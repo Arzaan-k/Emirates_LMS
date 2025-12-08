@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { BlurView } from "expo-blur";
-import { Feather, Octicons, Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { Feather, Octicons, Ionicons, MaterialIcons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -73,17 +73,33 @@ function Header() {
   const insets = useSafeAreaInsets();
   return (
     <View style={[styles.headerContainer, { paddingTop: insets.top + 10 }]}>
-      <View>
+      <View style={{ flex: 1 }}>
         <Text style={styles.greetingText}>Hello, Waffle Master! 👋</Text>
         <Text style={styles.subGreetingText}>Ready to learn something new?</Text>
       </View>
-      <TouchableOpacity style={styles.profileButton}>
-        <Image
-          source={{ uri: "https://ui-avatars.com/api/?name=Aditya+User&background=F59E0B&color=fff" }}
-          style={styles.profileImage}
-        />
-        <View style={styles.notificationBadge} />
-      </TouchableOpacity>
+
+      <View style={styles.headerRight}>
+        {/* STREAK BADGE */}
+        <TouchableOpacity style={styles.streakContainer} activeOpacity={0.8}>
+          <LinearGradient
+            colors={['#EF4444', '#F59E0B']} // Red to Amber
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.streakGradient}
+          >
+            <MaterialCommunityIcons name="fire" size={20} color="#FFF" />
+            <Text style={styles.streakText}>5 Days</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.profileButton}>
+          <Image
+            source={{ uri: "https://ui-avatars.com/api/?name=Aditya+User&background=F59E0B&color=fff" }}
+            style={styles.profileImage}
+          />
+          <View style={styles.notificationBadge} />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -235,52 +251,60 @@ function HomeContent() {
   );
 }
 
+// Import AI
+import AIChatBot from "../Components/AIChatBot";
+
 // ----------- MAIN NAVIGATOR -----------
 
 export default function Home() {
   return (
-    <Tab.Navigator
-      id="HomeTabs"
-      screenOptions={({ route }) => ({
-        headerShown: false,
-        tabBarShowLabel: false,
-        tabBarIcon: ({ color, focused }) => {
-          let IconComp;
-          let iconName;
-          let size = 24;
+    <View style={{ flex: 1 }}>
+      <Tab.Navigator
+        id="HomeTabs"
+        screenOptions={({ route }) => ({
+          headerShown: false,
+          tabBarShowLabel: false,
+          tabBarIcon: ({ color, focused }) => {
+            let IconComp;
+            let iconName;
+            let size = 24;
 
-          if (route.name === "HomeTab") {
-            IconComp = Feather;
-            iconName = "home";
-          } else if (route.name === "CoursesTab") {
-            IconComp = Feather;
-            iconName = "book-open";
-          } else if (route.name === "ResourcesTab") {
-            IconComp = Ionicons;
-            iconName = "document-text-outline";
-          } else if (route.name === "ProfileTab") {
-            IconComp = Octicons;
-            iconName = "person";
-          }
+            if (route.name === "HomeTab") {
+              IconComp = Feather;
+              iconName = "home";
+            } else if (route.name === "CoursesTab") {
+              IconComp = Feather;
+              iconName = "book-open";
+            } else if (route.name === "ResourcesTab") {
+              IconComp = Ionicons;
+              iconName = "document-text-outline";
+            } else if (route.name === "ProfileTab") {
+              IconComp = Octicons;
+              iconName = "person";
+            }
 
-          return (
-            <View style={[styles.tabIconContainer, focused && styles.activeTabIcon]}>
-              <IconComp name={iconName} size={size} color={focused ? "#F59E0B" : "#9CA3AF"} />
-              {focused && <View style={styles.activeDot} />}
-            </View>
-          );
-        },
-        tabBarStyle: styles.tabBar,
-        tabBarBackground: () => (
-          <BlurView intensity={80} tint="light" style={styles.blurBg} />
-        ),
-      })}
-    >
-      <Tab.Screen name="HomeTab" component={HomeContent} />
-      <Tab.Screen name="CoursesTab" component={Courses} />
-      <Tab.Screen name="ResourcesTab" component={Resources} />
-      <Tab.Screen name="ProfileTab" component={Profile} />
-    </Tab.Navigator>
+            return (
+              <View style={[styles.tabIconContainer, focused && styles.activeTabIcon]}>
+                <IconComp name={iconName} size={size} color={focused ? "#F59E0B" : "#9CA3AF"} />
+                {focused && <View style={styles.activeDot} />}
+              </View>
+            );
+          },
+          tabBarStyle: styles.tabBar,
+          tabBarBackground: () => (
+            <BlurView intensity={80} tint="light" style={styles.blurBg} />
+          ),
+        })}
+      >
+        <Tab.Screen name="HomeTab" component={HomeContent} />
+        <Tab.Screen name="CoursesTab" component={Courses} />
+        <Tab.Screen name="ResourcesTab" component={Resources} />
+        <Tab.Screen name="ProfileTab" component={Profile} />
+      </Tab.Navigator>
+
+      {/* GLOBAL AI CHATBOT OVERLAY */}
+      <AIChatBot />
+    </View>
   );
 }
 
