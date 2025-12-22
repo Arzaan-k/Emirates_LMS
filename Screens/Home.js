@@ -1,5 +1,5 @@
 // Screens/Home.js
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -11,7 +11,9 @@ import {
   Dimensions,
   Platform,
   ImageBackground,
+  Modal,
 } from "react-native";
+import { Video, ResizeMode } from 'expo-av'; // IMPORTED
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { BlurView } from "expo-blur";
 import { Feather, Octicons, Ionicons, MaterialIcons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -29,7 +31,144 @@ import AIRoleplay from "../Components/AIRoleplay";
 import AIScanner from "../Components/AIScanner";
 import AIFlashcards from "../Components/AIFlashcards";
 import AIChatBot from "../Components/AIChatBot";
-import AIDigitalTwin from "../Components/AIDigitalTwin"; // NEW
+import AIDigitalTwin from "../Components/AIDigitalTwin";
+
+
+// --- NEW: VIDEO PLAYER MODAL ---
+function VideoPlayerModal({ visible, url, onClose }) {
+  if (!visible || !url) return null;
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+      <View style={{ flex: 1, backgroundColor: '#000', justifyContent: 'center' }}>
+        <TouchableOpacity style={styles.closeVideoBtn} onPress={onClose}>
+          <Feather name="x" size={24} color="#FFF" />
+        </TouchableOpacity>
+        <Video
+          source={{ uri: url }}
+          style={{ width: '100%', height: 300 }}
+          useNativeControls
+          resizeMode={ResizeMode.CONTAIN}
+          shouldPlay
+          onError={(e) => console.log("Video Error:", e)}
+        />
+      </View>
+    </Modal>
+  );
+}
+
+// ... (Existing Components)
+
+function LiveFeedSection({ data, onPlay }) {
+  if (!data || data.length === 0) return null;
+
+  return (
+    <View style={styles.sectionContainer}>
+      <View style={[styles.sectionHeader, { paddingHorizontal: 20 }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444', marginRight: 8 }} />
+          <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Live Updates</Text>
+        </View>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20, paddingBottom: 10 }}>
+        {data.map((item, index) => (
+          <Animated.View key={index} entering={FadeInRight.duration(500)} style={styles.liveCard}>
+            <TouchableOpacity
+              style={styles.liveCardInner}
+              onPress={() => item.videoUrl && onPlay(item.videoUrl)}
+            >
+              <View style={styles.liveIcon}>
+                <Feather name="play-circle" size={24} color="#FFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.liveTitle} numberOfLines={1}>{item.title}</Text>
+                <Text style={styles.liveAuthor}>By {item.authorRole}</Text>
+              </View>
+              <View style={styles.newBadge}>
+                <Text style={styles.newBadgeText}>JUST NOW</Text>
+              </View>
+            </TouchableOpacity>
+          </Animated.View>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+// ... (NotificationToast Unchanged)
+
+function HomeContent({ onOpenTool, onOpenTwin }) {
+  const [liveUpdates, setLiveUpdates] = useState([]);
+  const [notification, setNotification] = useState(null);
+  const [selectedVideo, setSelectedVideo] = useState(null); // NEW STATE
+
+  useEffect(() => {
+    // CONNECT TO WEBSOCKET
+    const ws = new WebSocket("ws://192.168.1.35:8000/ws");
+
+    ws.onopen = () => {
+      console.log("Connected to Realtime Server");
+    };
+
+    ws.onmessage = (e) => {
+      try {
+        const message = JSON.parse(e.data);
+        if (message.type === "NEW_CONTENT") {
+          setLiveUpdates(prev => [message.data, ...prev]);
+        } else if (message.type === "NOTIFICATION") {
+          setNotification(message.data);
+          // Hide after 5 seconds
+          setTimeout(() => setNotification(null), 5000);
+        }
+      } catch (err) {
+        console.log("WS Error", err);
+      }
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, []);
+
+  return (
+    <View style={{ flex: 1 }}>
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+        {/* DECORATIVE BG */}
+        <View style={styles.decorCircle} />
+
+        <Header />
+        <SearchBar />
+
+        {/* LIVE FEED (Dynamic from Python) */}
+        <LiveFeedSection
+          data={liveUpdates}
+          onPlay={(url) => setSelectedVideo(url)}
+        />
+
+        {/* TWIN CARD */}
+        <DigitalTwinCard onOpen={onOpenTwin} />
+
+        <DailyFocus />
+        <AIToolsSection onOpenTool={onOpenTool} />
+        <CourseList />
+        <NewArrivals />
+      </ScrollView>
+
+      {/* ABSOLUTE NOTIFICATION OVERLAY */}
+      <View style={styles.overlayContainer} pointerEvents="box-none">
+        <NotificationToast visible={!!notification} message={notification} type={notification?.type} />
+      </View>
+
+      {/* VIDEO MODAL */}
+      <VideoPlayerModal
+        visible={!!selectedVideo}
+        url={selectedVideo}
+        onClose={() => setSelectedVideo(null)}
+      />
+    </View>
+  )
+}
+
+
 
 const Tab = createBottomTabNavigator();
 const { width } = Dimensions.get("window");
@@ -278,25 +417,31 @@ function NewArrivals() {
   )
 }
 
-function HomeContent({ onOpenTool, onOpenTwin }) {
+
+function NotificationToast({ message, type, visible }) {
+  if (!visible) return null;
+  const isQuiz = type === "quiz";
+
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      {/* DECORATIVE BG */}
-      <View style={styles.decorCircle} />
-
-      <Header />
-      <SearchBar />
-
-      {/* TWIN CARD */}
-      <DigitalTwinCard onOpen={onOpenTwin} />
-
-      <DailyFocus />
-      <AIToolsSection onOpenTool={onOpenTool} />
-      <CourseList />
-      <NewArrivals />
-    </ScrollView>
-  )
+    <Animated.View entering={FadeInDown.springify()} style={styles.toastContainer}>
+      <BlurView intensity={80} tint="dark" style={styles.toastContent}>
+        <View style={[styles.toastIcon, { backgroundColor: isQuiz ? '#F59E0B' : '#3B82F6' }]}>
+          <MaterialCommunityIcons name={isQuiz ? "school" : "bell"} size={24} color="#FFF" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.toastTitle}>{message.title || "Notification"}</Text>
+          <Text style={styles.toastMsg}>{message.message}</Text>
+        </View>
+        <TouchableOpacity style={styles.toastBtn}>
+          <Text style={styles.toastBtnText}>{isQuiz ? "Start Now" : "View"}</Text>
+        </TouchableOpacity>
+      </BlurView>
+    </Animated.View>
+  );
 }
+
+
+
 
 // MAIN LAYOUT
 export default function Home() {
@@ -463,4 +608,26 @@ const styles = StyleSheet.create({
   activeTabIcon: { top: 10 },
   iconWrapper: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent' },
   activeIconWrapper: { backgroundColor: '#F59E0B', shadowColor: "#F59E0B", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8 },
+
+  // LIVE FEED
+  liveCard: { width: 280, marginRight: 16, marginBottom: 5 },
+  liveCardInner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#312E81', padding: 12, borderRadius: 16, shadowColor: "#312E81", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
+  liveIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  liveTitle: { color: "#FFF", fontSize: 13, fontFamily: "Poppins_600SemiBold", marginBottom: 2 },
+  liveAuthor: { color: "rgba(255,255,255,0.7)", fontSize: 11, fontFamily: "Poppins_400Regular" },
+  newBadge: { position: 'absolute', top: 12, right: 12, backgroundColor: '#EF4444', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  newBadgeText: { color: '#FFF', fontSize: 8, fontFamily: "Poppins_700Bold" },
+
+  // NOTIFICATION OVERLAY
+  overlayContainer: { position: 'absolute', top: 120, left: 0, right: 0, paddingHorizontal: 20, zIndex: 9999 },
+  toastContainer: { borderRadius: 16, overflow: 'hidden', shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.2, shadowRadius: 15, elevation: 10 },
+  toastContent: { flexDirection: 'row', alignItems: 'center', padding: 12, backgroundColor: 'rgba(0,0,0,0.8)' },
+  toastIcon: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  toastTitle: { color: '#FFF', fontSize: 14, fontFamily: "Poppins_700Bold" },
+  toastMsg: { color: 'rgba(255,255,255,0.8)', fontSize: 12, fontFamily: "Poppins_400Regular" },
+  toastBtn: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
+  toastBtnText: { color: '#FFF', fontSize: 12, fontFamily: "Poppins_600SemiBold" },
+
+  // VIDEO MODAL
+  closeVideoBtn: { position: 'absolute', top: 50, right: 20, zIndex: 10, padding: 8, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20 }
 });

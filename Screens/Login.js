@@ -12,13 +12,41 @@ import {
 } from 'react-native';
 
 export default function LoginScreen() {
-   const navigation = /** @type {any} */ (useNavigation());
+  const navigation = /** @type {any} */ (useNavigation());
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
+  // STATIC CREDENTIALS FOR HIERARCHY
+  const STATIC_USERS = {
+    // LOWER LEVEL (Existing)
+    'user': { password: 'user@123', role: 'Team Member', name: 'John Doe' },
+
+    // UPPER LEVEL HIERARCHY
+    'store.manager': { password: 'bw_store@2025', role: 'Store Manager', name: 'Sarah Store' },
+    'area.manager': { password: 'bw_area@2025', role: 'Area Manager', name: 'Alex Area' },
+    'deputy.area': { password: 'bw_darea@2025', role: 'Deputy Area Manager', name: 'Danny Deputy' },
+    'deputy.city': { password: 'bw_dcity@2025', role: 'Deputy City Manager', name: 'Cindy City' },
+    'city.manager': { password: 'bw_city@2025', role: 'City Manager', name: 'Chris City' },
+    'ops.manager': { password: 'bw_ops@2025', role: 'Ops Manager', name: 'Oliver Ops' },
+  };
+
   const handleLogin = () => {
-    if (email === 'user' && password === 'user@123') {
-      navigation.navigate('Home');// 👈 Home screen name
+    const user = STATIC_USERS[email.toLowerCase()];
+
+    if (user && user.password === password) {
+      if (user.role === 'Team Member') {
+        navigation.navigate('Home', { userProfile: user });
+      } else if (user.role === 'Store Manager') {
+        navigation.navigate('StoreDashboard', { userProfile: user });
+      } else if (user.role === 'Area Manager' || user.role === 'Deputy Area Manager') {
+        navigation.navigate('AreaDashboard', { userProfile: user });
+      } else if (user.role === 'City Manager' || user.role === 'Deputy City Manager') {
+        navigation.navigate('CityDashboard', { userProfile: user });
+      } else if (user.role === 'Ops Manager') {
+        navigation.navigate('OpsDashboard', { userProfile: user });
+      } else {
+        navigation.navigate('ManagerDashboard', { userProfile: user });
+      }
     } else {
       Alert.alert('Login Failed', 'Invalid username or password');
     }
