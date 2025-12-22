@@ -137,7 +137,10 @@ const PathNode = ({ item, index, x, y, onPress }) => {
 /**
  * Detail Sheet Modal
  */
-const LevelDetailModal = ({ visible, level, onClose }) => {
+/**
+ * Detail Sheet Modal
+ */
+const LevelDetailModal = ({ visible, level, onClose, onStart }) => {
     const translateY = useSharedValue(height);
 
     useEffect(() => {
@@ -194,7 +197,7 @@ const LevelDetailModal = ({ visible, level, onClose }) => {
                         </View>
 
                         {/* CTA BUTTON */}
-                        <TouchableOpacity style={styles.startBtn} onPress={onClose}>
+                        <TouchableOpacity style={styles.startBtn} onPress={onStart}>
                             <LinearGradient colors={["#F59E0B", "#D97706"]} style={styles.startBtnGradient}>
                                 <Text style={styles.startBtnText}>
                                     {level.status === 'completed' ? "Practice Again" : "Start Chapter"}
@@ -209,8 +212,11 @@ const LevelDetailModal = ({ visible, level, onClose }) => {
     );
 };
 
+import LessonView from './LessonView';
+
 export default function CoursePath() {
     const [selectedLevel, setSelectedLevel] = useState(null);
+    const [activeLesson, setActiveLesson] = useState(null);
 
     const getPosition = (index) => {
         const y = index * VERTICAL_SPACING + 100;
@@ -254,6 +260,15 @@ export default function CoursePath() {
         setSelectedLevel(item);
     };
 
+    const handleStartLesson = () => {
+        const lessonToStart = selectedLevel;
+        setSelectedLevel(null); // Close modal
+        // Small delay to allow modal exit animation if desired, or instant switch
+        setTimeout(() => {
+            setActiveLesson(lessonToStart);
+        }, 100);
+    };
+
     const totalHeight = LEVELS.length * VERTICAL_SPACING + 250;
 
     return (
@@ -294,7 +309,16 @@ export default function CoursePath() {
                 visible={!!selectedLevel}
                 level={selectedLevel}
                 onClose={() => setSelectedLevel(null)}
+                onStart={handleStartLesson}
             />
+
+            {/* FULL SCREEN LESSON VIEW */}
+            {activeLesson && (
+                <LessonView
+                    lesson={activeLesson}
+                    onClose={() => setActiveLesson(null)}
+                />
+            )}
         </>
     );
 }

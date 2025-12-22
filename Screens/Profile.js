@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
     View,
     Text,
@@ -11,73 +11,120 @@ import {
 import { Feather, MaterialCommunityIcons, FontAwesome5 } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
-import Svg, { Rect, Text as SvgText } from "react-native-svg";
+import Svg, { Circle, G, Text as SvgText } from "react-native-svg";
 
 const { width } = Dimensions.get("window");
+
+// --- MOCK DATA ---
+const COMPLETED_LESSONS = [
+    { id: 1, title: "Espresso Mastery 101", date: "Dec 05", score: "100%", icon: "coffee" },
+    { id: 2, title: "Hygiene Protocols", date: "Dec 04", score: "95%", icon: "shield-check" },
+    { id: 3, title: "Customer Empathy", date: "Dec 02", score: "90%", icon: "heart-outline" },
+];
+
+const INCOMPLETE_LESSONS = [
+    { id: 4, title: "Advanced Waffle Textures", progress: 0.7, due: "Today" },
+    { id: 5, title: "Inventory Management", progress: 0.3, due: "Tomorrow" },
+];
+
+const EXTRA_CREDIT = [
+    { id: 6, title: "Mystery Shopper Sim", xp: "+500 XP", tag: "RECOMMENDED" },
+    { id: 7, title: "Speed Service Drill", xp: "+200 XP", tag: "OPTIONAL" },
+];
 
 const BADGES = [
     { id: 1, name: "Early Bird", icon: "weather-sunny", color: "#F59E0B", bg: "#FEF3C7" },
     { id: 2, name: "Fast Learner", icon: "lightning-bolt", color: "#EF4444", bg: "#FEE2E2" },
     { id: 3, name: "Team Player", icon: "account-group", color: "#3B82F6", bg: "#DBEAFE" },
     { id: 4, name: "Safety First", icon: "shield-check", color: "#10B981", bg: "#D1FAE5" },
-    { id: 5, name: "Coffee Guru", icon: "coffee", color: "#78350F", bg: "#FEF3C7" },
 ];
 
-const AI_INSIGHTS = [
-    { type: 'strength', text: "You're in the top 5% for Latte Art!", icon: 'trending-up', color: '#10B981' },
-    { type: 'focus', text: "Focus strictly on Grinder Calibration this week.", icon: 'target', color: '#F59E0B' },
-];
+// --- INTERACTIVE DONUT CHART ---
+const DonutChart = () => {
+    const size = 180;
+    const strokeWidth = 20;
+    const center = size / 2;
+    const radius = (size - strokeWidth) / 2;
+    const circumference = 2 * Math.PI * radius;
 
-// Simple Bar Chart Component
-const ActivityChart = () => {
-    const data = [40, 65, 30, 80, 55, 90, 45];
-    const max = 100;
-    const barWidth = 12;
-    const spacing = 20;
-    const chartHeight = 120;
-    const labels = ["M", "T", "W", "T", "F", "S", "S"];
+    // Data: Completed, Incomplete, Extra
+    const total = 50 + 20 + 30;
+    const data = [
+        { key: 'completed', value: 50, color: '#10B981', label: 'Completed' },
+        { key: 'incomplete', value: 20, color: '#EF4444', label: 'Incomplete' },
+        { key: 'extra', value: 30, color: '#F59E0B', label: 'Extra Credit' },
+    ];
+
+    const [activeSection, setActiveSection] = useState(data[0]);
+
+    let startAngle = -90;
 
     return (
-        <View style={styles.chartCard}>
-            <View style={styles.chartHeader}>
-                <View>
-                    <Text style={styles.chartTitle}>Learning Activity</Text>
-                    <Text style={styles.chartSubtitle}>+12% vs last week</Text>
-                </View>
-                <View style={styles.chartBadge}>
-                    <Text style={styles.chartBadgeText}>Weekly</Text>
-                </View>
+        <View style={styles.chartContainer}>
+            <View style={styles.chartTitleRow}>
+                <Text style={styles.chartMainTitle}>Learning Breakdown</Text>
+                <TouchableOpacity style={styles.chartFilter}><Text style={styles.chartFilterText}>This Week</Text></TouchableOpacity>
             </View>
 
-            <View style={{ alignItems: 'center' }}>
-                <Svg height={chartHeight + 30} width={width - 80}>
-                    {data.map((value, index) => (
-                        <React.Fragment key={index}>
-                            <Rect
-                                x={index * (barWidth + spacing)}
-                                y={chartHeight - (value / max) * chartHeight}
-                                width={barWidth}
-                                height={(value / max) * chartHeight}
-                                fill={value > 70 ? "#F59E0B" : "#E5E7EB"}
-                                rx={6}
-                            />
-                            <SvgText
-                                x={index * (barWidth + spacing) + barWidth / 2}
-                                y={chartHeight + 20}
-                                fontSize="12"
-                                fontFamily="Poppins_500Medium"
-                                fill="#9CA3AF"
-                                textAnchor="middle"
-                            >
-                                {labels[index]}
-                            </SvgText>
-                        </React.Fragment>
+            <View style={styles.chartRow}>
+                <View style={{ width: size, height: size }}>
+                    <Svg width={size} height={size}>
+                        <G rotation="-90" origin={`${center}, ${center}`}>
+                            {data.map((item, index) => {
+                                const strokeDashoffset = circumference - (circumference * item.value) / 100;
+                                const angle = (item.value / 100) * 360;
+                                const currentAngle = startAngle;
+                                startAngle += angle;
+
+                                return (
+                                    <Circle
+                                        key={item.key}
+                                        cx={center}
+                                        cy={center}
+                                        r={radius}
+                                        stroke={item.color}
+                                        strokeWidth={activeSection.key === item.key ? strokeWidth + 6 : strokeWidth}
+                                        strokeDasharray={`${circumference} ${circumference}`}
+                                        strokeDashoffset={strokeDashoffset}
+                                        strokeLinecap="round"
+                                        rotation={(currentAngle + 90) + (index * 2)} // mild gap
+                                        origin={`${center}, ${center}`}
+                                        onPress={() => setActiveSection(item)}
+                                    />
+                                );
+                            })}
+                        </G>
+                        {/* Center Text */}
+                        <SvgText x={center} y={center - 10} textAnchor="middle" fontSize="28" fontWeight="bold" fill="#111827">
+                            {activeSection.value}%
+                        </SvgText>
+                        <SvgText x={center} y={center + 15} textAnchor="middle" fontSize="12" fill="#6B7280" fontFamily="Poppins_500Medium">
+                            {activeSection.label}
+                        </SvgText>
+                    </Svg>
+                </View>
+
+                {/* LEGEND */}
+                <View style={styles.legendContainer}>
+                    {data.map((item) => (
+                        <TouchableOpacity
+                            key={item.key}
+                            style={[styles.legendItem, activeSection.key === item.key && styles.legendItemActive]}
+                            onPress={() => setActiveSection(item)}
+                        >
+                            <View style={[styles.legendDot, { backgroundColor: item.color }]} />
+                            <View>
+                                <Text style={styles.legendVal}>{item.value}%</Text>
+                                <Text style={styles.legendLabel}>{item.label}</Text>
+                            </View>
+                        </TouchableOpacity>
                     ))}
-                </Svg>
+                </View>
             </View>
         </View>
     );
 };
+
 
 export default function Profile() {
     const insets = useSafeAreaInsets();
@@ -111,7 +158,7 @@ export default function Profile() {
 
                     {/* LEAGUE CARD */}
                     <LinearGradient
-                        colors={["#4F46E5", "#7C3AED"]} // Indigo to Violet
+                        colors={["#4F46E5", "#7C3AED"]}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 1 }}
                         style={styles.leagueCard}
@@ -132,41 +179,71 @@ export default function Profile() {
                     </LinearGradient>
                 </View>
 
-                {/* AI INSIGHTS */}
-                <View style={styles.section}>
+                {/* ANALYTICS GRAPH */}
+                <DonutChart />
+
+                {/* SECTIONS LIST */}
+                <View style={styles.listSection}>
+
+                    {/* INCOMPLETE */}
                     <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>✨ AI Coach Insights</Text>
+                        <Text style={styles.sectionTitle}>In Progress ⏳</Text>
+                        <TouchableOpacity><Text style={styles.seeAll}>See All</Text></TouchableOpacity>
                     </View>
-                    {AI_INSIGHTS.map((insight, index) => (
-                        <View key={index} style={[styles.insightCard, { borderLeftColor: insight.color }]}>
-                            <View style={[styles.insightIcon, { backgroundColor: insight.color + '20' }]}>
-                                <MaterialCommunityIcons name={insight.icon} size={20} color={insight.color} />
+                    {INCOMPLETE_LESSONS.map((item) => (
+                        <View key={item.id} style={styles.taskCard}>
+                            <View>
+                                <Text style={styles.taskTitle}>{item.title}</Text>
+                                <Text style={styles.taskDue}>Due: {item.due}</Text>
                             </View>
-                            <Text style={styles.insightText}>{insight.text}</Text>
+                            <View style={styles.progressCircle}>
+                                <Text style={styles.progressText}>{item.progress * 100}%</Text>
+                            </View>
                         </View>
+                    ))}
+
+                    <View style={{ height: 20 }} />
+
+                    {/* COMPLETED */}
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Completed ✅</Text>
+                        <TouchableOpacity><Text style={styles.seeAll}>History</Text></TouchableOpacity>
+                    </View>
+                    {COMPLETED_LESSONS.map((item) => (
+                        <View key={item.id} style={styles.completedCard}>
+                            <View style={styles.completedIcon}>
+                                <MaterialCommunityIcons name={item.icon} size={20} color="#10B981" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.completedTitle}>{item.title}</Text>
+                                <Text style={styles.completedDate}>{item.date}</Text>
+                            </View>
+                            <View style={styles.scoreBadge}>
+                                <Text style={styles.scoreText}>{item.score}</Text>
+                            </View>
+                        </View>
+                    ))}
+
+                    <View style={{ height: 20 }} />
+
+                    {/* EXTRA CREDIT */}
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Extra Credit 🚀</Text>
+                    </View>
+                    {EXTRA_CREDIT.map((item) => (
+                        <LinearGradient key={item.id} colors={['#FFF7ED', '#FFF']} style={styles.extraCard}>
+                            <View>
+                                <View style={styles.extraTag}><Text style={styles.extraTagText}>{item.tag}</Text></View>
+                                <Text style={styles.extraTitle}>{item.title}</Text>
+                            </View>
+                            <View style={styles.xpBadge}>
+                                <Text style={styles.xpBadgeText}>{item.xp}</Text>
+                            </View>
+                        </LinearGradient>
                     ))}
                 </View>
 
-                {/* STATS GRID */}
-                <View style={styles.statsGrid}>
-                    <View style={styles.miniStat}>
-                        <Text style={styles.miniVal}>12</Text>
-                        <Text style={styles.miniLbl}>Certificates</Text>
-                    </View>
-                    <View style={styles.miniStat}>
-                        <Text style={styles.miniVal}>84%</Text>
-                        <Text style={styles.miniLbl}>Avg Score</Text>
-                    </View>
-                    <View style={styles.miniStat}>
-                        <Text style={styles.miniVal}>52h</Text>
-                        <Text style={styles.miniLbl}>Learning</Text>
-                    </View>
-                </View>
-
-                {/* ACTIVITY CHART */}
-                <ActivityChart />
-
-                {/* BADGES SCROLL */}
+                {/* BADGES */}
                 <View style={styles.section}>
                     <View style={styles.sectionHeader}>
                         <Text style={styles.sectionTitle}>Achievements</Text>
@@ -184,336 +261,77 @@ export default function Profile() {
                     </ScrollView>
                 </View>
 
-                {/* MENU */}
-                <View style={styles.menuList}>
-                    <TouchableOpacity style={styles.menuRow}>
-                        <View style={styles.menuIconBg}><Feather name="bell" size={18} color="#374151" /></View>
-                        <Text style={styles.menuLabel}>Notifications</Text>
-                        <Feather name="chevron-right" size={18} color="#9CA3AF" />
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.menuRow}>
-                        <View style={styles.menuIconBg}><Feather name="help-circle" size={18} color="#374151" /></View>
-                        <Text style={styles.menuLabel}>Help & Support</Text>
-                        <Feather name="chevron-right" size={18} color="#9CA3AF" />
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.menuRow}>
-                        <View style={[styles.menuIconBg, { backgroundColor: '#FEE2E2' }]}><Feather name="log-out" size={18} color="#EF4444" /></View>
-                        <Text style={[styles.menuLabel, { color: '#EF4444' }]}>Log Out</Text>
-                    </TouchableOpacity>
-                </View>
-
             </ScrollView>
         </View>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: "#F9FAFB",
-    },
-    header: {
-        backgroundColor: "#FFF",
-        paddingBottom: 20,
-        borderBottomLeftRadius: 30,
-        borderBottomRightRadius: 30,
-        paddingHorizontal: 20,
-        elevation: 4,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 10,
-    },
-    identityRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 24,
-        marginTop: 10,
-    },
-    avatarWrapper: {
-        position: 'relative',
-    },
-    avatar: {
-        width: 64,
-        height: 64,
-        borderRadius: 32,
-        borderWidth: 2,
-        borderColor: "#F3F4F6",
-    },
-    onlineIndicator: {
-        position: 'absolute',
-        bottom: 2,
-        right: 2,
-        width: 14,
-        height: 14,
-        borderRadius: 7,
-        backgroundColor: "#10B981",
-        borderWidth: 2,
-        borderColor: "#FFF",
-    },
-    userInfo: {
-        flex: 1,
-        marginLeft: 16,
-    },
-    userName: {
-        fontSize: 20,
-        fontFamily: "Poppins_700Bold",
-        color: "#111827",
-    },
-    userRole: {
-        fontSize: 12,
-        fontFamily: "Poppins_400Regular",
-        color: "#6B7280",
-        marginBottom: 4,
-    },
-    joinDateBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: "#F3F4F6",
-        alignSelf: 'flex-start',
-        paddingHorizontal: 8,
-        paddingVertical: 2,
-        borderRadius: 8,
-    },
-    joinDateText: {
-        fontSize: 10,
-        color: "#6B7280",
-        marginLeft: 4,
-        fontFamily: "Poppins_500Medium",
-    },
-    settingsBtn: {
-        padding: 10,
-        backgroundColor: "#F3F4F6",
-        borderRadius: 12,
-    },
+    container: { flex: 1, backgroundColor: "#F9FAFB" },
+    header: { backgroundColor: "#FFF", paddingBottom: 20, borderBottomLeftRadius: 30, borderBottomRightRadius: 30, paddingHorizontal: 20, elevation: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 10 },
+    identityRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 24, marginTop: 10 },
+    avatarWrapper: { position: 'relative' },
+    avatar: { width: 64, height: 64, borderRadius: 32, borderWidth: 2, borderColor: "#F3F4F6" },
+    onlineIndicator: { position: 'absolute', bottom: 2, right: 2, width: 14, height: 14, borderRadius: 7, backgroundColor: "#10B981", borderWidth: 2, borderColor: "#FFF" },
+    userInfo: { flex: 1, marginLeft: 16 },
+    userName: { fontSize: 20, fontFamily: "Poppins_700Bold", color: "#111827" },
+    userRole: { fontSize: 12, fontFamily: "Poppins_400Regular", color: "#6B7280", marginBottom: 4 },
+    joinDateBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: "#F3F4F6", alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
+    joinDateText: { fontSize: 10, color: "#6B7280", marginLeft: 4, fontFamily: "Poppins_500Medium" },
+    settingsBtn: { padding: 10, backgroundColor: "#F3F4F6", borderRadius: 12 },
 
-    // LEAGUE CARD
-    leagueCard: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: 20,
-        borderRadius: 24,
-    },
-    leagueInfo: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    leagueIcon: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: "rgba(255,255,255,0.2)",
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 12,
-    },
-    leagueTitle: {
-        color: "#FFF",
-        fontSize: 16,
-        fontFamily: "Poppins_700Bold",
-    },
-    leagueRank: {
-        color: "rgba(255,255,255,0.8)",
-        fontSize: 12,
-        fontFamily: "Poppins_500Medium",
-    },
-    xpBlock: {
-        alignItems: 'flex-end',
-    },
-    xpBig: {
-        color: "#FFF",
-        fontSize: 22,
-        fontFamily: "Poppins_700Bold",
-    },
-    xpLabel: {
-        color: "rgba(255,255,255,0.8)",
-        fontSize: 10,
-        fontFamily: "Poppins_500Medium",
-    },
-
-    // SECTIONS
-    section: {
-        paddingVertical: 24,
-    },
-    sectionHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingHorizontal: 20,
-        marginBottom: 16,
-    },
-    sectionTitle: {
-        fontSize: 18,
-        fontFamily: "Poppins_700Bold",
-        color: "#111827",
-    },
-    seeAll: {
-        fontSize: 13,
-        color: "#F59E0B",
-        fontFamily: "Poppins_600SemiBold",
-    },
-
-    // INSIGHTS
-    insightCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: "#FFF",
-        marginHorizontal: 20,
-        marginBottom: 10,
-        padding: 16,
-        borderRadius: 16,
-        borderLeftWidth: 4,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.03,
-        shadowRadius: 4,
-        elevation: 2,
-    },
-    insightIcon: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 12,
-    },
-    insightText: {
-        flex: 1,
-        fontSize: 13,
-        fontFamily: "Poppins_500Medium",
-        color: "#374151",
-        lineHeight: 20,
-    },
-
-    // STATS GRID
-    statsGrid: {
-        flexDirection: 'row',
-        paddingHorizontal: 20,
-        justifyContent: 'space-between',
-        marginBottom: 20,
-    },
-    miniStat: {
-        width: '31%',
-        backgroundColor: "#FFF",
-        paddingVertical: 14,
-        borderRadius: 16,
-        alignItems: 'center',
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.03,
-        shadowRadius: 4,
-        elevation: 1,
-    },
-    miniVal: {
-        fontSize: 18,
-        fontFamily: "Poppins_700Bold",
-        color: "#111827",
-        marginBottom: 2,
-    },
-    miniLbl: {
-        fontSize: 11,
-        color: "#9CA3AF",
-        fontFamily: "Poppins_500Medium",
-    },
+    leagueCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderRadius: 24 },
+    leagueInfo: { flexDirection: 'row', alignItems: 'center' },
+    leagueIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(255,255,255,0.2)", justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+    leagueTitle: { color: "#FFF", fontSize: 16, fontFamily: "Poppins_700Bold" },
+    leagueRank: { color: "rgba(255,255,255,0.8)", fontSize: 12, fontFamily: "Poppins_500Medium" },
+    xpBlock: { alignItems: 'flex-end' },
+    xpBig: { color: "#FFF", fontSize: 22, fontFamily: "Poppins_700Bold" },
+    xpLabel: { color: "rgba(255,255,255,0.8)", fontSize: 10, fontFamily: "Poppins_500Medium" },
 
     // CHART
-    chartCard: {
-        marginHorizontal: 20,
-        backgroundColor: "#FFF",
-        padding: 20,
-        borderRadius: 24,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.03,
-        shadowRadius: 8,
-        elevation: 2,
-    },
-    chartHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        marginBottom: 20,
-    },
-    chartTitle: {
-        fontSize: 16,
-        fontFamily: "Poppins_700Bold",
-        color: "#111827",
-    },
-    chartSubtitle: {
-        fontSize: 12,
-        color: "#10B981",
-        fontFamily: "Poppins_500Medium",
-    },
-    chartBadge: {
-        backgroundColor: "#F3F4F6",
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: 20,
-    },
-    chartBadgeText: {
-        fontSize: 11,
-        color: "#6B7280",
-        fontFamily: "Poppins_600SemiBold",
-    },
+    chartContainer: { backgroundColor: "#FFF", margin: 20, borderRadius: 24, padding: 20, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
+    chartTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+    chartMainTitle: { fontSize: 16, fontFamily: "Poppins_700Bold", color: "#111827" },
+    chartFilter: { backgroundColor: "#F3F4F6", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
+    chartFilterText: { fontSize: 12, fontFamily: "Poppins_600SemiBold", color: "#4B5563" },
+    chartRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    legendContainer: { flex: 1, marginLeft: 20 },
+    legendItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, padding: 8, borderRadius: 12 },
+    legendItemActive: { backgroundColor: '#F9FAFB' },
+    legendDot: { width: 12, height: 12, borderRadius: 6, marginRight: 12 },
+    legendVal: { fontSize: 16, fontFamily: "Poppins_700Bold", color: "#111827" },
+    legendLabel: { fontSize: 12, fontFamily: "Poppins_400Regular", color: "#6B7280" },
+
+    // LIST SECTIONS
+    listSection: { paddingHorizontal: 20 },
+    sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+    sectionTitle: { fontSize: 16, fontFamily: "Poppins_700Bold", color: "#111827" },
+    seeAll: { fontSize: 13, color: "#F59E0B", fontFamily: "Poppins_600SemiBold" },
+
+    taskCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: "#FFF", padding: 16, borderRadius: 16, marginBottom: 10, borderWidth: 1, borderColor: '#F3F4F6' },
+    taskTitle: { fontSize: 14, fontFamily: "Poppins_600SemiBold", color: "#111827" },
+    taskDue: { fontSize: 12, color: "#EF4444", fontFamily: "Poppins_500Medium", marginTop: 2 },
+    progressCircle: { width: 40, height: 40, borderRadius: 20, borderWidth: 3, borderColor: "#E5E7EB", justifyContent: 'center', alignItems: 'center' },
+    progressText: { fontSize: 10, fontFamily: "Poppins_700Bold", color: "#4B5563" },
+
+    completedCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: "#FFF", padding: 12, borderRadius: 16, marginBottom: 10 },
+    completedIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#D1FAE5", justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+    completedTitle: { fontSize: 14, fontFamily: "Poppins_600SemiBold", color: "#111827" },
+    completedDate: { fontSize: 12, color: "#9CA3AF", fontFamily: "Poppins_400Regular" },
+    scoreBadge: { backgroundColor: "#D1FAE5", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+    scoreText: { color: "#10B981", fontSize: 12, fontFamily: "Poppins_700Bold" },
+
+    extraCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderRadius: 16, marginBottom: 10, borderWidth: 1, borderColor: '#FED7AA' },
+    extraTag: { backgroundColor: "#FFEDD5", alignSelf: 'flex-start', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, marginBottom: 4 },
+    extraTagText: { fontSize: 10, color: "#C2410C", fontFamily: "Poppins_700Bold" },
+    extraTitle: { fontSize: 14, fontFamily: "Poppins_600SemiBold", color: "#111827" },
+    xpBadge: { backgroundColor: "#C2410C", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12 },
+    xpBadgeText: { color: "#FFF", fontSize: 12, fontFamily: "Poppins_700Bold" },
 
     // BADGES
-    badgeCard: {
-        marginRight: 16,
-        alignItems: 'center',
-        width: 90,
-    },
-    badgeCircle: {
-        width: 70,
-        height: 70,
-        borderRadius: 35,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 10,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.05,
-        shadowRadius: 4,
-        elevation: 2,
-    },
-    badgeName: {
-        fontSize: 12,
-        fontFamily: "Poppins_500Medium",
-        color: "#374151",
-        textAlign: 'center',
-    },
-
-    // MENU
-    menuList: {
-        paddingHorizontal: 20,
-        marginTop: 20,
-    },
-    menuRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: "#FFF",
-        padding: 16,
-        borderRadius: 16,
-        marginBottom: 12,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.02,
-        shadowRadius: 2,
-        elevation: 1,
-    },
-    menuIconBg: {
-        width: 36,
-        height: 36,
-        borderRadius: 12,
-        backgroundColor: "#F3F4F6",
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 14,
-    },
-    menuLabel: {
-        flex: 1,
-        fontSize: 14,
-        fontFamily: "Poppins_500Medium",
-        color: "#374151",
-    },
+    section: { paddingVertical: 24 },
+    badgeCard: { marginRight: 16, alignItems: 'center', width: 90 },
+    badgeCircle: { width: 70, height: 70, borderRadius: 35, justifyContent: 'center', alignItems: 'center', marginBottom: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
+    badgeName: { fontSize: 12, fontFamily: "Poppins_500Medium", color: "#374151", textAlign: 'center' },
 });
