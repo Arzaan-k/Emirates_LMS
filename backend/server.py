@@ -19,6 +19,12 @@ BASE_URL = f"http://192.168.1.35:{PORT}" # UPDATE THIS IP IF IT CHANGES
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("BW_LMS_Backend")
 
+# --- LOAD AI MODELS ---
+import whisper
+logger.info("Loading Whisper Model...")
+whisper_model = whisper.load_model("base")
+logger.info("Whisper Model Loaded.")
+
 # --- APP SETUP ---
 app = FastAPI(title="BW LMS Realtime Backend")
 
@@ -93,37 +99,89 @@ async def upload_content(
     Receives new content (Files + Metadata) from Managers.
     Saves file to disk, updates memory, and broadcasts to clients.
     """
-    # 1. Save content to disk (Initial Save)
+    # 1. Save content to disk
     file_location = f"{UPLOAD_DIR}/{file.filename}"
     with open(file_location, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
+    transcript_text = "Transcription Unavailable"
+    quiz_data = []
+
     # --- AUTO-CROP LOGIC (Max 30s) ---
     try:
         from moviepy.editor import VideoFileClip
         clip = VideoFileClip(file_location)
         if clip.duration > 30:
             logger.info(f"Video is too long ({clip.duration}s). Trimming to 30s...")
-            # Trim to 30s
             trimmed_clip = clip.subclip(0, 30)
-            
-            # Use a temporary name for processing
             temp_output = f"{UPLOAD_DIR}/trimmed_{file.filename}"
             trimmed_clip.write_videofile(temp_output, codec="libx264", audio_codec="aac")
-            
-            # Close clips to release file lock
             clip.close()
             trimmed_clip.close()
-            
-            # Replace original with trimmed
             os.remove(file_location)
             os.rename(temp_output, file_location)
             logger.info("Video trimmed successfully.")
         else:
             clip.close()
+            
+        # --- AI PROCESSING (Transcribe & Quiz) ---
+        logger.info("Starting AI Processing...")
+        
+        # 1. Extract Audio
+        audio_path = f"{UPLOAD_DIR}/{file.filename}_audio.mp3"
+        video = VideoFileClip(file_location)
+        video.audio.write_audiofile(audio_path, logger=None)
+        video.close()
+        
+        # 2. Transcribe with OpenAI Whisper (Local)
+        logger.info("Transcribing with Whisper (Local)...")
+        result = whisper_model.transcribe(audio_path)
+        transcript_text = result["text"]
+        logger.info(f"Transcript Generated: {transcript_text[:50]}...")
+        
+        # Cleanup Audio
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+            
+        # 3. Generate Quiz with Groq (Llama 3)
+        from groq import Groq
+        # Fixed Key (New User Key)
+        groq_client = Groq(api_key="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") 
+        
+        # ... (Rest of Quiz Logic)
+        prompt = f"""
+        Based on this training video transcript, generate 3 multiple-choice quiz questions.
+        Format purely as a JSON array of objects with keys: 'question', 'options' (array of 4 strings), 'correctIndex' (0-3).
+        
+        Transcript: "{transcript_text}"
+        """
+        
+        completion = groq_client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama-3.3-70b-versatile",
+            response_format={"type": "json_object"},
+            temperature=0.5
+        )
+        
+        # Parse JSON from response
+        try:
+             # Flexible parsing if model wraps in key
+            raw_json = json.loads(completion.choices[0].message.content)
+            if "questions" in raw_json:
+                quiz_data = raw_json["questions"]
+            elif isinstance(raw_json, list):
+                quiz_data = raw_json
+            else:
+                 # Last ditch effort if wrapped in another key
+                quiz_data = list(raw_json.values())[0]
+                
+            logger.info(f"Quiz Generated: {len(quiz_data)} questions")
+        except Exception as json_err:
+            logger.error(f"Quiz JSON Parse Error: {json_err}")
+
     except Exception as e:
-        logger.error(f"Error processing video: {e}")
-        # Proceed with original file if processing fails
+        logger.error(f"Error processing AI tasks: {e}")
+        # Proceed even if AI fails
     
     # 2. Generate Public URL
     video_url = f"{BASE_URL}/uploads/{file.filename}"
@@ -136,7 +194,9 @@ async def upload_content(
         "description": description,
         "videoUrl": video_url,
         "authorRole": authorRole,
-        "timestamp": timestamp
+        "timestamp": timestamp,
+        "transcript": transcript_text, 
+        "quiz": quiz_data 
     }
     
     content_store.insert(0, item_data) # Add to top

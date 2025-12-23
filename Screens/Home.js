@@ -35,22 +35,115 @@ import AIDigitalTwin from "../Components/AIDigitalTwin";
 
 
 // --- NEW: VIDEO PLAYER MODAL ---
-function VideoPlayerModal({ visible, url, onClose }) {
-  if (!visible || !url) return null;
+// --- NEW: VIDEO PLAYER MODAL ---
+function VideoPlayerModal({ visible, videoData, onClose }) {
+  const [activeTab, setActiveTab] = useState('transcript');
+  const [quizIndex, setQuizIndex] = useState(0);
+  const [score, setScore] = useState(0);
+  const [showResult, setShowResult] = useState(false);
+
+  if (!visible || !videoData) return null;
+
+  const handleAnswer = (optionIndex) => {
+    const currentQ = videoData.quiz[quizIndex];
+    if (optionIndex === currentQ.correctIndex) {
+      setScore(score + 1);
+    }
+
+    if (quizIndex < videoData.quiz.length - 1) {
+      setQuizIndex(quizIndex + 1);
+    } else {
+      setShowResult(true);
+    }
+  };
+
+  const hasQuiz = videoData.quiz && videoData.quiz.length > 0;
+
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-      <View style={{ flex: 1, backgroundColor: '#000', justifyContent: 'center' }}>
+      <View style={{ flex: 1, backgroundColor: '#000' }}>
+        {/* CLOSE BUTTON */}
         <TouchableOpacity style={styles.closeVideoBtn} onPress={onClose}>
           <Feather name="x" size={24} color="#FFF" />
         </TouchableOpacity>
+
+        {/* VIDEO PLAYER */}
         <Video
-          source={{ uri: url }}
-          style={{ width: '100%', height: 300 }}
+          source={{ uri: videoData.videoUrl }}
+          style={{ width: '100%', height: 250, marginTop: 40 }}
           useNativeControls
           resizeMode={ResizeMode.CONTAIN}
           shouldPlay
           onError={(e) => console.log("Video Error:", e)}
         />
+
+        {/* INTERACTIVE SECTION */}
+        <View style={styles.interactiveContainer}>
+          {/* TABS */}
+          <View style={styles.tabRow}>
+            <TouchableOpacity
+              style={[styles.tabBtn, activeTab === 'transcript' && styles.activeTabBtn]}
+              onPress={() => setActiveTab('transcript')}
+            >
+              <Text style={[styles.tabText, activeTab === 'transcript' && styles.activeTabText]}>Transcript</Text>
+            </TouchableOpacity>
+
+            {hasQuiz && (
+              <TouchableOpacity
+                style={[styles.tabBtn, activeTab === 'quiz' && styles.activeTabBtn]}
+                onPress={() => setActiveTab('quiz')}
+              >
+                <Text style={[styles.tabText, activeTab === 'quiz' && styles.activeTabText]}>AI Quiz</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* CONTENT */}
+          <ScrollView style={styles.contentArea}>
+            {activeTab === 'transcript' ? (
+              <Text style={styles.transcriptText}>
+                {videoData.transcript || "No transcript available for this video."}
+              </Text>
+            ) : (
+              <View style={styles.quizContainer}>
+                {!showResult ? (
+                  <>
+                    <View style={styles.quizHeader}>
+                      <Text style={styles.quizCount}>Question {quizIndex + 1}/{videoData.quiz.length}</Text>
+                      <View style={styles.quizProgress}>
+                        <View style={[styles.quizProgressBar, { width: `${((quizIndex + 1) / videoData.quiz.length) * 100}%` }]} />
+                      </View>
+                    </View>
+
+                    <Text style={styles.questionText}>{videoData.quiz[quizIndex].question}</Text>
+
+                    {videoData.quiz[quizIndex].options.map((option, idx) => (
+                      <TouchableOpacity
+                        key={idx}
+                        style={styles.optionBtn}
+                        onPress={() => handleAnswer(idx)}
+                      >
+                        <View style={styles.optionCircle}>
+                          <Text style={styles.optionLetter}>{String.fromCharCode(65 + idx)}</Text>
+                        </View>
+                        <Text style={styles.optionText}>{option}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </>
+                ) : (
+                  <View style={styles.resultContainer}>
+                    <Feather name="award" size={60} color="#F59E0B" />
+                    <Text style={styles.resultTitle}>Quiz Completed!</Text>
+                    <Text style={styles.resultScore}>You scored {score}/{videoData.quiz.length}</Text>
+                    <TouchableOpacity style={styles.retryBtn} onPress={() => { setQuizIndex(0); setScore(0); setShowResult(false); }}>
+                      <Text style={styles.retryText}>Retake Quiz</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            )}
+          </ScrollView>
+        </View>
       </View>
     </Modal>
   );
@@ -74,7 +167,7 @@ function LiveFeedSection({ data, onPlay }) {
           <Animated.View key={index} entering={FadeInRight.duration(500)} style={styles.liveCard}>
             <TouchableOpacity
               style={styles.liveCardInner}
-              onPress={() => item.videoUrl && onPlay(item.videoUrl)}
+              onPress={() => item.videoUrl && onPlay(item)}
             >
               <View style={styles.liveIcon}>
                 <Feather name="play-circle" size={24} color="#FFF" />
@@ -141,7 +234,7 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
         {/* LIVE FEED (Dynamic from Python) */}
         <LiveFeedSection
           data={liveUpdates}
-          onPlay={(url) => setSelectedVideo(url)}
+          onPlay={(item) => setSelectedVideo(item)}
         />
 
         {/* TWIN CARD */}
@@ -161,7 +254,7 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
       {/* VIDEO MODAL */}
       <VideoPlayerModal
         visible={!!selectedVideo}
-        url={selectedVideo}
+        videoData={selectedVideo}
         onClose={() => setSelectedVideo(null)}
       />
     </View>
@@ -629,5 +722,32 @@ const styles = StyleSheet.create({
   toastBtnText: { color: '#FFF', fontSize: 12, fontFamily: "Poppins_600SemiBold" },
 
   // VIDEO MODAL
-  closeVideoBtn: { position: 'absolute', top: 50, right: 20, zIndex: 10, padding: 8, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20 }
+  closeVideoBtn: { position: 'absolute', top: 50, right: 20, zIndex: 10, padding: 8, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20 },
+  interactiveContainer: { flex: 1, backgroundColor: '#111827', borderTopLeftRadius: 24, borderTopRightRadius: 24, marginTop: -20 },
+  tabRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#374151' },
+  tabBtn: { flex: 1, paddingVertical: 16, alignItems: 'center' },
+  activeTabBtn: { borderBottomWidth: 2, borderBottomColor: '#F59E0B' },
+  tabText: { color: '#9CA3AF', fontSize: 14, fontFamily: "Poppins_600SemiBold" },
+  activeTabText: { color: '#F59E0B' },
+  contentArea: { flex: 1, padding: 20 },
+  transcriptText: { color: '#D1D5DB', fontSize: 14, fontFamily: "Poppins_400Regular", lineHeight: 24 },
+
+  // QUIZ UI
+  quizContainer: { paddingBottom: 40 },
+  quizHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  quizCount: { color: '#9CA3AF', fontSize: 12, fontFamily: "Poppins_600SemiBold" },
+  quizProgress: { width: 100, height: 6, backgroundColor: '#374151', borderRadius: 3 },
+  quizProgressBar: { height: '100%', backgroundColor: '#F59E0B', borderRadius: 3 },
+  questionText: { color: '#FFF', fontSize: 18, fontFamily: "Poppins_700Bold", marginBottom: 20 },
+  optionBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1F2937', padding: 16, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#374151' },
+  optionCircle: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#374151', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  optionLetter: { color: '#FFF', fontSize: 14, fontFamily: "Poppins_700Bold" },
+  optionText: { color: '#E5E7EB', fontSize: 14, fontFamily: "Poppins_500Medium", flex: 1 },
+
+  // QUIZ RESULTS
+  resultContainer: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40 },
+  resultTitle: { color: '#FFF', fontSize: 24, fontFamily: "Poppins_700Bold", marginTop: 16, marginBottom: 8 },
+  resultScore: { color: '#9CA3AF', fontSize: 16, fontFamily: "Poppins_500Medium", marginBottom: 24 },
+  retryBtn: { backgroundColor: '#F59E0B', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 },
+  retryText: { color: '#FFF', fontSize: 14, fontFamily: "Poppins_700Bold" }
 });
