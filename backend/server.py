@@ -52,8 +52,25 @@ class ContentItem(BaseModel):
     authorRole: str
     timestamp: str
 
+class QuizQuestion(BaseModel):
+    question: str
+    options: List[str]  # 4 options
+    correctIndex: int  # 0-3
+
+class Quiz(BaseModel):
+    title: str
+    description: str
+    questions: List[QuizQuestion]
+
+class QuizSubmission(BaseModel):
+    quiz_id: str
+    user_name: str
+    answers: List[int]
+
 # --- IN-MEMORY STORE ---
 content_store: List[dict] = []
+quiz_store: List[dict] = []  # {id, title, description, questions, created_at, created_by}
+quiz_submissions: List[dict] = []  # {id, quiz_id, user_name, answers, score, submitted_at}
 
 # --- WEBSOCKET MANAGER ---
 class ConnectionManager:
@@ -221,6 +238,164 @@ async def send_notification(payload: dict):
         "data": payload
     })
     return {"status": "success"}
+
+# --- QUIZ ENDPOINTS ---
+class QuizCreateRequest(BaseModel):
+    title: str
+    description: str
+    questions: list
+    created_by: str
+
+@app.post("/quiz/create")
+async def create_quiz(payload: QuizCreateRequest):
+    """
+    Create a new quiz and broadcast to all users.
+    """
+    import uuid
+    from datetime import datetime
+    
+    quiz_id = str(uuid.uuid4())
+    quiz_data = {
+        "id": quiz_id,
+        "title": payload.title,
+        "description": payload.description,
+        "questions": payload.questions,
+        "created_at": datetime.now().isoformat(),
+        "created_by": payload.created_by
+    }
+    
+    quiz_store.append(quiz_data)
+    logger.info(f"Quiz Created: {quiz_data['title']} by {quiz_data['created_by']}")
+
+    
+    # Broadcast quiz assignment notification
+    await manager.broadcast({
+        "type": "QUIZ_ASSIGNED",
+        "data": {
+            "quiz_id": quiz_id,
+            "title": payload.title,
+            "description": payload.description,
+            "question_count": len(payload.questions)
+        }
+    })
+    
+    return {"status": "success", "quiz_id": quiz_id}
+
+@app.get("/quiz/list")
+async def list_quizzes():
+    """
+    Get all created quizzes (without answers).
+    """
+    quizzes = []
+    for quiz in quiz_store:
+        # Remove correct answers from response
+        quiz_copy = quiz.copy()
+        quiz_copy["questions"] = [
+            {
+                "question": q["question"],
+                "options": q["options"]
+            } for q in quiz["questions"]
+        ]
+        quizzes.append(quiz_copy)
+    return quizzes
+
+@app.get("/quiz/{quiz_id}")
+async def get_quiz(quiz_id: str):
+    """
+    Get specific quiz details (for taking quiz).
+    """
+    for quiz in quiz_store:
+        if quiz["id"] == quiz_id:
+            # Return without correct answers
+            return {
+                "id": quiz["id"],
+                "title": quiz["title"],
+                "description": quiz["description"],
+                "questions": [
+                    {
+                        "question": q["question"],
+                        "options": q["options"]
+                    } for q in quiz["questions"]
+                ]
+            }
+    return {"error": "Quiz not found"}
+
+@app.post("/quiz/submit")
+async def submit_quiz(submission: QuizSubmission):
+    """
+    Submit quiz answers and calculate score.
+    """
+    import uuid
+    from datetime import datetime
+    
+    # Find quiz
+    quiz = None
+    for q in quiz_store:
+        if q["id"] == submission.quiz_id:
+            quiz = q
+            break
+    
+    if not quiz:
+        return {"error": "Quiz not found"}
+    
+    # Calculate score
+    score = 0
+    for i, answer in enumerate(submission.answers):
+        if i < len(quiz["questions"]):
+            if answer == quiz["questions"][i]["correctIndex"]:
+                score += 1
+    
+    # Save submission
+    submission_data = {
+        "id": str(uuid.uuid4()),
+        "quiz_id": submission.quiz_id,
+        "user_name": submission.user_name,
+        "answers": submission.answers,
+        "score": score,
+        "total": len(quiz["questions"]),
+        "submitted_at": datetime.now().isoformat()
+    }
+    
+    quiz_submissions.append(submission_data)
+    logger.info(f"Quiz Submitted: {submission.user_name} scored {score}/{len(quiz['questions'])}")
+    
+    return {
+        "status": "success",
+        "score": score,
+        "total": len(quiz["questions"]),
+        "percentage": round((score / len(quiz["questions"])) * 100, 2)
+    }
+
+@app.get("/quiz/{quiz_id}/results")
+async def get_quiz_results(quiz_id: str):
+    """
+    Get all submissions for a specific quiz (for managers).
+    """
+    # Find quiz
+    quiz = None
+    for q in quiz_store:
+        if q["id"] == quiz_id:
+            quiz = q
+            break
+    
+    if not quiz:
+        return {"error": "Quiz not found"}
+    
+    # Get submissions for this quiz
+    submissions = [s for s in quiz_submissions if s["quiz_id"] == quiz_id]
+    
+    # Calculate statistics
+    total_submissions = len(submissions)
+    avg_score = sum(s["score"] for s in submissions) / total_submissions if total_submissions > 0 else 0
+    
+    return {
+        "quiz_title": quiz["title"],
+        "quiz_description": quiz["description"],
+        "total_submissions": total_submissions,
+        "average_score": round(avg_score, 2),
+        "total_questions": len(quiz["questions"]),
+        "submissions": submissions
+    }
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

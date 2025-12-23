@@ -20,6 +20,7 @@ import { Feather, Octicons, Ionicons, MaterialIcons, MaterialCommunityIcons } fr
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeInDown, FadeInRight } from "react-native-reanimated";
+import QuizScreen from '../Screens/QuizScreen';
 
 // Import Screens
 import Courses from "./Courses";
@@ -32,6 +33,8 @@ import AIScanner from "../Components/AIScanner";
 import AIFlashcards from "../Components/AIFlashcards";
 import AIChatBot from "../Components/AIChatBot";
 import AIDigitalTwin from "../Components/AIDigitalTwin";
+import QuizTakingModal from "../Components/QuizTakingModal";
+import { useNavigation } from "@react-navigation/native";
 
 
 // --- NEW: VIDEO PLAYER MODAL ---
@@ -187,12 +190,74 @@ function LiveFeedSection({ data, onPlay }) {
   );
 }
 
+function QuizFeedSection({ data, onStart }) {
+  if (!data || data.length === 0) return null;
+
+  return (
+    <View style={styles.sectionContainer}>
+      <View style={[styles.sectionHeader, { paddingHorizontal: 20 }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#F59E0B', marginRight: 8 }} />
+          <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Assigned Quizzes</Text>
+        </View>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20, paddingBottom: 10 }}>
+        {data.map((item, index) => (
+          <Animated.View key={index} entering={FadeInRight.duration(500)} style={styles.quizFeedCard}>
+            <TouchableOpacity
+              style={styles.quizFeedCardInner}
+              onPress={() => onStart(item)}
+            >
+              <View style={styles.quizFeedIcon}>
+                <MaterialCommunityIcons name="school" size={24} color="#FFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.quizFeedTitle} numberOfLines={1}>{item.title}</Text>
+                <Text style={styles.quizFeedMeta}>Assigned by Manager</Text>
+              </View>
+              <View style={styles.quizFeedBadge}>
+                <Text style={styles.quizFeedBadgeText}>ACTION REQUIRED</Text>
+              </View>
+            </TouchableOpacity>
+          </Animated.View>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
 // ... (NotificationToast Unchanged)
 
 function HomeContent({ onOpenTool, onOpenTwin }) {
   const [liveUpdates, setLiveUpdates] = useState([]);
   const [notification, setNotification] = useState(null);
-  const [selectedVideo, setSelectedVideo] = useState(null); // NEW STATE
+  const [selectedVideo, setSelectedVideo] = useState(null);
+  // QUIZ STATE
+  const [assignedQuizzes, setAssignedQuizzes] = useState([]);
+  const [activeQuiz, setActiveQuiz] = useState(null);
+  const [quizModalVisible, setQuizModalVisible] = useState(false);
+  const [currentQuizIndex, setCurrentQuizIndex] = useState(0);
+  const [quizAnswers, setQuizAnswers] = useState([]);
+  const [quizScore, setQuizScore] = useState(null);
+  // Add inside HomeContent
+  const startQuiz = async (quizData) => {
+    if (!quizData.questions) {
+      try {
+        const response = await fetch(`http://192.168.1.35:8000/quiz/${quizData.quiz_id || quizData.id}`);
+        const fullQuiz = await response.json();
+        if (fullQuiz.error) throw new Error(fullQuiz.error);
+        setActiveQuiz(fullQuiz);
+      } catch (err) {
+        console.error("Error fetching quiz:", err);
+        alert("Could not load quiz details.");
+        return;
+      }
+    } else {
+      setActiveQuiz(quizData);
+    }
+    setQuizModalVisible(true);
+  };
+
 
   useEffect(() => {
     // CONNECT TO WEBSOCKET
@@ -209,7 +274,16 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
           setLiveUpdates(prev => [message.data, ...prev]);
         } else if (message.type === "NOTIFICATION") {
           setNotification(message.data);
-          // Hide after 5 seconds
+          setTimeout(() => setNotification(null), 5000);
+        } else if (message.type === "QUIZ_ASSIGNED") {
+          // New quiz assigned
+          setAssignedQuizzes(prev => [message.data, ...prev]);
+          setNotification({
+            title: "New Quiz!",
+            message: message.data.title,
+            type: "quiz",
+            data: message.data
+          });
           setTimeout(() => setNotification(null), 5000);
         }
       } catch (err) {
@@ -237,6 +311,12 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
           onPlay={(item) => setSelectedVideo(item)}
         />
 
+        {/* QUIZ FEED (Assigned Quizzes) */}
+        <QuizFeedSection
+          data={assignedQuizzes}
+          onStart={(quiz) => startQuiz(quiz)}
+        />
+
         {/* TWIN CARD */}
         <DigitalTwinCard onOpen={onOpenTwin} />
 
@@ -248,7 +328,13 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
 
       {/* ABSOLUTE NOTIFICATION OVERLAY */}
       <View style={styles.overlayContainer} pointerEvents="box-none">
-        <NotificationToast visible={!!notification} message={notification} type={notification?.type} />
+        <NotificationToast
+          visible={!!notification}
+          message={notification}
+          type={notification?.type}
+          onPress={() => notification?.type === 'quiz' && notification?.data && startQuiz(notification.data)}
+        />
+
       </View>
 
       {/* VIDEO MODAL */}
@@ -256,6 +342,17 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
         visible={!!selectedVideo}
         videoData={selectedVideo}
         onClose={() => setSelectedVideo(null)}
+      />
+
+      {/* QUIZ TAKING MODAL */}
+      <QuizTakingModal
+        visible={quizModalVisible}
+        quiz={activeQuiz}
+        onClose={() => {
+          setQuizModalVisible(false);
+          setActiveQuiz(null);
+        }}
+        userName="John Doe"
       />
     </View>
   )
@@ -511,21 +608,47 @@ function NewArrivals() {
 }
 
 
-function NotificationToast({ message, type, visible }) {
+
+
+/**
+ * @param {object} props
+ * @param {any} props.message
+ * @param {string} props.type
+ * @param {boolean} props.visible
+ * @param {any} [props.navigation]
+ * @param {string} [props.targetScreen]
+ * @param {() => void} [props.onPress]
+ */
+function NotificationToast({ message, type, visible, navigation, targetScreen, onPress }) {
+
   if (!visible) return null;
   const isQuiz = type === "quiz";
 
+  const handlePress = () => {
+    if (onPress) {
+      onPress();
+    } else if (navigation && targetScreen) {
+      navigation.navigate(targetScreen);
+    }
+  };
+
   return (
-    <Animated.View entering={FadeInDown.springify()} style={styles.toastContainer}>
+    <Animated.View
+      entering={FadeInDown.springify()}
+      style={styles.toastContainer}
+      pointerEvents="box-none" // ensures touches pass through properly
+    >
       <BlurView intensity={80} tint="dark" style={styles.toastContent}>
-        <View style={[styles.toastIcon, { backgroundColor: isQuiz ? '#F59E0B' : '#3B82F6' }]}>
+        <View style={[styles.toastIcon, { backgroundColor: isQuiz ? "#F59E0B" : "#3B82F6" }]}>
           <MaterialCommunityIcons name={isQuiz ? "school" : "bell"} size={24} color="#FFF" />
         </View>
+
         <View style={{ flex: 1 }}>
-          <Text style={styles.toastTitle}>{message.title || "Notification"}</Text>
-          <Text style={styles.toastMsg}>{message.message}</Text>
+          <Text style={styles.toastTitle}>{message?.title || "Notification"}</Text>
+          <Text style={styles.toastMsg}>{message?.message || ""}</Text>
         </View>
-        <TouchableOpacity style={styles.toastBtn}>
+
+        <TouchableOpacity style={styles.toastBtn} onPress={handlePress}>
           <Text style={styles.toastBtnText}>{isQuiz ? "Start Now" : "View"}</Text>
         </TouchableOpacity>
       </BlurView>
@@ -565,11 +688,19 @@ export default function Home() {
             headerShown: false,
             tabBarShowLabel: false,
             tabBarIcon: ({ color, focused }) => {
-              let IconComp = Feather;
               let iconName = "home";
-              if (route.name === "CoursesTab") iconName = "book-open";
-              if (route.name === "ResourcesTab") { IconComp = Ionicons; iconName = "grid-outline"; }
-              if (route.name === "ProfileTab") iconName = "user";
+              let IconComp = Feather;
+
+              if (route.name === "CoursesTab") {
+                iconName = "book-open";
+                IconComp = Feather;
+              } else if (route.name === "ResourcesTab") {
+                iconName = "grid-outline";
+                IconComp = Ionicons;
+              } else if (route.name === "ProfileTab") {
+                iconName = "user";
+                IconComp = Feather;
+              }
 
               return (
                 <View style={[styles.tabIconContainer, focused && styles.activeTabIcon]}>
@@ -597,6 +728,7 @@ export default function Home() {
           <Tab.Screen name="CoursesTab" component={Courses} />
           <Tab.Screen name="ResourcesTab" component={Resources} />
           <Tab.Screen name="ProfileTab" component={Profile} />
+          <Tab.Screen name="QuizScreen" component={QuizScreen} />
         </Tab.Navigator>
       )}
 
@@ -749,5 +881,13 @@ const styles = StyleSheet.create({
   resultTitle: { color: '#FFF', fontSize: 24, fontFamily: "Poppins_700Bold", marginTop: 16, marginBottom: 8 },
   resultScore: { color: '#9CA3AF', fontSize: 16, fontFamily: "Poppins_500Medium", marginBottom: 24 },
   retryBtn: { backgroundColor: '#F59E0B', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 },
-  retryText: { color: '#FFF', fontSize: 14, fontFamily: "Poppins_700Bold" }
+  retryText: { color: '#FFF', fontSize: 14, fontFamily: "Poppins_700Bold" },
+  // QUIZ FEED
+  quizFeedCard: { width: 280, marginRight: 16, marginBottom: 5 },
+  quizFeedCardInner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#4338CA', padding: 12, borderRadius: 16, shadowColor: "#4338CA", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
+  quizFeedIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  quizFeedTitle: { color: "#FFF", fontSize: 13, fontFamily: "Poppins_600SemiBold", marginBottom: 2 },
+  quizFeedMeta: { color: "rgba(255,255,255,0.7)", fontSize: 11, fontFamily: "Poppins_400Regular" },
+  quizFeedBadge: { position: 'absolute', top: 12, right: 12, backgroundColor: '#F59E0B', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  quizFeedBadgeText: { color: '#FFF', fontSize: 8, fontFamily: "Poppins_700Bold" }
 });

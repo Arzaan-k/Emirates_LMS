@@ -16,36 +16,21 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  // STATIC CREDENTIALS FOR HIERARCHY
+  // SIMPLIFIED CREDENTIALS - ONLY 2 ROLES
   const STATIC_USERS = {
-    // LOWER LEVEL (Existing)
-    'user': { password: 'user@123', role: 'Team Member', name: 'John Doe' },
-
-    // UPPER LEVEL HIERARCHY
+    'user': { password: 'user@123', role: 'User', name: 'John Doe' },
     'store.manager': { password: 'bw_store@2025', role: 'Store Manager', name: 'Sarah Store' },
-    'area.manager': { password: 'bw_area@2025', role: 'Area Manager', name: 'Alex Area' },
-    'deputy.area': { password: 'bw_darea@2025', role: 'Deputy Area Manager', name: 'Danny Deputy' },
-    'deputy.city': { password: 'bw_dcity@2025', role: 'Deputy City Manager', name: 'Cindy City' },
-    'city.manager': { password: 'bw_city@2025', role: 'City Manager', name: 'Chris City' },
-    'ops.manager': { password: 'bw_ops@2025', role: 'Ops Manager', name: 'Oliver Ops' },
   };
 
   const handleLogin = () => {
     const user = STATIC_USERS[email.toLowerCase()];
 
     if (user && user.password === password) {
-      if (user.role === 'Team Member') {
-        navigation.navigate('Home', { userProfile: user });
-      } else if (user.role === 'Store Manager') {
-        navigation.navigate('StoreDashboard', { userProfile: user });
-      } else if (user.role === 'Area Manager' || user.role === 'Deputy Area Manager') {
-        navigation.navigate('AreaDashboard', { userProfile: user });
-      } else if (user.role === 'City Manager' || user.role === 'Deputy City Manager') {
-        navigation.navigate('CityDashboard', { userProfile: user });
-      } else if (user.role === 'Ops Manager') {
-        navigation.navigate('OpsDashboard', { userProfile: user });
-      } else {
+      if (user.role === 'Store Manager') {
         navigation.navigate('ManagerDashboard', { userProfile: user });
+      } else {
+        // Default: User role
+        navigation.navigate('Home', { userProfile: user });
       }
     } else {
       Alert.alert('Login Failed', 'Invalid username or password');

@@ -22,10 +22,6 @@ import Onboarding from "./Screens/Onboarding";
 import Login from "./Screens/Login";
 import Home from "./Screens/Home";
 import ManagerDashboard from "./Screens/ManagerDashboard";
-import OpsDashboard from "./Screens/OpsDashboard";
-import CityDashboard from "./Screens/CityDashboard";
-import AreaDashboard from "./Screens/AreaDashboard";
-import StoreDashboard from "./Screens/StoreDashboard";
 
 LogBox.ignoreAllLogs();
 
@@ -99,10 +95,6 @@ function App() {
           <Stack.Screen name="Login" component={Login} />
           <Stack.Screen name="Home" component={Home} />
           <Stack.Screen name="ManagerDashboard" component={ManagerDashboard} />
-          <Stack.Screen name="OpsDashboard" component={OpsDashboard} />
-          <Stack.Screen name="CityDashboard" component={CityDashboard} />
-          <Stack.Screen name="AreaDashboard" component={AreaDashboard} />
-          <Stack.Screen name="StoreDashboard" component={StoreDashboard} />
         </Stack.Navigator>
       </NavigationContainer>
       {/* </NotificationProvider> */}

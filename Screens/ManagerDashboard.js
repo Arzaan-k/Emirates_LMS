@@ -20,6 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
 import Svg, { Circle, G, Text as SvgText } from 'react-native-svg';
+import { QuizCreationModal, QuizResultsModal } from '../Components/QuizModals';
 
 const { width, height } = Dimensions.get('window');
 const API_URL = "http://192.168.1.35:8000"; // Updated for physical device using local IP
@@ -150,6 +151,18 @@ export default function ManagerDashboard({ route, navigation }) {
     const [selectedFile, setSelectedFile] = useState(null); // File state
     const [uploading, setUploading] = useState(false);
 
+    // QUIZ STATE
+    const [quizModalVisible, setQuizModalVisible] = useState(false);
+    const [quizTitle, setQuizTitle] = useState('');
+    const [quizDescription, setQuizDescription] = useState('');
+    const [questions, setQuestions] = useState([]);
+    const [currentQuestion, setCurrentQuestion] = useState('');
+    const [options, setOptions] = useState(['', '', '', '']);
+    const [correctIndex, setCorrectIndex] = useState(0);
+    const [createdQuizzes, setCreatedQuizzes] = useState([]);
+    const [resultsModalVisible, setResultsModalVisible] = useState(false);
+    const [selectedQuizResults, setSelectedQuizResults] = useState(null);
+
     // PICK FILE FUNCTION
     const pickFile = async () => {
         try {
@@ -221,6 +234,87 @@ export default function ManagerDashboard({ route, navigation }) {
             setUploading(false);
         }
     };
+
+    // QUIZ FUNCTIONS
+    const addQuestion = () => {
+        if (!currentQuestion || options.some(opt => !opt)) {
+            Alert.alert("Incomplete", "Please fill all question fields and 4 options");
+            return;
+        }
+
+        setQuestions([...questions, {
+            question: currentQuestion,
+            options: [...options],
+            correctIndex
+        }]);
+
+        // Reset
+        setCurrentQuestion('');
+        setOptions(['', '', '', '']);
+        setCorrectIndex(0);
+        Alert.alert("Added", `Question ${questions.length + 1} added successfully`);
+    };
+
+    const createQuiz = async () => {
+        if (!quizTitle || questions.length === 0) {
+            Alert.alert("Incomplete", "Please add a title and at least one question");
+            return;
+        }
+
+        try {
+            const response = await fetch(`${API_URL}/quiz/create`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: quizTitle,
+                    description: quizDescription,
+                    questions: questions,
+                    created_by: name
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                Alert.alert("Success", "Quiz created and assigned to all users!");
+                setQuizModalVisible(false);
+                setQuizTitle('');
+                setQuizDescription('');
+                setQuestions([]);
+                fetchQuizzes();
+            }
+        } catch (error) {
+            console.error(error);
+            Alert.alert("Error", "Failed to create quiz");
+        }
+    };
+
+    const fetchQuizzes = async () => {
+        try {
+            const response = await fetch(`${API_URL}/quiz/list`);
+            const quizzes = await response.json();
+            setCreatedQuizzes(quizzes);
+        } catch (error) {
+            console.error("Error fetching quizzes:", error);
+        }
+    };
+
+    const viewResults = async (quizId) => {
+        try {
+            const response = await fetch(`${API_URL}/quiz/${quizId}/results`);
+            const results = await response.json();
+            setSelectedQuizResults(results);
+            setResultsModalVisible(true);
+        } catch (error) {
+            console.error("Error fetching results:", error);
+            Alert.alert("Error", "Failed to load quiz results");
+        }
+    };
+
+    // Fetch quizzes on mount
+    React.useEffect(() => {
+        fetchQuizzes();
+    }, []);
 
     const handleAssignQuiz = async () => {
         try {
@@ -315,6 +409,12 @@ export default function ManagerDashboard({ route, navigation }) {
                             </View>
                             <Text style={styles.actionText}>Reports</Text>
                         </TouchableOpacity>
+                        <TouchableOpacity style={styles.actionBtn} onPress={() => setQuizModalVisible(true)}>
+                            <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
+                                <MaterialCommunityIcons name="clipboard-check" size={24} color="#F59E0B" />
+                            </View>
+                            <Text style={styles.actionText}>Assign Quiz</Text>
+                        </TouchableOpacity>
                         <TouchableOpacity style={styles.actionBtn}>
                             <View style={[styles.actionIcon, { backgroundColor: '#DCFCE7' }]}>
                                 <Feather name="check-square" size={24} color="#16A34A" />
@@ -379,9 +479,34 @@ export default function ManagerDashboard({ route, navigation }) {
                         </TouchableOpacity>
                     </View>
                 </View>
-            </Modal >
-        </View >
-    );
+            </Modal>
+
+            {/* QUIZ CREATION MODAL */}
+            <QuizCreationModal
+                visible={quizModalVisible}
+                onClose={() => setQuizModalVisible(false)}
+                quizTitle={quizTitle}
+                setQuizTitle={setQuizTitle}
+                quizDescription={quizDescription}
+                setQuizDescription={setQuizDescription}
+                currentQuestion={currentQuestion}
+                setCurrentQuestion={setCurrentQuestion}
+                options={options}
+                setOptions={setOptions}
+                correctIndex={correctIndex}
+                setCorrectIndex={setCorrectIndex}
+                questions={questions}
+                onAddQuestion={addQuestion}
+                onPublish={createQuiz}
+            />
+
+            {/* QUIZ RESULTS MODAL */}
+            <QuizResultsModal
+                visible={resultsModalVisible}
+                onClose={() => setResultsModalVisible(false)}
+                resultsData={selectedQuizResults}
+            />
+        </View>);
 }
 
 const styles = StyleSheet.create({
