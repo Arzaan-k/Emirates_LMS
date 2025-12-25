@@ -22,6 +22,8 @@ import Onboarding from "./Screens/Onboarding";
 import Login from "./Screens/Login";
 import Home from "./Screens/Home";
 import ManagerDashboard from "./Screens/ManagerDashboard";
+import CreateUser from "./Screens/CreateUser";
+import ProctoredAssessment from "./Screens/ProctoredAssessment";
 
 LogBox.ignoreAllLogs();
 
@@ -95,6 +97,8 @@ function App() {
           <Stack.Screen name="Login" component={Login} />
           <Stack.Screen name="Home" component={Home} />
           <Stack.Screen name="ManagerDashboard" component={ManagerDashboard} />
+          <Stack.Screen name="CreateUser" component={CreateUser} />
+          <Stack.Screen name="ProctoredAssessment" component={ProctoredAssessment} />
         </Stack.Navigator>
       </NavigationContainer>
       {/* </NotificationProvider> */}

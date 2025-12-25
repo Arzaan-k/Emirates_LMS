@@ -226,9 +226,46 @@ function QuizFeedSection({ data, onStart }) {
   );
 }
 
+function ProctoredFeedSection({ data, onStart }) {
+  if (!data || data.length === 0) return null;
+
+  return (
+    <View style={styles.sectionContainer}>
+      <View style={[styles.sectionHeader, { paddingHorizontal: 20 }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444', marginRight: 8 }} />
+          <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Live Assessments</Text>
+        </View>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20, paddingBottom: 10 }}>
+        {data.map((item, index) => (
+          <Animated.View key={index} entering={FadeInRight.duration(500)} style={styles.proctorFeedCard}>
+            <TouchableOpacity
+              style={styles.proctorFeedCardInner}
+              onPress={() => onStart(item)}
+            >
+              <View style={styles.proctorFeedIcon}>
+                <MaterialCommunityIcons name="shield-lock" size={24} color="#FFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.proctorFeedTitle} numberOfLines={1}>{item.title}</Text>
+                <Text style={styles.proctorFeedMeta}>Proctored • High Stakes</Text>
+              </View>
+              <View style={styles.proctorFeedBadge}>
+                <Text style={styles.proctorFeedBadgeText}>OFFICIAL</Text>
+              </View>
+            </TouchableOpacity>
+          </Animated.View>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
 // ... (NotificationToast Unchanged)
 
 function HomeContent({ onOpenTool, onOpenTwin }) {
+  const navigation = useNavigation();
   const [liveUpdates, setLiveUpdates] = useState([]);
   const [notification, setNotification] = useState(null);
   const [selectedVideo, setSelectedVideo] = useState(null);
@@ -239,11 +276,12 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   const [currentQuizIndex, setCurrentQuizIndex] = useState(0);
   const [quizAnswers, setQuizAnswers] = useState([]);
   const [quizScore, setQuizScore] = useState(null);
+  const [assignedProctoring, setAssignedProctoring] = useState([]);
   // Add inside HomeContent
   const startQuiz = async (quizData) => {
     if (!quizData.questions) {
       try {
-        const response = await fetch(`http://192.168.1.35:8000/quiz/${quizData.quiz_id || quizData.id}`);
+        const response = await fetch(`http://192.168.1.36:8000/quiz/${quizData.quiz_id || quizData.id}`);
         const fullQuiz = await response.json();
         if (fullQuiz.error) throw new Error(fullQuiz.error);
         setActiveQuiz(fullQuiz);
@@ -261,7 +299,7 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
 
   useEffect(() => {
     // CONNECT TO WEBSOCKET
-    const ws = new WebSocket("ws://192.168.1.35:8000/ws");
+    const ws = new WebSocket("ws://192.168.1.36:8000/ws");
 
     ws.onopen = () => {
       console.log("Connected to Realtime Server");
@@ -282,6 +320,15 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
             title: "New Quiz!",
             message: message.data.title,
             type: "quiz",
+            data: message.data
+          });
+          setTimeout(() => setNotification(null), 5000);
+        } else if (message.type === "proctored") {
+          setAssignedProctoring(prev => [message.data, ...prev]);
+          setNotification({
+            title: "Locked Assessment!",
+            message: message.data.title,
+            type: "proctored",
             data: message.data
           });
           setTimeout(() => setNotification(null), 5000);
@@ -311,6 +358,15 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
           onPlay={(item) => setSelectedVideo(item)}
         />
 
+        {/* PROCTORED FEED (Assigned Assessments) */}
+        <ProctoredFeedSection
+          data={assignedProctoring}
+          onStart={(assessment) => navigation.navigate('ProctoredAssessment', {
+            assessmentData: assessment,
+            userProfile: { role: 'User' }
+          })}
+        />
+
         {/* QUIZ FEED (Assigned Quizzes) */}
         <QuizFeedSection
           data={assignedQuizzes}
@@ -332,9 +388,17 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
           visible={!!notification}
           message={notification}
           type={notification?.type}
-          onPress={() => notification?.type === 'quiz' && notification?.data && startQuiz(notification.data)}
+          onPress={() => {
+            if (notification?.type === 'quiz' && notification?.data) {
+              startQuiz(notification.data);
+            } else if (notification?.type === 'proctored' && notification?.data) {
+              navigation.navigate('ProctoredAssessment', {
+                assessmentData: notification.data,
+                userProfile: { role: 'User' } // Default to user role for taker
+              });
+            }
+          }}
         />
-
       </View>
 
       {/* VIDEO MODAL */}
@@ -889,5 +953,13 @@ const styles = StyleSheet.create({
   quizFeedTitle: { color: "#FFF", fontSize: 13, fontFamily: "Poppins_600SemiBold", marginBottom: 2 },
   quizFeedMeta: { color: "rgba(255,255,255,0.7)", fontSize: 11, fontFamily: "Poppins_400Regular" },
   quizFeedBadge: { position: 'absolute', top: 12, right: 12, backgroundColor: '#F59E0B', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
-  quizFeedBadgeText: { color: '#FFF', fontSize: 8, fontFamily: "Poppins_700Bold" }
+  quizFeedBadgeText: { color: '#FFF', fontSize: 8, fontFamily: "Poppins_700Bold" },
+  // PROCTORED FEED
+  proctorFeedCard: { width: 280, marginRight: 16, marginBottom: 5 },
+  proctorFeedCardInner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#111827', padding: 12, borderRadius: 16, borderWidth: 1, borderColor: '#374151', shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
+  proctorFeedIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(239, 68, 68, 0.15)', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  proctorFeedTitle: { color: "#FFF", fontSize: 13, fontFamily: "Poppins_600SemiBold", marginBottom: 2 },
+  proctorFeedMeta: { color: "#94A3B8", fontSize: 11, fontFamily: "Poppins_400Regular" },
+  proctorFeedBadge: { position: 'absolute', top: 12, right: 12, backgroundColor: '#EF4444', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  proctorFeedBadgeText: { color: '#FFF', fontSize: 8, fontFamily: "Poppins_700Bold" }
 });

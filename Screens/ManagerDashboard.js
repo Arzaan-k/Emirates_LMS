@@ -23,7 +23,7 @@ import Svg, { Circle, G, Text as SvgText } from 'react-native-svg';
 import { QuizCreationModal, QuizResultsModal } from '../Components/QuizModals';
 
 const { width, height } = Dimensions.get('window');
-const API_URL = "http://192.168.1.35:8000"; // Updated for physical device using local IP
+const API_URL = "http://192.168.1.36:8000"; // Updated for physical device using local IP
 
 // MOCK DATA GENERATORS
 const getDashboardData = (role) => {
@@ -429,6 +429,23 @@ export default function ManagerDashboard({ route, navigation }) {
                             </View>
                             <Text style={styles.actionText}>Upload Training</Text>
                         </TouchableOpacity>
+                        <TouchableOpacity style={styles.actionBtn} onPress={() => navigation.navigate('CreateUser')}>
+                            <View style={[styles.actionIcon, { backgroundColor: '#ECFEFF' }]}>
+                                <Feather name="user-plus" size={24} color="#0891B2" />
+                            </View>
+                            <Text style={styles.actionText}>Create User</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.actionBtn}
+                            onPress={() => navigation.navigate('ProctoredAssessment', { userProfile })}
+                        >
+                            <View style={[styles.actionIcon, { backgroundColor: '#FFF7ED' }]}>
+                                <Feather name="shield" size={24} color="#EA580C" />
+                            </View>
+                            <Text style={styles.actionText}>Proctored Assessment</Text>
+                        </TouchableOpacity>
+
+
                     </View>
 
                 </ScrollView >

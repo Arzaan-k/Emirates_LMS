@@ -13,7 +13,7 @@ from pydantic import BaseModel
 # --- CONFIGURATION ---
 PORT = 8000
 HOST = "0.0.0.0"
-BASE_URL = f"http://192.168.1.35:{PORT}" # UPDATE THIS IP IF IT CHANGES
+BASE_URL = f"http://192.168.1.36:{PORT}" # UPDATE THIS IP IF IT CHANGES
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
