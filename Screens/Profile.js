@@ -12,6 +12,7 @@ import { Feather, MaterialCommunityIcons, FontAwesome5 } from "@expo/vector-icon
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import Svg, { Circle, G, Text as SvgText } from "react-native-svg";
+import { useLanguage } from "../context/language.context";
 
 const { width } = Dimensions.get("window");
 
@@ -41,6 +42,7 @@ const BADGES = [
 
 // --- INTERACTIVE DONUT CHART ---
 const DonutChart = () => {
+    const { t } = useLanguage();
     const size = 180;
     const strokeWidth = 20;
     const center = size / 2;
@@ -50,9 +52,9 @@ const DonutChart = () => {
     // Data: Completed, Incomplete, Extra
     const total = 50 + 20 + 30;
     const data = [
-        { key: 'completed', value: 50, color: '#10B981', label: 'Completed' },
-        { key: 'incomplete', value: 20, color: '#EF4444', label: 'Incomplete' },
-        { key: 'extra', value: 30, color: '#F59E0B', label: 'Extra Credit' },
+        { key: 'completed', value: 50, color: '#10B981', label: t('completed') },
+        { key: 'incomplete', value: 20, color: '#EF4444', label: t('incomplete') },
+        { key: 'extra', value: 30, color: '#F59E0B', label: t('extraCredit') },
     ];
 
     const [activeSection, setActiveSection] = useState(data[0]);
@@ -62,8 +64,8 @@ const DonutChart = () => {
     return (
         <View style={styles.chartContainer}>
             <View style={styles.chartTitleRow}>
-                <Text style={styles.chartMainTitle}>Learning Breakdown</Text>
-                <TouchableOpacity style={styles.chartFilter}><Text style={styles.chartFilterText}>This Week</Text></TouchableOpacity>
+                <Text style={styles.chartMainTitle}>{t('learningBreakdown')}</Text>
+                <TouchableOpacity style={styles.chartFilter}><Text style={styles.chartFilterText}>{t('thisWeek')}</Text></TouchableOpacity>
             </View>
 
             <View style={styles.chartRow}>
@@ -126,8 +128,9 @@ const DonutChart = () => {
 };
 
 
-export default function Profile() {
+export default function Profile({ navigation }) {
     const insets = useSafeAreaInsets();
+    const { t } = useLanguage();
 
     return (
         <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -145,13 +148,13 @@ export default function Profile() {
                         </View>
                         <View style={styles.userInfo}>
                             <Text style={styles.userName}>Aditya User</Text>
-                            <Text style={styles.userRole}>Store Manager • Mumbai</Text>
+                            <Text style={styles.userRole}>{t('storeManager')} • Mumbai</Text>
                             <View style={styles.joinDateBadge}>
                                 <Feather name="calendar" size={10} color="#6B7280" />
-                                <Text style={styles.joinDateText}>Joined Nov 2024</Text>
+                                <Text style={styles.joinDateText}>{t('joined')} Nov 2024</Text>
                             </View>
                         </View>
-                        <TouchableOpacity style={styles.settingsBtn}>
+                        <TouchableOpacity style={styles.settingsBtn} onPress={() => navigation.navigate('Settings')}>
                             <Feather name="settings" size={20} color="#374151" />
                         </TouchableOpacity>
                     </View>
@@ -168,13 +171,13 @@ export default function Profile() {
                                 <MaterialCommunityIcons name="trophy" size={24} color="#FBBF24" />
                             </View>
                             <View>
-                                <Text style={styles.leagueTitle}>Diamond League</Text>
-                                <Text style={styles.leagueRank}>Rank #4 • Top 5%</Text>
+                                <Text style={styles.leagueTitle}>{t('diamondLeague')}</Text>
+                                <Text style={styles.leagueRank}>{t('rank')} #4 • {t('top')} 5%</Text>
                             </View>
                         </View>
                         <View style={styles.xpBlock}>
                             <Text style={styles.xpBig}>2,400</Text>
-                            <Text style={styles.xpLabel}>Total XP</Text>
+                            <Text style={styles.xpLabel}>{t('totalXP')}</Text>
                         </View>
                     </LinearGradient>
                 </View>
@@ -182,19 +185,41 @@ export default function Profile() {
                 {/* ANALYTICS GRAPH */}
                 <DonutChart />
 
+                {/* ORGANIZATIONAL HIERARCHY NAVIGATION */}
+                <TouchableOpacity 
+                    style={styles.navCard} 
+                    onPress={() => navigation.navigate('Hierarchy')}
+                >
+                    <LinearGradient
+                        colors={["#4F46E5", "#7C3AED"]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.navCardGradient}
+                    >
+                        <View style={styles.navCardIcon}>
+                            <MaterialCommunityIcons name="sitemap" size={24} color="#FFF" />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.navCardTitle}>{t('viewOrgHierarchy') || 'View Organizational Hierarchy'}</Text>
+                            <Text style={styles.navCardSub}>See reporting structure & leadership</Text>
+                        </View>
+                        <Feather name="chevron-right" size={20} color="#FFF" />
+                    </LinearGradient>
+                </TouchableOpacity>
+
                 {/* SECTIONS LIST */}
                 <View style={styles.listSection}>
 
                     {/* INCOMPLETE */}
                     <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>In Progress ⏳</Text>
-                        <TouchableOpacity><Text style={styles.seeAll}>See All</Text></TouchableOpacity>
+                        <Text style={styles.sectionTitle}>{t('inProgress')}</Text>
+                        <TouchableOpacity><Text style={styles.seeAll}>{t('seeAll')}</Text></TouchableOpacity>
                     </View>
                     {INCOMPLETE_LESSONS.map((item) => (
                         <View key={item.id} style={styles.taskCard}>
                             <View>
                                 <Text style={styles.taskTitle}>{item.title}</Text>
-                                <Text style={styles.taskDue}>Due: {item.due}</Text>
+                                <Text style={styles.taskDue}>{t('due')}: {item.due}</Text>
                             </View>
                             <View style={styles.progressCircle}>
                                 <Text style={styles.progressText}>{item.progress * 100}%</Text>
@@ -206,8 +231,8 @@ export default function Profile() {
 
                     {/* COMPLETED */}
                     <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>Completed ✅</Text>
-                        <TouchableOpacity><Text style={styles.seeAll}>History</Text></TouchableOpacity>
+                        <Text style={styles.sectionTitle}>{t('completed')} ✅</Text>
+                        <TouchableOpacity><Text style={styles.seeAll}>{t('history')}</Text></TouchableOpacity>
                     </View>
                     {COMPLETED_LESSONS.map((item) => (
                         <View key={item.id} style={styles.completedCard}>
@@ -228,7 +253,7 @@ export default function Profile() {
 
                     {/* EXTRA CREDIT */}
                     <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>Extra Credit 🚀</Text>
+                        <Text style={styles.sectionTitle}>{t('extraCredit')} 🚀</Text>
                     </View>
                     {EXTRA_CREDIT.map((item) => (
                         <LinearGradient key={item.id} colors={['#FFF7ED', '#FFF']} style={styles.extraCard}>
@@ -246,8 +271,8 @@ export default function Profile() {
                 {/* BADGES */}
                 <View style={styles.section}>
                     <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>Achievements</Text>
-                        <TouchableOpacity><Text style={styles.seeAll}>See All</Text></TouchableOpacity>
+                        <Text style={styles.sectionTitle}>{t('achievements')}</Text>
+                        <TouchableOpacity><Text style={styles.seeAll}>{t('seeAll')}</Text></TouchableOpacity>
                     </View>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20 }}>
                         {BADGES.map((badge) => (
@@ -334,4 +359,11 @@ const styles = StyleSheet.create({
     badgeCard: { marginRight: 16, alignItems: 'center', width: 90 },
     badgeCircle: { width: 70, height: 70, borderRadius: 35, justifyContent: 'center', alignItems: 'center', marginBottom: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
     badgeName: { fontSize: 12, fontFamily: "Poppins_500Medium", color: "#374151", textAlign: 'center' },
+
+    // NAV CARD
+    navCard: { marginHorizontal: 20, marginBottom: 24, borderRadius: 24, overflow: 'hidden', elevation: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8 },
+    navCardGradient: { flexDirection: 'row', alignItems: 'center', padding: 20 },
+    navCardIcon: { width: 48, height: 48, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.2)", justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+    navCardTitle: { color: "#FFF", fontSize: 15, fontFamily: "Poppins_700Bold" },
+    navCardSub: { color: "rgba(255,255,255,0.8)", fontSize: 12, fontFamily: "Poppins_400Regular" },
 });

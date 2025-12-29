@@ -12,6 +12,8 @@ import { Feather, MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 
+import { useNavigation } from "@react-navigation/native";
+
 const { width } = Dimensions.get("window");
 
 const CATEGORIES = [
@@ -19,6 +21,14 @@ const CATEGORIES = [
     { id: 2, name: "Video Tutorials", icon: "play-circle-outline", count: 8, color: ["#F59E0B", "#D97706"], bg: "#FEF3C7" },
     { id: 3, name: "Machine Manuals", icon: "tools", count: 5, color: ["#8B5CF6", "#7C3AED"], bg: "#EDE9FE" },
     { id: 4, name: "Safety Guides", icon: "shield-check-outline", count: 15, color: ["#10B981", "#059669"], bg: "#D1FAE5" },
+    { id: 5, name: "Interview Modules", icon: "file-document-outline", count: 15, color: ["#F59E0B", "#D97706"], bg: "#FEF3C7" },
+];
+
+const MANDATORY_MODULES = [
+    { id: 1, name: "Batter Preparation", icon: "beaker-outline", count: 4, color: ["#EC4899", "#DB2777"], bg: "#FCE7F3" },
+    { id: 2, name: "Waffle Baking Standards", icon: "cookie", count: 6, color: ["#F59E0B", "#D97706"], bg: "#FEF3C7" },
+    { id: 3, name: "Topping Application", icon: "food-apple-outline", count: 5, color: ["#8B5CF6", "#7C3AED"], bg: "#EDE9FE" },
+    { id: 4, name: "Equipment Maintenance", icon: "tools", count: 8, color: ["#3B82F6", "#2563EB"], bg: "#DBEAFE" },
 ];
 
 const RECOMMENDED = [
@@ -29,6 +39,7 @@ const RECOMMENDED = [
 export default function Resources() {
     const insets = useSafeAreaInsets();
     const [search, setSearch] = useState("");
+    const navigation = useNavigation();
 
     return (
         <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -38,7 +49,7 @@ export default function Resources() {
                 <View style={styles.header}>
                     <Text style={styles.pageTitle}>Knowledge Base</Text>
                     <View style={styles.aiBadge}>
-                        <MaterialCommunityIcons name="sparkles" size={12} color="#F59E0B" />
+                        <MaterialCommunityIcons name="star-four-points" size={12} color="#F59E0B" />
                         <Text style={styles.aiBadgeText}>AI Powered</Text>
                     </View>
                 </View>
@@ -89,7 +100,15 @@ export default function Resources() {
                     <Text style={styles.sectionTitle}>Browse Categories</Text>
                     <View style={styles.grid}>
                         {CATEGORIES.map((cat) => (
-                            <TouchableOpacity key={cat.id} style={styles.catCard}>
+                            <TouchableOpacity
+                                key={cat.id}
+                                style={styles.catCard}
+                                onPress={() => {
+                                    if (cat.name === "Interview Modules") {
+                                        navigation.navigate("InterviewModules");
+                                    }
+                                }}
+                            >
                                 <LinearGradient
                                     colors={cat.color}
                                     style={styles.catGradient}
@@ -99,9 +118,41 @@ export default function Resources() {
                                     <MaterialCommunityIcons name={cat.icon} size={32} color="#FFF" />
                                 </LinearGradient>
                                 <View style={styles.catContent}>
-                                    <Text style={styles.catName}>{cat.name}</Text>
+                                    <Text style={styles.catName}>{cat.name === "Interview Modules" ? "Hiring Toolkit" : cat.name}</Text>
                                     <View style={styles.catBadge}>
                                         <Text style={styles.catCount}>{cat.count} files</Text>
+                                    </View>
+                                </View>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                </View>
+
+                {/* MANDATORY MODULES (OJT) */}
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Mandatory Modules (OJT)</Text>
+                    <Text style={[styles.sectionTitle, { fontSize: 13, fontFamily: 'Poppins_400Regular', color: '#6B7280', marginTop: -5, marginBottom: 15 }]}>
+                        Process & Framework for Waffle Manufacturing
+                    </Text>
+                    <View style={styles.grid}>
+                        {MANDATORY_MODULES.map((mod) => (
+                            <TouchableOpacity
+                                key={mod.id}
+                                style={styles.catCard}
+                                onPress={() => navigation.navigate("ModuleDetail", { moduleName: mod.name })}
+                            >
+                                <LinearGradient
+                                    colors={mod.color}
+                                    style={styles.catGradient}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 1 }}
+                                >
+                                    <MaterialCommunityIcons name={mod.icon} size={32} color="#FFF" />
+                                </LinearGradient>
+                                <View style={styles.catContent}>
+                                    <Text style={styles.catName}>{mod.name}</Text>
+                                    <View style={styles.catBadge}>
+                                        <Text style={styles.catCount}>{mod.count} modules</Text>
                                     </View>
                                 </View>
                             </TouchableOpacity>
@@ -126,6 +177,7 @@ export default function Resources() {
                         </View>
                         <Feather name="download" size={20} color="#9CA3AF" />
                     </View>
+                    
                 </View>
 
             </ScrollView>

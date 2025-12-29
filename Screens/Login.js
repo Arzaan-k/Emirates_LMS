@@ -10,9 +10,11 @@ import {
   Pressable,
   Alert,
 } from 'react-native';
+import { useLanguage } from "../context/language.context";
 
 export default function LoginScreen() {
   const navigation = /** @type {any} */ (useNavigation());
+  const { t } = useLanguage();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
@@ -48,13 +50,13 @@ export default function LoginScreen() {
       />
 
       <Text style={styles.title}>Belgian Waffle LMS</Text>
-      <Text style={styles.subtitle}>Login to continue</Text>
+      <Text style={styles.subtitle}>{t('loginTitle')}</Text>
 
       {/* FORM */}
       <View style={styles.form}>
 
         {/* Email */}
-        <Text style={styles.label}>Email</Text>
+        <Text style={styles.label}>{t('email')}</Text>
         <TextInput
           placeholder="you@example.com"
           value={email}
@@ -65,7 +67,7 @@ export default function LoginScreen() {
         />
 
         {/* Password */}
-        <Text style={styles.label}>Password</Text>
+        <Text style={styles.label}>{t('password')}</Text>
         <TextInput
           placeholder="••••••••"
           value={password}
@@ -76,12 +78,12 @@ export default function LoginScreen() {
 
         {/* Forgot password */}
         <Pressable>
-          <Text style={styles.forgot}>Forgot password?</Text>
+          <Text style={styles.forgot}>{t('forgotPassword')}</Text>
         </Pressable>
 
         {/* Login Button */}
         <Pressable style={styles.loginBtn} onPress={handleLogin}>
-          <Text style={styles.loginText}>Login</Text>
+          <Text style={styles.loginText}>{t('loginBtn')}</Text>
         </Pressable>
 
       </View>

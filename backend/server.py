@@ -13,17 +13,18 @@ from pydantic import BaseModel
 # --- CONFIGURATION ---
 PORT = 8000
 HOST = "0.0.0.0"
-BASE_URL = f"http://192.168.1.36:{PORT}" # UPDATE THIS IP IF IT CHANGES
+BASE_URL = f"http://192.168.1.37:{PORT}" # UPDATE THIS IP IF IT CHANGES
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("BW_LMS_Backend")
 
 # --- LOAD AI MODELS ---
-import whisper
-logger.info("Loading Whisper Model...")
-whisper_model = whisper.load_model("base")
-logger.info("Whisper Model Loaded.")
+from faster_whisper import WhisperModel
+logger.info("Loading Faster Whisper Model...")
+# Run on CPU with INT8
+whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+logger.info("Faster Whisper Model Loaded.")
 
 # --- APP SETUP ---
 app = FastAPI(title="BW LMS Realtime Backend")
@@ -150,10 +151,16 @@ async def upload_content(
         video.audio.write_audiofile(audio_path, logger=None)
         video.close()
         
-        # 2. Transcribe with OpenAI Whisper (Local)
-        logger.info("Transcribing with Whisper (Local)...")
-        result = whisper_model.transcribe(audio_path)
-        transcript_text = result["text"]
+        # 2. Transcribe with Faster Whisper
+        logger.info("Transcribing with Faster Whisper...")
+        segments, info = whisper_model.transcribe(audio_path, beam_size=5)
+        
+        # faster-whisper returns a generator, so we iterate to get the full text
+        transcript_text = ""
+        for segment in segments:
+            transcript_text += segment.text + " "
+            
+        transcript_text = transcript_text.strip()
         logger.info(f"Transcript Generated: {transcript_text[:50]}...")
         
         # Cleanup Audio

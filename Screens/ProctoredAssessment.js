@@ -17,7 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
 
 const { width, height } = Dimensions.get('window');
-const API_URL = "http://192.168.1.36:8000";
+const API_URL = "http://192.168.1.37:8000";
 
 export default function ProctoredAssessment({ route, navigation }) {
     const { userProfile, assessmentData } = route.params || {};

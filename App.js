@@ -25,6 +25,13 @@ import ManagerDashboard from "./Screens/ManagerDashboard";
 import CreateUser from "./Screens/CreateUser";
 import ProctoredAssessment from "./Screens/ProctoredAssessment";
 
+import Settings from "./Screens/Settings";
+import InterviewModules from "./Screens/InterviewModules";
+import ModuleDetail from "./Screens/ModuleDetail";
+import Hierarchy from "./Screens/Hierarchy";
+import { LanguageProvider } from "./context/language.context";
+import Analytics from "./Screens/Analytics";
+
 LogBox.ignoreAllLogs();
 
 const Stack = createNativeStackNavigator();
@@ -88,20 +95,27 @@ function App() {
 
   return (
     <ThemeProvider>
-      {/* <NotificationProvider> */}
-      <NavigationContainer>
-        <Stack.Navigator id="RootStack" screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="AuthGate" component={AuthGate} />
-          <Stack.Screen name="Onboarding" component={Onboarding} />
-          <Stack.Screen name="Intro" component={Intro} />
-          <Stack.Screen name="Login" component={Login} />
-          <Stack.Screen name="Home" component={Home} />
-          <Stack.Screen name="ManagerDashboard" component={ManagerDashboard} />
-          <Stack.Screen name="CreateUser" component={CreateUser} />
-          <Stack.Screen name="ProctoredAssessment" component={ProctoredAssessment} />
-        </Stack.Navigator>
-      </NavigationContainer>
-      {/* </NotificationProvider> */}
+      <LanguageProvider>
+        {/* <NotificationProvider> */}
+        <NavigationContainer>
+          <Stack.Navigator id="RootStack" screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="AuthGate" component={AuthGate} />
+            <Stack.Screen name="Onboarding" component={Onboarding} />
+            <Stack.Screen name="Intro" component={Intro} />
+            <Stack.Screen name="Login" component={Login} />
+            <Stack.Screen name="Home" component={Home} />
+            <Stack.Screen name="ManagerDashboard" component={ManagerDashboard} />
+            <Stack.Screen name="CreateUser" component={CreateUser} />
+            <Stack.Screen name="ProctoredAssessment" component={ProctoredAssessment} />
+            <Stack.Screen name="Settings" component={Settings} />
+            <Stack.Screen name="InterviewModules" component={InterviewModules} />
+            <Stack.Screen name="ModuleDetail" component={ModuleDetail} />
+            <Stack.Screen name="Hierarchy" component={Hierarchy} />
+            <Stack.Screen name="Analytics" component={Analytics} />
+          </Stack.Navigator>
+        </NavigationContainer>
+        {/* </NotificationProvider> */}
+      </LanguageProvider>
     </ThemeProvider>
   );
 }

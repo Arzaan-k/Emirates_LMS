@@ -35,7 +35,7 @@ import AIChatBot from "../Components/AIChatBot";
 import AIDigitalTwin from "../Components/AIDigitalTwin";
 import QuizTakingModal from "../Components/QuizTakingModal";
 import { useNavigation } from "@react-navigation/native";
-
+import { useLanguage } from "../context/language.context";
 
 // --- NEW: VIDEO PLAYER MODAL ---
 // --- NEW: VIDEO PLAYER MODAL ---
@@ -180,7 +180,7 @@ function LiveFeedSection({ data, onPlay }) {
                 <Text style={styles.liveAuthor}>By {item.authorRole}</Text>
               </View>
               <View style={styles.newBadge}>
-                <Text style={styles.newBadgeText}>JUST NOW</Text>
+                <Text style={styles.newBadgeText}>{/* JUST NOW handled dynamically, or use t('justNow') but item.time usually dynamic */}{t('justNow')}</Text>
               </View>
             </TouchableOpacity>
           </Animated.View>
@@ -216,7 +216,7 @@ function QuizFeedSection({ data, onStart }) {
                 <Text style={styles.quizFeedMeta}>Assigned by Manager</Text>
               </View>
               <View style={styles.quizFeedBadge}>
-                <Text style={styles.quizFeedBadgeText}>ACTION REQUIRED</Text>
+                <Text style={styles.quizFeedBadgeText}>{t('actionRequired')}</Text>
               </View>
             </TouchableOpacity>
           </Animated.View>
@@ -252,7 +252,7 @@ function ProctoredFeedSection({ data, onStart }) {
                 <Text style={styles.proctorFeedMeta}>Proctored • High Stakes</Text>
               </View>
               <View style={styles.proctorFeedBadge}>
-                <Text style={styles.proctorFeedBadgeText}>OFFICIAL</Text>
+                <Text style={styles.proctorFeedBadgeText}>{t('official')}</Text>
               </View>
             </TouchableOpacity>
           </Animated.View>
@@ -281,7 +281,7 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   const startQuiz = async (quizData) => {
     if (!quizData.questions) {
       try {
-        const response = await fetch(`http://192.168.1.36:8000/quiz/${quizData.quiz_id || quizData.id}`);
+        const response = await fetch(`http://192.168.1.37:8000/quiz/${quizData.quiz_id || quizData.id}`);
         const fullQuiz = await response.json();
         if (fullQuiz.error) throw new Error(fullQuiz.error);
         setActiveQuiz(fullQuiz);
@@ -299,7 +299,7 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
 
   useEffect(() => {
     // CONNECT TO WEBSOCKET
-    const ws = new WebSocket("ws://192.168.1.36:8000/ws");
+    const ws = new WebSocket("ws://192.168.1.37:8000/ws");
 
     ws.onopen = () => {
       console.log("Connected to Realtime Server");
@@ -470,10 +470,11 @@ const AI_TOOLS = [
 
 function Header() {
   const insets = useSafeAreaInsets();
+  const { t } = useLanguage();
   return (
     <Animated.View entering={FadeInDown.duration(600).springify()} style={[styles.headerContainer, { paddingTop: insets.top + 10 }]}>
       <View style={{ flex: 1 }}>
-        <Text style={styles.greetingText}>Good Morning,</Text>
+        <Text style={styles.greetingText}>{t('goodMorning')}</Text>
         <Text style={styles.nameText}>Aditya</Text>
       </View>
 
@@ -503,11 +504,12 @@ function Header() {
 }
 
 function SearchBar() {
+  const { t } = useLanguage();
   return (
     <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.searchContainer}>
       <Feather name="search" size={20} color="#9CA3AF" style={styles.searchIcon} />
       <TextInput
-        placeholder="Find courses, recipes, SOPs..."
+        placeholder={t('searchPlaceholder')}
         placeholderTextColor="#9CA3AF"
         style={styles.searchInput}
       />
@@ -520,6 +522,7 @@ function SearchBar() {
 
 // ------ NEW: DIGITAL TWIN HERO CARD ------
 function DigitalTwinCard({ onOpen }) {
+  const { t } = useLanguage();
   return (
     <Animated.View entering={FadeInDown.delay(200).duration(800)} style={styles.twinContainer}>
       <TouchableOpacity style={styles.twinCard} activeOpacity={0.9} onPress={onOpen}>
@@ -531,13 +534,13 @@ function DigitalTwinCard({ onOpen }) {
           <LinearGradient colors={["transparent", "rgba(0,0,0,0.9)"]} style={styles.twinGradient}>
             <View style={styles.twinBadge}>
               <MaterialCommunityIcons name="virtual-reality" size={14} color="#FFF" style={{ marginRight: 4 }} />
-              <Text style={styles.twinBadgeText}>DIGITAL TWIN</Text>
+              <Text style={styles.twinBadgeText}>{t('digitalTwin')}</Text>
             </View>
-            <Text style={styles.twinTitle}>Store Simulation</Text>
+            <Text style={styles.twinTitle}>{t('storeSimulation')}</Text>
             <Text style={styles.twinDesc}>Practice Waffle Making & Hygiene in a 2D Virtual Store.</Text>
 
             <View style={styles.twinBtn}>
-              <Text style={styles.twinBtnText}>Enter Simulation</Text>
+              <Text style={styles.twinBtnText}>{t('enterSimulation')}</Text>
               <Feather name="arrow-right" size={16} color="#000" />
             </View>
           </LinearGradient>
@@ -548,6 +551,7 @@ function DigitalTwinCard({ onOpen }) {
 }
 
 function DailyFocus() {
+  const { t } = useLanguage();
   return (
     <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.focusContainer}>
       <LinearGradient
@@ -560,7 +564,7 @@ function DailyFocus() {
         <View style={styles.focusContent}>
           <View>
             <View style={styles.focusBadge}>
-              <Text style={styles.focusBadgeText}>TODAY'S GOAL</Text>
+              <Text style={styles.focusBadgeText}>{t('todaysGoal')}</Text>
             </View>
             <Text style={styles.focusTitle}>Complete Unit 2</Text>
             <Text style={styles.focusSub}>Espresso Mastery</Text>
@@ -579,9 +583,10 @@ function DailyFocus() {
 }
 
 function AIToolsSection({ onOpenTool }) {
+  const { t } = useLanguage();
   return (
     <View style={styles.sectionContainer}>
-      <Animated.Text entering={FadeInDown.delay(300)} style={[styles.sectionTitle, { paddingHorizontal: 20 }]}>AI Power Suite ⚡</Animated.Text>
+      <Animated.Text entering={FadeInDown.delay(300)} style={[styles.sectionTitle, { paddingHorizontal: 20 }]}>{t('aiPowerSuite')}</Animated.Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20, paddingTop: 10, paddingBottom: 20 }}>
         {AI_TOOLS.map((tool, index) => (
           <Animated.View key={tool.id} entering={FadeInRight.delay(400 + index * 100)}>
@@ -610,10 +615,11 @@ function AIToolsSection({ onOpenTool }) {
 }
 
 function CourseList() {
+  const { t } = useLanguage();
   return (
     <View style={styles.sectionContainer}>
       <View style={[styles.sectionHeader, { paddingHorizontal: 20 }]}>
-        <Text style={styles.sectionTitle}>Jump Back In</Text>
+        <Text style={styles.sectionTitle}>{t('jumpBackIn')}</Text>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20, paddingBottom: 20 }}>
         {CONTINUE_WATCHING.map((item, index) => (
@@ -641,9 +647,10 @@ function CourseList() {
 }
 
 function NewArrivals() {
+  const { t } = useLanguage();
   return (
     <View style={[styles.sectionContainer, { marginBottom: 100 }]}>
-      <Text style={[styles.sectionTitle, { paddingHorizontal: 20, marginBottom: 15 }]}>Freshly Brewed ☕</Text>
+      <Text style={[styles.sectionTitle, { paddingHorizontal: 20, marginBottom: 15 }]}>{t('freshlyBrewed')}</Text>
       <View style={{ paddingHorizontal: 20 }}>
         {RECENT_COURSES.map((course, index) => (
           <Animated.View key={course.id} entering={FadeInDown.delay(800 + index * 100)}>
@@ -651,7 +658,7 @@ function NewArrivals() {
               <Image source={{ uri: course.image }} style={styles.listImg} />
               <View style={styles.listInfo}>
                 <View style={styles.tagRow}>
-                  <View style={styles.newTag}><Text style={styles.newTagText}>NEW</Text></View>
+                  <View style={styles.newTag}><Text style={styles.newTagText}>{t('newTag')}</Text></View>
                   <View style={styles.starRow}>
                     <Ionicons name="star" size={12} color="#F59E0B" />
                     <Text style={styles.ratingVal}>{course.rating}</Text>
@@ -792,7 +799,6 @@ export default function Home() {
           <Tab.Screen name="CoursesTab" component={Courses} />
           <Tab.Screen name="ResourcesTab" component={Resources} />
           <Tab.Screen name="ProfileTab" component={Profile} />
-          <Tab.Screen name="QuizScreen" component={QuizScreen} />
         </Tab.Navigator>
       )}
 
