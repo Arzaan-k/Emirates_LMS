@@ -28,7 +28,7 @@ import Resources from "./Resources";
 import Profile from "./Profile";
 
 // Import AI Components
-import AIRoleplay from "../Components/AIRoleplay";
+import SimulationHub from "../Components/SimulationHub";
 import AIScanner from "../Components/AIScanner";
 import AIFlashcards from "../Components/AIFlashcards";
 import AIChatBot from "../Components/AIChatBot";
@@ -36,6 +36,62 @@ import AIDigitalTwin from "../Components/AIDigitalTwin";
 import QuizTakingModal from "../Components/QuizTakingModal";
 import { useNavigation } from "@react-navigation/native";
 import { useLanguage } from "../context/language.context";
+import API_URL from "../config";
+
+// --- NEW: NOTIFICATIONS MODAL ---
+function NotificationsModal({ visible, notifications, onClose, onAction }) {
+  if (!visible) return null;
+
+  return (
+    <Modal visible={visible} animationType="fade" transparent>
+      <View style={styles.notifModalOverlay}>
+        <BlurView intensity={90} tint="dark" style={StyleSheet.absoluteFill} />
+        <View style={styles.notifModalContent}>
+          <View style={styles.notifHeader}>
+            <Text style={styles.notifHeaderTitle}>Notifications</Text>
+            <TouchableOpacity onPress={onClose} style={styles.closeNotifBtn}>
+              <Feather name="x" size={24} color="#FFF" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20 }}>
+            {notifications.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Feather name="bell-off" size={48} color="rgba(255,255,255,0.2)" />
+                <Text style={styles.emptyStateText}>No notifications yet</Text>
+              </View>
+            ) : (
+              notifications.map((notif, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={styles.notifItem}
+                  onPress={() => onAction(notif)}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.notifIconBox, { backgroundColor: notif.type === 'quiz' ? '#F59E0B' : '#3B82F6' }]}>
+                    <MaterialCommunityIcons
+                      name={notif.type === 'quiz' ? 'school' : (notif.type === 'proctored' ? 'shield-lock' : 'bell')}
+                      size={20}
+                      color="#FFF"
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.notifItemTitle}>{notif.title}</Text>
+                    <Text style={styles.notifItemMsg} numberOfLines={2}>{notif.message}</Text>
+                    <Text style={styles.notifTime}>{new Date(notif.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+                  </View>
+                  {notif.data && (
+                    <Feather name="chevron-right" size={16} color="rgba(255,255,255,0.3)" />
+                  )}
+                </TouchableOpacity>
+              ))
+            )}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
 
 // --- NEW: VIDEO PLAYER MODAL ---
 // --- NEW: VIDEO PLAYER MODAL ---
@@ -264,6 +320,51 @@ function ProctoredFeedSection({ data, onStart }) {
 
 // ... (NotificationToast Unchanged)
 
+// --- NEW: CRUCIAL NOTIFICATION COMPONENT ---
+function CrucialNotificationModal({ notification, onAcknowledge }) {
+  const [shake, setShake] = useState(0);
+
+  if (!notification) return null;
+
+  const handlePressOutside = () => {
+    // Shake effect logic (simplified for React Native)
+    setShake(prev => prev + 1);
+  };
+
+  const animatedStyle = {
+    transform: [{ translateX: shake % 2 === 0 ? 0 : 10 }] // Simple toggle for now, ideally use reanimated
+  };
+
+  return (
+    <Modal visible={true} transparent animationType="fade">
+      <View style={styles.crucialOverlay}>
+        <BlurView intensity={90} tint="dark" style={StyleSheet.absoluteFill} />
+        <TouchableOpacity style={styles.crucialClickLayer} onPress={handlePressOutside} activeOpacity={1}>
+          <Animated.View style={[styles.crucialCard, animatedStyle]}>
+            <View style={styles.crucialIconBg}>
+              <MaterialCommunityIcons name="alert-decagram" size={48} color="#EF4444" />
+            </View>
+            <Text style={styles.crucialLabel}>CRITICAL UPDATE</Text>
+            <Text style={styles.crucialTitle}>{notification.title}</Text>
+            <Text style={styles.crucialMsg}>{notification.message}</Text>
+
+            <View style={styles.crucialDivider} />
+
+            <TouchableOpacity style={styles.crucialAckBtn} onPress={() => onAcknowledge(notification.id)}>
+              <Text style={styles.crucialAckText}>I Have Read This</Text>
+              <Feather name="check-circle" size={18} color="#FFF" />
+            </TouchableOpacity>
+
+            {shake > 0 && (
+              <Text style={styles.crucialWarn}>You must acknowledge this before continuing.</Text>
+            )}
+          </Animated.View>
+        </TouchableOpacity>
+      </View>
+    </Modal>
+  );
+}
+
 function HomeContent({ onOpenTool, onOpenTwin }) {
   const navigation = useNavigation();
   const [liveUpdates, setLiveUpdates] = useState([]);
@@ -277,11 +378,39 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   const [quizAnswers, setQuizAnswers] = useState([]);
   const [quizScore, setQuizScore] = useState(null);
   const [assignedProctoring, setAssignedProctoring] = useState([]);
+  const [pathNodes, setPathNodes] = useState([]); // NEW STATE
+  const [crucialNotif, setCrucialNotif] = useState(null); // CRUCIAL STATE
+
+  const handleAcknowledge = async (id) => {
+    try {
+      await fetch(`${API_URL}/notifications/${id}/read`, { method: 'POST' });
+      setCrucialNotif(null);
+    } catch (e) {
+      console.error("Ack Error", e);
+      setCrucialNotif(null); // Dismiss anyway on error to not softlock
+    }
+  };
+
+  // FETCH PATH NODES
+  const fetchPathNodes = async () => {
+    try {
+      const response = await fetch(`${API_URL}/path/nodes`);
+      const data = await response.json();
+      setPathNodes(data);
+    } catch (error) {
+      console.error("Error fetching path:", error);
+    }
+  };
+
+  useEffect(() => {
+    fetchPathNodes();
+  }, []);
+
   // Add inside HomeContent
   const startQuiz = async (quizData) => {
     if (!quizData.questions) {
       try {
-        const response = await fetch(`http://192.168.1.37:8000/quiz/${quizData.quiz_id || quizData.id}`);
+        const response = await fetch(`${API_URL}/quiz/${quizData.quiz_id || quizData.id}`);
         const fullQuiz = await response.json();
         if (fullQuiz.error) throw new Error(fullQuiz.error);
         setActiveQuiz(fullQuiz);
@@ -297,9 +426,32 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   };
 
 
+  const [allNotifications, setAllNotifications] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false); // UI State
+
+  // FETCH NOTIFICATIONS
+  const fetchNotifications = async () => {
+    try {
+      const res = await fetch(`${API_URL}/notifications`);
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setAllNotifications(data);
+      }
+    } catch (e) {
+      console.log("Error fetching notifications", e);
+    }
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+  }, []);
+
+  // ... (Existing useEffect for WebSocket)
+
   useEffect(() => {
     // CONNECT TO WEBSOCKET
-    const ws = new WebSocket("ws://192.168.1.37:8000/ws");
+    const socketUrl = API_URL.replace('http', 'ws') + '/ws';
+    const ws = new WebSocket(socketUrl);
 
     ws.onopen = () => {
       console.log("Connected to Realtime Server");
@@ -312,25 +464,34 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
           setLiveUpdates(prev => [message.data, ...prev]);
         } else if (message.type === "NOTIFICATION") {
           setNotification(message.data);
+          setAllNotifications(prev => [message.data, ...prev]); // Add to list
           setTimeout(() => setNotification(null), 5000);
         } else if (message.type === "QUIZ_ASSIGNED") {
           // New quiz assigned
           setAssignedQuizzes(prev => [message.data, ...prev]);
-          setNotification({
+          const notif = {
             title: "New Quiz!",
             message: message.data.title,
             type: "quiz",
-            data: message.data
-          });
+            data: message.data,
+            created_at: new Date().toISOString()
+          };
+          setNotification(notif);
+          setAllNotifications(prev => [notif, ...prev]);
           setTimeout(() => setNotification(null), 5000);
+        } else if (message.type === "CRUCIAL_NOTIFICATION") {
+          setCrucialNotif(message.data);
         } else if (message.type === "proctored") {
           setAssignedProctoring(prev => [message.data, ...prev]);
-          setNotification({
+          const notif = {
             title: "Locked Assessment!",
             message: message.data.title,
             type: "proctored",
-            data: message.data
-          });
+            data: message.data,
+            created_at: new Date().toISOString()
+          };
+          setNotification(notif);
+          setAllNotifications(prev => [notif, ...prev]);
           setTimeout(() => setNotification(null), 5000);
         }
       } catch (err) {
@@ -343,13 +504,27 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
     };
   }, []);
 
+
+  const handleNotificationAction = (notif) => {
+    setShowNotifications(false);
+    if (notif.type === 'quiz' && notif.data) {
+      startQuiz(notif.data);
+    } else if (notif.type === 'proctored' && notif.data) {
+      navigation.navigate('ProctoredAssessment', {
+        assessmentData: notif.data,
+        userProfile: { role: 'User' }
+      });
+    }
+    // Simple info notifications might just close the modal
+  };
+
   return (
     <View style={{ flex: 1 }}>
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
         {/* DECORATIVE BG */}
         <View style={styles.decorCircle} />
 
-        <Header />
+        <Header onNotificationPress={() => setShowNotifications(true)} />
         <SearchBar />
 
         {/* LIVE FEED (Dynamic from Python) */}
@@ -376,9 +551,13 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
         {/* TWIN CARD */}
         <DigitalTwinCard onOpen={onOpenTwin} />
 
-        <DailyFocus />
+        {/* DAILY FOCUS (Dynamic) */}
+        <DailyFocus item={pathNodes.length > 0 ? pathNodes[0] : null} />
+
         <AIToolsSection onOpenTool={onOpenTool} />
-        <CourseList />
+
+        {/* COURSE LIST (Jump Back In - Dynamic) */}
+        <CourseList items={pathNodes} onPlay={(item) => setSelectedVideo(item)} />
         <NewArrivals />
       </ScrollView>
 
@@ -401,6 +580,12 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
         />
       </View>
 
+      {/* CRUCIAL BLOCKING MODAL */}
+      <CrucialNotificationModal
+        notification={crucialNotif}
+        onAcknowledge={handleAcknowledge}
+      />
+
       {/* VIDEO MODAL */}
       <VideoPlayerModal
         visible={!!selectedVideo}
@@ -408,7 +593,6 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
         onClose={() => setSelectedVideo(null)}
       />
 
-      {/* QUIZ TAKING MODAL */}
       <QuizTakingModal
         visible={quizModalVisible}
         quiz={activeQuiz}
@@ -418,6 +602,14 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
         }}
         userName="John Doe"
       />
+
+      {/* NOTIFICATIONS LIST MODAL */}
+      <NotificationsModal
+        visible={showNotifications}
+        notifications={allNotifications}
+        onClose={() => setShowNotifications(false)}
+        onAction={handleNotificationAction}
+      />
     </View>
   )
 }
@@ -426,6 +618,8 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
 
 const Tab = createBottomTabNavigator();
 const { width } = Dimensions.get("window");
+
+// CONSTANTS
 
 // Mock Data (Unchanged)
 const CATEGORIES = ["All", "Operations", "Hygiene", "Service", "Kitchen"];
@@ -468,7 +662,7 @@ const AI_TOOLS = [
   { id: 'flashcards', title: 'Wiki Cards', desc: 'Rapid Recall', icon: 'cards-playing-outline', color: ['#F59E0B', '#D97706'], accent: '#FFF' },
 ];
 
-function Header() {
+function Header({ onNotificationPress }) {
   const insets = useSafeAreaInsets();
   const { t } = useLanguage();
   return (
@@ -486,7 +680,7 @@ function Header() {
         </TouchableOpacity>
 
         {/* NOTIFICATIONS */}
-        <TouchableOpacity style={styles.iconBtn}>
+        <TouchableOpacity style={styles.iconBtn} onPress={onNotificationPress}>
           <Feather name="bell" size={20} color="#111827" />
           <View style={styles.dotBadage} />
         </TouchableOpacity>
@@ -550,8 +744,13 @@ function DigitalTwinCard({ onOpen }) {
   )
 }
 
-function DailyFocus() {
+function DailyFocus({ item }) {
   const { t } = useLanguage();
+
+  // Use first item or fallback if empty
+  const goalTitle = item ? item.title : "Complete Unit 1";
+  const goalSub = item ? (item.description || "Training Module") : "Introduction";
+
   return (
     <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.focusContainer}>
       <LinearGradient
@@ -566,13 +765,13 @@ function DailyFocus() {
             <View style={styles.focusBadge}>
               <Text style={styles.focusBadgeText}>{t('todaysGoal')}</Text>
             </View>
-            <Text style={styles.focusTitle}>Complete Unit 2</Text>
-            <Text style={styles.focusSub}>Espresso Mastery</Text>
+            <Text style={styles.focusTitle} numberOfLines={2}>{goalTitle}</Text>
+            <Text style={styles.focusSub} numberOfLines={1}>{goalSub}</Text>
           </View>
           <View style={styles.ringContainer}>
             <View style={styles.ringOuter}>
               <View style={styles.ringInner}>
-                <Text style={styles.ringText}>75%</Text>
+                <Text style={styles.ringText}>{item ? "0%" : "0%"}</Text>
               </View>
             </View>
           </View>
@@ -614,18 +813,25 @@ function AIToolsSection({ onOpenTool }) {
   )
 }
 
-function CourseList() {
+function CourseList({ items, onPlay }) {
   const { t } = useLanguage();
+
+  // Use passed items or fallback to empty array
+  const displayItems = (items && items.length > 0) ? items : [];
+
   return (
     <View style={styles.sectionContainer}>
       <View style={[styles.sectionHeader, { paddingHorizontal: 20 }]}>
         <Text style={styles.sectionTitle}>{t('jumpBackIn')}</Text>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20, paddingBottom: 20 }}>
-        {CONTINUE_WATCHING.map((item, index) => (
-          <Animated.View key={item.id} entering={FadeInRight.delay(600 + index * 100)}>
-            <TouchableOpacity style={styles.courseCard}>
-              <Image source={{ uri: item.image }} style={styles.courseImg} />
+        {displayItems.map((item, index) => (
+          <Animated.View key={item.id || index} entering={FadeInRight.delay(600 + index * 100)}>
+            <TouchableOpacity style={styles.courseCard} onPress={() => item.videoUrl && onPlay(item)}>
+              <Image
+                source={{ uri: "https://images.unsplash.com/photo-1497935586351-b67a49e012bf?q=80&w=2000" }} // Placeholder or thumbnail 
+                style={styles.courseImg}
+              />
               <BlurView intensity={20} tint="dark" style={styles.playOverlay}>
                 <Ionicons name="play-circle" size={40} color="rgba(255,255,255,0.9)" />
               </BlurView>
@@ -633,14 +839,19 @@ function CourseList() {
                 <Text style={styles.courseTitle} numberOfLines={1}>{item.title}</Text>
                 <View style={styles.progressRow}>
                   <View style={styles.progressBar}>
-                    <View style={[styles.progressFill, { width: `${item.progress * 100}%` }]} />
+                    <View style={[styles.progressFill, { width: `${item.xp ? 20 : 0}%` }]} />
                   </View>
-                  <Text style={styles.durationText}>{item.duration}</Text>
+                  <Text style={styles.durationText}>{item.xp || 50} XP</Text>
                 </View>
               </View>
             </TouchableOpacity>
           </Animated.View>
         ))}
+        {displayItems.length === 0 && (
+          <View style={{ padding: 20 }}>
+            <Text style={{ color: '#6B7280' }}>No active courses. Start your journey!</Text>
+          </View>
+        )}
       </ScrollView>
     </View>
   )
@@ -747,7 +958,7 @@ export default function Home() {
       {/* TOOL OVERLAY */}
       {activeTool && !showTwin && (
         <View style={{ flex: 1, zIndex: 9999, backgroundColor: '#FFF' }}>
-          {activeTool === 'roleplay' && <AIRoleplay onClose={() => setActiveTool(null)} />}
+          {activeTool === 'roleplay' && <SimulationHub onClose={() => setActiveTool(null)} />}
           {activeTool === 'scanner' && <AIScanner onClose={() => setActiveTool(null)} />}
           {activeTool === 'flashcards' && <AIFlashcards onClose={() => setActiveTool(null)} />}
         </View>
@@ -923,6 +1134,19 @@ const styles = StyleSheet.create({
   toastBtn: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   toastBtnText: { color: '#FFF', fontSize: 12, fontFamily: "Poppins_600SemiBold" },
 
+  // CRUCIAL STYLES
+  crucialOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  crucialClickLayer: { flex: 1, width: '100%', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  crucialCard: { width: '100%', maxWidth: 340, backgroundColor: '#1E1B4B', borderRadius: 24, padding: 30, alignItems: 'center', shadowColor: "#EF4444", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.5, shadowRadius: 20, elevation: 20, borderWidth: 1, borderColor: "rgba(239,68,68,0.3)" },
+  crucialIconBg: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(239,68,68,0.1)', justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
+  crucialLabel: { color: "#EF4444", fontSize: 12, fontFamily: "Poppins_700Bold", letterSpacing: 2, marginBottom: 8 },
+  crucialTitle: { color: "#FFF", fontSize: 22, fontFamily: "Poppins_700Bold", textAlign: 'center', marginBottom: 12 },
+  crucialMsg: { color: "#CBD5E1", fontSize: 15, fontFamily: "Poppins_400Regular", textAlign: 'center', lineHeight: 24 },
+  crucialDivider: { width: 60, height: 4, backgroundColor: 'rgba(255,255,255,0.1)', marginVertical: 20, borderRadius: 2 },
+  crucialAckBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#EF4444', paddingHorizontal: 24, paddingVertical: 14, borderRadius: 16, width: '100%', justifyContent: 'center' },
+  crucialAckText: { color: '#FFF', fontSize: 16, fontFamily: "Poppins_600SemiBold", marginRight: 8 },
+  crucialWarn: { color: "#F87171", fontSize: 12, fontFamily: "Poppins_500Medium", marginTop: 15 },
+
   // VIDEO MODAL
   closeVideoBtn: { position: 'absolute', top: 50, right: 20, zIndex: 10, padding: 8, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20 },
   interactiveContainer: { flex: 1, backgroundColor: '#111827', borderTopLeftRadius: 24, borderTopRightRadius: 24, marginTop: -20 },
@@ -967,5 +1191,19 @@ const styles = StyleSheet.create({
   proctorFeedTitle: { color: "#FFF", fontSize: 13, fontFamily: "Poppins_600SemiBold", marginBottom: 2 },
   proctorFeedMeta: { color: "#94A3B8", fontSize: 11, fontFamily: "Poppins_400Regular" },
   proctorFeedBadge: { position: 'absolute', top: 12, right: 12, backgroundColor: '#EF4444', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
-  proctorFeedBadgeText: { color: '#FFF', fontSize: 8, fontFamily: "Poppins_700Bold" }
+  proctorFeedBadgeText: { color: '#FFF', fontSize: 8, fontFamily: "Poppins_700Bold" },
+
+  // NOTIFICATION MODAL STYLES
+  notifModalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
+  notifModalContent: { height: '80%', backgroundColor: '#0F172A', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 24, paddingTop: 30 },
+  notifHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+  notifHeaderTitle: { color: '#FFF', fontSize: 24, fontFamily: "Poppins_700Bold" },
+  closeNotifBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
+  emptyState: { alignItems: 'center', justifyContent: 'center', marginTop: 100 },
+  emptyStateText: { color: 'rgba(255,255,255,0.4)', marginTop: 16, fontFamily: "Poppins_400Regular" },
+  notifItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1E293B', padding: 16, borderRadius: 16, marginBottom: 12 },
+  notifIconBox: { width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+  notifItemTitle: { color: '#FFF', fontSize: 14, fontFamily: "Poppins_600SemiBold", marginBottom: 2 },
+  notifItemMsg: { color: '#94A3B8', fontSize: 12, fontFamily: "Poppins_400Regular", marginBottom: 4 },
+  notifTime: { color: 'rgba(255,255,255,0.3)', fontSize: 10, fontFamily: "Poppins_500Medium" }
 });

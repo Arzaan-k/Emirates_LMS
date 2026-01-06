@@ -20,91 +20,77 @@ const { width, height } = Dimensions.get("window");
 
 // --- VIDEO PLAYER MODAL ---
 function VideoPlayerModal({ visible, videoData, onClose }) {
-  if (!visible || !videoData) return null;
+    if (!visible || !videoData) return null;
 
-  return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-      <View style={{ flex: 1, backgroundColor: '#000' }}>
-        {/* CLOSE BUTTON */}
-        <TouchableOpacity style={styles.closeVideoBtn} onPress={onClose}>
-          <Feather name="x" size={24} color="#FFF" />
-        </TouchableOpacity>
+    return (
+        <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+            <View style={{ flex: 1, backgroundColor: '#000' }}>
+                {/* CLOSE BUTTON */}
+                <TouchableOpacity style={styles.closeVideoBtn} onPress={onClose}>
+                    <Feather name="x" size={24} color="#FFF" />
+                </TouchableOpacity>
 
-        {/* VIDEO PLAYER */}
-        <Video
-          source={{ uri: videoData.videoUrl }}
-          style={{ width: '100%', height: 300, marginTop: 100 }}
-          useNativeControls
-          resizeMode={ResizeMode.CONTAIN}
-          shouldPlay
-          onError={(e) => console.log("Video Error:", e)}
-        />
+                {/* VIDEO PLAYER */}
+                <Video
+                    source={{ uri: videoData.videoUrl }}
+                    style={{ width: '100%', height: 300, marginTop: 100 }}
+                    useNativeControls
+                    resizeMode={ResizeMode.CONTAIN}
+                    shouldPlay
+                    onError={(e) => console.log("Video Error:", e)}
+                />
 
-        <View style={{ padding: 20 }}>
-            <Text style={{ color: '#FFF', fontSize: 18, fontFamily: 'Poppins_600SemiBold', marginBottom: 10 }}>{videoData.title}</Text>
-            <Text style={{ color: '#9CA3AF', fontSize: 14, fontFamily: 'Poppins_400Regular' }}>{videoData.category} • {videoData.duration}</Text>
-        </View>
-      </View>
-    </Modal>
-  );
+                <View style={{ padding: 20 }}>
+                    <Text style={{ color: '#FFF', fontSize: 18, fontFamily: 'Poppins_600SemiBold', marginBottom: 10 }}>{videoData.title}</Text>
+                    <Text style={{ color: '#9CA3AF', fontSize: 14, fontFamily: 'Poppins_400Regular' }}>{videoData.category} • {videoData.duration}</Text>
+                </View>
+            </View>
+        </Modal>
+    );
 }
 
-// CATEGORIES
+import API_URL from "../config";
+
 const CATEGORIES = ["All", "Barista Skills", "Food Safety", "Customer Service", "Management"];
-const COURSES = [
-    { 
-        id: 1, 
-        title: "Art of Espresso", 
-        category: "Barista Skills", 
-        duration: "2h 15m", 
-        rating: 4.8, 
-        image: "coffee", 
-        color: "#78350F", 
-        bg: "#FEF3C7",
-        videoUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" 
-    },
-    { 
-        id: 2, 
-        title: "Hygiene & Safety", 
-        category: "Food Safety", 
-        duration: "1h 30m", 
-        rating: 4.9, 
-        image: "shield-check", 
-        color: "#065F46", 
-        bg: "#D1FAE5",
-        videoUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-    },
-    { 
-        id: 3, 
-        title: "Handling Complaints", 
-        category: "Customer Service", 
-        duration: "45m", 
-        rating: 4.7, 
-        image: "account-voice", 
-        color: "#1E40AF", 
-        bg: "#DBEAFE",
-        videoUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-    },
-    { 
-        id: 4, 
-        title: "Inventory Master", 
-        category: "Management", 
-        duration: "3h 10m", 
-        rating: 4.6, 
-        image: "clipboard-list", 
-        color: "#5B21B6", 
-        bg: "#EDE9FE",
-        videoUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-    },
-];
 
 const AllCourses = () => {
     const [search, setSearch] = useState("");
     const [selectedCat, setSelectedCat] = useState("All");
     const [modalVisible, setModalVisible] = useState(false);
     const [currentVideo, setCurrentVideo] = useState(null);
+    const [courses, setCourses] = useState([]);
+    const [loading, setLoading] = useState(true);
 
-    const filteredCourses = COURSES.filter(c => 
+    React.useEffect(() => {
+        fetchCourses();
+    }, []);
+
+    const fetchCourses = async () => {
+        try {
+            const response = await fetch(`${API_URL}/content`);
+            const data = await response.json();
+            // Map backend data to UI model
+            const mappedCourses = data.map(item => ({
+                id: item.id,
+                title: item.title,
+                category: item.authorRole || "General", // Use authorRole as category for now
+                duration: "Video", // Placeholder
+                rating: 5.0, // Placeholder
+                image: "play-circle-outline", // Default icon
+                color: "#F59E0B",
+                bg: "#FFF7ED",
+                videoUrl: item.videoUrl,
+                description: item.description
+            }));
+            setCourses(mappedCourses);
+        } catch (error) {
+            console.error("Failed to fetch courses:", error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const filteredCourses = courses.filter(c =>
         (selectedCat === "All" || c.category === selectedCat) &&
         c.title.toLowerCase().includes(search.toLowerCase())
     );
@@ -119,9 +105,9 @@ const AllCourses = () => {
             {/* SEARCH */}
             <View style={styles.searchBox}>
                 <Feather name="search" size={20} color="#9CA3AF" />
-                <TextInput 
-                    style={styles.searchInput} 
-                    placeholder="Search courses..." 
+                <TextInput
+                    style={styles.searchInput}
+                    placeholder="Search courses..."
                     placeholderTextColor="#9CA3AF"
                     value={search}
                     onChangeText={setSearch}
@@ -129,23 +115,23 @@ const AllCourses = () => {
             </View>
 
             {/* CATEGORIES */}
-            <ScrollView 
-                horizontal 
-                showsHorizontalScrollIndicator={false} 
-                style={{ height: 50, flexGrow: 0, marginBottom: 20 }} 
+            <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={{ height: 50, flexGrow: 0, marginBottom: 20 }}
                 contentContainerStyle={{ alignItems: 'center', gap: 10 }}
             >
                 {CATEGORIES.map((cat) => (
-                    <TouchableOpacity 
-                        key={cat} 
+                    <TouchableOpacity
+                        key={cat}
                         style={[
-                            styles.catChip, 
+                            styles.catChip,
                             selectedCat === cat && styles.activeCatChip
                         ]}
                         onPress={() => setSelectedCat(cat)}
                     >
                         <Text style={[
-                            styles.catText, 
+                            styles.catText,
                             selectedCat === cat && styles.activeCatText
                         ]}>{cat}</Text>
                     </TouchableOpacity>
@@ -153,37 +139,43 @@ const AllCourses = () => {
             </ScrollView>
 
             {/* COURSE LIST */}
-            <ScrollView 
+            <ScrollView
                 style={{ flex: 1 }}
-                showsVerticalScrollIndicator={false} 
+                showsVerticalScrollIndicator={false}
                 contentContainerStyle={{ paddingBottom: 40 }}
             >
-                {filteredCourses.map((course) => (
-                    <TouchableOpacity 
-                        key={course.id} 
-                        style={styles.courseCard}
-                        onPress={() => playVideo(course)}
-                    >
-                        <View style={[styles.courseIcon, { backgroundColor: course.bg }]}>
-                            <MaterialCommunityIcons name={course.image} size={32} color={course.color} />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                            <Text style={styles.courseTitle}>{course.title}</Text>
-                            <Text style={styles.courseMeta}>{course.category} • {course.duration}</Text>
-                            <View style={styles.ratingRow}>
-                                <MaterialCommunityIcons name="star" size={14} color="#F59E0B" />
-                                <Text style={styles.ratingText}>{course.rating}</Text>
+                {loading ? (
+                    <Text style={{ textAlign: 'center', color: '#6B7280', marginTop: 20 }}>Loading courses...</Text>
+                ) : filteredCourses.length === 0 ? (
+                    <Text style={{ textAlign: 'center', color: '#6B7280', marginTop: 20 }}>No courses found.</Text>
+                ) : (
+                    filteredCourses.map((course) => (
+                        <TouchableOpacity
+                            key={course.id}
+                            style={styles.courseCard}
+                            onPress={() => playVideo(course)}
+                        >
+                            <View style={[styles.courseIcon, { backgroundColor: course.bg }]}>
+                                <MaterialCommunityIcons name={course.image} size={32} color={course.color} />
                             </View>
-                        </View>
-                        <Feather name="play-circle" size={24} color="#F59E0B" />
-                    </TouchableOpacity>
-                ))}
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.courseTitle}>{course.title}</Text>
+                                <Text style={styles.courseMeta}>{course.category} • {course.duration}</Text>
+                                <View style={styles.ratingRow}>
+                                    <MaterialCommunityIcons name="star" size={14} color="#F59E0B" />
+                                    <Text style={styles.ratingText}>{course.rating}</Text>
+                                </View>
+                            </View>
+                            <Feather name="play-circle" size={24} color="#F59E0B" />
+                        </TouchableOpacity>
+                    ))
+                )}
             </ScrollView>
 
-            <VideoPlayerModal 
-                visible={modalVisible} 
-                videoData={currentVideo} 
-                onClose={() => setModalVisible(false)} 
+            <VideoPlayerModal
+                visible={modalVisible}
+                videoData={currentVideo}
+                onClose={() => setModalVisible(false)}
             />
         </View>
     );
@@ -217,7 +209,7 @@ export default function Courses() {
                     >
                         <Text style={[styles.toggleText, activeTab === 'path' && styles.activeToggleText]}>Path</Text>
                     </TouchableOpacity>
-                    
+
                     <TouchableOpacity
                         style={[styles.toggleBtn, activeTab === 'quizzes' && styles.activeToggle]}
                         onPress={() => setActiveTab('quizzes')}

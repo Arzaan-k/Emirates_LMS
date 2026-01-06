@@ -30,16 +30,17 @@ const NODE_RADIUS = 40;
 const VERTICAL_SPACING = 140;
 const AMPLITUDE = width * 0.28;
 const CENTER_X = width / 2;
+import API_URL from '../config';
+
+// const API_URL = "http://192.168.0.136:8000"; // Physical Device
+const ICONS = ["coffee", "water", "flower", "cog", "flask", "clipboard-list", "account-heart"]; // Pool for dynamic items
 
 // Mock Data
-const LEVELS = [
+// Static Fallback (if backend empty)
+const STATIC_LEVELS = [
     { id: 1, title: "Espresso Basics", icon: "coffee", status: "completed", desc: "Learn the art of pulling the perfect shot.", lessonCount: 3, xp: 50 },
     { id: 2, title: "Milk Tech", icon: "water", status: "completed", desc: "Frothing, steaming, and pouring like a pro.", lessonCount: 4, xp: 60 },
     { id: 3, title: "Latte Art", icon: "flower", status: "active", desc: "Create hearts, rosettas, and tulips.", lessonCount: 5, xp: 100 },
-    { id: 4, title: "Grinder Set", icon: "cog", status: "locked", desc: "Dialing in your grind for optimal extraction.", lessonCount: 2, xp: 40 },
-    { id: 5, title: "Cust. Service", icon: "account-heart", status: "locked", desc: "Handling orders with a smile.", lessonCount: 3, xp: 50 },
-    { id: 6, title: "Brewing V60", icon: "flask", status: "locked", desc: "Manual brewing techniques.", lessonCount: 4, xp: 70 },
-    { id: 7, title: "Stock Mgmt", icon: "clipboard-list", status: "locked", desc: "Keeping track of beans and milk.", lessonCount: 2, xp: 30 },
 ];
 
 /**
@@ -217,6 +218,38 @@ import LessonView from './LessonView';
 export default function CoursePath() {
     const [selectedLevel, setSelectedLevel] = useState(null);
     const [activeLesson, setActiveLesson] = useState(null);
+    const [levels, setLevels] = useState([]);
+
+    useEffect(() => {
+        fetchPathNodes();
+    }, []);
+
+    const fetchPathNodes = async () => {
+        try {
+            const response = await fetch(`${API_URL}/path/nodes`);
+            const data = await response.json();
+
+            if (data && data.length > 0) {
+                // Map backend data to UI Nodes
+                const mappedLevels = data.map((item, index) => ({
+                    id: item.videoUrl || index, // Use URL as unique ID
+                    title: item.title,
+                    desc: item.description,
+                    transcript: item.transcript, // Pass transcript to lesson
+                    icon: ICONS[index % ICONS.length], // Cycle through icons
+                    status: index === 0 ? "active" : "locked", // Linear unlock logic: 1st Active, others Locked
+                    lessonCount: 1, // Single video per node for now
+                    xp: item.xp || 50,
+                    videoUrl: item.videoUrl,
+                    quiz: item.quiz
+                }));
+                setLevels(mappedLevels);
+            }
+        } catch (error) {
+            console.log("Error fetching path:", error);
+            // Keep STATIC_LEVELS on error
+        }
+    };
 
     const getPosition = (index) => {
         const y = index * VERTICAL_SPACING + 100;
@@ -227,8 +260,8 @@ export default function CoursePath() {
     const renderCurvedConnections = () => {
         // Create a single path string for optimized rendering?
         // Or multiple segments. Multiple segments allows coloring.
-        return LEVELS.map((item, index) => {
-            if (index === LEVELS.length - 1) return null;
+        return levels.map((item, index) => {
+            if (index === levels.length - 1) return null;
 
             const curr = getPosition(index);
             const next = getPosition(index + 1);
@@ -239,7 +272,7 @@ export default function CoursePath() {
             const cp2x = next.x;
             const cp2y = next.y - (VERTICAL_SPACING / 2);
 
-            const isUnlocked = LEVELS[index + 1].status !== "locked";
+            const isUnlocked = levels[index + 1].status !== "locked";
             const color = isUnlocked ? "#F59E0B" : "#E5E7EB";
 
             return (
@@ -269,7 +302,7 @@ export default function CoursePath() {
         }, 100);
     };
 
-    const totalHeight = LEVELS.length * VERTICAL_SPACING + 250;
+    const totalHeight = levels.length * VERTICAL_SPACING + 250;
 
     return (
         <>
@@ -290,7 +323,7 @@ export default function CoursePath() {
                     </Svg>
 
                     {/* NODES */}
-                    {LEVELS.map((item, index) => {
+                    {levels.map((item, index) => {
                         const { x, y } = getPosition(index);
                         return (
                             <PathNode

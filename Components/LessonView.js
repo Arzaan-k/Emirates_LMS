@@ -21,31 +21,13 @@ import Animated, {
     withSpring,
     withTiming
 } from 'react-native-reanimated';
+import { Video, ResizeMode } from 'expo-av';
 
 const { width, height } = Dimensions.get('window');
 
-const MOCK_TRANSCRIPT = `Welcome to the Art of Espresso. In this lesson, we're going to cover the fundamental variables that affect your espresso extraction.
 
-First, let's talk about the grind size. This is often the most critical variable. If your grind is too coarse, the water flows through too fast, resulting in a weak, sour shot. If it's too fine, the water chokes, leading to a bitter, over-extracted mess.
+// Mock Removed - using lesson props
 
-Next, dosing. Consistency is key. You want to aim for 18-20 grams for a standard double shot.
-
-Finally, the tamp. You need a level, firm tamp. 30 pounds of pressure is the standard, but consistency and levelness are more important than exact pressure.`;
-
-const MOCK_QUIZ = [
-    {
-        id: 1,
-        question: "What happens if the grind size is too coarse?",
-        options: ["The shot is bitter", "The shot is sour and weak", "The shot is perfect", "The machine explodes"],
-        correct: 1
-    },
-    {
-        id: 2,
-        question: "What is the recommended dose for a double shot?",
-        options: ["10-12g", "14-16g", "18-20g", "22-24g"],
-        correct: 2
-    }
-];
 
 const TabButton = ({ title, active, onPress }) => (
     <TouchableOpacity onPress={onPress} style={[styles.tabBtn, active && styles.tabBtnActive]}>
@@ -60,14 +42,19 @@ export default function LessonView({ lesson, onClose }) {
     const [quizScore, setQuizScore] = useState(0);
     const [quizComplete, setQuizComplete] = useState(false);
     const [selectedOption, setSelectedOption] = useState(null);
+    const videoRef = useRef(null);
+
+    // Parse Quiz Data safely
+    const quizData = lesson.quiz && lesson.quiz.questions ? lesson.quiz.questions : [];
+    const transcriptText = lesson.transcript || lesson.desc || "No transcript available for this lesson.";
 
     const handleOptionSelect = (idx) => {
         setSelectedOption(idx);
         setTimeout(() => {
-            if (idx === MOCK_QUIZ[currentQuizIdx].correct) {
+            if (idx === quizData[currentQuizIdx].correctIndex) {
                 setQuizScore(prev => prev + 1);
             }
-            if (currentQuizIdx < MOCK_QUIZ.length - 1) {
+            if (currentQuizIdx < quizData.length - 1) {
                 setCurrentQuizIdx(prev => prev + 1);
                 setSelectedOption(null);
             } else {
@@ -88,23 +75,37 @@ export default function LessonView({ lesson, onClose }) {
                         <Feather name="chevron-down" size={24} color="#FFF" />
                     </TouchableOpacity>
                     <View style={{ flex: 1, alignItems: 'center' }}>
-                        <Text style={styles.headerTitle}>ESPRESSO MASTERY</Text>
-                        <Text style={styles.headerSubtitle}>Chapter 1: The Basics</Text>
+                        <Text style={styles.headerTitle}>{lesson.title?.toUpperCase() || "LESSON"}</Text>
+                        <Text style={styles.headerSubtitle}>Pro Training</Text>
                     </View>
                     <TouchableOpacity style={styles.menuBtn}>
                         <Feather name="more-horizontal" size={24} color="#FFF" />
                     </TouchableOpacity>
                 </View>
 
-                {/* VIDEO PLAYER PLACEHOLDER */}
+                {/* VIDEO PLAYER */}
                 <View style={styles.videoContainer}>
-                    <LinearGradient
-                        colors={['#374151', '#1F2937']}
-                        style={styles.videoPlaceholder}
-                    >
-                        <MaterialCommunityIcons name="play-circle-outline" size={64} color="rgba(255,255,255,0.8)" />
-                        <Text style={styles.videoDuration}>04:20</Text>
-                    </LinearGradient>
+                    {lesson.videoUrl ? (
+                        <Video
+                            ref={videoRef}
+                            style={StyleSheet.absoluteFill}
+                            source={{
+                                uri: lesson.videoUrl,
+                            }}
+                            useNativeControls
+                            resizeMode={ResizeMode.CONTAIN}
+                            isLooping={false}
+                            shouldPlay={true}
+                        />
+                    ) : (
+                        <LinearGradient
+                            colors={['#374151', '#1F2937']}
+                            style={styles.videoPlaceholder}
+                        >
+                            <MaterialCommunityIcons name="video-off-outline" size={64} color="rgba(255,255,255,0.5)" />
+                            <Text style={styles.videoDuration}>No Video Source</Text>
+                        </LinearGradient>
+                    )}
                 </View>
 
                 {/* TABS */}
@@ -121,7 +122,7 @@ export default function LessonView({ lesson, onClose }) {
                     {activeTab === 'transcript' && (
                         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20 }}>
                             <Animated.Text entering={FadeInDown.delay(100)} style={styles.transcriptText}>
-                                {MOCK_TRANSCRIPT}
+                                {transcriptText}
                             </Animated.Text>
                         </ScrollView>
                     )}
@@ -132,13 +133,13 @@ export default function LessonView({ lesson, onClose }) {
                             {!quizComplete ? (
                                 <Animated.View entering={FadeInRight} key={currentQuizIdx} style={{ flex: 1 }}>
                                     <View style={styles.questionCounter}>
-                                        <Text style={styles.counterText}>Question {currentQuizIdx + 1}/{MOCK_QUIZ.length}</Text>
+                                        <Text style={styles.counterText}>Question {currentQuizIdx + 1}/{quizData.length}</Text>
                                     </View>
-                                    <Text style={styles.questionText}>{MOCK_QUIZ[currentQuizIdx].question}</Text>
+                                    <Text style={styles.questionText}>{quizData[currentQuizIdx].question}</Text>
 
-                                    {MOCK_QUIZ[currentQuizIdx].options.map((option, idx) => {
+                                    {quizData[currentQuizIdx].options.map((option, idx) => {
                                         const isSelected = selectedOption === idx;
-                                        const isCorrect = idx === MOCK_QUIZ[currentQuizIdx].correct;
+                                        const isCorrect = idx === quizData[currentQuizIdx].correctIndex;
 
                                         let borderColor = '#374151';
                                         let bgColor = '#1F2937';
@@ -168,7 +169,7 @@ export default function LessonView({ lesson, onClose }) {
                                 <View style={styles.quizResult}>
                                     <MaterialCommunityIcons name="trophy-outline" size={64} color="#FBBF24" />
                                     <Text style={styles.resultTitle}>Quiz Complete!</Text>
-                                    <Text style={styles.resultScore}>You scored {quizScore}/{MOCK_QUIZ.length}</Text>
+                                    <Text style={styles.resultScore}>You scored {quizScore}/{quizData.length}</Text>
                                     <TouchableOpacity style={styles.restartBtn} onPress={() => {
                                         setQuizComplete(false);
                                         setCurrentQuizIdx(0);
@@ -245,7 +246,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     headerTitle: {
-        color: '#FFF',
         fontSize: 14,
         fontFamily: 'Poppins_700Bold',
         letterSpacing: 1,

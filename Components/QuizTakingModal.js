@@ -12,7 +12,7 @@ import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const { width } = Dimensions.get('window');
-const API_URL = "http://192.168.1.37:8000";
+const API_URL = "http://192.168.0.136:8000";
 
 export default function QuizTakingModal({ visible, quiz, onClose, userName = "User" }) {
     const [currentIndex, setCurrentIndex] = useState(0);

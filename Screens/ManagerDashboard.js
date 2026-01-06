@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import * as ImagePicker from 'expo-image-picker'; // SWITCHED TO IMAGE PICKER
 import {
     View,
@@ -13,17 +13,23 @@ import {
     TextInput,
     Alert,
     KeyboardAvoidingView,
-    Platform
+    Platform,
+    ActivityIndicator
 } from 'react-native';
 import { MaterialCommunityIcons, Feather, Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as DocumentPicker from 'expo-document-picker';
+import { Video } from 'expo-av';
 import { BlurView } from 'expo-blur';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
 import Svg, { Circle, G, Text as SvgText } from 'react-native-svg';
 import { QuizCreationModal, QuizResultsModal } from '../Components/QuizModals';
+import EditNodeModal from '../Components/EditNodeModal';
+import BulkUploadModal from '../Components/BulkUploadModal'; // [NEW]
+import API_URL from '../config';
 
 const { width, height } = Dimensions.get('window');
-const API_URL = "http://192.168.1.37:8000"; // Updated for physical device using local IP
+// const API_URL = "http://192.168.0.136:8000"; // Updated for physical device using local IP
 
 // MOCK DATA GENERATORS
 const getDashboardData = (role) => {
@@ -144,14 +150,143 @@ export default function ManagerDashboard({ route, navigation }) {
     const name = userProfile?.name || "User";
     const data = getDashboardData(role);
 
-    // UPLOAD STATE
+    // --- RESOURCE UPLOAD STATE ---
     const [uploadVisible, setUploadVisible] = useState(false);
-    const [title, setTitle] = useState('');
-    const [desc, setDesc] = useState('');
-    const [selectedFile, setSelectedFile] = useState(null); // File state
+    const [resTitle, setResTitle] = useState('');
+    const [resDesc, setResDesc] = useState('');
+    const [resCategory, setResCategory] = useState(null);
+    const [resFile, setResFile] = useState(null);
     const [uploading, setUploading] = useState(false);
+    const [isPathNode, setIsPathNode] = useState(false); // RESTORED
+    const [bulkModalVisible, setBulkModalVisible] = useState(false); // [NEW]
 
-    // QUIZ STATE
+    // Categories
+    const [categories, setCategories] = useState([]);
+    const [loadingCats, setLoadingCats] = useState(false);
+    const [newCatMode, setNewCatMode] = useState(false);
+    const [newCatName, setNewCatName] = useState('');
+
+    useEffect(() => {
+        if (uploadVisible) fetchCategories();
+    }, [uploadVisible]);
+
+    const fetchCategories = async () => {
+        setLoadingCats(true);
+        try {
+            const res = await fetch(`${API_URL}/resources/categories`);
+            const data = await res.json();
+            setCategories(data);
+            // Default to first if available
+            if (data.length > 0 && !resCategory) setResCategory(data[0].name);
+        } catch (e) { console.error(e); }
+        finally { setLoadingCats(false); }
+    };
+
+    const handleCreateCategory = async () => {
+        if (!newCatName) return;
+        try {
+            const formData = new FormData();
+            formData.append('name', newCatName);
+            formData.append('icon', 'folder-text-outline'); // Default icon
+            formData.append('color1', '#6366F1'); // Default Indigo
+            formData.append('color2', '#4338CA');
+
+            const res = await fetch(`${API_URL}/resources/category`, {
+                method: 'POST',
+                body: formData
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                await fetchCategories();
+                setResCategory(newCatName);
+                setNewCatMode(false);
+                setNewCatName('');
+                Alert.alert("Created", "New category added!");
+            }
+        } catch (e) {
+            Alert.alert("Error", "Failed to create category");
+        }
+    };
+
+    const pickResourceFile = async () => {
+        try {
+            const result = await DocumentPicker.getDocumentAsync({
+                type: "*/*", // Allow all types
+                copyToCacheDirectory: true
+            });
+
+            if (result.assets && result.assets[0]) {
+                setResFile(result.assets[0]);
+            }
+        } catch (err) {
+            console.log("File Pick Error:", err);
+        }
+    };
+
+    const handleUploadResource = async () => {
+        if (!resTitle || !resFile || !resCategory) {
+            Alert.alert("Missing Fields", "Please provide title, category, and file.");
+            return;
+        }
+
+        setUploading(true);
+        try {
+            const formData = new FormData();
+            formData.append('title', resTitle);
+            formData.append('category', resCategory);
+            formData.append('description', resDesc);
+            formData.append('isPathNode', String(isPathNode)); // RESTORED
+            formData.append('file', {
+                uri: resFile.uri,
+                name: resFile.name,
+                type: resFile.mimeType || 'application/octet-stream'
+            });
+
+            // Use the NEW universal resource upload endpoint
+            // It will handle adding to Knowledge Base AND optionally to Learning Path
+            const response = await fetch(`${API_URL}/resources/upload`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'multipart/form-data' },
+                body: formData
+            });
+
+            const result = await response.json();
+            if (result.status === 'success') {
+                Alert.alert("Success", "Resource uploaded to Knowledge Base!");
+                if (isPathNode) Alert.alert("Note", "Also added to Learning Path.");
+                setUploadVisible(false);
+                setResTitle('');
+                setResDesc('');
+                setResFile(null);
+                setIsPathNode(false);
+            } else {
+                Alert.alert("Error", "Upload failed.");
+            }
+        } catch (error) {
+            Alert.alert("Error", "Network error.");
+        } finally {
+            setUploading(false);
+        }
+    };
+
+    // --- LEARNING PATH STATE ---
+    const [editModalVisible, setEditModalVisible] = useState(false);
+    const [selectedNode, setSelectedNode] = useState(null);
+    const [pathNodes, setPathNodes] = useState([]);
+    const [refreshPath, setRefreshPath] = useState(0);
+
+    useEffect(() => {
+        const fetchPath = async () => {
+            try {
+                const res = await fetch(`${API_URL}/path/nodes`);
+                const data = await res.json();
+                setPathNodes(data);
+            } catch (e) { console.error(e); }
+        };
+        fetchPath();
+    }, [refreshPath]);
+
+    // --- QUIZ STATE ---
     const [quizModalVisible, setQuizModalVisible] = useState(false);
     const [quizTitle, setQuizTitle] = useState('');
     const [quizDescription, setQuizDescription] = useState('');
@@ -163,79 +298,13 @@ export default function ManagerDashboard({ route, navigation }) {
     const [resultsModalVisible, setResultsModalVisible] = useState(false);
     const [selectedQuizResults, setSelectedQuizResults] = useState(null);
 
-    // PICK FILE FUNCTION
-    const pickFile = async () => {
-        try {
-            const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: "videos",
-                allowsEditing: true,
-                quality: 1,
-                videoMaxDuration: 30, // Native trim UI if supported
-                videoExportPreset: ImagePicker.VideoExportPreset.Medium, // Compression
-            });
+    // --- NOTIFICATION STATE ---
+    const [notifModalVisible, setNotifModalVisible] = useState(false);
+    const [notifTitle, setNotifTitle] = useState('');
+    const [notifMessage, setNotifMessage] = useState('');
+    const [isCrucial, setIsCrucial] = useState(false);
 
-            if (!result.canceled) {
-                const asset = result.assets[0];
-                setSelectedFile({
-                    uri: asset.uri,
-                    name: asset.fileName || "upload.mp4",
-                    mimeType: "video/mp4" // ImagePicker might not return mimeType
-                });
-            }
-        } catch (err) {
-            console.log("File Pick Error:", err);
-        }
-    };
-
-    const handleUpload = async () => {
-        if (!title || !selectedFile) {
-            Alert.alert("Missing Fields", "Please provide a title and select a video file.");
-            return;
-        }
-
-        setUploading(true);
-        try {
-            const formData = new FormData();
-            formData.append('title', title);
-            formData.append('description', desc);
-            formData.append('authorRole', role);
-            formData.append('timestamp', new Date().toISOString());
-
-            // Append File
-            formData.append('file', {
-                uri: selectedFile.uri,
-                name: selectedFile.name,
-                type: selectedFile.mimeType || 'video/mp4'
-            });
-
-            const response = await fetch(`${API_URL}/upload`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                },
-                body: formData
-            });
-
-            const result = await response.json();
-
-            if (result.status === 'success') {
-                Alert.alert("Success", "Training content uploaded safely!");
-                setUploadVisible(false);
-                setTitle('');
-                setDesc('');
-                setSelectedFile(null);
-            } else {
-                Alert.alert("Error", "Upload failed on server.");
-            }
-        } catch (error) {
-            console.error(error);
-            Alert.alert("Network Error", "Could not connect to Python backend. Ensure server.py is running.");
-        } finally {
-            setUploading(false);
-        }
-    };
-
-    // QUIZ FUNCTIONS
+    // --- QUIZ FUNCTIONS ---
     const addQuestion = () => {
         if (!currentQuestion || options.some(opt => !opt)) {
             Alert.alert("Incomplete", "Please fill all question fields and 4 options");
@@ -333,6 +402,97 @@ export default function ManagerDashboard({ route, navigation }) {
         }
     };
 
+    // --- ADVANCED HANDLERS [NEW] ---
+    const openEditNode = (node) => {
+        setSelectedNode(node);
+        setEditModalVisible(true);
+    };
+
+    const handleUpdateNode = async (id, updatedData) => {
+        try {
+            const response = await fetch(`${API_URL}/content/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updatedData)
+            });
+            if (response.ok) {
+                Alert.alert("Success", "Node updated successfully");
+                setEditModalVisible(false);
+                setRefreshPath(prev => prev + 1); // Reload list
+            } else {
+                Alert.alert("Error", "Failed to update node");
+            }
+        } catch (error) {
+            console.error(error);
+            Alert.alert("Error", "Network error updating node");
+        }
+    };
+
+    const handleDeleteNode = async (id) => {
+        try {
+            const response = await fetch(`${API_URL}/content/${id}`, {
+                method: 'DELETE'
+            });
+            if (response.ok) {
+                Alert.alert("Deleted", "Node removed from path");
+                setEditModalVisible(false);
+                setRefreshPath(prev => prev + 1);
+            } else {
+                Alert.alert("Error", "Failed to delete node");
+            }
+        } catch (error) {
+            console.error(error);
+            Alert.alert("Error", "Network error deleting node");
+        }
+    };
+
+    const handleGenerateQuiz = async (transcript) => {
+        try {
+            const response = await fetch(`${API_URL}/ai/generate_quiz`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ transcript })
+            });
+            const data = await response.json();
+            return data;
+        } catch (error) {
+            console.error(error);
+            throw error;
+        }
+    };
+
+    const handleSendNotification = async () => {
+        if (!notifTitle || !notifMessage) {
+            Alert.alert("Missing Fields", "Please add a title and message");
+            return;
+        }
+        try {
+            const response = await fetch(`${API_URL}/notifications/send`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: notifTitle,
+                    message: notifMessage,
+                    type: isCrucial ? 'crucial' : 'ordinary'
+                })
+            });
+            if (response.ok) {
+                Alert.alert("Sent", "Notification broadcasted successfully!");
+                setNotifModalVisible(false);
+                setNotifTitle('');
+                setNotifMessage('');
+                setIsCrucial(false);
+            } else {
+                Alert.alert("Error", "Failed to send notification");
+            }
+        } catch (error) {
+            console.error(error);
+            Alert.alert("Error", "Network error sending notification");
+        }
+    };
+
+
+
     return (
         <View style={styles.container}>
             {/* HEADER BACKGROUND */}
@@ -429,6 +589,15 @@ export default function ManagerDashboard({ route, navigation }) {
                             </View>
                             <Text style={styles.actionText}>Upload Training</Text>
                         </TouchableOpacity>
+
+                        {/* BULK UPLOAD BUTTON [NEW] */}
+                        <TouchableOpacity style={styles.actionBtn} onPress={() => setBulkModalVisible(true)}>
+                            <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
+                                <MaterialCommunityIcons name="layers-plus" size={24} color="#D97706" />
+                            </View>
+                            <Text style={styles.actionText}>Bulk Upload</Text>
+                        </TouchableOpacity>
+
                         <TouchableOpacity style={styles.actionBtn} onPress={() => navigation.navigate('CreateUser')}>
                             <View style={[styles.actionIcon, { backgroundColor: '#ECFEFF' }]}>
                                 <Feather name="user-plus" size={24} color="#0891B2" />
@@ -444,6 +613,7 @@ export default function ManagerDashboard({ route, navigation }) {
                             </View>
                             <Text style={styles.actionText}>Proctored Assessment</Text>
                         </TouchableOpacity>
+
                         <TouchableOpacity
                             style={styles.actionBtn}
                             onPress={() => navigation.navigate('Analytics', { userProfile })}
@@ -454,87 +624,269 @@ export default function ManagerDashboard({ route, navigation }) {
                             <Text style={styles.actionText}>View Analytics</Text>
                         </TouchableOpacity>
 
+                        {/* NEW NOTIFICATION BUTTON */}
+                        <TouchableOpacity
+                            style={styles.actionBtn}
+                            onPress={() => setNotifModalVisible(true)}
+                        >
+                            <View style={[styles.actionIcon, { backgroundColor: '#FEE2E2' }]}>
+                                <Feather name="bell" size={24} color="#EF4444" />
+                            </View>
+                            <Text style={styles.actionText}>Send Notif</Text>
+                        </TouchableOpacity>
                     </View>
+
+                    {/* --- [NEW] MANAGE LEARNING PATH SECTION --- */}
+                    <View style={styles.sectionHeaderRow}>
+                        <Text style={styles.sectionTitle}>Manage Learning Path</Text>
+                        <TouchableOpacity onPress={() => setRefreshPath(prev => prev + 1)}>
+                            <Feather name="refresh-cw" size={18} color="#6B7280" />
+                        </TouchableOpacity>
+                    </View>
+
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pathListScroll}>
+                        {pathNodes.map((node, index) => (
+                            <TouchableOpacity key={index} style={styles.pathNodeCard} onPress={() => openEditNode(node)}>
+                                <View style={styles.pathNodeIcon}>
+                                    <MaterialCommunityIcons name="coffee" size={24} color="#FFF" />
+                                </View>
+                                <View style={styles.pathNodeInfo}>
+                                    <Text style={styles.pathNodeTitle} numberOfLines={1}>{node.title}</Text>
+                                    <Text style={styles.pathNodeSub}>{node.skippable ? "Skippable" : "Mandatory"}</Text>
+                                </View>
+                                <Feather name="edit-2" size={16} color="#9CA3AF" />
+                            </TouchableOpacity>
+                        ))}
+                        {pathNodes.length === 0 && (
+                            <Text style={styles.emptyPathText}>No nodes in learning path yet.</Text>
+                        )}
+                    </ScrollView>
 
                 </ScrollView >
-            </View >
 
-            {/* UPLOAD MODAL */}
-            < Modal visible={uploadVisible} animationType="slide" transparent >
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
-                        <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>Upload Content</Text>
-                            <TouchableOpacity onPress={() => setUploadVisible(false)}>
-                                <Feather name="x" size={24} color="#374151" />
+                {/* MODALS */}
+                <EditNodeModal
+                    visible={editModalVisible}
+                    node={selectedNode}
+                    onClose={() => setEditModalVisible(false)}
+                    onSave={handleUpdateNode}
+                    onDelete={handleDeleteNode}
+                    onGenerateQuiz={handleGenerateQuiz}
+                />
+
+                {/* BULK UPLOAD MODAL */}
+                <BulkUploadModal
+                    visible={bulkModalVisible}
+                    onClose={() => setBulkModalVisible(false)}
+                    onUploadComplete={() => setRefreshPath(prev => prev + 1)}
+                />
+
+                {/* NOTIFICATION MODAL */}
+                <Modal visible={notifModalVisible} animationType="slide" transparent>
+                    <View style={styles.modalOverlay}>
+                        <View style={styles.modalContent}>
+                            <View style={styles.modalHeader}>
+                                <Text style={styles.modalTitle}>Send Notification</Text>
+                                <TouchableOpacity onPress={() => setNotifModalVisible(false)}>
+                                    <Feather name="x" size={24} color="#374151" />
+                                </TouchableOpacity>
+                            </View>
+
+                            <Text style={styles.inputLabel}>Title</Text>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="Notification Title"
+                                value={notifTitle}
+                                onChangeText={setNotifTitle}
+                            />
+
+                            <Text style={styles.inputLabel}>Message</Text>
+                            <TextInput
+                                style={[styles.input, { height: 100 }]}
+                                placeholder="Message content..."
+                                value={notifMessage}
+                                onChangeText={setNotifMessage}
+                                multiline
+                            />
+
+                            <TouchableOpacity
+                                style={styles.toggleRow}
+                                onPress={() => setIsCrucial(!isCrucial)}
+                            >
+                                <View style={[styles.checkbox, isCrucial && { backgroundColor: '#EF4444', borderColor: '#EF4444' }]}>
+                                    {isCrucial && <Feather name="check" size={14} color="#FFF" />}
+                                </View>
+                                <Text style={styles.toggleLabel}>Mark as Crucial (Blocking)</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={[styles.uploadBtn, { backgroundColor: isCrucial ? '#EF4444' : '#10B981' }]}
+                                onPress={handleSendNotification}
+                            >
+                                <Text style={styles.uploadBtnText}>Send Notification</Text>
                             </TouchableOpacity>
                         </View>
-
-                        <Text style={styles.inputLabel}>Title</Text>
-                        <TextInput
-                            style={styles.input}
-                            placeholder="e.g. Advanced Espresso Technique"
-                            value={title}
-                            onChangeText={setTitle}
-                        />
-
-                        <Text style={styles.inputLabel}>Video File</Text>
-                        <TouchableOpacity style={styles.fileBtn} onPress={pickFile}>
-                            <Feather name={selectedFile ? "check-circle" : "video"} size={20} color={selectedFile ? "#059669" : "#6B7280"} />
-                            <Text style={[styles.fileBtnText, selectedFile && { color: '#059669' }]}>
-                                {selectedFile ? selectedFile.name : "Select Video from Device"}
-                            </Text>
-                        </TouchableOpacity>
-
-                        <Text style={styles.inputLabel}>Description</Text>
-                        <TextInput
-                            style={[styles.input, { height: 80 }]}
-                            placeholder="Brief summary..."
-                            value={desc}
-                            onChangeText={setDesc}
-                            multiline
-                        />
-
-                        <TouchableOpacity
-                            style={[styles.uploadBtn, uploading && styles.disabledBtn]}
-                            onPress={handleUpload}
-                            disabled={uploading}
-                        >
-                            <Text style={styles.uploadBtnText}>{uploading ? "Broadcasting..." : "Upload & Broadcast"}</Text>
-                        </TouchableOpacity>
                     </View>
-                </View>
-            </Modal>
+                </Modal>
 
-            {/* QUIZ CREATION MODAL */}
-            <QuizCreationModal
-                visible={quizModalVisible}
-                onClose={() => setQuizModalVisible(false)}
-                quizTitle={quizTitle}
-                setQuizTitle={setQuizTitle}
-                quizDescription={quizDescription}
-                setQuizDescription={setQuizDescription}
-                currentQuestion={currentQuestion}
-                setCurrentQuestion={setCurrentQuestion}
-                options={options}
-                setOptions={setOptions}
-                correctIndex={correctIndex}
-                setCorrectIndex={setCorrectIndex}
-                questions={questions}
-                onAddQuestion={addQuestion}
-                onPublish={createQuiz}
-            />
+                {/* PREMIUM UPLOAD MODAL */}
+                <Modal visible={uploadVisible} animationType="slide" transparent>
+                    <View style={styles.modalOverlay}>
+                        <View style={[styles.modalContent, { maxHeight: height * 0.8 }]}>
+                            {/* PREMIUM HEADER - GRADIENT */}
+                            <LinearGradient
+                                colors={['#7C3AED', '#4F46E5']}
+                                style={{ margin: -2, padding: 20, borderTopLeftRadius: 24, borderTopRightRadius: 24, marginBottom: 15 }}
+                                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                            >
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                        <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
+                                            <Feather name="upload-cloud" size={18} color="#FFF" />
+                                        </View>
+                                        <Text style={{ fontSize: 18, color: '#FFF', fontFamily: 'Poppins_700Bold' }}>Knowledge Base</Text>
+                                    </View>
+                                    <TouchableOpacity onPress={() => setUploadVisible(false)} style={{ backgroundColor: 'rgba(255,255,255,0.2)', padding: 5, borderRadius: 8 }}>
+                                        <Feather name="x" size={20} color="#FFF" />
+                                    </TouchableOpacity>
+                                </View>
+                            </LinearGradient>
 
-            {/* QUIZ RESULTS MODAL */}
-            <QuizResultsModal
-                visible={resultsModalVisible}
-                onClose={() => setResultsModalVisible(false)}
-                resultsData={selectedQuizResults}
-            />
-        </View>);
+                            <ScrollView showsVerticalScrollIndicator={false}>
+                                <Text style={styles.inputLabel}>Title</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="e.g. Grinder Maintenance Manual"
+                                    value={resTitle}
+                                    onChangeText={setResTitle}
+                                />
+
+                                <Text style={styles.inputLabel}>Category</Text>
+                                {!newCatMode ? (
+                                    <View style={{ marginBottom: 15 }}>
+                                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
+                                            {categories.map((cat, i) => (
+                                                <TouchableOpacity
+                                                    key={i}
+                                                    onPress={() => setResCategory(cat.name)}
+                                                    style={{
+                                                        paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, marginRight: 8,
+                                                        backgroundColor: resCategory === cat.name ? '#7C3AED' : '#F3F4F6',
+                                                        borderWidth: 1, borderColor: resCategory === cat.name ? '#7C3AED' : '#E5E7EB'
+                                                    }}
+                                                >
+                                                    <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: resCategory === cat.name ? '#FFF' : '#4B5563' }}>{cat.name}</Text>
+                                                </TouchableOpacity>
+                                            ))}
+                                            <TouchableOpacity
+                                                onPress={() => setNewCatMode(true)}
+                                                style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: '#FFF', borderWidth: 1, borderColor: '#7C3AED', borderStyle: 'dashed' }}
+                                            >
+                                                <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: '#7C3AED' }}>+ New</Text>
+                                            </TouchableOpacity>
+                                        </ScrollView>
+                                    </View>
+                                ) : (
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15, gap: 10 }}>
+                                        <TextInput
+                                            style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                                            placeholder="New Category Name"
+                                            value={newCatName}
+                                            onChangeText={setNewCatName}
+                                        />
+                                        <TouchableOpacity onPress={handleCreateCategory} style={{ backgroundColor: '#7C3AED', padding: 12, borderRadius: 12 }}>
+                                            <Feather name="check" size={20} color="#FFF" />
+                                        </TouchableOpacity>
+                                        <TouchableOpacity onPress={() => setNewCatMode(false)} style={{ backgroundColor: '#F3F4F6', padding: 12, borderRadius: 12 }}>
+                                            <Feather name="x" size={20} color="#6B7280" />
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
+
+                                <Text style={styles.inputLabel}>File (PDF, Video, Excel...)</Text>
+                                <TouchableOpacity
+                                    style={[styles.fileBtn, { borderStyle: 'dashed', borderWidth: 2, borderColor: resFile ? '#10B981' : '#D1D5DB', backgroundColor: resFile ? '#ECFDF5' : '#F9FAFB', height: 100, flexDirection: 'column', gap: 5 }]}
+                                    onPress={pickResourceFile}
+                                >
+                                    <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: resFile ? '#D1FAE5' : '#E5E7EB', justifyContent: 'center', alignItems: 'center' }}>
+                                        <Feather name={resFile ? "check" : "file-plus"} size={20} color={resFile ? "#10B981" : "#6B7280"} />
+                                    </View>
+                                    <Text style={[styles.fileBtnText, { textAlign: 'center' }]}>
+                                        {resFile ? resFile.name : "Tap to Select File"}
+                                    </Text>
+                                    {resFile && <Text style={{ fontSize: 10, color: '#6B7280' }}>{(resFile.size / 1024 / 1024).toFixed(2)} MB</Text>}
+                                </TouchableOpacity>
+
+                                <Text style={styles.inputLabel}>Description</Text>
+                                <TextInput
+                                    style={[styles.input, { height: 80 }]}
+                                    placeholder="Brief summary used for AI Search..."
+                                    value={resDesc}
+                                    onChangeText={setResDesc}
+                                    multiline
+                                />
+
+                                {/* RESTORED: Add to Path Toggle */}
+                                <TouchableOpacity
+                                    style={styles.toggleRow}
+                                    onPress={() => setIsPathNode(!isPathNode)}
+                                >
+                                    <View style={[styles.checkbox, isPathNode && { backgroundColor: '#7C3AED', borderColor: '#7C3AED' }]}>
+                                        {isPathNode && <Feather name="check" size={14} color="#FFF" />}
+                                    </View>
+                                    <Text style={styles.toggleLabel}>Add to Learning Path (Mandatory Training)</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={[styles.uploadBtn, { marginTop: 10 }, uploading && styles.disabledBtn]}
+                                    onPress={handleUploadResource}
+                                    disabled={uploading}
+                                >
+                                    {uploading ? <ActivityIndicator color="#FFF" /> : (
+                                        <>
+                                            <Feather name="upload" size={18} color="#FFF" style={{ marginRight: 8 }} />
+                                            <Text style={styles.uploadBtnText}>Upload & Publish</Text>
+                                        </>
+                                    )}
+                                </TouchableOpacity>
+                            </ScrollView>
+                        </View>
+                    </View>
+                </Modal >
+
+
+                {/* QUIZ CREATION MODAL */}
+                <QuizCreationModal
+                    visible={quizModalVisible}
+                    onClose={() => setQuizModalVisible(false)}
+                    quizTitle={quizTitle}
+                    setQuizTitle={setQuizTitle}
+                    quizDescription={quizDescription}
+                    setQuizDescription={setQuizDescription}
+                    currentQuestion={currentQuestion}
+                    setCurrentQuestion={setCurrentQuestion}
+                    options={options}
+                    setOptions={setOptions}
+                    correctIndex={correctIndex}
+                    setCorrectIndex={setCorrectIndex}
+                    questions={questions}
+                    onAddQuestion={addQuestion}
+                    onPublish={createQuiz}
+                />
+
+                {/* QUIZ RESULTS MODAL */}
+                <QuizResultsModal
+                    visible={resultsModalVisible}
+                    onClose={() => setResultsModalVisible(false)}
+                    resultsData={selectedQuizResults}
+                />
+            </View>
+        </View>
+    );
 }
 
 const styles = StyleSheet.create({
+
     container: {
         flex: 1,
         backgroundColor: '#F9FAFB',
@@ -828,5 +1180,44 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_500Medium',
         color: '#6B7280',
         marginLeft: 10
-    }
+    },
+    toggleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 15,
+        marginBottom: 5,
+    },
+    checkbox: {
+        width: 20,
+        height: 20,
+        borderRadius: 4,
+        borderWidth: 2,
+        borderColor: '#9CA3AF',
+        marginRight: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    checkboxActive: {
+        backgroundColor: '#F59E0B',
+        borderColor: '#F59E0B',
+    },
+    toggleLabel: { fontSize: 14, fontFamily: 'Poppins_500Medium', color: '#374151' },
+
+    // PATH MANAGE STYLES [NEW]
+    sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginTop: 20, marginBottom: 10 },
+    pathListScroll: { paddingLeft: 20, marginBottom: 30 },
+    pathNodeCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 12, borderRadius: 12, marginRight: 12, width: 220, borderWidth: 1, borderColor: '#E5E7EB', shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05 },
+    pathNodeIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F59E0B', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+    pathNodeInfo: { flex: 1 },
+    pathNodeTitle: { fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: '#111827' },
+    pathNodeSub: { fontSize: 11, fontFamily: 'Poppins_400Regular', color: '#6B7280' },
+    emptyPathText: { marginLeft: 20, color: '#9CA3AF', fontStyle: 'italic' },
+
+    // QUICK ACTION STYLES
+    sectionContainer: { marginTop: 24, paddingHorizontal: 20 },
+    sectionTitle: { fontSize: 18, fontFamily: 'Poppins_700Bold', color: '#111827', marginBottom: 16 },
+    actionGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
+    actionBtn: { width: (width - 60) / 4, alignItems: 'center', marginBottom: 20 },
+    actionIcon: { width: 50, height: 50, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
+    actionText: { fontSize: 11, fontFamily: 'Poppins_500Medium', color: '#4B5563', textAlign: 'center' }
 });

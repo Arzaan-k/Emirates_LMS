@@ -13,8 +13,228 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import Svg, { Circle, G, Text as SvgText } from "react-native-svg";
 import { useLanguage } from "../context/language.context";
+import { Modal } from "react-native"; // Added Modal
 
 const { width } = Dimensions.get("window");
+
+// --- MOCK CALENDAR DATA GENERATOR ---
+const generateCalendarData = (year, month) => {
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const data = {};
+    const skills = ["Latte Art", "Hygiene", "Inventory", "Cust. Service", "Speed", "Safety"];
+
+    for (let i = 1; i <= daysInMonth; i++) {
+        // Random activity
+        if (Math.random() > 0.4) {
+            data[i] = {
+                videos: Math.floor(Math.random() * 5),
+                quizzes: Math.floor(Math.random() * 3),
+                score: Math.floor(Math.random() * 20 + 80),
+                focusTime: Math.floor(Math.random() * 120 + 10) + "m", // e.g. 45m
+                topSkill: skills[Math.floor(Math.random() * skills.length)]
+            };
+        }
+    }
+    return data;
+};
+
+// --- PREMIUM ACTIVITY CALENDAR ---
+const ActivityCalendar = () => {
+    const [currentDate, setCurrentDate] = useState(new Date());
+    const [selectedDay, setSelectedDay] = useState(null);
+    const [modalVisible, setModalVisible] = useState(false);
+
+    const today = new Date();
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const isCurrentMonth = month === today.getMonth() && year === today.getFullYear();
+
+    const [activityData, setActivityData] = useState(() => generateCalendarData(year, month));
+
+    const changeMonth = (increment) => {
+        const newDate = new Date(currentDate.setMonth(currentDate.getMonth() + increment));
+        setCurrentDate(new Date(newDate));
+        setActivityData(generateCalendarData(newDate.getFullYear(), newDate.getMonth()));
+    };
+
+    const getDaysArray = () => {
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const firstDay = new Date(year, month, 1).getDay();
+        const days = [];
+        for (let i = 0; i < firstDay; i++) { days.push(null); }
+        for (let i = 1; i <= daysInMonth; i++) { days.push(i); }
+        return days;
+    };
+
+    const days = getDaysArray();
+    const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+    const handleDayPress = (day) => {
+        if (!day) return;
+        const data = activityData[day];
+        setSelectedDay({ day, ...data, year, month });
+        setModalVisible(true);
+    };
+
+    return (
+        <View style={styles.calendarContainer}>
+            {/* GLOW EFFECT */}
+            <View style={styles.goldGlow} />
+
+            {/* HEADER */}
+            <View style={styles.calHeader}>
+                <View>
+                    <View style={styles.calBadge}>
+                        <Feather name="zap" size={12} color="#B45309" />
+                        <Text style={styles.calBadgeText}>PRO INSIGHTS</Text>
+                    </View>
+                    <Text style={styles.calSubtitle}>{currentDate.toLocaleDateString('default', { month: 'long', year: 'numeric' })}</Text>
+                </View>
+                <View style={styles.calControls}>
+                    <TouchableOpacity onPress={() => changeMonth(-1)} style={styles.calBtn}>
+                        <Feather name="chevron-left" size={20} color="#78350F" />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => changeMonth(1)} style={styles.calBtn}>
+                        <Feather name="chevron-right" size={20} color="#78350F" />
+                    </TouchableOpacity>
+                </View>
+            </View>
+
+            {/* WEEKDAYS */}
+            <View style={styles.weekRow}>
+                {weekDays.map((d, i) => (
+                    <Text key={i} style={styles.weekText}>{d}</Text>
+                ))}
+            </View>
+
+            {/* DAYS GRID */}
+            <View style={styles.daysGrid}>
+                {days.map((day, index) => {
+                    if (!day) return <View key={index} style={styles.dayCell} />;
+
+                    const hasActivity = activityData[day];
+                    const isToday = isCurrentMonth && day === today.getDate();
+
+                    // ACTIVITY INTENSITY LOGIC (YELLOW/GOLD THEME)
+                    let cellBg = 'transparent';
+                    let cellText = '#4B5563';
+                    let cellBorder = 'transparent';
+
+                    if (hasActivity) {
+                        const totalActs = hasActivity.videos + hasActivity.quizzes;
+                        if (totalActs > 4) {
+                            cellBg = '#F59E0B'; // Deep Gold
+                            cellText = '#FFF';
+                        } else if (totalActs > 0) {
+                            cellBg = '#FEF3C7'; // Light Gold
+                            cellText = '#92400E';
+                        }
+                    }
+
+                    if (isToday) {
+                        cellBorder = '#F59E0B';
+                        if (!hasActivity) cellBg = '#FFFBEB';
+                    }
+
+                    return (
+                        <TouchableOpacity
+                            key={index}
+                            style={[styles.dayCell]}
+                            onPress={() => handleDayPress(day)}
+                        >
+                            <View style={[styles.dayBg, { backgroundColor: cellBg, borderColor: cellBorder, borderWidth: isToday ? 2 : 0 }]}>
+                                <Text style={[styles.dayText, { color: cellText }]}>{day}</Text>
+                                {/* Tiny Indicators */}
+                                {hasActivity && (
+                                    <View style={styles.dotRow}>
+                                        {hasActivity.videos > 0 && <View style={[styles.dot, { backgroundColor: cellText === '#FFF' ? '#FFF' : '#F59E0B' }]} />}
+                                        {hasActivity.quizzes > 0 && <View style={[styles.dot, { backgroundColor: cellText === '#FFF' ? 'rgba(255,255,255,0.7)' : '#D97706' }]} />}
+                                    </View>
+                                )}
+                            </View>
+                        </TouchableOpacity>
+                    )
+                })}
+            </View>
+
+            {/* PREMIUM GOLD MODAL */}
+            <Modal visible={modalVisible} transparent animationType="fade">
+                <View style={styles.calModalOverlay}>
+                    {/* BLUR EFFECT BACKGROUND */}
+                    <View style={{ position: 'absolute', width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.6)' }} />
+
+                    <View style={styles.goldModalContent}>
+                        <LinearGradient
+                            colors={['#F59E0B', '#D97706']}
+                            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                            style={styles.goldModalHeader}
+                        >
+                            <View>
+                                <Text style={styles.goldModalDate}>
+                                    {selectedDay?.day} {new Date(year, month).toLocaleString('default', { month: 'long' })}
+                                </Text>
+                                <Text style={styles.goldModalYear}>{year}</Text>
+                            </View>
+                            <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.goldCloseBtn}>
+                                <Feather name="x" size={22} color="#FFF" />
+                            </TouchableOpacity>
+                        </LinearGradient>
+
+                        <View style={styles.calModalBody}>
+                            {selectedDay?.videos !== undefined ? (
+                                <>
+                                    <View style={styles.goldStatGrid}>
+                                        {/* VIDEOS */}
+                                        <View style={styles.goldStatItem}>
+                                            <View style={styles.goldIconBg}><Feather name="play" size={18} color="#D97706" /></View>
+                                            <Text style={styles.goldVal}>{selectedDay.videos}</Text>
+                                            <Text style={styles.goldLabel}>Videos</Text>
+                                        </View>
+                                        {/* QUIZZES */}
+                                        <View style={styles.goldStatItem}>
+                                            <View style={styles.goldIconBg}><MaterialCommunityIcons name="note-text-outline" size={18} color="#D97706" /></View>
+                                            <Text style={styles.goldVal}>{selectedDay.quizzes}</Text>
+                                            <Text style={styles.goldLabel}>Quizzes</Text>
+                                        </View>
+                                        {/* TIME */}
+                                        <View style={styles.goldStatItem}>
+                                            <View style={styles.goldIconBg}><Feather name="clock" size={18} color="#D97706" /></View>
+                                            <Text style={styles.goldVal}>{selectedDay.focusTime}</Text>
+                                            <Text style={styles.goldLabel}>Focus</Text>
+                                        </View>
+                                    </View>
+
+                                    {/* MAIN INSIGHT CARD */}
+                                    <LinearGradient colors={['#FFFBEB', '#FEF3C7']} style={styles.insightCard}>
+                                        <View style={styles.insightHeader}>
+                                            <MaterialCommunityIcons name="lightning-bolt" size={20} color="#F59E0B" />
+                                            <Text style={styles.insightTitle}>Performance Highlight</Text>
+                                        </View>
+                                        <Text style={styles.insightBig}>Top Skill: {selectedDay.topSkill}</Text>
+                                        <View style={styles.scoreRow}>
+                                            <Text style={styles.scoreLabel}>Daily Avg Score</Text>
+                                            <View style={styles.scorePill}>
+                                                <Text style={styles.scorePillText}>{selectedDay.score}%</Text>
+                                            </View>
+                                        </View>
+                                    </LinearGradient>
+                                </>
+                            ) : (
+                                <View style={styles.noActivity}>
+                                    <Feather name="moon" size={48} color="#E5E7EB" />
+                                    <Text style={styles.noActText}>Rest Day. No activity recorded.</Text>
+                                    <TouchableOpacity style={styles.startBtn} onPress={() => setModalVisible(false)}>
+                                        <Text style={styles.startBtnText}>Start Learning</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            )}
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+        </View>
+    );
+};
 
 // --- MOCK DATA ---
 const COMPLETED_LESSONS = [
@@ -182,12 +402,15 @@ export default function Profile({ navigation }) {
                     </LinearGradient>
                 </View>
 
+                {/* PREMIUM CALENDAR */}
+                <ActivityCalendar />
+
                 {/* ANALYTICS GRAPH */}
                 <DonutChart />
 
                 {/* ORGANIZATIONAL HIERARCHY NAVIGATION */}
-                <TouchableOpacity 
-                    style={styles.navCard} 
+                <TouchableOpacity
+                    style={styles.navCard}
                     onPress={() => navigation.navigate('Hierarchy')}
                 >
                     <LinearGradient
@@ -366,4 +589,54 @@ const styles = StyleSheet.create({
     navCardIcon: { width: 48, height: 48, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.2)", justifyContent: 'center', alignItems: 'center', marginRight: 16 },
     navCardTitle: { color: "#FFF", fontSize: 15, fontFamily: "Poppins_700Bold" },
     navCardSub: { color: "rgba(255,255,255,0.8)", fontSize: 12, fontFamily: "Poppins_400Regular" },
+
+    // CALENDAR STYLES (GOLDEN THEME)
+    calendarContainer: { marginHorizontal: 20, marginBottom: 24, padding: 20, backgroundColor: '#FFF', borderRadius: 24, shadowColor: "#F59E0B", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.1, shadowRadius: 15, elevation: 5, borderWidth: 1, borderColor: '#FFFBEB', overflow: 'hidden' },
+    goldGlow: { position: 'absolute', top: -50, right: -50, width: 150, height: 150, borderRadius: 75, backgroundColor: 'rgba(245, 158, 11, 0.1)' },
+
+    calHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+    calBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, alignSelf: 'flex-start', marginBottom: 4 },
+    calBadgeText: { fontSize: 10, fontFamily: "Poppins_700Bold", color: "#B45309", marginLeft: 4, letterSpacing: 1 },
+    calSubtitle: { fontSize: 18, fontFamily: "Poppins_700Bold", color: "#111827" },
+
+    calControls: { flexDirection: 'row', backgroundColor: '#F3F4F6', borderRadius: 12, padding: 2 },
+    calBtn: { padding: 8, borderRadius: 10 },
+
+    weekRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
+    weekText: { width: (width - 80) / 7, textAlign: 'center', fontSize: 12, fontFamily: "Poppins_600SemiBold", color: "#9CA3AF" },
+    daysGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+    dayCell: { width: (width - 80) / 7, aspectRatio: 1, padding: 3 },
+    dayBg: { flex: 1, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+    dayText: { fontSize: 12, fontFamily: "Poppins_600SemiBold" },
+    dotRow: { flexDirection: 'row', position: 'absolute', bottom: 3, gap: 2 },
+    dot: { width: 3, height: 3, borderRadius: 1.5 },
+
+    // GOLD MODAL STYLES
+    calModalOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
+    goldModalContent: { width: '100%', maxWidth: 320, backgroundColor: '#FFF', borderRadius: 24, overflow: 'hidden', shadowColor: "#F59E0B", shadowOffset: { width: 0, height: 20 }, shadowOpacity: 0.3, shadowRadius: 30, elevation: 20 },
+    goldModalHeader: { padding: 20, paddingTop: 24, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+    goldModalDate: { color: '#FFF', fontSize: 20, fontFamily: "Poppins_700Bold" },
+    goldModalYear: { color: 'rgba(255,255,255,0.8)', fontSize: 14, fontFamily: "Poppins_500Medium" },
+    goldCloseBtn: { padding: 6, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 12 },
+
+    calModalBody: { padding: 24 },
+    goldStatGrid: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 24 },
+    goldStatItem: { alignItems: 'center', flex: 1 },
+    goldIconBg: { width: 44, height: 44, borderRadius: 14, backgroundColor: '#FFFBEB', justifyContent: 'center', alignItems: 'center', marginBottom: 8, borderWidth: 1, borderColor: '#FEF3C7' },
+    goldVal: { fontSize: 16, fontFamily: "Poppins_700Bold", color: "#111827" },
+    goldLabel: { fontSize: 11, fontFamily: "Poppins_500Medium", color: "#9CA3AF" },
+
+    insightCard: { padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#FDE68A' },
+    insightHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+    insightTitle: { fontSize: 12, fontFamily: "Poppins_700Bold", color: "#B45309", marginLeft: 6, letterSpacing: 1 },
+    insightBig: { fontSize: 16, fontFamily: "Poppins_600SemiBold", color: "#451A03", marginBottom: 12 },
+    scoreRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: 'rgba(245, 158, 11, 0.2)', paddingTop: 12 },
+    scoreLabel: { fontSize: 12, color: "#92400E", fontFamily: "Poppins_500Medium" },
+    scorePill: { backgroundColor: "#FFF", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, shadowColor: "#F59E0B", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 1 },
+    scorePillText: { fontSize: 12, fontFamily: "Poppins_700Bold", color: "#D97706" },
+
+    noActivity: { alignItems: 'center', paddingVertical: 30 },
+    noActText: { color: '#9CA3AF', marginTop: 12, fontFamily: "Poppins_400Regular", marginBottom: 20 },
+    startBtn: { backgroundColor: '#F59E0B', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12, shadowColor: "#F59E0B", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+    startBtnText: { color: '#FFF', fontSize: 14, fontFamily: "Poppins_700Bold" }
 });

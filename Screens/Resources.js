@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
     View,
     Text,
@@ -7,21 +7,21 @@ import {
     TouchableOpacity,
     TextInput,
     Dimensions,
+    ActivityIndicator,
+    RefreshControl
 } from "react-native";
 import { Feather, MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
-
 import { useNavigation } from "@react-navigation/native";
+import API_URL from '../config';
 
 const { width } = Dimensions.get("window");
 
-const CATEGORIES = [
-    { id: 1, name: "Standard SOPs", icon: "file-document-outline", count: 12, color: ["#3B82F6", "#2563EB"], bg: "#DBEAFE" },
-    { id: 2, name: "Video Tutorials", icon: "play-circle-outline", count: 8, color: ["#F59E0B", "#D97706"], bg: "#FEF3C7" },
-    { id: 3, name: "Machine Manuals", icon: "tools", count: 5, color: ["#8B5CF6", "#7C3AED"], bg: "#EDE9FE" },
-    { id: 4, name: "Safety Guides", icon: "shield-check-outline", count: 15, color: ["#10B981", "#059669"], bg: "#D1FAE5" },
-    { id: 5, name: "Interview Modules", icon: "file-document-outline", count: 15, color: ["#F59E0B", "#D97706"], bg: "#FEF3C7" },
+// Static fallback for Recommendations (can be made dynamic later)
+const RECOMMENDED = [
+    { id: 1, title: "How to fix Grinder Jam", type: "AI Solution", time: "2 min read", icon: "robot-happy-outline" },
+    { id: 2, title: "Closing Shift Checklist", type: "PDF Guide", time: "500 KB", icon: "file-pdf-box" },
 ];
 
 const MANDATORY_MODULES = [
@@ -31,19 +31,52 @@ const MANDATORY_MODULES = [
     { id: 4, name: "Equipment Maintenance", icon: "tools", count: 8, color: ["#3B82F6", "#2563EB"], bg: "#DBEAFE" },
 ];
 
-const RECOMMENDED = [
-    { id: 1, title: "How to fix Grinder Jam", type: "AI Solution", time: "2 min read", icon: "robot-happy-outline" },
-    { id: 2, title: "Closing Shift Checklist", type: "PDF Guide", time: "500 KB", icon: "file-pdf-box" },
-];
-
 export default function Resources() {
     const insets = useSafeAreaInsets();
     const [search, setSearch] = useState("");
     const navigation = useNavigation();
 
+    // DYNAMIC DATA
+    const [categories, setCategories] = useState([]);
+    const [resources, setResources] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
+
+    const fetchData = async () => {
+        try {
+            // Fetch Categories
+            const catRes = await fetch(`${API_URL}/resources/categories`);
+            const catData = await catRes.json();
+            setCategories(catData);
+
+            // Fetch Resources
+            const resRes = await fetch(`${API_URL}/resources`);
+            const resData = await resRes.json();
+            setResources(resData.reverse()); // Show newest first
+        } catch (error) {
+            console.error("Error fetching knowledge base:", error);
+        } finally {
+            setLoading(false);
+            setRefreshing(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchData();
+    }, []);
+
+    const onRefresh = () => {
+        setRefreshing(true);
+        fetchData();
+    };
+
     return (
         <View style={[styles.container, { paddingTop: insets.top }]}>
-            <ScrollView contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
+            <ScrollView
+                contentContainerStyle={{ paddingBottom: 100 }}
+                showsVerticalScrollIndicator={false}
+                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+            >
 
                 {/* HEADER */}
                 <View style={styles.header}>
@@ -95,37 +128,43 @@ export default function Resources() {
                     </ScrollView>
                 </View>
 
-                {/* VISUAL CATEGORIES GRID */}
+                {/* DYNAMIC CATEGORIES GRID */}
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Browse Categories</Text>
-                    <View style={styles.grid}>
-                        {CATEGORIES.map((cat) => (
-                            <TouchableOpacity
-                                key={cat.id}
-                                style={styles.catCard}
-                                onPress={() => {
-                                    if (cat.name === "Interview Modules") {
-                                        navigation.navigate("InterviewModules");
-                                    }
-                                }}
-                            >
-                                <LinearGradient
-                                    colors={cat.color}
-                                    style={styles.catGradient}
-                                    start={{ x: 0, y: 0 }}
-                                    end={{ x: 1, y: 1 }}
+                    {loading ? <ActivityIndicator color="#F59E0B" /> : (
+                        <View style={styles.grid}>
+                            {categories.map((cat, index) => (
+                                <TouchableOpacity
+                                    key={index}
+                                    style={styles.catCard}
+                                    onPress={() => {
+                                        // Navigate to a filtered list or internal screen
+                                        if (cat.name === "Interview Modules") {
+                                            navigation.navigate("InterviewModules");
+                                        } else {
+                                            // Future: Navigate to Generic Resource List filtered by category
+                                            console.log("Open category:", cat.name);
+                                        }
+                                    }}
                                 >
-                                    <MaterialCommunityIcons name={cat.icon} size={32} color="#FFF" />
-                                </LinearGradient>
-                                <View style={styles.catContent}>
-                                    <Text style={styles.catName}>{cat.name === "Interview Modules" ? "Hiring Toolkit" : cat.name}</Text>
-                                    <View style={styles.catBadge}>
-                                        <Text style={styles.catCount}>{cat.count} files</Text>
+                                    <LinearGradient
+                                        colors={cat.color || ["#9CA3AF", "#6B7280"]}
+                                        style={styles.catGradient}
+                                        start={{ x: 0, y: 0 }}
+                                        end={{ x: 1, y: 1 }}
+                                    >
+                                        <MaterialCommunityIcons name={cat.icon || "folder-outline"} size={32} color="#FFF" />
+                                    </LinearGradient>
+                                    <View style={styles.catContent}>
+                                        <Text style={styles.catName}>{cat.name}</Text>
+                                        <View style={styles.catBadge}>
+                                            <Text style={styles.catCount}>View Files</Text>
+                                        </View>
                                     </View>
-                                </View>
-                            </TouchableOpacity>
-                        ))}
-                    </View>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    )}
                 </View>
 
                 {/* MANDATORY MODULES (OJT) */}
@@ -164,20 +203,35 @@ export default function Resources() {
                 <View style={styles.section}>
                     <View style={styles.sectionHeader}>
                         <Text style={styles.sectionTitle}>Recently Added</Text>
-                        <TouchableOpacity><Text style={styles.seeAll}>View All</Text></TouchableOpacity>
+                        <TouchableOpacity style={{ padding: 4 }} onPress={fetchData}>
+                            <Feather name="refresh-cw" size={14} color="#F59E0B" />
+                        </TouchableOpacity>
                     </View>
-                    {/* Dummy Item */}
-                    <View style={styles.fileRow}>
-                        <View style={styles.fileIcon}>
-                            <MaterialCommunityIcons name="file-video-outline" size={24} color="#EF4444" />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                            <Text style={styles.fileName}>New Summer Menu Training</Text>
-                            <Text style={styles.fileMeta}>Video • 12 mins • Added Today</Text>
-                        </View>
-                        <Feather name="download" size={20} color="#9CA3AF" />
-                    </View>
-                    
+
+                    {loading ? <ActivityIndicator size="small" /> : (
+                        resources.length === 0 ? (
+                            <Text style={{ textAlign: 'center', color: '#9CA3AF', fontStyle: 'italic', marginTop: 10 }}>No recent uploads.</Text>
+                        ) : (
+                            resources.map((item, index) => (
+                                <View key={index} style={styles.fileRow}>
+                                    <View style={[styles.fileIcon, {
+                                        backgroundColor: item.type === 'Video' ? '#FEF2F2' : item.type === 'PDF' ? '#EFF6FF' : '#F0FDF4'
+                                    }]}>
+                                        <MaterialCommunityIcons
+                                            name={item.type === 'Video' ? "file-video-outline" : item.type === 'PDF' ? "file-pdf-box" : "file-document-outline"}
+                                            size={24}
+                                            color={item.type === 'Video' ? "#EF4444" : item.type === 'PDF' ? "#3B82F6" : "#10B981"}
+                                        />
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.fileName}>{item.title}</Text>
+                                        <Text style={styles.fileMeta}>{item.type} • {item.category} • {new Date(item.timestamp).toLocaleDateString()}</Text>
+                                    </View>
+                                    <Feather name="download" size={20} color="#9CA3AF" />
+                                </View>
+                            ))
+                        )
+                    )}
                 </View>
 
             </ScrollView>
