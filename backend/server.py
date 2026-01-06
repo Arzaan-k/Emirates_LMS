@@ -39,6 +39,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- FFMPEG FIX FOR WHISPER ---
+# Whisper requires 'ffmpeg' to be in the PATH. MoviePy finds it via imageio, but Whisper doesn't.
+try:
+    import imageio_ffmpeg
+    ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+    ffmpeg_dir = os.path.dirname(ffmpeg_path)
+    if ffmpeg_dir not in os.environ["PATH"]:
+        os.environ["PATH"] += os.pathsep + ffmpeg_dir
+    logger.info(f"FFmpeg Path configured for Whisper: {ffmpeg_dir}")
+except Exception as e:
+    logger.warning(f"Could not configuring FFmpeg for Whisper automatically: {e}")
+
 # --- STATIC FILES ---
 # Ensure uploads directory exists
 UPLOAD_DIR = "uploads"
