@@ -21,12 +21,50 @@ BASE_URL = f"http://192.168.0.136:{PORT}" # UPDATE THIS IP IF IT CHANGES
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("BW_LMS_Backend")
 
+# --- ELEVENLABS CONFIG ---
+ELEVENLABS_API_KEY = "sk_6ecd572e870639a9cb94b52be1b37f7d093d2857734c5a5a"
+VOICE_ID = "Y6nOpHQlW4lnf9GRRc8f" # Best emotive Hindi voice
+
+def generate_elevenlabs_audio(text):
+    """Generates audio from text using ElevenLabs API and returns Base64 string."""
+    try:
+        import requests
+        import base64
+        
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}"
+        headers = {
+            "xi-api-key": ELEVENLABS_API_KEY,
+            "Content-Type": "application/json"
+        }
+        data = {
+            "text": text,
+            "model_id": "eleven_multilingual_v2",
+            "voice_settings": {
+                "stability": 0.4,
+                "similarity_boost": 0.8,
+                "style": 0.6,
+                "use_speaker_boost": True
+            }
+        }
+        
+        response = requests.post(url, json=data, headers=headers)
+        
+        if response.status_code == 200:
+            return base64.b64encode(response.content).decode('utf-8')
+        else:
+            logger.error(f"ElevenLabs Error: {response.status_code} - {response.text}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"TTS Generation Error: {e}")
+        return None
+
 # --- LOAD AI MODELS ---
 import whisper
 logger.info("Loading OpenAI Whisper Model...")
 # Run on CPU
-whisper_model = whisper.load_model("base")
-logger.info("OpenAI Whisper Model Loaded.")
+whisper_model = whisper.load_model("small")
+logger.info("OpenAI Whisper Model Loaded (Small).")
 
 # --- APP SETUP ---
 app = FastAPI(title="BW LMS Realtime Backend")
@@ -141,6 +179,119 @@ async def create_category(name: str = Form(...), icon: str = Form(...), color1: 
 async def get_resources():
     return resource_store
 
+# --- AI PROCESSING HELPER ---
+async def process_video_content(file_path: str, filename: str):
+    """
+    Handles video trimming, audio extraction, Whisper transcription, and Groq Quiz generation.
+    Returns dictionary with transcript and quiz_data.
+    """
+    print(f"--- [DEBUG] Starting process_video_content for {filename} ---")
+    transcript_text = "Transcription Unavailable"
+    quiz_data = []
+    
+    try:
+        from moviepy.editor import VideoFileClip
+        import shutil
+        
+        # 1. TRIM VIDEO (Max 30s)
+        print(f"--- [DEBUG] Loading video clip... {file_path}")
+        clip = VideoFileClip(file_path)
+        print(f"--- [DEBUG] Clip duration: {clip.duration}")
+        if clip.duration > 30:
+            logger.info(f"Video is too long ({clip.duration}s). Trimming to 30s...")
+            trimmed_path = f"{os.path.dirname(file_path)}/trimmed_{filename}"
+            trimmed_clip = clip.subclip(0, 30)
+            trimmed_clip.write_videofile(trimmed_path, codec="libx264", audio_codec="aac", logger=None)
+            clip.close()
+            trimmed_clip.close()
+            
+            # Replace original with trimmed
+            os.remove(file_path)
+            os.rename(trimmed_path, file_path)
+            logger.info("Video trimmed successfully.")
+        else:
+            clip.close()
+            
+        # 2. TRANSCRIBE (OpenAI Whisper)
+        logger.info("Starting AI Processing...")
+        # Use simple path construction to avoid path issues
+        audio_path = f"{os.path.dirname(file_path)}/{filename}_audio.mp3"
+        print(f"--- [DEBUG] Extracting audio to {audio_path}")
+        video = VideoFileClip(file_path)
+        
+        if video.audio:
+            video.audio.write_audiofile(audio_path, logger=None)
+            video.close()
+            
+            logger.info("Transcribing with OpenAI Whisper...")
+            print("--- [DEBUG] Running Whisper...")
+            # Run in thread to avoid blocking event loop
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, whisper_model.transcribe, audio_path)
+            transcript_text = result["text"]
+            logger.info(f"Transcript Generated: {transcript_text[:50]}...")
+            print(f"--- [DEBUG] Transcript: {transcript_text[:50]}...")
+            
+            if os.path.exists(audio_path):
+                try:
+                    os.remove(audio_path)
+                except:
+                    pass
+        else:
+            logger.warning("Video has no audio track. Skipping transcription.")
+            print("--- [DEBUG] No audio track found.")
+            video.close()
+            return {"transcript": transcript_text, "quiz": quiz_data} # Exit early if no audio
+
+        # 3. GENERATE QUIZ (Groq)
+        print("--- [DEBUG] Generating Quiz with Groq...")
+        from groq import Groq
+        groq_client = Groq(api_key="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") 
+        
+        prompt = f"""
+        Based on this training video transcript, generate 3 multiple-choice quiz questions.
+        Format purely as a JSON array of objects with keys: 'question', 'options' (array of 4 strings), 'correctIndex' (0-3).
+        
+        Transcript: "{transcript_text}"
+        """
+        
+        completion = await loop.run_in_executor(None, lambda: groq_client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama-3.3-70b-versatile",
+            response_format={"type": "json_object"},
+            temperature=0.5
+        ))
+        
+        # Parse JSON
+        try:
+            content = completion.choices[0].message.content
+            print(f"--- [DEBUG] Groq Raw Response: {content}")
+            raw_json = json.loads(content)
+            if "questions" in raw_json:
+                quiz_data = raw_json["questions"]
+            elif isinstance(raw_json, list):
+                quiz_data = raw_json
+            else:
+                # Try finding value that is a list
+                for val in raw_json.values():
+                    if isinstance(val, list):
+                        quiz_data = val
+                        break
+                        
+            logger.info(f"Quiz Generated: {len(quiz_data)} questions")
+        except Exception as json_err:
+            logger.error(f"Quiz JSON Parse Error: {json_err}")
+            print(f"--- [DEBUG] Quiz JSON Error: {json_err}")
+            
+    except Exception as e:
+        import traceback
+        logger.error(f"AI Processing Error: {e}")
+        logger.error(traceback.format_exc())
+        print(f"--- [DEBUG] AI Error: {e}")
+        print(traceback.format_exc())
+        
+    return {"transcript": transcript_text, "quiz": quiz_data}
+
 @app.post("/resources/upload")
 async def upload_resource(
     title: str = Form(...),
@@ -149,6 +300,7 @@ async def upload_resource(
     isPathNode: bool = Form(False), # New param
     file: UploadFile = File(...)
 ):
+    print(f"--- [DEBUG] Upload Request: Title={title}, IsPathNode={isPathNode}, File={file.filename} ---")
     # Save file
     file_id = str(uuid.uuid4())
     filename = f"{file_id}_{file.filename}"
@@ -167,6 +319,8 @@ async def upload_resource(
     elif "image" in content_type: res_type = "Image"
     elif "sheet" in content_type or "excel" in content_type: res_type = "Excel"
     
+    print(f"--- [DEBUG] File saved to {file_path}, Type={res_type}")
+    
     new_resource = {
         "id": file_id,
         "title": title,
@@ -180,7 +334,22 @@ async def upload_resource(
     resource_store.append(new_resource)
     
     # [LOGIC] Optional: Add to Learning Path
+    # [LOGIC] Optional: Add to Learning Path
     if isPathNode:
+        print("--- [DEBUG] Processing Path Node...")
+        transcript = None
+        quiz = None
+        
+        # AI Processing for Videos
+        if res_type == "Video":
+            print("--- [DEBUG] Video detected, calling process_video_content...")
+            ai_result = await process_video_content(file_path, filename)
+            transcript = ai_result["transcript"]
+            quiz = ai_result["quiz"]
+            print(f"--- [DEBUG] AI Result: Transcript Len={len(transcript) if transcript else 0}, Quiz Len={len(quiz) if quiz else 0}")
+        else:
+            print(f"--- [DEBUG] Not a video (Type: {res_type}), skipping AI.")
+
         # Create ContentItem for Path
         path_item = {
             "id": file_id,
@@ -192,10 +361,21 @@ async def upload_resource(
             "isPathNode": True,
             "skippable": False,
             "xp": 50,
-            "transcript": None,
-            "quiz": None
+            "transcript": transcript,
+            "quiz": quiz
         }
-        content_store.append(path_item)
+        # Add to top of store
+        content_store.insert(0, path_item)
+        print(f"--- [DEBUG] Added to content_store. New Len: {len(content_store)}")
+        
+        # Broadcast update
+        await manager.broadcast({
+            "type": "NEW_CONTENT", # Use consistent type for listeners
+            "data": path_item
+        })
+        print("--- [DEBUG] Broadcast sent.")
+    else:
+        print("--- [DEBUG] isPathNode is FALSE")
     
     return {"status": "success", "resource": new_resource}
 
@@ -255,97 +435,10 @@ async def upload_content(
     with open(file_location, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
-    transcript_text = "Transcription Unavailable"
-    quiz_data = []
-
-    # --- AUTO-CROP LOGIC (Max 30s) ---
-    try:
-        from moviepy.editor import VideoFileClip
-        clip = VideoFileClip(file_location)
-        if clip.duration > 30:
-            logger.info(f"Video is too long ({clip.duration}s). Trimming to 30s...")
-            trimmed_clip = clip.subclip(0, 30)
-            temp_output = f"{UPLOAD_DIR}/trimmed_{file.filename}"
-            trimmed_clip.write_videofile(temp_output, codec="libx264", audio_codec="aac", logger=None)
-            clip.close()
-            trimmed_clip.close()
-            os.remove(file_location)
-            os.rename(temp_output, file_location)
-            logger.info("Video trimmed successfully.")
-        else:
-            clip.close()
-            
-        # --- AI PROCESSING (Transcribe & Quiz) ---
-        logger.info("Starting AI Processing...")
-        
-        # 1. Extract Audio
-        audio_path = f"{UPLOAD_DIR}/{file.filename}_audio.mp3"
-        video = VideoFileClip(file_location)
-        
-        if video.audio:
-            video.audio.write_audiofile(audio_path, logger=None)
-            video.close()
-            
-            # 2. Transcribe with OpenAI Whisper
-            logger.info("Transcribing with OpenAI Whisper...")
-            result = whisper_model.transcribe(audio_path)
-            transcript_text = result["text"]
-            logger.info(f"Transcript Generated: {transcript_text[:50]}...")
-            
-            # Cleanup Audio
-            if os.path.exists(audio_path):
-                os.remove(audio_path)
-        else:
-            logger.warning("Video has no audio track. Skipping transcription.")
-            video.close()
-        
-            
-        # 3. Generate Quiz with Groq (Llama 3)
-        from groq import Groq
-        # Fixed Key (New User Key)
-        groq_client = Groq(api_key="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") 
-        
-        # ... (Rest of Quiz Logic)
-        prompt = f"""
-        Based on this training video transcript, generate 3 multiple-choice quiz questions.
-        Format purely as a JSON array of objects with keys: 'question', 'options' (array of 4 strings), 'correctIndex' (0-3).
-        
-        Transcript: "{transcript_text}"
-        """
-        
-        completion = groq_client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            model="llama-3.3-70b-versatile",
-            response_format={"type": "json_object"},
-            temperature=0.5
-        )
-        
-        # Parse JSON from response
-        try:
-             # Flexible parsing if model wraps in key
-            raw_json = json.loads(completion.choices[0].message.content)
-            if "questions" in raw_json:
-                quiz_data = raw_json["questions"]
-            elif isinstance(raw_json, list):
-                quiz_data = raw_json
-            else:
-                 # Last ditch effort if wrapped in another key
-                quiz_data = list(raw_json.values())[0]
-                
-            logger.info(f"Quiz Generated: {len(quiz_data)} questions")
-        except Exception as json_err:
-            logger.error(f"Quiz JSON Parse Error: {json_err}")
-
-    except Exception as e:
-        import traceback
-        error_msg = traceback.format_exc()
-        logger.error(f"Error processing AI tasks: {e}")
-        logger.error(error_msg)
-        with open("server_error.log", "a") as f:
-            f.write(f"\n--- Error at {datetime.now()} ---\n")
-            f.write(error_msg)
-            f.write("\n----------------------------\n")
-        # Proceed even if AI fails
+    # --- AI PROCESSING (Transcribe & Quiz) ---
+    ai_result = await process_video_content(file_location, file.filename)
+    transcript_text = ai_result["transcript"]
+    quiz_data = ai_result["quiz"]
     
     # 2. Generate Public URL
     video_url = f"{BASE_URL}/uploads/{file.filename}"
@@ -406,31 +499,64 @@ async def delete_content(item_id: str):
     
     raise HTTPException(status_code=404, detail="Content not found")
 
-@app.post("/notify")
-async def send_notification(payload: dict):
+@app.post("/notifications/send") # Renamed/Updated to match ManagerDashboard call which was trying /notifications/send but server had /notify? No, ManagerDashboard calls /notifications/send in one place and /notify in another. Let's standardize to /notify, but ManagerDashboard uses /notifications/send. I will use /notify and update ManagerDashboard to match OR assume ManagerDashboard was wrong.
+# Actually, I'll stick to replacing the existing /notify and ensure ManagerDashboard uses it.
+# Wait, let's check ManagerDashboard again. It calls: fetched `${API_URL}/notifications/send` in handleSendNotification.
+# But server.py had `@app.post("/notify")`. This means the current code in ManagerDashboard MIGHT BE BROKEN or I missed where /notifications/send is defined.
+# I will define this as `@app.post("/notifications/send")` to match ManagerDashboard's expectation and support uploads.
+
+async def send_notification(
+    title: str = Form(...),
+    message: str = Form(...),
+    type: str = Form("info"),
+    file: Optional[UploadFile] = File(None)
+):
     """
     Broadcasts a system-wide notification AND stores it.
+    Supports optional media attachment (Image/Video).
     """
     import uuid
     from datetime import datetime
     
-    # 1. Create Notification Object
+    # 1. Handle Media Upload
+    media_url = None
+    media_type = None
+    
+    if file:
+        file_id = str(uuid.uuid4())
+        ext = file.filename.split('.')[-1]
+        filename = f"notif_{file_id}.{ext}"
+        file_path = os.path.join(UPLOAD_DIR, filename)
+        
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        media_url = f"{BASE_URL}/uploads/{filename}"
+        if "video" in file.content_type:
+            media_type = "video"
+        elif "image" in file.content_type:
+            media_type = "image"
+        else:
+            media_type = "file"
+
+    # 2. Create Notification Object
     notif_id = str(uuid.uuid4())
     notification_data = {
         "id": notif_id,
-        "title": payload.get("title", "Notification"),
-        "message": payload.get("message", ""),
-        "type": payload.get("type", "info"),
-        "data": payload.get("data", {}),
+        "title": title,
+        "message": message,
+        "type": type,
+        "mediaUrl": media_url,
+        "mediaType": media_type,
         "created_at": datetime.now().isoformat(),
-        "read_by": [] # List of user IDs who read it
+        "read_by": [] 
     }
     
-    # 2. Store in Memory
+    # 3. Store in Memory
     notification_store.insert(0, notification_data)
     
-    # 3. Broadcast
-    logger.info(f"Broadcasting Notification: {payload}")
+    # 4. Broadcast
+    logger.info(f"Broadcasting Notification: {title}")
     await manager.broadcast({
         "type": "NOTIFICATION",
         "data": notification_data
@@ -785,17 +911,24 @@ async def process_roleplay_logic(user_text: str, history: List[dict]):
         groq_client = Groq(api_key="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")
         
         system_prompt = """
-        You are an Indian customer calling customer support. The user is the support agent.
+        You are an angry Indian customer at 'The Belgian Waffle Co.'.
+        The user is the store manager or support agent.
+
+        CONTEXT:
+        - You ordered a 'Triple Chocolate Waffle' 45 minutes ago via Swiggy/Zomato.
+        - The delivery is late, and when it arrived, the waffle was COLD and SOGGY.
+        - You are very frustrated and hungry.
         
         TASK:
         1.  Analyze the User's response for empathy, politeness, and problem solving.
         2.  Generate a Score (0-100) based on their performance.
         3.  Provide a short, constructive TIP on how they could improve (max 10 words).
-        4.  Continue the roleplay conversation as the customer. Speak naturally in Hinglish.
+        4.  Continue the roleplay conversation as the customer. Speak naturally in Hinglish (Hindi + English mix).
+        5.  Be dramatic but realistic. If they apologize well, calm down slightly. If they are rude, get angrier.
         
         OUTPUT FORMAT (JSON ONLY):
         {
-            "customer_response": "Arre why are you late? ...",
+            "customer_response": "Arre bhai, kya mazaak hai? ...",
             "mood_score": 20,
             "user_score": 75,
             "improvement_tip": "Be more apologetic."
@@ -805,11 +938,100 @@ async def process_roleplay_logic(user_text: str, history: List[dict]):
         messages = [{"role": "system", "content": system_prompt}]
         for msg in history[-5:]: # Context
             # Filter only text content for simplicity in prompt context
-             messages.append({"role": "user" if msg['sender'] == 'user' else "assistant", "content": msg['text']})
+             messages.append({"role": "user" if msg.get('sender', 'ai') == 'user' else "assistant", "content": msg.get('text', '')})
              
         messages.append({"role": "user", "content": user_text})
 
         logger.info("Sending request to Groq...")
+        
+        completion = groq_client.chat.completions.create(
+            messages=messages,
+            model="llama-3.3-70b-versatile",
+            temperature=0.7,
+            max_tokens=300,
+            response_format={"type": "json_object"}
+        )
+
+        response_content = completion.choices[0].message.content
+        logger.info(f"Groq Response: {response_content}")
+        
+        result_json = json.loads(response_content)
+        
+        # 2. GENERATE AUDIO (ElevenLabs)
+        if "customer_response" in result_json:
+            audio_b64 = generate_elevenlabs_audio(result_json["customer_response"])
+            result_json["audio_base64"] = audio_b64
+            
+        return result_json
+
+    except Exception as e:
+        logger.error(f"Roleplay Logic Error: {e}")
+        return {
+            "customer_response": "Check internet connection...",
+            "mood_score": 0,
+            "user_score": 0,
+            "improvement_tip": "Error"
+        }
+
+# --- VOICE CHAT ENDPOINT ---
+@app.post("/ai/voice_query")
+async def voice_query(file: UploadFile = File(...)):
+    """
+    Receives audio blob, Transcribes (Whisper) -> Answers (Groq).
+    """
+    try:
+        # 1. SAVE TEMP AUDIO
+        unique_id = str(uuid.uuid4())
+        audio_path = f"{UPLOAD_DIR}/voice_query_{unique_id}.m4a" # Assuming m4a from client
+        with open(audio_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        # 2. TRANSCRIBE (Whisper)
+        logger.info(f"Transcribing voice query: {audio_path}")
+        # Added prompt for Hinglish context
+        result = whisper_model.transcribe(audio_path, initial_prompt="Hindi code-switching, restaurant operations context.") 
+        transcript = result["text"]
+        logger.info(f"User Query: {transcript}")
+        
+        # Clean up
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+            
+        # 3. GENERATE ANSWER (Groq)
+        if not transcript.strip():
+             return {"user_text": "", "ai_response": "I couldn't hear you. Please try again."}
+
+        from groq import Groq
+        groq_client = Groq(api_key="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")
+        
+        system_prompt = """
+        You are the 'Belgian Waffle Co. AI Assistant'. 
+        Your goal is to help Store Managers with RECIPES, SOPs, and OPERATIONS.
+        Keep answers CONCISE (max 2 sentences) and helpful. 
+        If asked about waffles, mention 'Crispy & Golden'.
+        """
+        
+        completion = groq_client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": transcript}
+            ],
+            model="llama-3.3-70b-versatile",
+            temperature=0.7,
+            max_tokens=150
+        )
+        
+        ai_response = completion.choices[0].message.content
+        
+        return {
+            "status": "success",
+            "user_text": transcript,
+            "ai_response": ai_response
+        }
+
+    except Exception as e:
+        logger.error(f"Voice Query Error: {e}")
+        return {"status": "error", "message": str(e)}
         
         # Enforce JSON mode
         completion = groq_client.chat.completions.create(
@@ -890,10 +1112,9 @@ async def start_roleplay_endpoint(request: StartRequest):
     logger.info(f"--- START SIMULATION ({request.scenario_id}) ---")
     
     scenarios = {
-        "angry": {"prompt": "You are ANGRY because your food arrived cold. Start the partial conversation complaining loudly in Hinglish.", "mood": 20},
-        "happy": {"prompt": "You are HAPPY because the service was super fast. Start by praising the agent in Hinglish.", "mood": 90},
-        "confused": {"prompt": "You are CONFUSED about a charge on your bill. Start by asking politely but worriedly in Hinglish.", "mood": 50},
-        "default": {"prompt": "You are a customer calling support. Start with a generic issue.", "mood": 50}
+        "late_order": {"prompt": "Start by complaining loudly in Hinglish about your late waffle order.", "mood": 20},
+        "wrong_item": {"prompt": "Start by saying you received a plain waffle instead of chocolate. Be annoyed.", "mood": 30},
+        "default": {"prompt": "Start by complaining about cold waffles delivered late.", "mood": 20}
     }
     
     scenario = scenarios.get(request.scenario_id, scenarios["default"])
@@ -912,15 +1133,22 @@ async def roleplay_endpoint(request: RoleplayRequest):
 async def roleplay_voice_endpoint(file: UploadFile = File(...), history: str = Form("[]")):
     logger.info(f"--- VOICE RQ ---")
     
-    # 1. SAVE TEMP FILE
+        # 1. SAVE TEMP FILE
     temp_filename = f"temp_{uuid.uuid4()}.m4a"
     try:
         with open(temp_filename, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
-        # 2. TRANSCRIBE (WHISPER)
-        segments, info = whisper_model.transcribe(temp_filename, beam_size=5, language="en")
-        user_text = "".join([s.text for s in segments]).strip()
+        file_size = os.path.getsize(temp_filename)
+        logger.info(f"Received Audio File: {temp_filename}, Size: {file_size} bytes")
+
+        # 2. TRANSCRIBE (WHISPER - OpenAI Version)
+        # OpenAI Whisper returns a dict -> result["text"]
+        # Added prompt for Hinglish context
+        result = whisper_model.transcribe(temp_filename, initial_prompt="Conversation in Hindi and English about food delivery and customer complaints.") 
+        user_text = result["text"].strip()
+        logger.info(f"Whisper Result Keys: {result.keys()}")
+        logger.info(f"Detected Language: {result.get('language')}")
         logger.info(f"Transcribed: {user_text}")
         
         # Cleanup

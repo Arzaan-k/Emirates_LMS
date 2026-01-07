@@ -13,13 +13,21 @@ import {
   ImageBackground,
   Modal,
 } from "react-native";
-import { Video, ResizeMode } from 'expo-av'; // IMPORTED
+import { Video, ResizeMode } from 'expo-av';
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { BlurView } from "expo-blur";
 import { Feather, Octicons, Ionicons, MaterialIcons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Animated, { FadeInDown, FadeInRight } from "react-native-reanimated";
+import Animated, {
+  FadeInDown,
+  FadeInRight,
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withTiming,
+  Easing
+} from "react-native-reanimated";
 import QuizScreen from '../Screens/QuizScreen';
 
 // Import Screens
@@ -38,7 +46,32 @@ import { useNavigation } from "@react-navigation/native";
 import { useLanguage } from "../context/language.context";
 import API_URL from "../config";
 
-// --- NEW: NOTIFICATIONS MODAL ---
+const { width, height } = Dimensions.get('window');
+
+// --- PREMIUM ACCENT: FLOATING WAFFLE ---
+const FloatingWaffle = ({ delay, duration, size, top, left, rotate }) => {
+  const translateY = useSharedValue(0);
+
+  useEffect(() => {
+    translateY.value = withRepeat(
+      withTiming(20, { duration: duration, easing: Easing.inOut(Easing.ease) }),
+      -1,
+      true
+    );
+  }, []);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }, { rotate: rotate }]
+  }));
+
+  return (
+    <Animated.View style={[{ position: 'absolute', top, left, opacity: 0.1 }, animatedStyle]}>
+      <MaterialCommunityIcons name="grid" size={size} color="#D97706" />
+    </Animated.View>
+  );
+};
+
+// --- NEW: NOTIFICATIONS LIST MODAL ---
 function NotificationsModal({ visible, notifications, onClose, onAction }) {
   if (!visible) return null;
 
@@ -68,26 +101,74 @@ function NotificationsModal({ visible, notifications, onClose, onAction }) {
                   onPress={() => onAction(notif)}
                   activeOpacity={0.7}
                 >
-                  <View style={[styles.notifIconBox, { backgroundColor: notif.type === 'quiz' ? '#F59E0B' : '#3B82F6' }]}>
+                  <View style={[styles.notifIconBox, { backgroundColor: notif.type === 'quiz' ? '#F59E0B' : (notif.type === 'crucial' ? '#EF4444' : '#3B82F6') }]}>
                     <MaterialCommunityIcons
-                      name={notif.type === 'quiz' ? 'school' : (notif.type === 'proctored' ? 'shield-lock' : 'bell')}
+                      name={notif.type === 'quiz' ? 'school' : (notif.type === 'proctored' ? 'shield-lock' : (notif.mediaUrl ? 'paperclip' : 'bell'))}
                       size={20}
                       color="#FFF"
                     />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.notifItemTitle}>{notif.title}</Text>
-                    <Text style={styles.notifItemMsg} numberOfLines={2}>{notif.message}</Text>
+                    <Text style={styles.notifItemMsg} numberOfLines={2}>
+                      {notif.mediaUrl && "📎 "}{notif.message}
+                    </Text>
                     <Text style={styles.notifTime}>{new Date(notif.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
                   </View>
-                  {notif.data && (
-                    <Feather name="chevron-right" size={16} color="rgba(255,255,255,0.3)" />
-                  )}
+                  <Feather name="chevron-right" size={16} color="rgba(255,255,255,0.3)" />
                 </TouchableOpacity>
               ))
             )}
           </ScrollView>
         </View>
+      </View>
+    </Modal>
+  );
+}
+
+// --- NEW: NOTIFICATION DETAIL MODAL ---
+function NotificationDetailModal({ visible, notification, onClose }) {
+  if (!visible || !notification) return null;
+
+  const isVideo = notification.mediaType === 'video';
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+      <View style={styles.detailModalContainer}>
+        {/* CLOSE BUTTON */}
+        <TouchableOpacity style={styles.closeDetailBtn} onPress={onClose}>
+          <Feather name="x" size={24} color="#FFF" />
+        </TouchableOpacity>
+
+        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 50 }}>
+          {/* MEDIA */}
+          {notification.mediaUrl && (
+            <View style={styles.mediaContainer}>
+              {isVideo ? (
+                <Video
+                  source={{ uri: notification.mediaUrl }}
+                  style={{ width: '100%', height: 250, borderRadius: 16 }}
+                  useNativeControls
+                  resizeMode={ResizeMode.CONTAIN}
+                  shouldPlay
+                />
+              ) : (
+                <Image
+                  source={{ uri: notification.mediaUrl }}
+                  style={{ width: '100%', height: 300, borderRadius: 16 }}
+                  resizeMode="contain"
+                />
+              )}
+            </View>
+          )}
+
+          <Text style={styles.detailTitle}>{notification.title}</Text>
+          <Text style={styles.detailTime}>{new Date(notification.created_at).toLocaleString()}</Text>
+
+          <View style={styles.detailDivider} />
+
+          <Text style={styles.detailMessage}>{notification.message}</Text>
+        </ScrollView>
       </View>
     </Modal>
   );
@@ -323,16 +404,16 @@ function ProctoredFeedSection({ data, onStart }) {
 // --- NEW: CRUCIAL NOTIFICATION COMPONENT ---
 function CrucialNotificationModal({ notification, onAcknowledge }) {
   const [shake, setShake] = useState(0);
+  const [isChecked, setIsChecked] = useState(false); // [NEW]
 
   if (!notification) return null;
 
   const handlePressOutside = () => {
-    // Shake effect logic (simplified for React Native)
     setShake(prev => prev + 1);
   };
 
   const animatedStyle = {
-    transform: [{ translateX: shake % 2 === 0 ? 0 : 10 }] // Simple toggle for now, ideally use reanimated
+    transform: [{ translateX: shake % 2 === 0 ? 0 : 10 }]
   };
 
   return (
@@ -350,9 +431,25 @@ function CrucialNotificationModal({ notification, onAcknowledge }) {
 
             <View style={styles.crucialDivider} />
 
-            <TouchableOpacity style={styles.crucialAckBtn} onPress={() => onAcknowledge(notification.id)}>
-              <Text style={styles.crucialAckText}>I Have Read This</Text>
-              <Feather name="check-circle" size={18} color="#FFF" />
+            {/* CHECKBOX */}
+            <TouchableOpacity
+              style={styles.crucialCheckboxRow}
+              onPress={() => setIsChecked(!isChecked)}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.crucialCheckbox, isChecked && styles.crucialCheckboxChecked]}>
+                {isChecked && <Feather name="check" size={14} color="#FFF" />}
+              </View>
+              <Text style={styles.crucialCheckboxText}>I have read it entirely</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.crucialAckBtn, !isChecked && { opacity: 0.5, backgroundColor: '#4B5563' }]}
+              onPress={() => isChecked && onAcknowledge(notification.id)}
+              disabled={!isChecked}
+            >
+              <Text style={styles.crucialAckText}>{isChecked ? "Acknowledge" : "Read Above First"}</Text>
+              {isChecked && <Feather name="check-circle" size={18} color="#FFF" />}
             </TouchableOpacity>
 
             {shake > 0 && (
@@ -505,6 +602,8 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   }, []);
 
 
+  const [selectedNotification, setSelectedNotification] = useState(null); // [NEW]
+
   const handleNotificationAction = (notif) => {
     setShowNotifications(false);
     if (notif.type === 'quiz' && notif.data) {
@@ -514,8 +613,10 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
         assessmentData: notif.data,
         userProfile: { role: 'User' }
       });
+    } else {
+      // Open Detail Modal for generic/media notifications
+      setSelectedNotification(notif);
     }
-    // Simple info notifications might just close the modal
   };
 
   return (
@@ -575,6 +676,8 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
                 assessmentData: notification.data,
                 userProfile: { role: 'User' } // Default to user role for taker
               });
+            } else {
+              setSelectedNotification(notification);
             }
           }}
         />
@@ -610,6 +713,13 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
         onClose={() => setShowNotifications(false)}
         onAction={handleNotificationAction}
       />
+
+      {/* NOTIFICATION DETAIL MODAL */}
+      <NotificationDetailModal
+        visible={!!selectedNotification}
+        notification={selectedNotification}
+        onClose={() => setSelectedNotification(null)}
+      />
     </View>
   )
 }
@@ -617,7 +727,6 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
 
 
 const Tab = createBottomTabNavigator();
-const { width } = Dimensions.get("window");
 
 // CONSTANTS
 
@@ -943,11 +1052,25 @@ function NotificationToast({ message, type, visible, navigation, targetScreen, o
 
 // MAIN LAYOUT
 export default function Home() {
+  const insets = useSafeAreaInsets();
   const [activeTool, setActiveTool] = useState(null);
   const [showTwin, setShowTwin] = useState(false); // New Twin State
 
   return (
     <View style={{ flex: 1 }}>
+      {/* 1. PREMIUM BACKGROUND */}
+      <LinearGradient
+        colors={['#FFFBEB', '#FEF3C7', '#FCD34D']} // Cream -> Amber Gradient
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
+
+      {/* 2. FLOATING ACCENTS */}
+      <FloatingWaffle delay={0} duration={8000} size={150} top={-20} left={-40} rotate="15deg" />
+      <FloatingWaffle delay={1000} duration={9000} size={100} top={height * 0.4} left={width - 60} rotate="-10deg" />
+      <FloatingWaffle delay={2000} duration={10000} size={180} top={height * 0.8} left={-50} rotate="30deg" />
+
       {/* TWIN OVERLAY */}
       {showTwin && (
         <View style={{ flex: 1, zIndex: 99999, backgroundColor: '#000' }}>
@@ -966,6 +1089,7 @@ export default function Home() {
 
       {!activeTool && !showTwin && (
         <Tab.Navigator
+          sceneContainerStyle={{ backgroundColor: 'transparent' }} // ENSURE TRANSPARENCY
           screenOptions={({ route }) => ({
             headerShown: false,
             tabBarShowLabel: false,
@@ -987,22 +1111,19 @@ export default function Home() {
               return (
                 <View style={[styles.tabIconContainer, focused && styles.activeTabIcon]}>
                   <View style={[styles.iconWrapper, focused && styles.activeIconWrapper]}>
-                    <IconComp name={iconName} size={24} color={focused ? "#FFF" : "#94A3B8"} />
+                    <IconComp name={iconName} size={24} color={focused ? "#FFF" : "#64748B"} />
                   </View>
                 </View>
               );
             },
-            tabBarStyle: styles.tabBar,
+            tabBarStyle: [styles.tabBar, { bottom: 20 + insets.bottom, height: 75 }],
             tabBarBackground: () => (
-              <View style={{ flex: 1, borderRadius: 40, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', backgroundColor: 'transparent' }}>
-                <BlurView intensity={70} tint="light" style={StyleSheet.absoluteFill} />
+              <BlurView intensity={50} tint="light" style={[StyleSheet.absoluteFill, { borderRadius: 40, overflow: 'hidden' }]}>
                 <LinearGradient
-                  colors={['rgba(255,255,255,0.5)', 'rgba(255,255,255,0.1)']}
+                  colors={['rgba(255,255,255,0.8)', 'rgba(255,255,255,0.4)']}
                   style={StyleSheet.absoluteFill}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 0, y: 1 }}
                 />
-              </View>
+              </BlurView>
             ),
           })}
         >
@@ -1019,191 +1140,198 @@ export default function Home() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F8FAFC" },
-  decorCircle: {
-    position: 'absolute',
-    top: -150,
-    right: -100,
-    width: 400,
-    height: 400,
-    borderRadius: 200,
-    backgroundColor: 'rgba(245, 158, 11, 0.05)',
-  },
+  container: { flex: 1 }, // Transparent container for gradient
+  decorCircle: { display: 'none' }, // Removed old decor
 
   // HEADER
   headerContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingBottom: 10 },
   greetingText: { fontSize: 14, fontFamily: "Poppins_400Regular", color: "#64748B" },
-  nameText: { fontSize: 24, fontFamily: "Poppins_700Bold", color: "#0F172A" },
+  nameText: { fontSize: 24, fontFamily: "Poppins_700Bold", color: "#1E293B" },
   headerRight: { flexDirection: 'row', alignItems: 'center' },
-  streakPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF7ED', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, marginRight: 12 },
-  streakText: { fontFamily: "Poppins_700Bold", color: "#F59E0B", marginLeft: 4 },
-  iconBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#FFF", justifyContent: 'center', alignItems: 'center', marginRight: 12, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
-  dotBadage: { position: 'absolute', top: 10, right: 12, width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444', borderWidth: 1, borderColor: '#FFF' },
+  streakPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.6)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, marginRight: 12, borderWidth: 1, borderColor: '#FFF' },
+  streakText: { fontFamily: "Poppins_700Bold", color: "#D97706", marginLeft: 4 },
+  iconBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.6)', justifyContent: 'center', alignItems: 'center', marginRight: 12, borderWidth: 1, borderColor: '#FFF' },
+  dotBadage: { position: 'absolute', top: 10, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444', borderWidth: 1, borderColor: '#FFF' },
   profileBtn: { shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 4 },
   profileImage: { width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: '#FFF' },
 
   // SEARCH
-  searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', marginHorizontal: 24, paddingHorizontal: 16, height: 52, borderRadius: 16, marginBottom: 20, shadowColor: "#64748B", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 3 },
+  searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.7)', marginHorizontal: 24, paddingHorizontal: 16, height: 52, borderRadius: 16, marginBottom: 20, borderWidth: 1, borderColor: '#FFF', shadowColor: "#D97706", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10 },
   searchIcon: { marginRight: 12 },
   searchInput: { flex: 1, fontFamily: "Poppins_400Regular", fontSize: 14, color: "#1E293B" },
-  micBtn: { padding: 8, backgroundColor: "#EEF2FF", borderRadius: 10 },
+  micBtn: { padding: 8, backgroundColor: "rgba(255,247,237, 0.8)", borderRadius: 10 },
 
   // TWIN CARD
   twinContainer: { paddingHorizontal: 24, marginBottom: 24 },
-  twinCard: { height: 180, borderRadius: 24, backgroundColor: "#000", shadowColor: "#F59E0B", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 15, elevation: 10 },
-  twinBg: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#000', borderRadius: 24 },
-  twinGradient: { padding: 20, borderRadius: 24 },
-  twinBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F59E0B', alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, marginBottom: 8 },
+  twinCard: { height: 200, borderRadius: 28, overflow: 'hidden', shadowColor: "#F59E0B", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.25, shadowRadius: 15, elevation: 10 },
+  twinBg: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#000' },
+  twinGradient: { padding: 24, paddingBottom: 20 },
+  twinBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F59E0B', alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, marginBottom: 10 },
   twinBadgeText: { color: "#FFF", fontSize: 10, fontFamily: "Poppins_700Bold", letterSpacing: 1 },
-  twinTitle: { color: "#FFF", fontSize: 22, fontFamily: "Poppins_700Bold", marginBottom: 4 },
-  twinDesc: { color: "rgba(255,255,255,0.8)", fontSize: 12, fontFamily: "Poppins_400Regular", marginBottom: 12 },
-  twinBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', alignSelf: 'flex-start', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 12 },
-  twinBtnText: { fontFamily: "Poppins_700Bold", color: "#000", marginRight: 8, fontSize: 12 },
+  twinTitle: { color: "#FFF", fontSize: 24, fontFamily: "Poppins_700Bold", marginBottom: 6, textShadowColor: 'rgba(0,0,0,0.3)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 4 },
+  twinDesc: { color: "rgba(255,255,255,0.9)", fontSize: 13, fontFamily: "Poppins_400Regular", marginBottom: 16 },
+  twinBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', alignSelf: 'flex-start', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 14 },
+  twinBtnText: { fontFamily: "Poppins_700Bold", color: "#D97706", marginRight: 8, fontSize: 12 },
 
   // DAILY FOCUS
   focusContainer: { paddingHorizontal: 24, marginBottom: 30 },
-  focusCard: { borderRadius: 24, padding: 24, position: 'relative', overflow: 'hidden' },
-  focusBgIcon: { position: 'absolute', right: -20, bottom: -20 },
+  focusCard: { borderRadius: 28, padding: 24, overflow: 'hidden', shadowColor: "#4F46E5", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.2, shadowRadius: 15 },
+  focusBgIcon: { position: 'absolute', right: -20, bottom: -20, opacity: 0.1 },
   focusContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  focusBadge: { backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, alignSelf: 'flex-start', marginBottom: 8 },
-  focusBadgeText: { color: "#818CF8", fontSize: 10, fontFamily: "Poppins_700Bold", letterSpacing: 1 },
-  focusTitle: { color: "#FFF", fontSize: 20, fontFamily: "Poppins_700Bold", marginBottom: 2 },
-  focusSub: { color: "#94A3B8", fontSize: 14, fontFamily: "Poppins_400Regular" },
+  focusBadge: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, alignSelf: 'flex-start', marginBottom: 12 },
+  focusBadgeText: { color: "#FFF", fontSize: 10, fontFamily: "Poppins_700Bold", letterSpacing: 1 },
+  focusTitle: { color: "#FFF", fontSize: 22, fontFamily: "Poppins_700Bold", marginBottom: 4 },
+  focusSub: { color: "rgba(255,255,255,0.7)", fontSize: 14, fontFamily: "Poppins_400Regular" },
   ringContainer: { justifyContent: 'center', alignItems: 'center' },
   ringOuter: { width: 64, height: 64, borderRadius: 32, borderWidth: 4, borderColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
   ringInner: { width: 50, height: 50, borderRadius: 25, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
   ringText: { color: "#FFF", fontSize: 12, fontFamily: "Poppins_700Bold" },
 
-  // AI TOOLS
-  sectionContainer: { marginBottom: 30 },
-  sectionTitle: { fontSize: 18, fontFamily: "Poppins_700Bold", color: "#0F172A", marginBottom: 15 },
-  aiCard: { width: 140, height: 160, marginRight: 16, borderRadius: 24, shadowColor: "#4F46E5", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 6 },
-  aiCardGradient: { flex: 1, borderRadius: 24, padding: 16, justifyContent: 'space-between' },
+  // SECTIONS (AI TOOLS, FEED)
+  sectionContainer: { marginBottom: 35 },
+  sectionTitle: { fontSize: 18, fontFamily: "Poppins_700Bold", color: "#334155", marginBottom: 15 },
+
+  // AI TOOLS CARDS
+  aiCard: { width: 150, height: 170, marginRight: 16, borderRadius: 24, shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.1, shadowRadius: 12, elevation: 6 },
+  aiCardGradient: { flex: 1, borderRadius: 24, padding: 18, justifyContent: 'space-between' },
   aiCardContent: { justifyContent: 'flex-end' },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
-  aiTitle: { color: "#FFF", fontSize: 15, fontFamily: "Poppins_700Bold", lineHeight: 20 },
-  aiDesc: { color: "rgba(255,255,255,0.8)", fontSize: 11, fontFamily: "Poppins_500Medium" },
+  aiTitle: { color: "#FFF", fontSize: 16, fontFamily: "Poppins_700Bold", lineHeight: 22 },
+  aiDesc: { color: "rgba(255,255,255,0.9)", fontSize: 11, fontFamily: "Poppins_500Medium" },
 
-  // COURSES
-  courseCard: { width: 220, marginRight: 16, borderRadius: 20, backgroundColor: "#FFF", overflow: 'hidden', shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 3 },
-  courseImg: { width: '100%', height: 120 },
-  playOverlay: { position: 'absolute', top: 0, left: 0, right: 0, height: 120, justifyContent: 'center', alignItems: 'center' },
-  courseMeta: { padding: 12 },
-  courseTitle: { fontSize: 14, fontFamily: "Poppins_600SemiBold", color: "#1E293B", marginBottom: 8 },
+  // COURSE LIST
+  courseCard: { width: 220, marginRight: 20, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.6)', overflow: 'hidden', borderWidth: 1, borderColor: '#FFF', shadowColor: "#D97706", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10 },
+  courseImg: { width: '100%', height: 130 },
+  playOverlay: { position: 'absolute', top: 0, left: 0, right: 0, height: 130, justifyContent: 'center', alignItems: 'center' },
+  courseMeta: { padding: 16 },
+  courseTitle: { fontSize: 15, fontFamily: "Poppins_600SemiBold", color: "#1E293B", marginBottom: 10 },
   progressRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  progressBar: { flex: 1, height: 4, backgroundColor: "#F1F5F9", borderRadius: 2, marginRight: 8 },
-  progressFill: { height: '100%', backgroundColor: "#F59E0B", borderRadius: 2 },
-  durationText: { fontSize: 10, fontFamily: "Poppins_500Medium", color: "#94A3B8" },
+  progressBar: { flex: 1, height: 6, backgroundColor: "rgba(0,0,0,0.05)", borderRadius: 3, marginRight: 10 },
+  progressFill: { height: '100%', backgroundColor: "#F59E0B", borderRadius: 3 },
+  durationText: { fontSize: 11, fontFamily: "Poppins_700Bold", color: "#D97706" },
 
   // NEW ARRIVALS
-  listCard: { flexDirection: 'row', padding: 12, backgroundColor: "#FFF", borderRadius: 20, marginBottom: 16, borderWidth: 1, borderColor: "#F1F5F9" },
-  listImg: { width: 70, height: 70, borderRadius: 14, backgroundColor: "#E2E8F0" },
+  listCard: { flexDirection: 'row', padding: 14, backgroundColor: 'rgba(255,255,255,0.6)', borderRadius: 20, marginBottom: 16, borderWidth: 1, borderColor: '#FFF' },
+  listImg: { width: 70, height: 70, borderRadius: 16, backgroundColor: "#E2E8F0" },
   listInfo: { flex: 1, marginLeft: 16, justifyContent: 'center' },
-  tagRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
-  newTag: { backgroundColor: "#EFF6FF", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, marginRight: 8 },
-  newTagText: { color: "#3B82F6", fontSize: 9, fontFamily: "Poppins_700Bold" },
+  tagRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
+  newTag: { backgroundColor: "#DBEAFE", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginRight: 8 },
+  newTagText: { color: "#2563EB", fontSize: 10, fontFamily: "Poppins_700Bold" },
   starRow: { flexDirection: 'row', alignItems: 'center' },
-  ratingVal: { fontSize: 11, fontFamily: "Poppins_600SemiBold", color: "#475569", marginLeft: 4 },
-  listTitle: { fontSize: 15, fontFamily: "Poppins_600SemiBold", color: "#1E293B", marginBottom: 2 },
-  listAuthor: { fontSize: 12, fontFamily: "Poppins_400Regular", color: "#94A3B8" },
+  ratingVal: { fontSize: 12, fontFamily: "Poppins_700Bold", color: "#475569", marginLeft: 4 },
+  listTitle: { fontSize: 16, fontFamily: "Poppins_600SemiBold", color: "#1E293B", marginBottom: 2 },
+  listAuthor: { fontSize: 12, fontFamily: "Poppins_400Regular", color: "#64748B" },
   saveBtn: { padding: 8 },
 
   // NAV
-  tabBar: { position: "absolute", bottom: 30, left: 20, right: 20, height: 80, borderRadius: 40, backgroundColor: "transparent", borderTopWidth: 0, elevation: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.25, shadowRadius: 25 },
-  tabIconContainer: { alignItems: 'center', justifyContent: 'center', top: 15 },
-  activeTabIcon: { top: 10 },
-  iconWrapper: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent' },
-  activeIconWrapper: { backgroundColor: '#F59E0B', shadowColor: "#F59E0B", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8 },
+  tabBar: { position: "absolute", bottom: 30, left: 24, right: 24, height: 80, borderRadius: 40, backgroundColor: "transparent", borderTopWidth: 0, elevation: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.15, shadowRadius: 20 },
+  tabIconContainer: { alignItems: 'center', justifyContent: 'center', top: 18 },
+  activeTabIcon: { top: 12 },
+  iconWrapper: { width: 48, height: 48, borderRadius: 24, justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent' },
+  activeIconWrapper: { backgroundColor: '#F59E0B', shadowColor: "#F59E0B", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 10 },
 
-  // LIVE FEED
+  // FEED STYLES (Unified)
   liveCard: { width: 280, marginRight: 16, marginBottom: 5 },
-  liveCardInner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#312E81', padding: 12, borderRadius: 16, shadowColor: "#312E81", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
-  liveIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  liveTitle: { color: "#FFF", fontSize: 13, fontFamily: "Poppins_600SemiBold", marginBottom: 2 },
-  liveAuthor: { color: "rgba(255,255,255,0.7)", fontSize: 11, fontFamily: "Poppins_400Regular" },
-  newBadge: { position: 'absolute', top: 12, right: 12, backgroundColor: '#EF4444', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
-  newBadgeText: { color: '#FFF', fontSize: 8, fontFamily: "Poppins_700Bold" },
+  liveCardInner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#312E81', padding: 14, borderRadius: 20, shadowColor: "#312E81", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.25, shadowRadius: 10, elevation: 6 },
+  liveIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
+  liveTitle: { color: "#FFF", fontSize: 14, fontFamily: "Poppins_600SemiBold", marginBottom: 2 },
+  liveAuthor: { color: "rgba(255,255,255,0.7)", fontSize: 12, fontFamily: "Poppins_400Regular" },
+  newBadge: { position: 'absolute', top: 12, right: 12, backgroundColor: '#EF4444', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  newBadgeText: { color: '#FFF', fontSize: 9, fontFamily: "Poppins_700Bold" },
 
-  // NOTIFICATION OVERLAY
-  overlayContainer: { position: 'absolute', top: 120, left: 0, right: 0, paddingHorizontal: 20, zIndex: 9999 },
-  toastContainer: { borderRadius: 16, overflow: 'hidden', shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.2, shadowRadius: 15, elevation: 10 },
-  toastContent: { flexDirection: 'row', alignItems: 'center', padding: 12, backgroundColor: 'rgba(0,0,0,0.8)' },
-  toastIcon: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  toastTitle: { color: '#FFF', fontSize: 14, fontFamily: "Poppins_700Bold" },
-  toastMsg: { color: 'rgba(255,255,255,0.8)', fontSize: 12, fontFamily: "Poppins_400Regular" },
-  toastBtn: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
-  toastBtnText: { color: '#FFF', fontSize: 12, fontFamily: "Poppins_600SemiBold" },
-
-  // CRUCIAL STYLES
-  crucialOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  crucialClickLayer: { flex: 1, width: '100%', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  crucialCard: { width: '100%', maxWidth: 340, backgroundColor: '#1E1B4B', borderRadius: 24, padding: 30, alignItems: 'center', shadowColor: "#EF4444", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.5, shadowRadius: 20, elevation: 20, borderWidth: 1, borderColor: "rgba(239,68,68,0.3)" },
-  crucialIconBg: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(239,68,68,0.1)', justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
-  crucialLabel: { color: "#EF4444", fontSize: 12, fontFamily: "Poppins_700Bold", letterSpacing: 2, marginBottom: 8 },
-  crucialTitle: { color: "#FFF", fontSize: 22, fontFamily: "Poppins_700Bold", textAlign: 'center', marginBottom: 12 },
-  crucialMsg: { color: "#CBD5E1", fontSize: 15, fontFamily: "Poppins_400Regular", textAlign: 'center', lineHeight: 24 },
-  crucialDivider: { width: 60, height: 4, backgroundColor: 'rgba(255,255,255,0.1)', marginVertical: 20, borderRadius: 2 },
-  crucialAckBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#EF4444', paddingHorizontal: 24, paddingVertical: 14, borderRadius: 16, width: '100%', justifyContent: 'center' },
-  crucialAckText: { color: '#FFF', fontSize: 16, fontFamily: "Poppins_600SemiBold", marginRight: 8 },
-  crucialWarn: { color: "#F87171", fontSize: 12, fontFamily: "Poppins_500Medium", marginTop: 15 },
-
-  // VIDEO MODAL
-  closeVideoBtn: { position: 'absolute', top: 50, right: 20, zIndex: 10, padding: 8, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20 },
-  interactiveContainer: { flex: 1, backgroundColor: '#111827', borderTopLeftRadius: 24, borderTopRightRadius: 24, marginTop: -20 },
-  tabRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#374151' },
-  tabBtn: { flex: 1, paddingVertical: 16, alignItems: 'center' },
-  activeTabBtn: { borderBottomWidth: 2, borderBottomColor: '#F59E0B' },
-  tabText: { color: '#9CA3AF', fontSize: 14, fontFamily: "Poppins_600SemiBold" },
-  activeTabText: { color: '#F59E0B' },
-  contentArea: { flex: 1, padding: 20 },
-  transcriptText: { color: '#D1D5DB', fontSize: 14, fontFamily: "Poppins_400Regular", lineHeight: 24 },
-
-  // QUIZ UI
-  quizContainer: { paddingBottom: 40 },
-  quizHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  quizCount: { color: '#9CA3AF', fontSize: 12, fontFamily: "Poppins_600SemiBold" },
-  quizProgress: { width: 100, height: 6, backgroundColor: '#374151', borderRadius: 3 },
-  quizProgressBar: { height: '100%', backgroundColor: '#F59E0B', borderRadius: 3 },
-  questionText: { color: '#FFF', fontSize: 18, fontFamily: "Poppins_700Bold", marginBottom: 20 },
-  optionBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1F2937', padding: 16, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#374151' },
-  optionCircle: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#374151', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  optionLetter: { color: '#FFF', fontSize: 14, fontFamily: "Poppins_700Bold" },
-  optionText: { color: '#E5E7EB', fontSize: 14, fontFamily: "Poppins_500Medium", flex: 1 },
-
-  // QUIZ RESULTS
-  resultContainer: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40 },
-  resultTitle: { color: '#FFF', fontSize: 24, fontFamily: "Poppins_700Bold", marginTop: 16, marginBottom: 8 },
-  resultScore: { color: '#9CA3AF', fontSize: 16, fontFamily: "Poppins_500Medium", marginBottom: 24 },
-  retryBtn: { backgroundColor: '#F59E0B', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 },
-  retryText: { color: '#FFF', fontSize: 14, fontFamily: "Poppins_700Bold" },
   // QUIZ FEED
   quizFeedCard: { width: 280, marginRight: 16, marginBottom: 5 },
-  quizFeedCardInner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#4338CA', padding: 12, borderRadius: 16, shadowColor: "#4338CA", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
-  quizFeedIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  quizFeedTitle: { color: "#FFF", fontSize: 13, fontFamily: "Poppins_600SemiBold", marginBottom: 2 },
-  quizFeedMeta: { color: "rgba(255,255,255,0.7)", fontSize: 11, fontFamily: "Poppins_400Regular" },
-  quizFeedBadge: { position: 'absolute', top: 12, right: 12, backgroundColor: '#F59E0B', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
-  quizFeedBadgeText: { color: '#FFF', fontSize: 8, fontFamily: "Poppins_700Bold" },
+  quizFeedCardInner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#4338CA', padding: 14, borderRadius: 20, shadowColor: "#4338CA", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.25, shadowRadius: 10, elevation: 6 },
+  quizFeedIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
+  quizFeedTitle: { color: "#FFF", fontSize: 14, fontFamily: "Poppins_600SemiBold", marginBottom: 2 },
+  quizFeedMeta: { color: "rgba(255,255,255,0.8)", fontSize: 12, fontFamily: "Poppins_400Regular" },
+  quizFeedBadge: { position: 'absolute', top: 12, right: 12, backgroundColor: '#F59E0B', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  quizFeedBadgeText: { color: '#FFF', fontSize: 9, fontFamily: "Poppins_700Bold" },
+
   // PROCTORED FEED
   proctorFeedCard: { width: 280, marginRight: 16, marginBottom: 5 },
-  proctorFeedCardInner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#111827', padding: 12, borderRadius: 16, borderWidth: 1, borderColor: '#374151', shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
-  proctorFeedIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(239, 68, 68, 0.15)', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  proctorFeedTitle: { color: "#FFF", fontSize: 13, fontFamily: "Poppins_600SemiBold", marginBottom: 2 },
-  proctorFeedMeta: { color: "#94A3B8", fontSize: 11, fontFamily: "Poppins_400Regular" },
-  proctorFeedBadge: { position: 'absolute', top: 12, right: 12, backgroundColor: '#EF4444', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
-  proctorFeedBadgeText: { color: '#FFF', fontSize: 8, fontFamily: "Poppins_700Bold" },
+  proctorFeedCardInner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1E293B', padding: 14, borderRadius: 20, shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 10, elevation: 6 },
+  proctorFeedIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(239, 68, 68, 0.2)', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
+  proctorFeedTitle: { color: "#FFF", fontSize: 14, fontFamily: "Poppins_600SemiBold", marginBottom: 2 },
+  proctorFeedMeta: { color: "#94A3B8", fontSize: 12, fontFamily: "Poppins_400Regular" },
+  proctorFeedBadge: { position: 'absolute', top: 12, right: 12, backgroundColor: '#EF4444', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  proctorFeedBadgeText: { color: '#FFF', fontSize: 9, fontFamily: "Poppins_700Bold" },
 
-  // NOTIFICATION MODAL STYLES
-  notifModalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
-  notifModalContent: { height: '80%', backgroundColor: '#0F172A', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 24, paddingTop: 30 },
+  // NOTIFICATIONS
+  overlayContainer: { position: 'absolute', top: 120, left: 0, right: 0, paddingHorizontal: 20, zIndex: 9999 },
+  toastContainer: { borderRadius: 20, overflow: 'hidden', shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.2, shadowRadius: 15, elevation: 10 },
+  toastContent: { flexDirection: 'row', alignItems: 'center', padding: 16, backgroundColor: 'rgba(15, 23, 42, 0.9)' },
+  toastIcon: { width: 44, height: 44, borderRadius: 14, justifyContent: 'center', alignItems: 'center', marginRight: 14 },
+  toastTitle: { color: '#FFF', fontSize: 14, fontFamily: "Poppins_700Bold", marginBottom: 2 },
+  toastMsg: { color: 'rgba(255,255,255,0.8)', fontSize: 12, fontFamily: "Poppins_400Regular" },
+  toastBtn: { backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
+  toastBtnText: { color: '#FFF', fontSize: 12, fontFamily: "Poppins_600SemiBold" },
+
+  // MODAL OVERLAYS
+  notifModalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' },
+  notifModalContent: { height: '85%', backgroundColor: '#0F172A', borderTopLeftRadius: 36, borderTopRightRadius: 36, padding: 24, paddingTop: 30 },
   notifHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
   notifHeaderTitle: { color: '#FFF', fontSize: 24, fontFamily: "Poppins_700Bold" },
-  closeNotifBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
+  closeNotifBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
   emptyState: { alignItems: 'center', justifyContent: 'center', marginTop: 100 },
   emptyStateText: { color: 'rgba(255,255,255,0.4)', marginTop: 16, fontFamily: "Poppins_400Regular" },
-  notifItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1E293B', padding: 16, borderRadius: 16, marginBottom: 12 },
-  notifIconBox: { width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 16 },
-  notifItemTitle: { color: '#FFF', fontSize: 14, fontFamily: "Poppins_600SemiBold", marginBottom: 2 },
-  notifItemMsg: { color: '#94A3B8', fontSize: 12, fontFamily: "Poppins_400Regular", marginBottom: 4 },
-  notifTime: { color: 'rgba(255,255,255,0.3)', fontSize: 10, fontFamily: "Poppins_500Medium" }
+  notifItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1E293B', padding: 16, borderRadius: 20, marginBottom: 12 },
+  notifIconBox: { width: 48, height: 48, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+  notifItemTitle: { color: '#FFF', fontSize: 15, fontFamily: "Poppins_600SemiBold", marginBottom: 4 },
+  notifItemMsg: { color: '#94A3B8', fontSize: 13, fontFamily: "Poppins_400Regular", marginBottom: 6 },
+  notifTime: { color: 'rgba(255,255,255,0.3)', fontSize: 11, fontFamily: "Poppins_500Medium" },
+
+  // CRUCIAL STYLES (Unchanged mostly, just refined radius)
+  crucialOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  crucialClickLayer: { flex: 1, width: '100%', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  crucialCard: { width: '100%', maxWidth: 350, backgroundColor: '#1E1B4B', borderRadius: 32, padding: 32, alignItems: 'center', shadowColor: "#EF4444", shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.6, shadowRadius: 24, elevation: 20, borderWidth: 1, borderColor: "rgba(239,68,68,0.4)" },
+  crucialIconBg: { width: 88, height: 88, borderRadius: 44, backgroundColor: 'rgba(239,68,68,0.15)', justifyContent: 'center', alignItems: 'center', marginBottom: 24 },
+  crucialLabel: { color: "#EF4444", fontSize: 12, fontFamily: "Poppins_700Bold", letterSpacing: 2.5, marginBottom: 10 },
+  crucialTitle: { color: "#FFF", fontSize: 24, fontFamily: "Poppins_700Bold", textAlign: 'center', marginBottom: 16 },
+  crucialMsg: { color: "#CBD5E1", fontSize: 15, fontFamily: "Poppins_400Regular", textAlign: 'center', lineHeight: 26 },
+  crucialDivider: { width: 60, height: 4, backgroundColor: 'rgba(255,255,255,0.1)', marginVertical: 24, borderRadius: 2 },
+  crucialCheckboxRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 24, backgroundColor: 'rgba(0,0,0,0.2)', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12 },
+  crucialCheckbox: { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: '#6B7280', marginRight: 12, justifyContent: 'center', alignItems: 'center' },
+  crucialCheckboxChecked: { backgroundColor: '#10B981', borderColor: '#10B981' },
+  crucialCheckboxText: { color: '#E5E7EB', fontSize: 14, fontFamily: "Poppins_500Medium" },
+  crucialAckBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#EF4444', paddingHorizontal: 24, paddingVertical: 16, borderRadius: 18, width: '100%', justifyContent: 'center' },
+  crucialAckText: { color: '#FFF', fontSize: 16, fontFamily: "Poppins_600SemiBold", marginRight: 8 },
+  crucialWarn: { color: "#F87171", fontSize: 13, fontFamily: "Poppins_500Medium", marginTop: 16 },
+
+  // VIDEO MODAL
+  closeVideoBtn: { position: 'absolute', top: 50, right: 20, zIndex: 10, padding: 10, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 24 },
+  interactiveContainer: { flex: 1, backgroundColor: '#0F172A', borderTopLeftRadius: 32, borderTopRightRadius: 32, marginTop: -24 },
+  tabRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#334155' },
+  tabBtn: { flex: 1, paddingVertical: 18, alignItems: 'center' },
+  activeTabBtn: { borderBottomWidth: 2, borderBottomColor: '#F59E0B' },
+  tabText: { color: '#94A3B8', fontSize: 14, fontFamily: "Poppins_600SemiBold" },
+  activeTabText: { color: '#F59E0B' },
+  contentArea: { flex: 1, padding: 24 },
+  transcriptText: { color: '#CBD5E1', fontSize: 15, fontFamily: "Poppins_400Regular", lineHeight: 26 },
+
+  // QUIZ UI (Dark polished)
+  quizContainer: { paddingBottom: 50 },
+  quizHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+  quizCount: { color: '#94A3B8', fontSize: 13, fontFamily: "Poppins_600SemiBold" },
+  quizProgress: { width: 120, height: 8, backgroundColor: '#334155', borderRadius: 4 },
+  quizProgressBar: { height: '100%', backgroundColor: '#F59E0B', borderRadius: 4 },
+  questionText: { color: '#FFF', fontSize: 20, fontFamily: "Poppins_700Bold", marginBottom: 24, lineHeight: 28 },
+  optionBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1E293B', padding: 20, borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: '#334155' },
+  optionCircle: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#334155', justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+  optionLetter: { color: '#FFF', fontSize: 14, fontFamily: "Poppins_700Bold" },
+  optionText: { color: '#E2E8F0', fontSize: 15, fontFamily: "Poppins_500Medium", flex: 1 },
+  resultContainer: { alignItems: 'center', justifyContent: 'center', paddingVertical: 60 },
+  resultTitle: { color: '#FFF', fontSize: 28, fontFamily: "Poppins_700Bold", marginTop: 20, marginBottom: 10 },
+  resultScore: { color: '#CBD5E1', fontSize: 18, fontFamily: "Poppins_500Medium", marginBottom: 30 },
+  retryBtn: { backgroundColor: '#F59E0B', paddingHorizontal: 32, paddingVertical: 14, borderRadius: 16 },
+  retryText: { color: '#FFF', fontSize: 16, fontFamily: "Poppins_700Bold" },
+
+  // OTHERS
+  detailModalContainer: { flex: 1, backgroundColor: '#0F172A', paddingTop: 60 },
+  closeDetailBtn: { position: 'absolute', top: 50, right: 20, zIndex: 10, width: 40, height: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 20 },
+  mediaContainer: { marginBottom: 24, borderRadius: 20, overflow: 'hidden', backgroundColor: '#1E293B' },
+  detailTitle: { fontSize: 24, fontFamily: "Poppins_700Bold", color: '#FFF', marginBottom: 8 },
+  detailTime: { fontSize: 13, fontFamily: "Poppins_500Medium", color: 'rgba(255,255,255,0.5)' },
+  detailDivider: { height: 1, backgroundColor: 'rgba(255,255,255,0.1)', marginVertical: 20 },
+  detailMessage: { fontSize: 16, fontFamily: "Poppins_400Regular", color: '#E2E8F0', lineHeight: 26 },
 });

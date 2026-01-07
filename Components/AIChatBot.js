@@ -15,6 +15,8 @@ import {
 import { BlurView } from "expo-blur";
 import { MaterialCommunityIcons, Feather, Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { Audio } from 'expo-av';
+import API_URL from '../config';
 
 const { height, width } = Dimensions.get("window");
 
@@ -57,7 +59,10 @@ const VOICE_SKILLS = [
     { id: 'timer', title: "Timer", icon: "stopwatch", color: ["#6366F1", "#4F46E5"] },
 ];
 
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
 export default function AIChatBot() {
+    const insets = useSafeAreaInsets();
     const [isOpen, setIsOpen] = useState(false);
     const [isVoiceMode, setIsVoiceMode] = useState(false);
     const [voiceState, setVoiceState] = useState("listening"); // listening, processing, speaking
@@ -116,7 +121,7 @@ export default function AIChatBot() {
     const handleSend = (text = inputText) => {
         if (!text.trim()) return;
 
-        const newMsg = { id: Date.now(), text: text, sender: "user" };
+        const newMsg = { id: Date.now(), text: text, sender: "user", status: "done" };
         setMessages((prev) => [...prev, newMsg]);
         setInputText("");
 
@@ -146,20 +151,113 @@ export default function AIChatBot() {
         }, 1200);
     };
 
-    const toggleVoiceMode = () => {
-        setIsVoiceMode(!isVoiceMode);
-        setVoiceState("listening"); // Reset to listening on entry
+    // --- VOICE LOGIC ---
+    const [recording, setRecording] = useState(null);
+
+
+    const startRecording = async () => {
+        try {
+            const permission = await Audio.requestPermissionsAsync();
+            if (permission.status === "granted") {
+                await Audio.setAudioModeAsync({
+                    allowsRecordingIOS: true,
+                    playsInSilentModeIOS: true,
+                });
+                const { recording } = await Audio.Recording.createAsync(
+                    Audio.RecordingOptionsPresets.HIGH_QUALITY
+                );
+                setRecording(recording);
+                setVoiceState("listening");
+            } else {
+                setMessages(prev => [...prev, { id: Date.now(), text: "Permission to access microphone was denied", sender: "ai", status: "done" }]);
+            }
+        } catch (err) {
+            console.error('Failed to start recording', err);
+        }
     };
 
-    const onVoiceSkillPress = (skill) => {
-        // Simulate Voice Interaction
+    const stopRecording = async () => {
+        if (!recording) return;
         setVoiceState("processing");
-        setTimeout(() => {
-            setVoiceState("speaking");
-            setTimeout(() => {
+        await recording.stopAndUnloadAsync();
+        const uri = recording.getURI();
+        setRecording(null);
+        handleVoiceUpload(uri);
+    };
+
+    const handleVoiceUpload = async (uri) => {
+        try {
+            const formData = new FormData();
+            formData.append('file', {
+                uri: uri,
+                type: 'audio/m4a',
+                name: 'voice_query.m4a'
+            });
+
+            const res = await fetch(`${API_URL}/ai/voice_query`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'multipart/form-data' },
+                body: formData
+            });
+
+            const data = await res.json();
+            if (data.status === 'success') {
+                // 1. Add User's Transcribed Text
+                setMessages(prev => [...prev, {
+                    id: Date.now(),
+                    text: `🎤 ${data.user_text}`,
+                    sender: "user",
+                    status: "done"
+                }]);
+
+                // 2. Add AI Response
+                setVoiceState("speaking");
+                setTimeout(() => {
+                    setMessages(prev => [...prev, {
+                        id: Date.now() + 1,
+                        text: data.ai_response,
+                        sender: "ai",
+                        status: "done"
+                    }]);
+
+                    // Close Voice Mode to show chat
+                    setIsVoiceMode(false);
+                    setVoiceState("listening"); // Reset
+                }, 1500); // Fake "speaking" delay
+            } else {
                 setVoiceState("listening");
-            }, 3000);
-        }, 1500);
+                alert("Sorry, I didn't catch that.");
+            }
+        } catch (e) {
+            console.error(e);
+            setVoiceState("listening");
+            alert("Network error.");
+        }
+    };
+
+    const toggleVoiceMode = () => {
+        setIsVoiceMode(!isVoiceMode);
+        if (!isVoiceMode) {
+            // Just opened
+            setVoiceState("idle"); // Wait for user to press mic
+        } else {
+            // Closing
+            if (recording) stopRecording();
+        }
+    };
+
+    const onMicPress = () => {
+        if (voiceState === 'listening' || recording) {
+            stopRecording();
+        } else {
+            startRecording();
+        }
+    };
+
+    // Replaces the old simulation
+    const onVoiceSkillPress = (skill) => {
+        // Just a hint for now
+        alert(`Try asking about '${skill.title}'! Press the mic to start.`);
     };
 
     return (
@@ -193,13 +291,13 @@ export default function AIChatBot() {
                         {/* VISUALIZER */}
                         <View style={styles.voiceVisualizerContainer}>
                             <Animated.View style={[styles.voiceOrbOuter, { transform: [{ scale: voicePulseAnim }] }]} />
-                            <View style={styles.voiceOrbInner}>
-                                <LinearGradient colors={voiceState === 'speaking' ? ["#F59E0B", "#D97706"] : ["#6366F1", "#A855F7"]} style={styles.voiceOrbGradient}>
-                                    <MaterialCommunityIcons name={voiceState === 'listening' ? "microphone" : "waveform"} size={40} color="#FFF" />
+                            <TouchableOpacity style={styles.voiceOrbInner} onPress={onMicPress}>
+                                <LinearGradient colors={voiceState === 'recording' || recording ? ["#EF4444", "#B91C1C"] : ["#6366F1", "#A855F7"]} style={styles.voiceOrbGradient}>
+                                    <MaterialCommunityIcons name={voiceState === 'processing' ? "dots-horizontal" : (recording ? "stop" : "microphone")} size={40} color="#FFF" />
                                 </LinearGradient>
-                            </View>
+                            </TouchableOpacity>
                             <Text style={styles.voiceStatusText}>
-                                {voiceState === "listening" ? "Listening..." : voiceState === "processing" ? "Thinking..." : "Speaking..."}
+                                {voiceState === "listening" ? "Listening..." : voiceState === "processing" ? "Thinking..." : recording ? "Recording..." : "Tap to Speak"}
                             </Text>
                         </View>
 
@@ -221,7 +319,7 @@ export default function AIChatBot() {
                     </LinearGradient>
                 ) : (
                     // ---------------- TEXT CHAT MODE UI ----------------
-                    <BlurView intensity={90} tint="dark" style={styles.blurContainer}>
+                    <BlurView intensity={90} tint="dark" style={[styles.blurContainer, { paddingTop: insets.top + 20 }]}>
                         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.keyboardView}>
 
                             {/* HEADER */}
@@ -293,7 +391,7 @@ const styles = StyleSheet.create({
     fabGradient: { width: 60, height: 60, justifyContent: "center", alignItems: "center" },
 
     overlayContainer: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 },
-    blurContainer: { flex: 1, paddingTop: 50 },
+    blurContainer: { flex: 1 },
     keyboardView: { flex: 1, flexDirection: "column" },
 
     header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 20, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.1)" },

@@ -226,8 +226,10 @@ export default function CoursePath() {
 
     const fetchPathNodes = async () => {
         try {
+            console.log("Fetching path nodes from:", `${API_URL}/path/nodes`);
             const response = await fetch(`${API_URL}/path/nodes`);
             const data = await response.json();
+            console.log("Path nodes response:", data);
 
             if (data && data.length > 0) {
                 // Map backend data to UI Nodes
@@ -244,10 +246,14 @@ export default function CoursePath() {
                     quiz: item.quiz
                 }));
                 setLevels(mappedLevels);
+            } else {
+                console.log("No path nodes found. Data:", data);
+                // Optional: Force a refresh or show empty state
             }
         } catch (error) {
-            console.log("Error fetching path:", error);
-            // Keep STATIC_LEVELS on error
+            console.error("Error fetching path:", error);
+            // Alert for user feedback
+            // alert("Debug: Error fetching path. Check console.");
         }
     };
 
@@ -311,6 +317,16 @@ export default function CoursePath() {
                 contentContainerStyle={{ height: totalHeight }}
                 showsVerticalScrollIndicator={false}
             >
+                {/* DEBUG OVERLAY */}
+                {levels.length === 0 && (
+                    <View style={{ padding: 20, backgroundColor: '#FEF2F2', margin: 20, borderRadius: 10, borderWidth: 1, borderColor: '#EF4444' }}>
+                        <Text style={{ color: '#B91C1C', fontFamily: 'Poppins_700Bold' }}>DEBUG INFO:</Text>
+                        <Text style={{ color: '#EF4444' }}>0 Path Nodes Loaded.</Text>
+                        <Text style={{ color: '#EF4444', fontSize: 10, marginTop: 5 }}>API: {API_URL}</Text>
+                        <Text style={{ color: '#EF4444', fontSize: 10 }}>Check console logs for details.</Text>
+                    </View>
+                )}
+
                 <View style={styles.pathArea}>
                     {/* DECORATIONS */}
                     <MaterialCommunityIcons name="cloud" size={50} color="#E5E7EB" style={{ position: 'absolute', top: 50, left: 20, opacity: 0.5 }} />

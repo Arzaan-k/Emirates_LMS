@@ -8,14 +8,14 @@ import {
     ScrollView,
     Dimensions,
     Image,
-    SafeAreaView,
+    Platform,
+    ActivityIndicator,
     Modal,
     TextInput,
     Alert,
-    KeyboardAvoidingView,
-    Platform,
-    ActivityIndicator
+    KeyboardAvoidingView
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons, Feather, Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as DocumentPicker from 'expo-document-picker';
@@ -461,33 +461,69 @@ export default function ManagerDashboard({ route, navigation }) {
         }
     };
 
+    const [notifFile, setNotifFile] = useState(null); // [NEW]
+
+    const pickNotifFile = async () => {
+        try {
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.All,
+                allowsEditing: true,
+                quality: 0.8,
+            });
+            if (!result.canceled) {
+                setNotifFile(result.assets[0]);
+            }
+        } catch (e) {
+            console.log(e);
+        }
+    };
+
     const handleSendNotification = async () => {
         if (!notifTitle || !notifMessage) {
             Alert.alert("Missing Fields", "Please add a title and message");
             return;
         }
+        setUploading(true);
         try {
+            const formData = new FormData();
+            formData.append('title', notifTitle);
+            formData.append('message', notifMessage);
+            formData.append('type', isCrucial ? 'crucial' : 'ordinary');
+
+            if (notifFile) {
+                // Infer type from extension if needed, but 'video/mp4' or 'image/jpeg' usually
+                const fileType = notifFile.type === 'video' ? 'video/mp4' : 'image/jpeg';
+                formData.append('file', {
+                    uri: notifFile.uri,
+                    name: `upload.${notifFile.type === 'video' ? 'mp4' : 'jpg'}`,
+                    type: fileType
+                });
+            }
+
+            // Corrected Endpoint
             const response = await fetch(`${API_URL}/notifications/send`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    title: notifTitle,
-                    message: notifMessage,
-                    type: isCrucial ? 'crucial' : 'ordinary'
-                })
+                headers: { 'Content-Type': 'multipart/form-data' },
+                body: formData
             });
-            if (response.ok) {
+
+            const data = await response.json();
+
+            if (data.status === 'success') {
                 Alert.alert("Sent", "Notification broadcasted successfully!");
                 setNotifModalVisible(false);
                 setNotifTitle('');
                 setNotifMessage('');
                 setIsCrucial(false);
+                setNotifFile(null);
             } else {
                 Alert.alert("Error", "Failed to send notification");
             }
         } catch (error) {
             console.error(error);
             Alert.alert("Error", "Network error sending notification");
+        } finally {
+            setUploading(false);
         }
     };
 
@@ -719,11 +755,27 @@ export default function ManagerDashboard({ route, navigation }) {
                                 <Text style={styles.toggleLabel}>Mark as Crucial (Blocking)</Text>
                             </TouchableOpacity>
 
+                            {/* FILE PICKER */}
+                            <TouchableOpacity
+                                style={[styles.filePickBtn, notifFile && styles.filePickBtnActive]}
+                                onPress={pickNotifFile}
+                            >
+                                <Feather name={notifFile ? "check" : "camera"} size={20} color={notifFile ? "#FFF" : "#6B7280"} />
+                                <Text style={[styles.filePickText, notifFile && { color: '#FFF' }]}>
+                                    {notifFile ? "Media Attached" : "Attach Image/Video"}
+                                </Text>
+                                {notifFile && (
+                                    <TouchableOpacity onPress={() => setNotifFile(null)} style={{ marginLeft: 10 }}>
+                                        <Feather name="x" size={18} color="#FFF" />
+                                    </TouchableOpacity>
+                                )}
+                            </TouchableOpacity>
+
                             <TouchableOpacity
                                 style={[styles.uploadBtn, { backgroundColor: isCrucial ? '#EF4444' : '#10B981' }]}
                                 onPress={handleSendNotification}
                             >
-                                <Text style={styles.uploadBtnText}>Send Notification</Text>
+                                {uploading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.uploadBtnText}>Send Notification</Text>}
                             </TouchableOpacity>
                         </View>
                     </View>

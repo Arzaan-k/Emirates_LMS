@@ -11,6 +11,7 @@ import * as FileSystem from 'expo-file-system';
 import API_URL from '../config';
 // const API_URL = "http://192.168.0.136:8000"; // Ensure this matches Home.js
 const { width, height } = Dimensions.get('window');
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Mock initial data
 const MESSAGES = [
@@ -18,6 +19,7 @@ const MESSAGES = [
 ];
 
 export default function AIRoleplay({ onClose, scenario }) {
+    const insets = useSafeAreaInsets();
     const [mood, setMood] = useState(20); // 0-100
     const [reply, setReply] = useState('');
     const [chat, setChat] = useState(MESSAGES);
@@ -183,21 +185,21 @@ export default function AIRoleplay({ onClose, scenario }) {
                         ...msg,
                         text: data.user_transcription,
                         score: data.user_score,
-                        tip: data.tip
+                        tip: data.improvement_tip // FIXED: tip -> improvement_tip
                     } : msg
                 ));
             }
 
             const aiMsg = {
                 id: Date.now() + 1,
-                text: data.text,
+                text: data.customer_response, // FIXED: text -> customer_response
                 sender: 'ai',
-                mood: data.mood,
+                mood: data.mood_score, // FIXED: mood -> mood_score
                 audio: data.audio_base64
             };
 
             setChat(prev => [...prev, aiMsg]);
-            setMood(data.mood);
+            setMood(data.mood_score); // FIXED: mood -> mood_score
 
             if (data.audio_base64) {
                 // Use the existing playBase64Audio function
@@ -244,14 +246,14 @@ export default function AIRoleplay({ onClose, scenario }) {
             // ADD AI RESPONSE
             const aiMsg = {
                 id: Date.now() + 1,
-                text: data.text,
+                text: data.customer_response, // FIXED: text -> customer_response
                 sender: 'ai',
-                mood: data.mood,
+                mood: data.mood_score, // FIXED: mood -> mood_score
                 audio: data.audio_base64 // Store base64 for playback
             };
 
             setChat(prev => [...prev, aiMsg]);
-            setMood(data.mood); // Update Customer Mood
+            setMood(data.mood_score); // Update Customer Mood
 
             // AUTO PLAY AUDIO
             if (data.audio_base64) {
@@ -318,7 +320,13 @@ export default function AIRoleplay({ onClose, scenario }) {
                 const data = await response.json();
 
                 // Overwrite initial message
-                const newInitial = { id: Date.now(), text: data.text, sender: 'ai', mood: data.mood, audio: data.audio_base64 };
+                const newInitial = {
+                    id: Date.now(),
+                    text: data.customer_response || data.text, // FIXED: Handle both keys
+                    sender: 'ai',
+                    mood: data.mood,
+                    audio: data.audio_base64
+                };
                 setChat([newInitial]);
                 setMood(data.mood);
 
@@ -391,7 +399,7 @@ export default function AIRoleplay({ onClose, scenario }) {
     return (
         <View style={styles.container}>
             {/* HEADER */}
-            <BlurView intensity={20} tint="dark" style={styles.header}>
+            <BlurView intensity={20} tint="dark" style={[styles.header, { paddingTop: insets.top }]}>
                 <TouchableOpacity onPress={onClose} style={styles.backBtn}>
                     <Feather name="arrow-left" size={24} color="#FFF" />
                 </TouchableOpacity>
@@ -474,23 +482,14 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#1F2937', // Darker background
     },
-    header: {
-        backgroundColor: '#111827',
-        paddingTop: 50,
-        paddingBottom: 20,
-        paddingHorizontal: 20,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-    },
     closeBtn: {
         padding: 8,
         backgroundColor: 'rgba(255,255,255,0.1)',
         borderRadius: 12,
     },
-    avatarContainer: { alignItems: 'center', marginVertical: 20 },
+    avatarContainer: { alignItems: 'center', marginVertical: 20, marginTop: 100 },
 
-    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 50, paddingBottom: 20, position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 20, position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
     headerTitle: { color: '#FFF', fontSize: 18, fontFamily: 'Poppins_700Bold' },
     headerSub: { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontFamily: 'Poppins_500Medium' },
     backBtn: { padding: 8, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.1)' },
