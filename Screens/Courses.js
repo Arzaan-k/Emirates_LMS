@@ -51,8 +51,6 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
 
 import API_URL from "../config";
 
-const CATEGORIES = ["All", "Barista Skills", "Food Safety", "Customer Service", "Management"];
-
 const AllCourses = () => {
     const [search, setSearch] = useState("");
     const [selectedCat, setSelectedCat] = useState("All");
@@ -61,27 +59,51 @@ const AllCourses = () => {
     const [courses, setCourses] = useState([]);
     const [loading, setLoading] = useState(true);
 
+    // [NEW] Course buckets state
+    const [courseBuckets, setCourseBuckets] = useState([]);
+    const [loadingBuckets, setLoadingBuckets] = useState(true);
+
     React.useEffect(() => {
         fetchCourses();
+        fetchBuckets();
     }, []);
+
+    // [NEW] Fetch course buckets from API
+    const fetchBuckets = async () => {
+        setLoadingBuckets(true);
+        try {
+            const response = await fetch(`${API_URL}/course-buckets`);
+            const data = await response.json();
+            setCourseBuckets(data);
+        } catch (error) {
+            console.error("Failed to fetch buckets:", error);
+        } finally {
+            setLoadingBuckets(false);
+        }
+    };
 
     const fetchCourses = async () => {
         try {
             const response = await fetch(`${API_URL}/content`);
             const data = await response.json();
             // Map backend data to UI model
-            const mappedCourses = data.map(item => ({
-                id: item.id,
-                title: item.title,
-                category: item.authorRole || "General", // Use authorRole as category for now
-                duration: "Video", // Placeholder
-                rating: 5.0, // Placeholder
-                image: "play-circle-outline", // Default icon
-                color: "#F59E0B",
-                bg: "#FFF7ED",
-                videoUrl: item.videoUrl,
-                description: item.description
-            }));
+            const mappedCourses = data.map(item => {
+                // Find the bucket for this course to get its color
+                const bucket = courseBuckets.find(b => b.name === item.bucket);
+                return {
+                    id: item.id,
+                    title: item.title,
+                    category: item.bucket || "Uncategorized", // Use bucket as category
+                    duration: "Video", // Placeholder
+                    rating: 5.0, // Placeholder
+                    image: bucket?.icon || "play-circle-outline", // Use bucket icon
+                    color: bucket?.color || "#F59E0B",
+                    bg: bucket?.color ? `${bucket.color}15` : "#FFF7ED", // Light version of bucket color
+                    videoUrl: item.videoUrl,
+                    description: item.description,
+                    bucket: item.bucket
+                };
+            });
             setCourses(mappedCourses);
         } catch (error) {
             console.error("Failed to fetch courses:", error);
@@ -89,6 +111,22 @@ const AllCourses = () => {
             setLoading(false);
         }
     };
+
+    // Refetch courses when buckets are loaded to apply colors
+    React.useEffect(() => {
+        if (courseBuckets.length > 0 && courses.length > 0) {
+            // Update course colors based on buckets
+            setCourses(prev => prev.map(course => {
+                const bucket = courseBuckets.find(b => b.name === course.bucket);
+                return {
+                    ...course,
+                    image: bucket?.icon || "play-circle-outline",
+                    color: bucket?.color || "#F59E0B",
+                    bg: bucket?.color ? `${bucket.color}15` : "#FFF7ED"
+                };
+            }));
+        }
+    }, [courseBuckets]);
 
     const filteredCourses = courses.filter(c =>
         (selectedCat === "All" || c.category === selectedCat) &&
@@ -114,26 +152,74 @@ const AllCourses = () => {
                 />
             </View>
 
-            {/* CATEGORIES */}
+            {/* CATEGORIES - Dynamic from Course Buckets */}
             <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 style={{ height: 50, flexGrow: 0, marginBottom: 20 }}
                 contentContainerStyle={{ alignItems: 'center', gap: 10 }}
             >
-                {CATEGORIES.map((cat) => (
+                {/* ALL chip */}
+                <TouchableOpacity
+                    style={[
+                        styles.catChip,
+                        selectedCat === "All" && styles.activeCatChip
+                    ]}
+                    onPress={() => setSelectedCat("All")}
+                >
+                    <MaterialCommunityIcons
+                        name="view-grid"
+                        size={14}
+                        color={selectedCat === "All" ? "#FFF" : "#6B7280"}
+                        style={{ marginRight: 4 }}
+                    />
+                    <Text style={[
+                        styles.catText,
+                        selectedCat === "All" && styles.activeCatText
+                    ]}>All</Text>
+                </TouchableOpacity>
+
+                {/* Uncategorized chip */}
+                <TouchableOpacity
+                    style={[
+                        styles.catChip,
+                        selectedCat === "Uncategorized" && styles.activeCatChip
+                    ]}
+                    onPress={() => setSelectedCat("Uncategorized")}
+                >
+                    <MaterialCommunityIcons
+                        name="folder-outline"
+                        size={14}
+                        color={selectedCat === "Uncategorized" ? "#FFF" : "#6B7280"}
+                        style={{ marginRight: 4 }}
+                    />
+                    <Text style={[
+                        styles.catText,
+                        selectedCat === "Uncategorized" && styles.activeCatText
+                    ]}>Uncategorized</Text>
+                </TouchableOpacity>
+
+                {/* Dynamic bucket chips */}
+                {courseBuckets.map((bucket) => (
                     <TouchableOpacity
-                        key={cat}
+                        key={bucket.id}
                         style={[
                             styles.catChip,
-                            selectedCat === cat && styles.activeCatChip
+                            { borderWidth: 1, borderColor: selectedCat === bucket.name ? bucket.color : '#E5E7EB' },
+                            selectedCat === bucket.name && { backgroundColor: bucket.color }
                         ]}
-                        onPress={() => setSelectedCat(cat)}
+                        onPress={() => setSelectedCat(bucket.name)}
                     >
+                        <MaterialCommunityIcons
+                            name={bucket.icon || "folder"}
+                            size={14}
+                            color={selectedCat === bucket.name ? "#FFF" : bucket.color}
+                            style={{ marginRight: 4 }}
+                        />
                         <Text style={[
                             styles.catText,
-                            selectedCat === cat && styles.activeCatText
-                        ]}>{cat}</Text>
+                            { color: selectedCat === bucket.name ? "#FFF" : "#4B5563" }
+                        ]}>{bucket.name}</Text>
                     </TouchableOpacity>
                 ))}
             </ScrollView>
@@ -336,6 +422,8 @@ const styles = StyleSheet.create({
         color: '#111827',
     },
     catChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
         paddingHorizontal: 16,
         paddingVertical: 8,
         borderRadius: 20,

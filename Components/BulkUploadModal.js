@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     View,
     Text,
@@ -9,7 +9,8 @@ import {
     Switch,
     Dimensions,
     Alert,
-    ActivityIndicator
+    ActivityIndicator,
+    ScrollView
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
@@ -23,6 +24,28 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
     const [isPathNode, setIsPathNode] = useState(false);
     const [uploading, setUploading] = useState(false);
     const [progress, setProgress] = useState(0);
+
+    // [NEW] Bucket state
+    const [courseBuckets, setCourseBuckets] = useState([]);
+    const [selectedBucket, setSelectedBucket] = useState(null);
+    const [loadingBuckets, setLoadingBuckets] = useState(false);
+
+    // [NEW] Fetch buckets when modal opens
+    useEffect(() => {
+        if (visible) {
+            fetchBuckets();
+        }
+    }, [visible]);
+
+    const fetchBuckets = async () => {
+        setLoadingBuckets(true);
+        try {
+            const res = await fetch(`${API_URL}/course-buckets`);
+            const data = await res.json();
+            setCourseBuckets(data);
+        } catch (e) { console.error('Error fetching buckets:', e); }
+        finally { setLoadingBuckets(false); }
+    };
 
     const pickFiles = async () => {
         try {
@@ -72,6 +95,9 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                 formData.append('authorRole', "Store Manager");
                 formData.append('timestamp', new Date().toISOString());
                 formData.append('isPathNode', String(isPathNode));
+                if (selectedBucket) {
+                    formData.append('bucket', selectedBucket); // [NEW] Add bucket if selected
+                }
                 formData.append('file', {
                     uri: file.uri,
                     name: file.name,
@@ -96,6 +122,7 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
         setUploading(false);
         setFiles([]);
         setProgress(0);
+        setSelectedBucket(null); // [NEW] Reset bucket selection
         onUploadComplete();
         Alert.alert("Success", "All files uploaded!");
         onClose();
@@ -123,6 +150,41 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                         <MaterialCommunityIcons name="cloud-upload-outline" size={28} color="#F59E0B" />
                         <Text style={styles.addBtnText}>Select Videos</Text>
                     </TouchableOpacity>
+
+                    {/* [NEW] BUCKET SELECTOR */}
+                    <Text style={styles.sectionLabel}>Course Bucket (Optional)</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.bucketScroll}>
+                        <TouchableOpacity
+                            onPress={() => setSelectedBucket(null)}
+                            style={[
+                                styles.bucketChip,
+                                !selectedBucket && styles.bucketChipSelected
+                            ]}
+                        >
+                            <MaterialCommunityIcons name="close-circle" size={16} color={!selectedBucket ? '#FFF' : '#6B7280'} />
+                            <Text style={[styles.bucketChipText, !selectedBucket && { color: '#FFF' }]}>None</Text>
+                        </TouchableOpacity>
+                        {courseBuckets.map((bucket) => (
+                            <TouchableOpacity
+                                key={bucket.id}
+                                onPress={() => setSelectedBucket(bucket.name)}
+                                style={[
+                                    styles.bucketChip,
+                                    selectedBucket === bucket.name && { backgroundColor: bucket.color, borderColor: bucket.color }
+                                ]}
+                            >
+                                <MaterialCommunityIcons
+                                    name={bucket.icon || 'folder'}
+                                    size={16}
+                                    color={selectedBucket === bucket.name ? '#FFF' : bucket.color}
+                                />
+                                <Text style={[
+                                    styles.bucketChipText,
+                                    selectedBucket === bucket.name && { color: '#FFF' }
+                                ]}>{bucket.name}</Text>
+                            </TouchableOpacity>
+                        ))}
+                    </ScrollView>
 
                     {/* PATH TOGGLE */}
                     <View style={styles.optionRow}>
@@ -228,5 +290,22 @@ const styles = StyleSheet.create({
     uploadBtnText: { color: '#FFF', fontSize: 16, fontFamily: 'Poppins_700Bold' },
 
     uploadingBox: { flexDirection: 'row', alignItems: 'center', justifyContent: "center" },
-    uploadingText: { marginLeft: 10, fontFamily: 'Poppins_600SemiBold', color: '#374151' }
+    uploadingText: { marginLeft: 10, fontFamily: 'Poppins_600SemiBold', color: '#374151' },
+
+    // [NEW] Bucket styles
+    sectionLabel: { fontSize: 13, fontFamily: 'Poppins_600SemiBold', color: '#374151', marginBottom: 8 },
+    bucketScroll: { flexDirection: 'row', marginBottom: 16 },
+    bucketChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 20,
+        marginRight: 8,
+        backgroundColor: '#F3F4F6',
+        borderWidth: 1,
+        borderColor: '#E5E7EB'
+    },
+    bucketChipSelected: { backgroundColor: '#6366F1', borderColor: '#6366F1' },
+    bucketChipText: { fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: '#4B5563', marginLeft: 4 }
 });

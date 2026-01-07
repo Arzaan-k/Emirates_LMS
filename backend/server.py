@@ -7,15 +7,16 @@ from typing import List, Optional
 import uuid
 from datetime import datetime
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from groq import Groq
 
 # --- CONFIGURATION ---
 PORT = 8000
 HOST = "0.0.0.0"
-BASE_URL = "http://192.168.0.136:8000"  # Local network IP for physical device
+BASE_URL = "http://192.168.29.119:8000"  # Local network IP for physical device
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
@@ -24,6 +25,9 @@ logger = logging.getLogger("BW_LMS_Backend")
 # --- ELEVENLABS CONFIG ---
 ELEVENLABS_API_KEY = "sk_6ecd572e870639a9cb94b52be1b37f7d093d2857734c5a5a"
 VOICE_ID = "Y6nOpHQlW4lnf9GRRc8f" # Best emotive Hindi voice
+
+# --- GROQ CONFIG ---
+os.environ["GROQ_API_KEY"] = "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"
 
 def generate_elevenlabs_audio(text):
     """Generates audio from text using ElevenLabs API and returns Base64 string."""
@@ -78,16 +82,25 @@ app.add_middleware(
 )
 
 # --- FFMPEG FIX FOR WHISPER ---
-# Whisper requires 'ffmpeg' to be in the PATH. MoviePy finds it via imageio, but Whisper doesn't.
+# Whisper requires 'ffmpeg' to be in the PATH. We add multiple possible locations.
+import os
+
+# Add WinGet-installed FFmpeg path (Windows)
+FFMPEG_WINGET_PATH = r"C:\Users\Arzaan Ali Khan\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.0.1-full_build\bin"
+if os.path.exists(FFMPEG_WINGET_PATH) and FFMPEG_WINGET_PATH not in os.environ["PATH"]:
+    os.environ["PATH"] = FFMPEG_WINGET_PATH + os.pathsep + os.environ["PATH"]
+    logger.info(f"FFmpeg WinGet Path added: {FFMPEG_WINGET_PATH}")
+
+# Also try imageio_ffmpeg as fallback
 try:
     import imageio_ffmpeg
     ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
     ffmpeg_dir = os.path.dirname(ffmpeg_path)
     if ffmpeg_dir not in os.environ["PATH"]:
         os.environ["PATH"] += os.pathsep + ffmpeg_dir
-    logger.info(f"FFmpeg Path configured for Whisper: {ffmpeg_dir}")
+    logger.info(f"FFmpeg imageio Path configured: {ffmpeg_dir}")
 except Exception as e:
-    logger.warning(f"Could not configuring FFmpeg for Whisper automatically: {e}")
+    logger.warning(f"Could not configure imageio FFmpeg: {e}")
 
 # --- STATIC FILES ---
 # Ensure uploads directory exists
@@ -176,6 +189,20 @@ resource_categories: List[dict] = [
     {"id": "4", "name": "Safety Guides", "icon": "shield-check-outline", "color": ["#10B981", "#059669"], "bg": "#D1FAE5"},
 ]
 
+# COURSE BUCKETS STORE - For organizing courses into categories/buckets
+course_buckets: List[dict] = [
+    {"id": "1", "name": "Onboarding", "description": "Essential training for new employees", "color": "#3B82F6", "icon": "account-plus"},
+    {"id": "2", "name": "Product Training", "description": "Learn about our products and recipes", "color": "#10B981", "icon": "coffee"},
+    {"id": "3", "name": "Safety & Hygiene", "description": "Workplace safety and hygiene protocols", "color": "#EF4444", "icon": "shield-check"},
+    {"id": "4", "name": "Customer Service", "description": "Excellence in customer interactions", "color": "#F59E0B", "icon": "account-heart"},
+    {"id": "5", "name": "Operations", "description": "Store operations and procedures", "color": "#8B5CF6", "icon": "cog"},
+]
+
+# PROCTORED ASSESSMENTS STORE
+proctored_assessments: List[dict] = []  # {id, title, description, questions, time_limit_minutes, passing_score, created_at, created_by, is_active}
+assessment_submissions: List[dict] = []  # {id, assessment_id, user_email, user_name, answers, score, passed, time_taken_seconds, submitted_at, violations}
+
+
 # --- KNOWLEDGE BASE ENDPOINTS ---
 
 @app.get("/resources/categories")
@@ -197,6 +224,382 @@ async def create_category(name: str = Form(...), icon: str = Form(...), color1: 
 @app.get("/resources")
 async def get_resources():
     return resource_store
+
+# --- COURSE BUCKETS ENDPOINTS ---
+
+@app.get("/course-buckets")
+async def get_course_buckets():
+    """Get all course buckets for organizing courses"""
+    return course_buckets
+
+@app.post("/course-buckets")
+async def create_course_bucket(
+    name: str = Form(...),
+    description: str = Form(""),
+    color: str = Form("#6366F1"),
+    icon: str = Form("folder")
+):
+    """Create a new course bucket"""
+    new_bucket = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "description": description,
+        "color": color,
+        "icon": icon
+    }
+    course_buckets.append(new_bucket)
+    logger.info(f"Course Bucket Created: {name}")
+    return {"status": "success", "bucket": new_bucket}
+
+@app.put("/course-buckets/{bucket_id}")
+async def update_course_bucket(
+    bucket_id: str,
+    name: str = Form(None),
+    description: str = Form(None),
+    color: str = Form(None),
+    icon: str = Form(None)
+):
+    """Update an existing course bucket"""
+    for bucket in course_buckets:
+        if bucket.get("id") == bucket_id:
+            if name is not None: bucket["name"] = name
+            if description is not None: bucket["description"] = description
+            if color is not None: bucket["color"] = color
+            if icon is not None: bucket["icon"] = icon
+            logger.info(f"Course Bucket Updated: {bucket_id}")
+            return {"status": "success", "bucket": bucket}
+    raise HTTPException(status_code=404, detail="Bucket not found")
+
+@app.delete("/course-buckets/{bucket_id}")
+async def delete_course_bucket(bucket_id: str):
+    """Delete a course bucket"""
+    global course_buckets
+    initial_len = len(course_buckets)
+    course_buckets = [b for b in course_buckets if b.get("id") != bucket_id]
+    
+    if len(course_buckets) < initial_len:
+        logger.info(f"Course Bucket Deleted: {bucket_id}")
+        return {"status": "success"}
+    
+    raise HTTPException(status_code=404, detail="Bucket not found")
+
+# --- PROCTORED ASSESSMENT ENDPOINTS ---
+
+@app.get("/proctored-assessments")
+async def get_proctored_assessments():
+    """Get all active proctored assessments"""
+    return [a for a in proctored_assessments if a.get("is_active", True)]
+
+@app.get("/proctored-assessments/all")
+async def get_all_proctored_assessments():
+    """Get all proctored assessments (admin)"""
+    return proctored_assessments
+
+@app.get("/proctored-assessments/{assessment_id}")
+async def get_proctored_assessment(assessment_id: str):
+    """Get a specific proctored assessment"""
+    for assessment in proctored_assessments:
+        if assessment.get("id") == assessment_id:
+            return assessment
+    raise HTTPException(status_code=404, detail="Assessment not found")
+
+@app.post("/proctored-assessments")
+async def create_proctored_assessment(
+    title: str = Form(...),
+    description: str = Form(""),
+    time_limit_minutes: int = Form(30),
+    passing_score: int = Form(70),
+    questions: str = Form(...),  # JSON string of questions array
+    created_by: str = Form("Admin")
+):
+    """Create a new proctored assessment"""
+    import json
+    try:
+        questions_list = json.loads(questions)
+    except:
+        raise HTTPException(status_code=400, detail="Invalid questions format")
+    
+    new_assessment = {
+        "id": str(uuid.uuid4()),
+        "title": title,
+        "description": description,
+        "questions": questions_list,
+        "time_limit_minutes": time_limit_minutes,
+        "passing_score": passing_score,
+        "created_at": datetime.now().isoformat(),
+        "created_by": created_by,
+        "is_active": True,
+        "total_questions": len(questions_list)
+    }
+    proctored_assessments.insert(0, new_assessment)
+    logger.info(f"Proctored Assessment Created: {title} with {len(questions_list)} questions")
+    return {"status": "success", "assessment": new_assessment}
+
+@app.post("/proctored-assessments/bulk-upload")
+async def bulk_upload_assessment_questions(
+    title: str = Form(...),
+    description: str = Form(""),
+    time_limit_minutes: int = Form(30),
+    passing_score: int = Form(70),
+    created_by: str = Form("Admin"),
+    file: UploadFile = File(...)
+):
+    """Create assessment with questions from Excel/CSV file"""
+    import pandas as pd
+    import io
+    
+    try:
+        # Read file content
+        content = await file.read()
+        
+        # Determine file type and parse
+        if file.filename.endswith('.xlsx') or file.filename.endswith('.xls'):
+            df = pd.read_excel(io.BytesIO(content))
+        elif file.filename.endswith('.csv'):
+            df = pd.read_csv(io.BytesIO(content))
+        else:
+            raise HTTPException(status_code=400, detail="Only Excel (.xlsx, .xls) or CSV files supported")
+        
+        # Expected columns: Question, Option1, Option2, Option3, Option4, CorrectOption (1-4)
+        required_cols = ['Question', 'Option1', 'Option2', 'Option3', 'Option4', 'CorrectOption']
+        for col in required_cols:
+            if col not in df.columns:
+                raise HTTPException(status_code=400, detail=f"Missing required column: {col}")
+        
+        # Parse questions
+        questions_list = []
+        for idx, row in df.iterrows():
+            question = {
+                "question": str(row['Question']),
+                "options": [
+                    str(row['Option1']),
+                    str(row['Option2']),
+                    str(row['Option3']),
+                    str(row['Option4'])
+                ],
+                "correctIndex": int(row['CorrectOption']) - 1  # Convert 1-4 to 0-3
+            }
+            questions_list.append(question)
+        
+        if len(questions_list) == 0:
+            raise HTTPException(status_code=400, detail="No valid questions found in file")
+        
+        # Create assessment
+        new_assessment = {
+            "id": str(uuid.uuid4()),
+            "title": title,
+            "description": description,
+            "questions": questions_list,
+            "time_limit_minutes": time_limit_minutes,
+            "passing_score": passing_score,
+            "created_at": datetime.now().isoformat(),
+            "created_by": created_by,
+            "is_active": True,
+            "total_questions": len(questions_list)
+        }
+        proctored_assessments.insert(0, new_assessment)
+        logger.info(f"Proctored Assessment Bulk Created: {title} with {len(questions_list)} questions from file")
+        
+        return {"status": "success", "assessment": new_assessment, "questions_count": len(questions_list)}
+    
+    except Exception as e:
+        logger.error(f"Bulk upload error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
+
+@app.post("/proctored-assessments/ai-generate")
+async def ai_generate_assessment_questions(
+    title: str = Form(...),
+    description: str = Form(""),
+    time_limit_minutes: int = Form(30),
+    passing_score: int = Form(70),
+    num_questions: int = Form(10),
+    topic: str = Form(""),
+    content: str = Form(""),
+    created_by: str = Form("Admin")
+):
+    """Generate proctored assessment questions using AI from topic or provided content"""
+    try:
+        prompt = f"""Generate exactly {num_questions} multiple-choice quiz questions {"about " + topic if topic else "based on the following content"}. 
+        
+{"Content: " + content[:4000] if content else "Topic: " + topic}
+
+IMPORTANT: Return ONLY a valid JSON array with this exact structure:
+[
+    {{
+        "question": "Clear, specific question text?",
+        "options": ["Option A", "Option B", "Option C", "Option D"],
+        "correctIndex": 0
+    }}
+]
+
+Requirements:
+- Each question should test understanding, not just recall
+- Options should be plausible but only one correct
+- correctIndex is 0-3 indicating the correct option
+- Generate exactly {num_questions} questions
+- Return ONLY the JSON array, no markdown or extra text"""
+
+        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "You are an expert assessment creator. Return only valid JSON arrays."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=4000
+        )
+        
+        response_text = response.choices[0].message.content.strip()
+        
+        # Clean response - extract JSON array
+        import re
+        json_match = re.search(r'\[[\s\S]*\]', response_text)
+        if json_match:
+            response_text = json_match.group()
+        
+        import json
+        questions_list = json.loads(response_text)
+        
+        if not isinstance(questions_list, list) or len(questions_list) == 0:
+            raise Exception("Invalid AI response format")
+        
+        # Validate each question
+        for q in questions_list:
+            if "correctIndex" not in q:
+                q["correctIndex"] = 0
+            q["correctIndex"] = max(0, min(3, int(q["correctIndex"])))
+        
+        # Create assessment
+        new_assessment = {
+            "id": str(uuid.uuid4()),
+            "title": title,
+            "description": description,
+            "questions": questions_list[:num_questions],
+            "time_limit_minutes": time_limit_minutes,
+            "passing_score": passing_score,
+            "created_at": datetime.now().isoformat(),
+            "created_by": created_by,
+            "is_active": True,
+            "total_questions": len(questions_list[:num_questions]),
+            "ai_generated": True
+        }
+        proctored_assessments.insert(0, new_assessment)
+        logger.info(f"AI Generated Assessment: {title} with {len(questions_list)} questions")
+        
+        return {"status": "success", "assessment": new_assessment, "questions_count": len(questions_list[:num_questions])}
+        
+    except Exception as e:
+        logger.error(f"AI generation error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate questions: {str(e)}")
+
+@app.put("/proctored-assessments/{assessment_id}/toggle")
+async def toggle_assessment_active(assessment_id: str):
+    """Toggle assessment active/inactive status"""
+    for assessment in proctored_assessments:
+        if assessment.get("id") == assessment_id:
+            assessment["is_active"] = not assessment.get("is_active", True)
+            return {"status": "success", "is_active": assessment["is_active"]}
+    raise HTTPException(status_code=404, detail="Assessment not found")
+
+@app.delete("/proctored-assessments/{assessment_id}")
+async def delete_proctored_assessment(assessment_id: str):
+    """Delete a proctored assessment"""
+    global proctored_assessments
+    initial_len = len(proctored_assessments)
+    proctored_assessments = [a for a in proctored_assessments if a.get("id") != assessment_id]
+    
+    if len(proctored_assessments) < initial_len:
+        logger.info(f"Proctored Assessment Deleted: {assessment_id}")
+        return {"status": "success"}
+    
+    raise HTTPException(status_code=404, detail="Assessment not found")
+
+@app.post("/proctored-assessments/{assessment_id}/submit")
+async def submit_assessment(
+    assessment_id: str,
+    user_email: str = Form(...),
+    user_name: str = Form(...),
+    answers: str = Form(...),  # JSON string of answers array [0, 2, 1, 3, ...]
+    time_taken_seconds: int = Form(...),
+    violations: int = Form(0)
+):
+    """Submit a proctored assessment attempt"""
+    import json
+    
+    # Find assessment
+    assessment = None
+    for a in proctored_assessments:
+        if a.get("id") == assessment_id:
+            assessment = a
+            break
+    
+    if not assessment:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+    
+    try:
+        answers_list = json.loads(answers)
+    except:
+        raise HTTPException(status_code=400, detail="Invalid answers format")
+    
+    # Calculate score
+    correct_count = 0
+    total = len(assessment["questions"])
+    
+    for i, ans in enumerate(answers_list):
+        if i < total and ans == assessment["questions"][i].get("correctIndex"):
+            correct_count += 1
+    
+    score_percent = (correct_count / total * 100) if total > 0 else 0
+    passed = score_percent >= assessment.get("passing_score", 70)
+    
+    # Create submission record
+    submission = {
+        "id": str(uuid.uuid4()),
+        "assessment_id": assessment_id,
+        "assessment_title": assessment.get("title"),
+        "user_email": user_email,
+        "user_name": user_name,
+        "answers": answers_list,
+        "correct_count": correct_count,
+        "total_questions": total,
+        "score_percent": round(score_percent, 1),
+        "passed": passed,
+        "time_taken_seconds": time_taken_seconds,
+        "time_limit_seconds": assessment.get("time_limit_minutes", 30) * 60,
+        "violations": violations,
+        "submitted_at": datetime.now().isoformat()
+    }
+    
+    assessment_submissions.insert(0, submission)
+    logger.info(f"Assessment Submitted: {user_name} scored {score_percent}% on {assessment.get('title')}")
+    
+    return {
+        "status": "success",
+        "submission": submission,
+        "result": {
+            "score": round(score_percent, 1),
+            "correct": correct_count,
+            "total": total,
+            "passed": passed,
+            "passing_score": assessment.get("passing_score", 70)
+        }
+    }
+
+@app.get("/proctored-assessments/submissions/all")
+async def get_all_submissions():
+    """Get all assessment submissions (admin)"""
+    return assessment_submissions
+
+@app.get("/proctored-assessments/{assessment_id}/submissions")
+async def get_assessment_submissions(assessment_id: str):
+    """Get submissions for a specific assessment"""
+    return [s for s in assessment_submissions if s.get("assessment_id") == assessment_id]
+
+@app.get("/proctored-assessments/submissions/user/{user_email}")
+async def get_user_submissions(user_email: str):
+    """Get all submissions by a specific user"""
+    return [s for s in assessment_submissions if s.get("user_email") == user_email]
 
 # --- AI PROCESSING HELPER ---
 async def process_video_content(file_path: str, filename: str):
@@ -317,6 +720,7 @@ async def upload_resource(
     category: str = Form(...), 
     description: str = Form(...),
     isPathNode: bool = Form(False), # New param
+    bucket: str = Form(None),  # NEW: Optional bucket/category for the course
     file: UploadFile = File(...)
 ):
     print(f"--- [DEBUG] Upload Request: Title={title}, IsPathNode={isPathNode}, File={file.filename} ---")
@@ -381,7 +785,8 @@ async def upload_resource(
             "skippable": False,
             "xp": 50,
             "transcript": transcript,
-            "quiz": quiz
+            "quiz": quiz,
+            "bucket": bucket  # NEW: Store bucket/category
         }
         # Add to top of store
         content_store.insert(0, path_item)
@@ -443,6 +848,7 @@ async def upload_content(
     authorRole: str = Form(...),
     timestamp: str = Form(...),
     isPathNode: bool = Form(False),
+    bucket: str = Form(None),  # NEW: Optional bucket/category for the course
     file: UploadFile = File(...)
 ):
     """
@@ -462,7 +868,7 @@ async def upload_content(
     # 2. Generate Public URL
     video_url = f"{BASE_URL}/uploads/{file.filename}"
     
-    logger.info(f"New Content Uploaded: {title} by {authorRole} (File: {file.filename})")
+    logger.info(f"New Content Uploaded: {title} by {authorRole} (File: {file.filename}, Bucket: {bucket})")
     
     # 3. Store Metadata
     item_id = str(uuid.uuid4())
@@ -477,7 +883,8 @@ async def upload_content(
         "skippable": False, 
         "xp": 50,
         "transcript": transcript_text,
-        "quiz": quiz_data 
+        "quiz": quiz_data,
+        "bucket": bucket  # NEW: Store bucket/category
     }
     
     content_store.insert(0, item_data) # Add to top
@@ -1826,7 +2233,175 @@ async def location_history_report():
     }
 
 
-# --- START SERVER ---
+
+# ==========================================
+# PROCTORED ASSESSMENT APIs
+# ==========================================
+
+proctored_assessments = []
+assessment_submissions = []
+
+class AssessmentModel(BaseModel):
+    title: str
+    description: str = ""
+    time_limit_minutes: int = 30
+    passing_score: int = 70
+    created_by: str = "Admin"
+    questions: List[dict]
+
+class AssessmentSubmission(BaseModel):
+    user_name: str
+    answers: List[int]
+    violations: int = 0
+
+@app.post("/proctored-assessments")
+async def create_assessment(data: AssessmentModel):
+    new_id = str(uuid.uuid4())
+    assessment = data.dict()
+    assessment["id"] = new_id
+    assessment["created_at"] = datetime.now().isoformat()
+    assessment["active"] = True
+    proctored_assessments.append(assessment)
+    return {"status": "success", "id": new_id}
+
+@app.get("/proctored-assessments")
+async def get_assessments():
+    return [a for a in proctored_assessments if a.get("active", True)]
+
+@app.get("/proctored-assessments/all")
+async def get_all_assessments():
+    return proctored_assessments
+
+@app.delete("/proctored-assessments/{assessment_id}")
+async def delete_assessment(assessment_id: str):
+    global proctored_assessments
+    initial_len = len(proctored_assessments)
+    proctored_assessments = [a for a in proctored_assessments if a["id"] != assessment_id]
+    if len(proctored_assessments) < initial_len:
+        return {"status": "success", "message": "Assessment deleted"}
+    return {"status": "error", "message": "Assessment not found"}
+
+@app.post("/proctored-assessments/{assessment_id}/submit")
+async def submit_assessment(assessment_id: str, submission: AssessmentSubmission):
+    assessment = next((a for a in proctored_assessments if a["id"] == assessment_id), None)
+    if not assessment:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+
+    score = 0
+    total = len(assessment["questions"])
+    for i, ans in enumerate(submission.answers):
+        if i < total and ans == assessment["questions"][i]["correctIndex"]:
+            score += 1
+    
+    passed_cutoff = assessment.get("passing_score", 70)
+    percentage = (score / total) * 100 if total > 0 else 0
+    passed = percentage >= passed_cutoff
+
+    result = {
+        "id": str(uuid.uuid4()),
+        "assessment_id": assessment_id,
+        "user_name": submission.user_name,
+        "score": round(percentage, 1),
+        "correct": score,
+        "total": total,
+        "passed": passed,
+        "passing_score": passed_cutoff,
+        "violations": submission.violations,
+        "submitted_at": datetime.now().isoformat(),
+        "answers": submission.answers
+    }
+    assessment_submissions.append(result)
+    return {"status": "success", "result": result}
+
+@app.get("/proctored-assessments/{assessment_id}/submissions")
+async def get_assessment_submissions(assessment_id: str):
+    return [s for s in assessment_submissions if s["assessment_id"] == assessment_id]
+
+class AiGenRequest(BaseModel):
+    topic: str = ""
+    content: str = ""
+    num_questions: int = 5
+
+@app.post("/proctored-assessments/ai-generate")
+async def ai_generate_assessment(req: AiGenRequest):
+    try:
+        if not req.topic and not req.content:
+             return {"error": "Provide topic or content"}
+
+        prompt = f"""
+        Generate {req.num_questions} multiple-choice questions for an assessment.
+        Topic: {req.topic}
+        Context: {req.content[:1000]}
+        
+        Format JSON:
+        {{
+            "questions": [
+                {{ "question": "...", "options": ["A", "B", "C", "D"], "correctIndex": 0 }}
+            ]
+        }}
+        """
+        
+        client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+        completion = client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama-3.3-70b-versatile",
+            response_format={"type": "json_object"}
+        )
+        content = completion.choices[0].message.content
+        return json.loads(content)
+    except Exception as e:
+        logger.error(f"AI Gen Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/proctored-assessments/bulk-upload")
+async def bulk_upload_assessment(
+    title: str = Form(...),
+    description: str = Form(...),
+    time_limit_minutes: int = Form(30),
+    passing_score: int = Form(70),
+    created_by: str = Form("Admin"),
+    file: UploadFile = File(...)
+):
+    try:
+        import pandas as pd
+        contents = await file.read()
+        import io
+        
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(io.BytesIO(contents))
+        else:
+            df = pd.read_excel(io.BytesIO(contents))
+            
+        questions = []
+        # Expect columns: Question, Option1, Option2, Option3, Option4, CorrectOption (1-4)
+        for _, row in df.iterrows():
+            q = {
+                "question": str(row.iloc[0]),
+                "options": [str(row.iloc[1]), str(row.iloc[2]), str(row.iloc[3]), str(row.iloc[4])],
+                "correctIndex": int(row.iloc[5]) - 1
+            }
+            questions.append(q)
+            
+        new_id = str(uuid.uuid4())
+        assessment = {
+            "id": new_id,
+            "title": title,
+            "description": description,
+            "time_limit_minutes": time_limit_minutes,
+            "passing_score": passing_score,
+            "created_by": created_by,
+            "questions": questions,
+            "created_at": datetime.now().isoformat(),
+            "active": True
+        }
+        proctored_assessments.append(assessment)
+        return {"status": "success", "id": new_id, "questions_count": len(questions)}
+        
+    except Exception as e:
+        logger.error(f"Bulk Upload Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to process file: {str(e)}")
+
+
 if __name__ == "__main__":
     import uvicorn
     logger.info(f"Starting BW LMS Backend on {HOST}:{PORT}")

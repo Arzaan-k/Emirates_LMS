@@ -292,6 +292,7 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
 // ... (Existing Components)
 
 function LiveFeedSection({ data, onPlay }) {
+  const { t } = useLanguage();
   if (!data || data.length === 0) return null;
 
   return (
@@ -328,6 +329,7 @@ function LiveFeedSection({ data, onPlay }) {
 }
 
 function QuizFeedSection({ data, onStart }) {
+  const { t } = useLanguage();
   if (!data || data.length === 0) return null;
 
   return (
@@ -364,6 +366,7 @@ function QuizFeedSection({ data, onStart }) {
 }
 
 function ProctoredFeedSection({ data, onStart }) {
+  const { t } = useLanguage();
   if (!data || data.length === 0) return null;
 
   return (
@@ -574,11 +577,25 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
     }
   };
 
+  // FETCH PROCTORED ASSESSMENTS
+  const fetchProctoredAssessments = async () => {
+    try {
+      const response = await fetch(`${API_URL}/proctored-assessments`);
+      const data = await response.json();
+      if (Array.isArray(data)) {
+        setAssignedProctoring(data);
+      }
+    } catch (error) {
+      console.error("Error fetching proctored assessments:", error);
+    }
+  };
+
   useEffect(() => {
     fetchPathNodes();
     fetchNotifications();
     fetchNews();
     fetchLiveQuizzes();
+    fetchProctoredAssessments();
   }, []);
 
   useEffect(() => {

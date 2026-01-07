@@ -26,6 +26,7 @@ import Svg, { Circle, G, Text as SvgText } from 'react-native-svg';
 import { QuizCreationModal, QuizResultsModal } from '../Components/QuizModals';
 import EditNodeModal from '../Components/EditNodeModal';
 import BulkUploadModal from '../Components/BulkUploadModal'; // [NEW]
+import BucketManagementModal from '../Components/BucketManagementModal'; // [NEW] Bucket management
 import CreateUser from '../Screens/CreateUser';
 import API_URL from '../config';
 
@@ -193,9 +194,29 @@ export default function ManagerDashboard({ route, navigation }) {
     const [newCatMode, setNewCatMode] = useState(false);
     const [newCatName, setNewCatName] = useState('');
 
+    // [NEW] Course Buckets State
+    const [bucketModalVisible, setBucketModalVisible] = useState(false);
+    const [courseBuckets, setCourseBuckets] = useState([]);
+    const [selectedBucket, setSelectedBucket] = useState(null);
+    const [loadingBuckets, setLoadingBuckets] = useState(false);
+
     useEffect(() => {
-        if (uploadVisible) fetchCategories();
+        if (uploadVisible) {
+            fetchCategories();
+            fetchBuckets();
+        }
     }, [uploadVisible]);
+
+    // [NEW] Fetch course buckets
+    const fetchBuckets = async () => {
+        setLoadingBuckets(true);
+        try {
+            const res = await fetch(`${API_URL}/course-buckets`);
+            const data = await res.json();
+            setCourseBuckets(data);
+        } catch (e) { console.error('Error fetching buckets:', e); }
+        finally { setLoadingBuckets(false); }
+    };
 
     const fetchCategories = async () => {
         setLoadingCats(true);
@@ -263,6 +284,9 @@ export default function ManagerDashboard({ route, navigation }) {
             formData.append('category', resCategory);
             formData.append('description', resDesc);
             formData.append('isPathNode', String(isPathNode)); // RESTORED
+            if (selectedBucket) {
+                formData.append('bucket', selectedBucket); // [NEW] Add bucket if selected
+            }
             formData.append('file', {
                 uri: resFile.uri,
                 name: resFile.name,
@@ -286,6 +310,7 @@ export default function ManagerDashboard({ route, navigation }) {
                 setResDesc('');
                 setResFile(null);
                 setIsPathNode(false);
+                setSelectedBucket(null); // [NEW] Reset bucket selection
             } else {
                 Alert.alert("Error", "Upload failed.");
             }
@@ -923,6 +948,17 @@ export default function ManagerDashboard({ route, navigation }) {
                             </View>
                             <Text style={styles.actionText}>Send Notif</Text>
                         </TouchableOpacity>
+
+                        {/* [NEW] MANAGE BUCKETS BUTTON */}
+                        <TouchableOpacity
+                            style={styles.actionBtn}
+                            onPress={() => setBucketModalVisible(true)}
+                        >
+                            <View style={[styles.actionIcon, { backgroundColor: '#EEF2FF' }]}>
+                                <MaterialCommunityIcons name="folder-multiple" size={24} color="#6366F1" />
+                            </View>
+                            <Text style={styles.actionText}>Manage Buckets</Text>
+                        </TouchableOpacity>
                     </View>
 
                     {/* --- [NEW] MANAGE LEARNING PATH SECTION --- */}
@@ -968,6 +1004,13 @@ export default function ManagerDashboard({ route, navigation }) {
                     visible={bulkModalVisible}
                     onClose={() => setBulkModalVisible(false)}
                     onUploadComplete={() => setRefreshPath(prev => prev + 1)}
+                />
+
+                {/* [NEW] BUCKET MANAGEMENT MODAL */}
+                <BucketManagementModal
+                    visible={bucketModalVisible}
+                    onClose={() => setBucketModalVisible(false)}
+                    onBucketsChanged={fetchBuckets}
                 />
 
                 {/* CREATE USER MODAL */}
@@ -1137,6 +1180,45 @@ export default function ManagerDashboard({ route, navigation }) {
                                     onChangeText={setResDesc}
                                     multiline
                                 />
+
+                                {/* [NEW] Course Bucket Selector */}
+                                <Text style={styles.inputLabel}>Course Bucket (Optional)</Text>
+                                <View style={{ marginBottom: 15 }}>
+                                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
+                                        <TouchableOpacity
+                                            onPress={() => setSelectedBucket(null)}
+                                            style={{
+                                                paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginRight: 8,
+                                                backgroundColor: !selectedBucket ? '#6366F1' : '#F3F4F6',
+                                                borderWidth: 1, borderColor: !selectedBucket ? '#6366F1' : '#E5E7EB',
+                                                flexDirection: 'row', alignItems: 'center'
+                                            }}
+                                        >
+                                            <MaterialCommunityIcons name="close-circle" size={14} color={!selectedBucket ? '#FFF' : '#6B7280'} style={{ marginRight: 4 }} />
+                                            <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: !selectedBucket ? '#FFF' : '#4B5563' }}>None</Text>
+                                        </TouchableOpacity>
+                                        {courseBuckets.map((bucket, i) => (
+                                            <TouchableOpacity
+                                                key={bucket.id}
+                                                onPress={() => setSelectedBucket(bucket.name)}
+                                                style={{
+                                                    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginRight: 8,
+                                                    backgroundColor: selectedBucket === bucket.name ? bucket.color : '#F3F4F6',
+                                                    borderWidth: 1, borderColor: selectedBucket === bucket.name ? bucket.color : '#E5E7EB',
+                                                    flexDirection: 'row', alignItems: 'center'
+                                                }}
+                                            >
+                                                <MaterialCommunityIcons
+                                                    name={bucket.icon || 'folder'}
+                                                    size={14}
+                                                    color={selectedBucket === bucket.name ? '#FFF' : bucket.color}
+                                                    style={{ marginRight: 4 }}
+                                                />
+                                                <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: selectedBucket === bucket.name ? '#FFF' : '#4B5563' }}>{bucket.name}</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </ScrollView>
+                                </View>
 
                                 {/* RESTORED: Add to Path Toggle */}
                                 <TouchableOpacity
