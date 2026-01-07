@@ -386,7 +386,7 @@ export default function AIChatBot() {
 }
 
 const styles = StyleSheet.create({
-    fabContainer: { position: "absolute", bottom: 100, right: 20, zIndex: 999, shadowColor: "#6366F1", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 15, elevation: 10 },
+    fabContainer: { position: "absolute", bottom: 140, right: 20, zIndex: 999, shadowColor: "#6366F1", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 15, elevation: 10 },
     fab: { borderRadius: 30, overflow: "hidden" },
     fabGradient: { width: 60, height: 60, justifyContent: "center", alignItems: "center" },
 

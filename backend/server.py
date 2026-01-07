@@ -15,7 +15,7 @@ from pydantic import BaseModel
 # --- CONFIGURATION ---
 PORT = 8000
 HOST = "0.0.0.0"
-BASE_URL = f"http://192.168.0.136:{PORT}" # UPDATE THIS IP IF IT CHANGES
+BASE_URL = "https://526f8b36f50f.ngrok-free.app" # Ngrok public URL
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)

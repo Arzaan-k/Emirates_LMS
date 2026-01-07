@@ -26,7 +26,7 @@ export default function SimulationHub({ onClose }) {
 
     const fetchHistory = async () => {
         try {
-            const res = await fetch("http://192.168.0.136:8000/ai/simulation/history");
+            const res = await fetch("https://526f8b36f50f.ngrok-free.app/ai/simulation/history");
             const data = await res.json();
             setHistory(data);
         } catch (e) {

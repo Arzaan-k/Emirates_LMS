@@ -317,6 +317,7 @@ const DonutChart = () => {
                                         rotation={(currentAngle + 90) + (index * 2)} // mild gap
                                         origin={`${center}, ${center}`}
                                         onPress={() => setActiveSection(item)}
+                                        fill="transparent"
                                     />
                                 );
                             })}
