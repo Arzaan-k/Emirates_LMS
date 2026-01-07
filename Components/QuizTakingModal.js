@@ -105,21 +105,26 @@ export default function QuizTakingModal({ visible, quiz, onClose, userName = "Us
                     <Text style={styles.question}>{currentQuestion.question}</Text>
 
                     {/* Options */}
-                    {currentQuestion.options.map((option, index) => (
-                        <TouchableOpacity
-                            key={index}
-                            style={[
-                                styles.option,
-                                answers[currentIndex] === index && styles.optionSelected
-                            ]}
-                            onPress={() => handleAnswer(index)}
-                        >
-                            <View style={styles.optionCircle}>
-                                {answers[currentIndex] === index && <View style={styles.optionDot} />}
-                            </View>
-                            <Text style={styles.optionText}>{option}</Text>
-                        </TouchableOpacity>
-                    ))}
+                    {currentQuestion.options.map((option, index) => {
+                        // Handle both string options and object options {id, text}
+                        const optionText = typeof option === 'object' ? option.text : option;
+
+                        return (
+                            <TouchableOpacity
+                                key={index}
+                                style={[
+                                    styles.option,
+                                    answers[currentIndex] === index && styles.optionSelected
+                                ]}
+                                onPress={() => handleAnswer(index)}
+                            >
+                                <View style={styles.optionCircle}>
+                                    {answers[currentIndex] === index && <View style={styles.optionDot} />}
+                                </View>
+                                <Text style={styles.optionText}>{optionText}</Text>
+                            </TouchableOpacity>
+                        );
+                    })}
                 </ScrollView>
 
                 {/* Footer Buttons */}

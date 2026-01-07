@@ -647,6 +647,194 @@ async def delete_live_quiz(quiz_id: str):
     
     raise HTTPException(status_code=404, detail="Quiz not found")
 
+# --- AI QUIZ GENERATION ENDPOINT ---
+
+@app.post("/generate-quiz-from-content")
+async def generate_quiz_from_content(
+    title: str = Form(...),
+    difficulty: str = Form("Medium"),
+    num_questions: int = Form(5),
+    file: UploadFile = File(...)
+):
+    """
+    Generate a quiz from any uploaded content (video, PDF, image, or text file).
+    Uses Whisper for audio, PyMuPDF for PDF, and Groq for quiz generation.
+    """
+    quiz_id = str(uuid.uuid4())
+    extracted_text = ""
+    
+    # Save uploaded file
+    file_extension = file.filename.split('.')[-1].lower()
+    temp_filename = f"temp_{quiz_id}.{file_extension}"
+    temp_path = os.path.join(UPLOAD_DIR, temp_filename)
+    
+    with open(temp_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    
+    content_type = file.content_type or ""
+    logger.info(f"AI Quiz Gen: Processing {file.filename} ({content_type})")
+    
+    try:
+        # 1. EXTRACT TEXT BASED ON FILE TYPE
+        
+        # VIDEO/AUDIO: Use Whisper transcription
+        if any(x in content_type for x in ["video", "audio"]) or file_extension in ["mp4", "mp3", "wav", "m4a", "webm"]:
+            logger.info("Extracting audio and transcribing with Whisper...")
+            
+            # Extract audio if video
+            if "video" in content_type or file_extension in ["mp4", "webm"]:
+                from moviepy.editor import VideoFileClip
+                video = VideoFileClip(temp_path)
+                audio_path = temp_path.replace(f".{file_extension}", ".mp3")
+                video.audio.write_audiofile(audio_path, verbose=False, logger=None)
+                video.close()
+            else:
+                audio_path = temp_path
+            
+            # Transcribe with Whisper
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, lambda: whisper_model.transcribe(audio_path))
+            extracted_text = result.get("text", "")
+            logger.info(f"Whisper transcription: {len(extracted_text)} chars")
+            
+        # PDF: Use PyMuPDF (fitz)
+        elif "pdf" in content_type or file_extension == "pdf":
+            logger.info("Extracting text from PDF...")
+            try:
+                import fitz  # PyMuPDF
+                doc = fitz.open(temp_path)
+                for page in doc:
+                    extracted_text += page.get_text()
+                doc.close()
+                logger.info(f"PDF extraction: {len(extracted_text)} chars")
+            except ImportError:
+                logger.warning("PyMuPDF not installed, trying pdfplumber...")
+                try:
+                    import pdfplumber
+                    with pdfplumber.open(temp_path) as pdf:
+                        for page in pdf.pages:
+                            extracted_text += (page.extract_text() or "")
+                except ImportError:
+                    raise HTTPException(status_code=500, detail="PDF extraction libraries not available")
+                    
+        # IMAGE: Use Tesseract OCR
+        elif "image" in content_type or file_extension in ["jpg", "jpeg", "png", "bmp", "gif"]:
+            logger.info("Extracting text from image with OCR...")
+            try:
+                import pytesseract
+                from PIL import Image
+                img = Image.open(temp_path)
+                extracted_text = pytesseract.image_to_string(img)
+                logger.info(f"OCR extraction: {len(extracted_text)} chars")
+            except ImportError:
+                raise HTTPException(status_code=500, detail="Tesseract OCR not available")
+                
+        # TEXT FILE: Read directly
+        elif file_extension in ["txt", "md", "csv"]:
+            logger.info("Reading text file...")
+            with open(temp_path, "r", encoding="utf-8", errors="ignore") as f:
+                extracted_text = f.read()
+            logger.info(f"Text file: {len(extracted_text)} chars")
+            
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {content_type}")
+        
+        # Check if we got any text
+        if not extracted_text or len(extracted_text.strip()) < 50:
+            raise HTTPException(status_code=400, detail="Could not extract enough text from the file")
+        
+        # 2. GENERATE QUIZ WITH GROQ
+        logger.info("Generating quiz with Groq...")
+        from groq import Groq
+        groq_client = Groq(api_key="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")
+        
+        prompt = f"""Based on the following content, generate exactly {num_questions} multiple choice quiz questions.
+Difficulty level: {difficulty}
+
+CONTENT:
+{extracted_text[:8000]}
+
+Generate a JSON array with this exact structure:
+[
+  {{
+    "question": "Question text here?",
+    "options": [
+      {{"id": "a", "text": "Option A"}},
+      {{"id": "b", "text": "Option B"}},
+      {{"id": "c", "text": "Option C"}},
+      {{"id": "d", "text": "Option D"}}
+    ],
+    "correct": "a"
+  }}
+]
+
+IMPORTANT:
+- Generate exactly {num_questions} questions
+- Each question must have exactly 4 options (a, b, c, d)
+- Include "correct" field with the correct answer letter
+- Make questions appropriate for the difficulty level
+- Return ONLY the JSON array, no other text"""
+
+        loop = asyncio.get_event_loop()
+        completion = await loop.run_in_executor(None, lambda: groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=2000
+        ))
+        
+        response_content = completion.choices[0].message.content.strip()
+        logger.info(f"Groq response: {response_content[:500]}...")
+        
+        # Parse JSON from response
+        import re
+        json_match = re.search(r'\[[\s\S]*\]', response_content)
+        if json_match:
+            questions_list = json.loads(json_match.group())
+        else:
+            raise ValueError("Could not find JSON array in response")
+        
+        # 3. CREATE QUIZ OBJECT
+        quiz_item = {
+            "id": quiz_id,
+            "title": title,
+            "difficulty": difficulty,
+            "time": f"{num_questions * 2} mins",
+            "questions": questions_list,
+            "source": "ai_generated",
+            "extracted_text_preview": extracted_text[:200] + "...",
+            "image": "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800",
+            "created_at": datetime.now().isoformat()
+        }
+        
+        live_quizzes.append(quiz_item)
+        logger.info(f"AI Quiz Created: {title} ({len(questions_list)} questions)")
+        
+        # Broadcast to all connected clients
+        await manager.broadcast({
+            "type": "QUIZ_POSTED",
+            "data": quiz_item
+        })
+        
+        return {"status": "success", "data": quiz_item}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        logger.error(f"AI Quiz Generation Error: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Quiz generation failed: {str(e)}")
+    finally:
+        # Cleanup temp files
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            audio_path = temp_path.replace(f".{file_extension}", ".mp3")
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
+        except:
+            pass
 
 @app.post("/notifications/send") # Renamed/Updated to match ManagerDashboard call which was trying /notifications/send but server had /notify? No, ManagerDashboard calls /notifications/send in one place and /notify in another. Let's standardize to /notify, but ManagerDashboard uses /notifications/send. I will use /notify and update ManagerDashboard to match OR assume ManagerDashboard was wrong.
 # Actually, I'll stick to replacing the existing /notify and ensure ManagerDashboard uses it.

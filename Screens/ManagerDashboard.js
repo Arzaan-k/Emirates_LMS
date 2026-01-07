@@ -181,6 +181,12 @@ export default function ManagerDashboard({ route, navigation }) {
     ]);
     const [postingQuiz, setPostingQuiz] = useState(false);
 
+    // AI Quiz Generation State
+    const [quizMode, setQuizMode] = useState('manual'); // 'manual' or 'ai'
+    const [aiQuizFile, setAiQuizFile] = useState(null);
+    const [aiQuizNumQuestions, setAiQuizNumQuestions] = useState(5);
+    const [generatingAiQuiz, setGeneratingAiQuiz] = useState(false);
+
     // Categories
     const [categories, setCategories] = useState([]);
     const [loadingCats, setLoadingCats] = useState(false);
@@ -391,6 +397,69 @@ export default function ManagerDashboard({ route, navigation }) {
             Alert.alert("Error", "Network error while posting quiz.");
         } finally {
             setPostingQuiz(false);
+        }
+    };
+
+    // --- AI QUIZ GENERATION HANDLER ---
+    const pickAiQuizFile = async () => {
+        try {
+            const result = await DocumentPicker.getDocumentAsync({
+                type: ["video/*", "audio/*", "application/pdf", "image/*", "text/*"],
+                copyToCacheDirectory: true
+            });
+
+            if (result.assets && result.assets[0]) {
+                setAiQuizFile(result.assets[0]);
+            }
+        } catch (err) {
+            console.log("AI Quiz File Pick Error:", err);
+        }
+    };
+
+    const handleGenerateAiQuiz = async () => {
+        if (!topicQuizTitle) {
+            Alert.alert("Missing Info", "Please enter a quiz title.");
+            return;
+        }
+        if (!aiQuizFile) {
+            Alert.alert("Missing Info", "Please select a file to generate quiz from.");
+            return;
+        }
+
+        setGeneratingAiQuiz(true);
+        try {
+            const formData = new FormData();
+            formData.append('title', topicQuizTitle);
+            formData.append('difficulty', topicQuizDifficulty);
+            formData.append('num_questions', String(aiQuizNumQuestions));
+            formData.append('file', {
+                uri: aiQuizFile.uri,
+                name: aiQuizFile.name,
+                type: aiQuizFile.mimeType || 'application/octet-stream'
+            });
+
+            const response = await fetch(`${API_URL}/generate-quiz-from-content`, {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+            if (result.status === 'success') {
+                Alert.alert("Success", `AI Quiz created with ${result.data.questions?.length || 0} questions!`);
+                setQuizCreationVisible(false);
+                setTopicQuizTitle('');
+                setTopicQuizDifficulty('Medium');
+                setAiQuizFile(null);
+                setAiQuizNumQuestions(5);
+                setQuizMode('manual');
+            } else {
+                Alert.alert("Error", result.detail || "Failed to generate quiz.");
+            }
+        } catch (error) {
+            console.error("AI Quiz generation error:", error);
+            Alert.alert("Error", "Network error while generating quiz.");
+        } finally {
+            setGeneratingAiQuiz(false);
         }
     };
 
@@ -1209,6 +1278,28 @@ export default function ManagerDashboard({ route, navigation }) {
                             </View>
 
                             <ScrollView showsVerticalScrollIndicator={false}>
+                                {/* AI/MANUAL TOGGLE */}
+                                <View style={{ flexDirection: 'row', backgroundColor: '#F3F4F6', borderRadius: 12, padding: 4, marginBottom: 20 }}>
+                                    <TouchableOpacity
+                                        style={{ flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: 'center', backgroundColor: quizMode === 'manual' ? '#FFF' : 'transparent' }}
+                                        onPress={() => setQuizMode('manual')}
+                                    >
+                                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                            <Feather name="edit-3" size={16} color={quizMode === 'manual' ? '#4F46E5' : '#6B7280'} />
+                                            <Text style={{ marginLeft: 6, fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: quizMode === 'manual' ? '#4F46E5' : '#6B7280' }}>Manual</Text>
+                                        </View>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={{ flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: 'center', backgroundColor: quizMode === 'ai' ? '#FFF' : 'transparent' }}
+                                        onPress={() => setQuizMode('ai')}
+                                    >
+                                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                            <MaterialCommunityIcons name="robot-outline" size={18} color={quizMode === 'ai' ? '#7C3AED' : '#6B7280'} />
+                                            <Text style={{ marginLeft: 6, fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: quizMode === 'ai' ? '#7C3AED' : '#6B7280' }}>AI Generate</Text>
+                                        </View>
+                                    </TouchableOpacity>
+                                </View>
+
                                 <Text style={styles.inputLabel}>Quiz Title *</Text>
                                 <TextInput
                                     style={styles.input}
@@ -1236,83 +1327,150 @@ export default function ManagerDashboard({ route, navigation }) {
                                             ))}
                                         </View>
                                     </View>
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={styles.inputLabel}>Time</Text>
-                                        <TextInput
-                                            style={styles.input}
-                                            placeholder="e.g. 10 min"
-                                            value={topicQuizTime}
-                                            onChangeText={setTopicQuizTime}
-                                        />
-                                    </View>
+                                    {quizMode === 'manual' && (
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.inputLabel}>Time</Text>
+                                            <TextInput
+                                                style={styles.input}
+                                                placeholder="e.g. 10 min"
+                                                value={topicQuizTime}
+                                                onChangeText={setTopicQuizTime}
+                                            />
+                                        </View>
+                                    )}
                                 </View>
 
-                                <Text style={[styles.inputLabel, { marginTop: 15 }]}>Questions</Text>
-                                {topicQuizQuestions.map((q, qi) => (
-                                    <View key={qi} style={{ backgroundColor: '#F9FAFB', padding: 12, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#E5E7EB' }}>
-                                        <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: '#6B7280', marginBottom: 8 }}>Question {qi + 1}</Text>
-                                        <TextInput
-                                            style={[styles.input, { marginBottom: 8 }]}
-                                            placeholder="Enter question..."
-                                            value={q.question}
-                                            onChangeText={(text) => {
-                                                const updated = [...topicQuizQuestions];
-                                                updated[qi].question = text;
-                                                setTopicQuizQuestions(updated);
+                                {/* AI MODE CONTENT */}
+                                {quizMode === 'ai' && (
+                                    <View style={{ marginTop: 15 }}>
+                                        <Text style={styles.inputLabel}>Upload Content (Video, PDF, Image, Text)</Text>
+                                        <TouchableOpacity
+                                            style={{
+                                                borderWidth: 2, borderStyle: 'dashed', borderRadius: 16, padding: 20,
+                                                borderColor: aiQuizFile ? '#7C3AED' : '#D1D5DB',
+                                                backgroundColor: aiQuizFile ? '#F5F3FF' : '#F9FAFB',
+                                                alignItems: 'center', marginBottom: 15
                                             }}
-                                        />
-                                        {q.options.map((opt, oi) => (
-                                            <View key={oi} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                                            onPress={pickAiQuizFile}
+                                        >
+                                            <View style={{ width: 50, height: 50, borderRadius: 25, backgroundColor: aiQuizFile ? '#7C3AED' : '#E5E7EB', justifyContent: 'center', alignItems: 'center', marginBottom: 10 }}>
+                                                <MaterialCommunityIcons name={aiQuizFile ? "check" : "file-upload-outline"} size={24} color={aiQuizFile ? "#FFF" : "#6B7280"} />
+                                            </View>
+                                            <Text style={{ fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: aiQuizFile ? '#7C3AED' : '#4B5563' }}>
+                                                {aiQuizFile ? aiQuizFile.name : 'Tap to Select File'}
+                                            </Text>
+                                            <Text style={{ fontSize: 11, color: '#9CA3AF', marginTop: 4 }}>
+                                                Supported: MP4, PDF, JPG, PNG, TXT
+                                            </Text>
+                                        </TouchableOpacity>
+
+                                        <Text style={styles.inputLabel}>Number of Questions: {aiQuizNumQuestions}</Text>
+                                        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 20 }}>
+                                            {[3, 5, 7, 10].map(n => (
                                                 <TouchableOpacity
-                                                    onPress={() => {
-                                                        const updated = [...topicQuizQuestions];
-                                                        updated[qi].correct = oi;
-                                                        setTopicQuizQuestions(updated);
-                                                    }}
+                                                    key={n}
+                                                    onPress={() => setAiQuizNumQuestions(n)}
                                                     style={{
-                                                        width: 24, height: 24, borderRadius: 12, borderWidth: 2,
-                                                        borderColor: q.correct === oi ? '#10B981' : '#D1D5DB',
-                                                        backgroundColor: q.correct === oi ? '#10B981' : 'transparent',
-                                                        justifyContent: 'center', alignItems: 'center'
+                                                        flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center',
+                                                        backgroundColor: aiQuizNumQuestions === n ? '#7C3AED' : '#F3F4F6'
                                                     }}
                                                 >
-                                                    {q.correct === oi && <Feather name="check" size={12} color="#FFF" />}
+                                                    <Text style={{ fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: aiQuizNumQuestions === n ? '#FFF' : '#4B5563' }}>{n}</Text>
                                                 </TouchableOpacity>
+                                            ))}
+                                        </View>
+
+                                        <TouchableOpacity
+                                            style={[styles.uploadBtn, { backgroundColor: '#7C3AED', opacity: generatingAiQuiz ? 0.6 : 1 }]}
+                                            onPress={handleGenerateAiQuiz}
+                                            disabled={generatingAiQuiz}
+                                        >
+                                            {generatingAiQuiz ? (
+                                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                                    <ActivityIndicator color="#FFF" />
+                                                    <Text style={[styles.uploadBtnText, { marginLeft: 10 }]}>AI Generating...</Text>
+                                                </View>
+                                            ) : (
+                                                <>
+                                                    <MaterialCommunityIcons name="robot" size={18} color="#FFF" style={{ marginRight: 8 }} />
+                                                    <Text style={styles.uploadBtnText}>Generate Quiz with AI</Text>
+                                                </>
+                                            )}
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
+
+                                {/* MANUAL MODE CONTENT */}
+                                {quizMode === 'manual' && (
+                                    <>
+                                        <Text style={[styles.inputLabel, { marginTop: 15 }]}>Questions</Text>
+                                        {topicQuizQuestions.map((q, qi) => (
+                                            <View key={qi} style={{ backgroundColor: '#F9FAFB', padding: 12, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#E5E7EB' }}>
+                                                <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: '#6B7280', marginBottom: 8 }}>Question {qi + 1}</Text>
                                                 <TextInput
-                                                    style={[styles.input, { flex: 1, marginBottom: 0 }]}
-                                                    placeholder={`Option ${oi + 1}`}
-                                                    value={opt}
+                                                    style={[styles.input, { marginBottom: 8 }]}
+                                                    placeholder="Enter question..."
+                                                    value={q.question}
                                                     onChangeText={(text) => {
                                                         const updated = [...topicQuizQuestions];
-                                                        updated[qi].options[oi] = text;
+                                                        updated[qi].question = text;
                                                         setTopicQuizQuestions(updated);
                                                     }}
                                                 />
+                                                {q.options.map((opt, oi) => (
+                                                    <View key={oi} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                                                        <TouchableOpacity
+                                                            onPress={() => {
+                                                                const updated = [...topicQuizQuestions];
+                                                                updated[qi].correct = oi;
+                                                                setTopicQuizQuestions(updated);
+                                                            }}
+                                                            style={{
+                                                                width: 24, height: 24, borderRadius: 12, borderWidth: 2,
+                                                                borderColor: q.correct === oi ? '#10B981' : '#D1D5DB',
+                                                                backgroundColor: q.correct === oi ? '#10B981' : 'transparent',
+                                                                justifyContent: 'center', alignItems: 'center'
+                                                            }}
+                                                        >
+                                                            {q.correct === oi && <Feather name="check" size={12} color="#FFF" />}
+                                                        </TouchableOpacity>
+                                                        <TextInput
+                                                            style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                                                            placeholder={`Option ${oi + 1}`}
+                                                            value={opt}
+                                                            onChangeText={(text) => {
+                                                                const updated = [...topicQuizQuestions];
+                                                                updated[qi].options[oi] = text;
+                                                                setTopicQuizQuestions(updated);
+                                                            }}
+                                                        />
+                                                    </View>
+                                                ))}
                                             </View>
                                         ))}
-                                    </View>
-                                ))}
 
-                                <TouchableOpacity
-                                    style={{ padding: 12, backgroundColor: '#F3F4F6', borderRadius: 12, alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: '#E5E7EB', borderStyle: 'dashed' }}
-                                    onPress={() => setTopicQuizQuestions([...topicQuizQuestions, { question: '', options: ['', '', '', ''], correct: 0 }])}
-                                >
-                                    <Feather name="plus" size={20} color="#6B7280" />
-                                    <Text style={{ fontSize: 12, fontFamily: 'Poppins_500Medium', color: '#6B7280', marginTop: 4 }}>Add Question</Text>
-                                </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={{ padding: 12, backgroundColor: '#F3F4F6', borderRadius: 12, alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: '#E5E7EB', borderStyle: 'dashed' }}
+                                            onPress={() => setTopicQuizQuestions([...topicQuizQuestions, { question: '', options: ['', '', '', ''], correct: 0 }])}
+                                        >
+                                            <Feather name="plus" size={20} color="#6B7280" />
+                                            <Text style={{ fontSize: 12, fontFamily: 'Poppins_500Medium', color: '#6B7280', marginTop: 4 }}>Add Question</Text>
+                                        </TouchableOpacity>
 
-                                <TouchableOpacity
-                                    style={[styles.uploadBtn, { opacity: postingQuiz ? 0.6 : 1 }]}
-                                    onPress={handlePostTopicQuiz}
-                                    disabled={postingQuiz}
-                                >
-                                    {postingQuiz ? <ActivityIndicator color="#FFF" /> : (
-                                        <>
-                                            <MaterialCommunityIcons name="send" size={18} color="#FFF" style={{ marginRight: 8 }} />
-                                            <Text style={styles.uploadBtnText}>Publish Quiz</Text>
-                                        </>
-                                    )}
-                                </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={[styles.uploadBtn, { opacity: postingQuiz ? 0.6 : 1 }]}
+                                            onPress={handlePostTopicQuiz}
+                                            disabled={postingQuiz}
+                                        >
+                                            {postingQuiz ? <ActivityIndicator color="#FFF" /> : (
+                                                <>
+                                                    <MaterialCommunityIcons name="send" size={18} color="#FFF" style={{ marginRight: 8 }} />
+                                                    <Text style={styles.uploadBtnText}>Publish Quiz</Text>
+                                                </>
+                                            )}
+                                        </TouchableOpacity>
+                                    </>
+                                )}
                             </ScrollView>
                         </View>
                     </View>
