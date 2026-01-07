@@ -162,6 +162,25 @@ export default function ManagerDashboard({ route, navigation }) {
     const [createUserVisible, setCreateUserVisible] = useState(false); // NEW
     const [bulkModalVisible, setBulkModalVisible] = useState(false); // [NEW]
 
+    // NEWS & QUIZ CREATION STATE
+    const [newsModalVisible, setNewsModalVisible] = useState(false);
+    const [quizCreationVisible, setQuizCreationVisible] = useState(false);
+    const [newsTitle, setNewsTitle] = useState('');
+    const [newsContent, setNewsContent] = useState('');
+    const [newsAuthor, setNewsAuthor] = useState('');
+    const [newsImage, setNewsImage] = useState(null);
+    const [postingNews, setPostingNews] = useState(false);
+
+    // Topic quiz creation
+    const [topicQuizTitle, setTopicQuizTitle] = useState('');
+    const [topicQuizDifficulty, setTopicQuizDifficulty] = useState('Medium');
+    const [topicQuizTime, setTopicQuizTime] = useState('10 min');
+    const [topicQuizImage, setTopicQuizImage] = useState(null);
+    const [topicQuizQuestions, setTopicQuizQuestions] = useState([
+        { question: '', options: ['', '', '', ''], correct: 0 }
+    ]);
+    const [postingQuiz, setPostingQuiz] = useState(false);
+
     // Categories
     const [categories, setCategories] = useState([]);
     const [loadingCats, setLoadingCats] = useState(false);
@@ -268,6 +287,110 @@ export default function ManagerDashboard({ route, navigation }) {
             Alert.alert("Error", "Network error.");
         } finally {
             setUploading(false);
+        }
+    };
+
+    // --- POST NEWS HANDLER ---
+    const handlePostNews = async () => {
+        if (!newsTitle || !newsContent || !newsAuthor) {
+            Alert.alert("Missing Info", "Please fill in title, content, and author.");
+            return;
+        }
+
+        setPostingNews(true);
+        try {
+            const formData = new FormData();
+            formData.append('title', newsTitle);
+            formData.append('content', newsContent);
+            formData.append('author', newsAuthor);
+
+            if (newsImage) {
+                formData.append('image', {
+                    uri: newsImage.uri,
+                    name: 'news_image.jpg',
+                    type: 'image/jpeg'
+                });
+            }
+
+            const response = await fetch(`${API_URL}/news`, {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+            if (result.status === 'success') {
+                Alert.alert("Success", "News posted to all users!");
+                setNewsModalVisible(false);
+                setNewsTitle('');
+                setNewsContent('');
+                setNewsAuthor('');
+                setNewsImage(null);
+            } else {
+                Alert.alert("Error", "Failed to post news.");
+            }
+        } catch (error) {
+            console.error("Post news error:", error);
+            Alert.alert("Error", "Network error while posting news.");
+        } finally {
+            setPostingNews(false);
+        }
+    };
+
+    // --- POST TOPIC QUIZ HANDLER ---
+    const handlePostTopicQuiz = async () => {
+        if (!topicQuizTitle) {
+            Alert.alert("Missing Info", "Please enter a quiz title.");
+            return;
+        }
+
+        // Filter out empty questions
+        const validQuestions = topicQuizQuestions.filter(q =>
+            q.question.trim() && q.options.filter(o => o.trim()).length >= 2
+        );
+
+        if (validQuestions.length === 0) {
+            Alert.alert("Missing Info", "Please add at least one question with options.");
+            return;
+        }
+
+        setPostingQuiz(true);
+        try {
+            const formData = new FormData();
+            formData.append('title', topicQuizTitle);
+            formData.append('difficulty', topicQuizDifficulty);
+            formData.append('time', topicQuizTime);
+            formData.append('questions', JSON.stringify(validQuestions));
+
+            if (topicQuizImage) {
+                formData.append('image', {
+                    uri: topicQuizImage.uri,
+                    name: 'quiz_image.jpg',
+                    type: 'image/jpeg'
+                });
+            }
+
+            const response = await fetch(`${API_URL}/live-quizzes`, {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+            if (result.status === 'success') {
+                Alert.alert("Success", "Topic Quiz posted to all users!");
+                setQuizCreationVisible(false);
+                setTopicQuizTitle('');
+                setTopicQuizDifficulty('Medium');
+                setTopicQuizTime('10 min');
+                setTopicQuizQuestions([{ question: '', options: ['', '', '', ''], correct: 0 }]);
+                setTopicQuizImage(null);
+            } else {
+                Alert.alert("Error", "Failed to post quiz.");
+            }
+        } catch (error) {
+            console.error("Post quiz error:", error);
+            Alert.alert("Error", "Network error while posting quiz.");
+        } finally {
+            setPostingQuiz(false);
         }
     };
 
@@ -667,6 +790,22 @@ export default function ManagerDashboard({ route, navigation }) {
                             <Text style={styles.actionText}>Bulk Upload</Text>
                         </TouchableOpacity>
 
+                        {/* POST NEWS BUTTON [NEW] */}
+                        <TouchableOpacity style={styles.actionBtn} onPress={() => setNewsModalVisible(true)}>
+                            <View style={[styles.actionIcon, { backgroundColor: '#FEE2E2' }]}>
+                                <MaterialCommunityIcons name="newspaper-variant-outline" size={24} color="#DC2626" />
+                            </View>
+                            <Text style={styles.actionText}>Post News</Text>
+                        </TouchableOpacity>
+
+                        {/* POST TOPIC QUIZ BUTTON [NEW] */}
+                        <TouchableOpacity style={styles.actionBtn} onPress={() => setQuizCreationVisible(true)}>
+                            <View style={[styles.actionIcon, { backgroundColor: '#E0E7FF' }]}>
+                                <MaterialCommunityIcons name="head-question-outline" size={24} color="#4F46E5" />
+                            </View>
+                            <Text style={styles.actionText}>Post Quiz</Text>
+                        </TouchableOpacity>
+
                         <TouchableOpacity style={styles.actionBtn} onPress={() => setCreateUserVisible(true)}>
                             <View style={[styles.actionIcon, { backgroundColor: '#ECFEFF' }]}>
                                 <Feather name="user-plus" size={24} color="#0891B2" />
@@ -984,6 +1123,200 @@ export default function ManagerDashboard({ route, navigation }) {
                     onClose={() => setResultsModalVisible(false)}
                     resultsData={selectedQuizResults}
                 />
+
+                {/* NEWS CREATION MODAL */}
+                <Modal visible={newsModalVisible} animationType="slide" transparent>
+                    <View style={styles.modalOverlay}>
+                        <View style={[styles.modalContent, { maxHeight: '85%' }]}>
+                            <View style={styles.modalHeader}>
+                                <Text style={styles.modalTitle}>📰 Post News</Text>
+                                <TouchableOpacity onPress={() => setNewsModalVisible(false)}>
+                                    <Feather name="x" size={24} color="#6B7280" />
+                                </TouchableOpacity>
+                            </View>
+
+                            <ScrollView showsVerticalScrollIndicator={false}>
+                                <Text style={styles.inputLabel}>Title *</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="e.g. New Summer Menu Launch!"
+                                    value={newsTitle}
+                                    onChangeText={setNewsTitle}
+                                />
+
+                                <Text style={styles.inputLabel}>Author *</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="e.g. HR Team, Head Chef..."
+                                    value={newsAuthor}
+                                    onChangeText={setNewsAuthor}
+                                />
+
+                                <Text style={styles.inputLabel}>Content *</Text>
+                                <TextInput
+                                    style={[styles.input, { height: 120, textAlignVertical: 'top' }]}
+                                    placeholder="Write the news content..."
+                                    value={newsContent}
+                                    onChangeText={setNewsContent}
+                                    multiline
+                                />
+
+                                <Text style={styles.inputLabel}>Image (Optional)</Text>
+                                <TouchableOpacity
+                                    style={[styles.fileBtn, { borderStyle: 'dashed', borderWidth: 2, borderColor: newsImage ? '#10B981' : '#D1D5DB', backgroundColor: newsImage ? '#ECFDF5' : '#F9FAFB', height: 80 }]}
+                                    onPress={async () => {
+                                        const result = await ImagePicker.launchImageLibraryAsync({
+                                            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                                            quality: 0.8
+                                        });
+                                        if (!result.canceled) {
+                                            setNewsImage(result.assets[0]);
+                                        }
+                                    }}
+                                >
+                                    <Feather name={newsImage ? "check" : "image"} size={24} color={newsImage ? "#10B981" : "#6B7280"} />
+                                    <Text style={styles.fileBtnText}>
+                                        {newsImage ? "Image Selected" : "Add Cover Image"}
+                                    </Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={[styles.uploadBtn, { opacity: postingNews ? 0.6 : 1 }]}
+                                    onPress={handlePostNews}
+                                    disabled={postingNews}
+                                >
+                                    {postingNews ? <ActivityIndicator color="#FFF" /> : (
+                                        <>
+                                            <MaterialCommunityIcons name="send" size={18} color="#FFF" style={{ marginRight: 8 }} />
+                                            <Text style={styles.uploadBtnText}>Publish News</Text>
+                                        </>
+                                    )}
+                                </TouchableOpacity>
+                            </ScrollView>
+                        </View>
+                    </View>
+                </Modal>
+
+                {/* TOPIC QUIZ CREATION MODAL */}
+                <Modal visible={quizCreationVisible} animationType="slide" transparent>
+                    <View style={styles.modalOverlay}>
+                        <View style={[styles.modalContent, { maxHeight: '90%' }]}>
+                            <View style={styles.modalHeader}>
+                                <Text style={styles.modalTitle}>🧠 Create Topic Quiz</Text>
+                                <TouchableOpacity onPress={() => setQuizCreationVisible(false)}>
+                                    <Feather name="x" size={24} color="#6B7280" />
+                                </TouchableOpacity>
+                            </View>
+
+                            <ScrollView showsVerticalScrollIndicator={false}>
+                                <Text style={styles.inputLabel}>Quiz Title *</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="e.g. Espresso Mastery"
+                                    value={topicQuizTitle}
+                                    onChangeText={setTopicQuizTitle}
+                                />
+
+                                <View style={{ flexDirection: 'row', gap: 12 }}>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.inputLabel}>Difficulty</Text>
+                                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                                            {['Easy', 'Medium', 'Hard'].map(d => (
+                                                <TouchableOpacity
+                                                    key={d}
+                                                    onPress={() => setTopicQuizDifficulty(d)}
+                                                    style={{
+                                                        paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
+                                                        backgroundColor: topicQuizDifficulty === d ?
+                                                            (d === 'Easy' ? '#10B981' : d === 'Medium' ? '#F59E0B' : '#EF4444') : '#F3F4F6'
+                                                    }}
+                                                >
+                                                    <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: topicQuizDifficulty === d ? '#FFF' : '#4B5563' }}>{d}</Text>
+                                                </TouchableOpacity>
+                                            ))}
+                                        </View>
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.inputLabel}>Time</Text>
+                                        <TextInput
+                                            style={styles.input}
+                                            placeholder="e.g. 10 min"
+                                            value={topicQuizTime}
+                                            onChangeText={setTopicQuizTime}
+                                        />
+                                    </View>
+                                </View>
+
+                                <Text style={[styles.inputLabel, { marginTop: 15 }]}>Questions</Text>
+                                {topicQuizQuestions.map((q, qi) => (
+                                    <View key={qi} style={{ backgroundColor: '#F9FAFB', padding: 12, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#E5E7EB' }}>
+                                        <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: '#6B7280', marginBottom: 8 }}>Question {qi + 1}</Text>
+                                        <TextInput
+                                            style={[styles.input, { marginBottom: 8 }]}
+                                            placeholder="Enter question..."
+                                            value={q.question}
+                                            onChangeText={(text) => {
+                                                const updated = [...topicQuizQuestions];
+                                                updated[qi].question = text;
+                                                setTopicQuizQuestions(updated);
+                                            }}
+                                        />
+                                        {q.options.map((opt, oi) => (
+                                            <View key={oi} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                                                <TouchableOpacity
+                                                    onPress={() => {
+                                                        const updated = [...topicQuizQuestions];
+                                                        updated[qi].correct = oi;
+                                                        setTopicQuizQuestions(updated);
+                                                    }}
+                                                    style={{
+                                                        width: 24, height: 24, borderRadius: 12, borderWidth: 2,
+                                                        borderColor: q.correct === oi ? '#10B981' : '#D1D5DB',
+                                                        backgroundColor: q.correct === oi ? '#10B981' : 'transparent',
+                                                        justifyContent: 'center', alignItems: 'center'
+                                                    }}
+                                                >
+                                                    {q.correct === oi && <Feather name="check" size={12} color="#FFF" />}
+                                                </TouchableOpacity>
+                                                <TextInput
+                                                    style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                                                    placeholder={`Option ${oi + 1}`}
+                                                    value={opt}
+                                                    onChangeText={(text) => {
+                                                        const updated = [...topicQuizQuestions];
+                                                        updated[qi].options[oi] = text;
+                                                        setTopicQuizQuestions(updated);
+                                                    }}
+                                                />
+                                            </View>
+                                        ))}
+                                    </View>
+                                ))}
+
+                                <TouchableOpacity
+                                    style={{ padding: 12, backgroundColor: '#F3F4F6', borderRadius: 12, alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: '#E5E7EB', borderStyle: 'dashed' }}
+                                    onPress={() => setTopicQuizQuestions([...topicQuizQuestions, { question: '', options: ['', '', '', ''], correct: 0 }])}
+                                >
+                                    <Feather name="plus" size={20} color="#6B7280" />
+                                    <Text style={{ fontSize: 12, fontFamily: 'Poppins_500Medium', color: '#6B7280', marginTop: 4 }}>Add Question</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={[styles.uploadBtn, { opacity: postingQuiz ? 0.6 : 1 }]}
+                                    onPress={handlePostTopicQuiz}
+                                    disabled={postingQuiz}
+                                >
+                                    {postingQuiz ? <ActivityIndicator color="#FFF" /> : (
+                                        <>
+                                            <MaterialCommunityIcons name="send" size={18} color="#FFF" style={{ marginRight: 8 }} />
+                                            <Text style={styles.uploadBtnText}>Publish Quiz</Text>
+                                        </>
+                                    )}
+                                </TouchableOpacity>
+                            </ScrollView>
+                        </View>
+                    </View>
+                </Modal>
             </View>
         </View>
     );

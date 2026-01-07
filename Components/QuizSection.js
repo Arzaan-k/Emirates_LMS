@@ -69,6 +69,150 @@ const QUIZ_TOPICS = [
     { id: 4, title: "Machine Maint.", count: "10 Qs", color: ["#6366F1", "#4F46E5"], icon: "cogs" },
 ];
 
+// TOPIC QUIZ DATA
+const TOPIC_QUIZ_DATA = {
+    1: { // Espresso Science
+        title: "Espresso Science",
+        questions: [
+            {
+                id: 1,
+                question: "What is the optimal extraction time for a double shot espresso?",
+                options: [
+                    { id: 'a', text: "10-15 seconds" },
+                    { id: 'b', text: "25-30 seconds", correct: true },
+                    { id: 'c', text: "45-60 seconds" },
+                    { id: 'd', text: "90 seconds" },
+                ],
+            },
+            {
+                id: 2,
+                question: "What does 'channeling' in espresso extraction indicate?",
+                options: [
+                    { id: 'a', text: "Perfect extraction" },
+                    { id: 'b', text: "Uneven water flow through the puck", correct: true },
+                    { id: 'c', text: "Too coarse grind" },
+                    { id: 'd', text: "Cold water temperature" },
+                ],
+            },
+            {
+                id: 3,
+                question: "What pressure should the espresso machine maintain during extraction?",
+                options: [
+                    { id: 'a', text: "5-6 bars" },
+                    { id: 'b', text: "7-8 bars" },
+                    { id: 'c', text: "9-10 bars", correct: true },
+                    { id: 'd', text: "15-20 bars" },
+                ],
+            },
+        ]
+    },
+    2: { // Milk Texturing
+        title: "Milk Texturing",
+        questions: [
+            {
+                id: 1,
+                question: "What is the ideal temperature for steamed milk?",
+                options: [
+                    { id: 'a', text: "40-50°C" },
+                    { id: 'b', text: "55-65°C", correct: true },
+                    { id: 'c', text: "70-80°C" },
+                    { id: 'd', text: "90-100°C" },
+                ],
+            },
+            {
+                id: 2,
+                question: "What creates microfoam in steamed milk?",
+                options: [
+                    { id: 'a', text: "Boiling the milk" },
+                    { id: 'b', text: "Introducing air while creating a vortex", correct: true },
+                    { id: 'c', text: "Adding cream" },
+                    { id: 'd', text: "Using cold milk" },
+                ],
+            },
+            {
+                id: 3,
+                question: "Which milk alternative froths most similarly to whole milk?",
+                options: [
+                    { id: 'a', text: "Almond milk" },
+                    { id: 'b', text: "Oat milk", correct: true },
+                    { id: 'c', text: "Coconut milk" },
+                    { id: 'd', text: "Rice milk" },
+                ],
+            },
+        ]
+    },
+    3: { // Customer Service
+        title: "Customer Service",
+        questions: [
+            {
+                id: 1,
+                question: "A customer's order was made incorrectly. What's the first step?",
+                options: [
+                    { id: 'a', text: "Argue about the order details" },
+                    { id: 'b', text: "Apologize sincerely and remake immediately", correct: true },
+                    { id: 'c', text: "Offer a refund only" },
+                    { id: 'd', text: "Ask them to wait in line again" },
+                ],
+            },
+            {
+                id: 2,
+                question: "How should you handle a long wait time complaint?",
+                options: [
+                    { id: 'a', text: "Ignore them" },
+                    { id: 'b', text: "Explain you're short-staffed" },
+                    { id: 'c', text: "Acknowledge, apologize, and offer a small gesture", correct: true },
+                    { id: 'd', text: "Tell them to come back later" },
+                ],
+            },
+            {
+                id: 3,
+                question: "What's the LEARN method in customer service?",
+                options: [
+                    { id: 'a', text: "Listen, Empathize, Apologize, React, Notify", correct: true },
+                    { id: 'b', text: "Look, Explain, Accept, Remove, Next" },
+                    { id: 'c', text: "Leave, Exit, Avoid, Run, Never" },
+                    { id: 'd', text: "Lead, Engage, Assist, Return, Note" },
+                ],
+            },
+        ]
+    },
+    4: { // Machine Maintenance
+        title: "Machine Maintenance",
+        questions: [
+            {
+                id: 1,
+                question: "How often should the group head be cleaned during service?",
+                options: [
+                    { id: 'a', text: "Once a week" },
+                    { id: 'b', text: "Once a day" },
+                    { id: 'c', text: "After every 10-15 shots", correct: true },
+                    { id: 'd', text: "Only when visibly dirty" },
+                ],
+            },
+            {
+                id: 2,
+                question: "What does backflushing the espresso machine do?",
+                options: [
+                    { id: 'a', text: "Heats the water faster" },
+                    { id: 'b', text: "Cleans coffee oils from the group head", correct: true },
+                    { id: 'c', text: "Increases pressure" },
+                    { id: 'd', text: "Grinds the coffee" },
+                ],
+            },
+            {
+                id: 3,
+                question: "When should grinder burrs be replaced?",
+                options: [
+                    { id: 'a', text: "Every month" },
+                    { id: 'b', text: "Every 500-1000 lbs of coffee", correct: true },
+                    { id: 'c', text: "Only when broken" },
+                    { id: 'd', text: "Every week" },
+                ],
+            },
+        ]
+    }
+};
+
 export default function QuizSection() {
     const [quizVisible, setQuizVisible] = useState(false);
     const [currentQuestionIdx, setCurrentQuestionIdx] = useState(0);
@@ -76,6 +220,14 @@ export default function QuizSection() {
     const [gameState, setGameState] = useState('intro'); // intro, playing, analyzing, result
     const [selectedOption, setSelectedOption] = useState(null);
     const [aiFeedback, setAiFeedback] = useState("");
+
+    // Topic Quiz State
+    const [topicQuizVisible, setTopicQuizVisible] = useState(false);
+    const [selectedTopic, setSelectedTopic] = useState(null);
+    const [topicQuizIdx, setTopicQuizIdx] = useState(0);
+    const [topicScore, setTopicScore] = useState(0);
+    const [topicSelectedOption, setTopicSelectedOption] = useState(null);
+    const [topicShowResult, setTopicShowResult] = useState(false);
 
     // Animation Values
     const scaleAnim = useSharedValue(1);
@@ -90,6 +242,39 @@ export default function QuizSection() {
         setTimeout(() => {
             setGameState('playing');
         }, 2500);
+    };
+
+    // TOPIC QUIZ FUNCTIONS
+    const startTopicQuiz = (topic) => {
+        setSelectedTopic(topic);
+        setTopicQuizIdx(0);
+        setTopicScore(0);
+        setTopicSelectedOption(null);
+        setTopicShowResult(false);
+        setTopicQuizVisible(true);
+    };
+
+    const handleTopicAnswer = (option) => {
+        setTopicSelectedOption(option.id);
+
+        setTimeout(() => {
+            if (option.correct) {
+                setTopicScore(prev => prev + 1);
+            }
+
+            const questions = TOPIC_QUIZ_DATA[selectedTopic.id].questions;
+            if (topicQuizIdx < questions.length - 1) {
+                setTopicQuizIdx(prev => prev + 1);
+                setTopicSelectedOption(null);
+            } else {
+                setTopicShowResult(true);
+            }
+        }, 800);
+    };
+
+    const closeTopicQuiz = () => {
+        setTopicQuizVisible(false);
+        setSelectedTopic(null);
     };
 
     const handleAnswer = (option) => {
@@ -282,13 +467,15 @@ export default function QuizSection() {
                             entering={FadeInDown.delay(200 + index * 100).duration(500)}
                             style={styles.topicCardWrapper}
                         >
-                            <TouchableOpacity style={[styles.topicCard]}>
+                            <TouchableOpacity style={[styles.topicCard]} onPress={() => startTopicQuiz(topic)}>
                                 <LinearGradient colors={topic.color} style={styles.topicIconBox}>
                                     <MaterialCommunityIcons name={topic.icon} size={32} color="#FFF" />
                                 </LinearGradient>
                                 <Text style={styles.topicTitle}>{topic.title}</Text>
                                 <Text style={styles.topicCount}>{topic.count}</Text>
-                                <View style={styles.cardEdge} />
+                                <View style={styles.playBadge}>
+                                    <Feather name="play" size={12} color="#FFF" />
+                                </View>
                             </TouchableOpacity>
                         </Animated.View>
                     ))}
@@ -313,6 +500,114 @@ export default function QuizSection() {
                         {gameState === 'playing' && renderPlaying()}
                         {gameState === 'analyzing' && renderAnalyzing()}
                         {gameState === 'result' && renderResult()}
+                    </View>
+                </BlurView>
+            </Modal>
+
+            {/* TOPIC QUIZ MODAL */}
+            <Modal visible={topicQuizVisible} animationType="slide" transparent={true}>
+                <BlurView intensity={100} tint="dark" style={styles.modalContainer}>
+                    {/* Header */}
+                    <View style={styles.quizHeader}>
+                        <TouchableOpacity onPress={closeTopicQuiz} style={styles.closeBtn}>
+                            <Feather name="x" size={24} color="#FFF" />
+                        </TouchableOpacity>
+                        <Text style={styles.quizHeaderTitle}>{selectedTopic?.title || 'Topic Quiz'}</Text>
+                        <View style={styles.scoreBadge}>
+                            <MaterialCommunityIcons name="star" size={16} color="#FBBF24" />
+                            <Text style={styles.scoreText}>{topicScore}</Text>
+                        </View>
+                    </View>
+
+                    {/* Content */}
+                    <View style={{ flex: 1, justifyContent: 'center', padding: 20 }}>
+                        {!topicShowResult && selectedTopic && TOPIC_QUIZ_DATA[selectedTopic.id] && (
+                            <Animated.View entering={FadeInDown.duration(400)}>
+                                {/* Progress */}
+                                <View style={styles.progressBarBg}>
+                                    <LinearGradient
+                                        colors={selectedTopic.color}
+                                        start={{ x: 0, y: 0 }}
+                                        end={{ x: 1, y: 0 }}
+                                        style={[styles.progressBarFill, { width: `${((topicQuizIdx + 1) / TOPIC_QUIZ_DATA[selectedTopic.id].questions.length) * 100}%` }]}
+                                    />
+                                </View>
+                                <Text style={styles.progressText}>Question {topicQuizIdx + 1} of {TOPIC_QUIZ_DATA[selectedTopic.id].questions.length}</Text>
+
+                                {/* Question */}
+                                <View style={styles.topicQuestionCard}>
+                                    <Text style={styles.questionText}>
+                                        {TOPIC_QUIZ_DATA[selectedTopic.id].questions[topicQuizIdx].question}
+                                    </Text>
+                                </View>
+
+                                {/* Options */}
+                                <View style={styles.optionsContainer}>
+                                    {TOPIC_QUIZ_DATA[selectedTopic.id].questions[topicQuizIdx].options.map((opt) => {
+                                        const isSelected = topicSelectedOption === opt.id;
+                                        const showCorrect = isSelected && opt.correct;
+                                        const showWrong = isSelected && !opt.correct;
+
+                                        return (
+                                            <TouchableOpacity
+                                                key={opt.id}
+                                                style={[
+                                                    styles.topicOptionBtn,
+                                                    isSelected && {
+                                                        borderColor: opt.correct ? '#10B981' : '#EF4444',
+                                                        backgroundColor: opt.correct ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'
+                                                    }
+                                                ]}
+                                                onPress={() => !topicSelectedOption && handleTopicAnswer(opt)}
+                                                activeOpacity={0.8}
+                                            >
+                                                <View style={[
+                                                    styles.topicOptionCircle,
+                                                    showCorrect && { backgroundColor: '#10B981' },
+                                                    showWrong && { backgroundColor: '#EF4444' }
+                                                ]}>
+                                                    {showCorrect && <Feather name="check" size={16} color="#FFF" />}
+                                                    {showWrong && <Feather name="x" size={16} color="#FFF" />}
+                                                    {!isSelected && <Text style={styles.optionLetter}>{opt.id.toUpperCase()}</Text>}
+                                                </View>
+                                                <Text style={[styles.optionText, isSelected && { fontFamily: "Poppins_600SemiBold" }]}>{opt.text}</Text>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </View>
+                            </Animated.View>
+                        )}
+
+                        {/* Result */}
+                        {topicShowResult && (
+                            <Animated.View entering={FadeInDown.duration(500)} style={styles.resultContainer}>
+                                <LinearGradient colors={selectedTopic?.color || ['#8B5CF6', '#6366F1']} style={styles.resultIconBg}>
+                                    <MaterialCommunityIcons name="trophy" size={60} color="#FFF" />
+                                </LinearGradient>
+                                <Text style={styles.resultTitle}>Quiz Complete!</Text>
+                                <Text style={styles.topicResultScore}>
+                                    {topicScore} / {selectedTopic && TOPIC_QUIZ_DATA[selectedTopic.id].questions.length} Correct
+                                </Text>
+
+                                <View style={styles.resultPercentBadge}>
+                                    <Text style={styles.resultPercentText}>
+                                        {Math.round((topicScore / (selectedTopic ? TOPIC_QUIZ_DATA[selectedTopic.id].questions.length : 1)) * 100)}%
+                                    </Text>
+                                </View>
+
+                                <Text style={styles.resultSub}>
+                                    {topicScore === TOPIC_QUIZ_DATA[selectedTopic?.id]?.questions.length
+                                        ? "Perfect Score! You're a master! 🎉"
+                                        : topicScore >= TOPIC_QUIZ_DATA[selectedTopic?.id]?.questions.length / 2
+                                            ? "Good job! Keep practicing! 💪"
+                                            : "Keep learning! You'll improve! 📚"}
+                                </Text>
+
+                                <TouchableOpacity style={[styles.closeQuizBtn, { backgroundColor: selectedTopic?.color[0] || '#8B5CF6' }]} onPress={closeTopicQuiz}>
+                                    <Text style={styles.closeQuizText}>Done</Text>
+                                </TouchableOpacity>
+                            </Animated.View>
+                        )}
                     </View>
                 </BlurView>
             </Modal>
@@ -387,7 +682,20 @@ const styles = StyleSheet.create({
     resultScore: { color: "#FBBF24", fontSize: 20, fontFamily: "Poppins_600SemiBold", marginBottom: 30 },
     rankBadge: { backgroundColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginBottom: 30 },
     rankText: { color: "#10B981", fontSize: 14, fontFamily: "Poppins_700Bold" },
-    resultSub: { color: "#9CA3AF", textAlign: 'center', fontSize: 14, marginBottom: 40, fontFamily: "Poppins_400Italic" },
+    resultSub: { color: "#9CA3AF", textAlign: 'center', fontSize: 14, marginBottom: 40, fontFamily: "Poppins_400Regular" },
     closeQuizBtn: { backgroundColor: "#8B5CF6", width: '100%', paddingVertical: 16, borderRadius: 20, alignItems: 'center' },
     closeQuizText: { color: "#FFF", fontSize: 16, fontFamily: "Poppins_700Bold" },
+
+    // TOPIC QUIZ STYLES
+    playBadge: { position: 'absolute', bottom: 12, right: 12, backgroundColor: '#8B5CF6', width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
+    scoreBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14 },
+    scoreText: { color: '#FBBF24', fontSize: 16, fontFamily: "Poppins_700Bold", marginLeft: 4 },
+    progressText: { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontFamily: "Poppins_500Medium", marginBottom: 20, textAlign: 'center' },
+    topicQuestionCard: { marginBottom: 30, backgroundColor: 'rgba(255,255,255,0.05)', padding: 20, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+    topicOptionBtn: { flexDirection: 'row', alignItems: 'center', padding: 18, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 18, marginBottom: 14, borderWidth: 2, borderColor: 'rgba(255,255,255,0.1)' },
+    topicOptionCircle: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.15)', justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+    resultIconBg: { width: 100, height: 100, borderRadius: 50, justifyContent: 'center', alignItems: 'center', shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 16, elevation: 10 },
+    topicResultScore: { color: "#FBBF24", fontSize: 24, fontFamily: "Poppins_700Bold", marginBottom: 16 },
+    resultPercentBadge: { backgroundColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 20, marginBottom: 20 },
+    resultPercentText: { color: "#10B981", fontSize: 32, fontFamily: "Poppins_700Bold" },
 });

@@ -65,7 +65,7 @@ const FloatingWaffle = ({ delay, duration, size, top, left, rotate }) => {
   }));
 
   return (
-    <Animated.View style={[{ position: 'absolute', top, left, opacity: 0.1 }, animatedStyle]}>
+    <Animated.View pointerEvents="none" style={[{ position: 'absolute', top, left, opacity: 0.1 }, animatedStyle]}>
       <MaterialCommunityIcons name="grid" size={size} color="#D97706" />
     </Animated.View>
   );
@@ -464,9 +464,12 @@ function CrucialNotificationModal({ notification, onAcknowledge }) {
 
 function HomeContent({ onOpenTool, onOpenTwin }) {
   const navigation = useNavigation();
+  const { t } = useLanguage();
   const [liveUpdates, setLiveUpdates] = useState([]);
   const [notification, setNotification] = useState(null);
   const [selectedVideo, setSelectedVideo] = useState(null);
+  const [selectedNews, setSelectedNews] = useState(null);
+
   // QUIZ STATE
   const [assignedQuizzes, setAssignedQuizzes] = useState([]);
   const [activeQuiz, setActiveQuiz] = useState(null);
@@ -474,9 +477,19 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   const [currentQuizIndex, setCurrentQuizIndex] = useState(0);
   const [quizAnswers, setQuizAnswers] = useState([]);
   const [quizScore, setQuizScore] = useState(null);
+
   const [assignedProctoring, setAssignedProctoring] = useState([]);
-  const [pathNodes, setPathNodes] = useState([]); // NEW STATE
-  const [crucialNotif, setCrucialNotif] = useState(null); // CRUCIAL STATE
+  const [pathNodes, setPathNodes] = useState([]);
+  const [crucialNotif, setCrucialNotif] = useState(null);
+  const [goalModalVisible, setGoalModalVisible] = useState(false);
+
+  const [allNotifications, setAllNotifications] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [selectedNotification, setSelectedNotification] = useState(null);
+
+  // DYNAMIC NEWS & QUIZZES
+  const [newsData, setNewsData] = useState([]);
+  const [liveQuizzesData, setLiveQuizzesData] = useState([]);
 
   const handleAcknowledge = async (id) => {
     try {
@@ -484,8 +497,13 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
       setCrucialNotif(null);
     } catch (e) {
       console.error("Ack Error", e);
-      setCrucialNotif(null); // Dismiss anyway on error to not softlock
+      setCrucialNotif(null);
     }
+  };
+
+  const handleGoalContinue = () => {
+    setGoalModalVisible(false);
+    navigation.navigate("CoursesTab");
   };
 
   // FETCH PATH NODES
@@ -499,11 +517,32 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
     }
   };
 
-  useEffect(() => {
-    fetchPathNodes();
-  }, []);
+  // FETCH NEWS FEED
+  const fetchNews = async () => {
+    try {
+      const response = await fetch(`${API_URL}/news`);
+      const data = await response.json();
+      if (Array.isArray(data)) {
+        setNewsData(data);
+      }
+    } catch (error) {
+      console.error("Error fetching news:", error);
+    }
+  };
 
-  // Add inside HomeContent
+  // FETCH LIVE QUIZZES
+  const fetchLiveQuizzes = async () => {
+    try {
+      const response = await fetch(`${API_URL}/live-quizzes`);
+      const data = await response.json();
+      if (Array.isArray(data)) {
+        setLiveQuizzesData(data);
+      }
+    } catch (error) {
+      console.error("Error fetching live quizzes:", error);
+    }
+  };
+
   const startQuiz = async (quizData) => {
     if (!quizData.questions) {
       try {
@@ -522,10 +561,6 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
     setQuizModalVisible(true);
   };
 
-
-  const [allNotifications, setAllNotifications] = useState([]);
-  const [showNotifications, setShowNotifications] = useState(false); // UI State
-
   // FETCH NOTIFICATIONS
   const fetchNotifications = async () => {
     try {
@@ -540,10 +575,11 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   };
 
   useEffect(() => {
+    fetchPathNodes();
     fetchNotifications();
+    fetchNews();
+    fetchLiveQuizzes();
   }, []);
-
-  // ... (Existing useEffect for WebSocket)
 
   useEffect(() => {
     // CONNECT TO WEBSOCKET
@@ -561,10 +597,9 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
           setLiveUpdates(prev => [message.data, ...prev]);
         } else if (message.type === "NOTIFICATION") {
           setNotification(message.data);
-          setAllNotifications(prev => [message.data, ...prev]); // Add to list
+          setAllNotifications(prev => [message.data, ...prev]);
           setTimeout(() => setNotification(null), 5000);
         } else if (message.type === "QUIZ_ASSIGNED") {
-          // New quiz assigned
           setAssignedQuizzes(prev => [message.data, ...prev]);
           const notif = {
             title: "New Quiz!",
@@ -590,6 +625,12 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
           setNotification(notif);
           setAllNotifications(prev => [notif, ...prev]);
           setTimeout(() => setNotification(null), 5000);
+        } else if (message.type === "NEWS_POSTED") {
+          // Real-time news update
+          setNewsData(prev => [message.data, ...prev]);
+        } else if (message.type === "QUIZ_POSTED") {
+          // Real-time quiz update
+          setLiveQuizzesData(prev => [message.data, ...prev]);
         }
       } catch (err) {
         console.log("WS Error", err);
@@ -601,9 +642,6 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
     };
   }, []);
 
-
-  const [selectedNotification, setSelectedNotification] = useState(null); // [NEW]
-
   const handleNotificationAction = (notif) => {
     setShowNotifications(false);
     if (notif.type === 'quiz' && notif.data) {
@@ -614,7 +652,6 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
         userProfile: { role: 'User' }
       });
     } else {
-      // Open Detail Modal for generic/media notifications
       setSelectedNotification(notif);
     }
   };
@@ -622,19 +659,16 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   return (
     <View style={{ flex: 1 }}>
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-        {/* DECORATIVE BG */}
         <View style={styles.decorCircle} />
 
         <Header onNotificationPress={() => setShowNotifications(true)} />
         <SearchBar />
 
-        {/* LIVE FEED (Dynamic from Python) */}
         <LiveFeedSection
           data={liveUpdates}
           onPlay={(item) => setSelectedVideo(item)}
         />
 
-        {/* PROCTORED FEED (Assigned Assessments) */}
         <ProctoredFeedSection
           data={assignedProctoring}
           onStart={(assessment) => navigation.navigate('ProctoredAssessment', {
@@ -643,26 +677,38 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
           })}
         />
 
-        {/* QUIZ FEED (Assigned Quizzes) */}
         <QuizFeedSection
           data={assignedQuizzes}
           onStart={(quiz) => startQuiz(quiz)}
         />
 
-        {/* TWIN CARD */}
         <DigitalTwinCard onOpen={onOpenTwin} />
 
-        {/* DAILY FOCUS (Dynamic) */}
-        <DailyFocus item={pathNodes.length > 0 ? pathNodes[0] : null} />
+        <DailyFocus
+          item={pathNodes.length > 0 ? pathNodes[0] : null}
+          onPress={() => setGoalModalVisible(true)}
+        />
 
         <AIToolsSection onOpenTool={onOpenTool} />
 
-        {/* COURSE LIST (Jump Back In - Dynamic) */}
+        <TopicQuizzes
+          quizzes={liveQuizzesData}
+          onStartQuiz={(quiz) => {
+            setActiveQuiz(quiz);
+            setQuizModalVisible(true);
+          }}
+        />
+
         <CourseList items={pathNodes} onPlay={(item) => setSelectedVideo(item)} />
-        <NewArrivals />
+        <NewArrivals
+          news={newsData}
+          onOpenNews={(news) => {
+            console.log("Opening news:", news?.title);
+            setSelectedNews(news);
+          }}
+        />
       </ScrollView>
 
-      {/* ABSOLUTE NOTIFICATION OVERLAY */}
       <View style={styles.overlayContainer} pointerEvents="box-none">
         <NotificationToast
           visible={!!notification}
@@ -674,7 +720,7 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
             } else if (notification?.type === 'proctored' && notification?.data) {
               navigation.navigate('ProctoredAssessment', {
                 assessmentData: notification.data,
-                userProfile: { role: 'User' } // Default to user role for taker
+                userProfile: { role: 'User' }
               });
             } else {
               setSelectedNotification(notification);
@@ -683,13 +729,18 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
         />
       </View>
 
-      {/* CRUCIAL BLOCKING MODAL */}
+      <TodaysGoalModal
+        visible={goalModalVisible}
+        item={pathNodes.length > 0 ? pathNodes[0] : null}
+        onClose={() => setGoalModalVisible(false)}
+        onContinue={handleGoalContinue}
+      />
+
       <CrucialNotificationModal
         notification={crucialNotif}
         onAcknowledge={handleAcknowledge}
       />
 
-      {/* VIDEO MODAL */}
       <VideoPlayerModal
         visible={!!selectedVideo}
         videoData={selectedVideo}
@@ -706,7 +757,6 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
         userName="John Doe"
       />
 
-      {/* NOTIFICATIONS LIST MODAL */}
       <NotificationsModal
         visible={showNotifications}
         notifications={allNotifications}
@@ -714,7 +764,46 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
         onAction={handleNotificationAction}
       />
 
-      {/* NOTIFICATION DETAIL MODAL */}
+      {/* NEWS DETAIL MODAL */}
+      <Modal visible={!!selectedNews} animationType="slide" transparent>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.95)' }}>
+          <View style={{ flex: 1, paddingTop: 50 }}>
+            <TouchableOpacity
+              style={{ position: 'absolute', top: 50, right: 20, zIndex: 10, padding: 10 }}
+              onPress={() => setSelectedNews(null)}
+            >
+              <Feather name="x" size={28} color="#FFF" />
+            </TouchableOpacity>
+
+            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+              {selectedNews?.image && (
+                <Image
+                  source={{ uri: selectedNews.image }}
+                  style={{ width: '100%', height: 250 }}
+                  resizeMode="cover"
+                />
+              )}
+              <View style={{ padding: 20 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                  <Text style={{ color: '#F59E0B', fontFamily: 'Poppins_600SemiBold', fontSize: 13 }}>
+                    {selectedNews?.author || 'Team'}
+                  </Text>
+                  <Text style={{ color: '#6B7280', fontSize: 12, marginLeft: 8 }}>
+                    • {selectedNews?.date || 'Today'}
+                  </Text>
+                </View>
+                <Text style={{ color: '#FFF', fontFamily: 'Poppins_700Bold', fontSize: 24, marginBottom: 16 }}>
+                  {selectedNews?.title}
+                </Text>
+                <Text style={{ color: 'rgba(255,255,255,0.8)', fontFamily: 'Poppins_400Regular', fontSize: 16, lineHeight: 26 }}>
+                  {selectedNews?.content}
+                </Text>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       <NotificationDetailModal
         visible={!!selectedNotification}
         notification={selectedNotification}
@@ -853,7 +942,87 @@ function DigitalTwinCard({ onOpen }) {
   )
 }
 
-function DailyFocus({ item }) {
+// --- MOCK NEWS DATA ---
+const NEWS_FEED_DATA = [
+  {
+    id: 1,
+    title: "New Summer Menu Launch!",
+    author: "Head Chef",
+    date: "2 hours ago",
+    image: "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?q=80&w=2000&auto=format&fit=crop",
+    content: "Get ready for the summer season with our refreshing new waffle toppings! Mango Madness and Berry Blast are joining the menu starting next week. Training modules are now live."
+  },
+  {
+    id: 2,
+    title: "Employee of the Month: Sarah",
+    author: "HR Team",
+    date: "1 day ago",
+    image: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?q=80&w=2000&auto=format&fit=crop",
+    content: "Congratulations to Sarah for achieving 100% customer satisfaction rating this month! Her dedication to service excellence is an inspiration to us all."
+  },
+  {
+    id: 3,
+    title: "Hygiene Protocol Update",
+    author: "Safety Officer",
+    date: "2 days ago",
+    image: "https://images.unsplash.com/photo-1584634731339-252c581abfc5?q=80&w=2000&auto=format&fit=crop",
+    content: "Please review the updated hand-washing protocols. A new 5-step process has been introduced to ensure maximum safety. Check the 'Hygiene' course for details."
+  },
+];
+
+// --- TODAY'S GOAL MODAL ---
+function TodaysGoalModal({ visible, item, onClose, onContinue }) {
+  if (!visible) return null;
+  const { t } = useLanguage();
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent>
+      <View style={styles.goalModalOverlay}>
+        <BlurView intensity={95} tint="dark" style={StyleSheet.absoluteFill} />
+        <Animated.View entering={FadeInDown.springify()} style={styles.goalModalContent}>
+          <TouchableOpacity style={styles.closeGoalBtn} onPress={onClose}>
+            <Feather name="x" size={24} color="#FFF" />
+          </TouchableOpacity>
+
+          <View style={styles.goalIconContainer}>
+            <MaterialCommunityIcons name="target" size={60} color="#F59E0B" />
+          </View>
+
+          <Text style={styles.goalModalTitle}>{t('todaysGoal')}</Text>
+          <Text style={styles.goalModalSub}>{item ? item.title : "Complete Unit 1"}</Text>
+
+          <View style={styles.goalDetailsBox}>
+            <View style={styles.goalDetailRow}>
+              <Feather name="clock" size={18} color="#9CA3AF" />
+              <Text style={styles.goalDetailText}>Est. Time: 15 mins</Text>
+            </View>
+            <View style={styles.goalDetailRow}>
+              <Feather name="award" size={18} color="#9CA3AF" />
+              <Text style={styles.goalDetailText}>Reward: +50 XP</Text>
+            </View>
+          </View>
+
+          <Text style={styles.goalDesc}>
+            {item ? (item.description || "Master the basics of waffle preparation.") : "Start your journey by completing the first training unit."}
+          </Text>
+
+          <TouchableOpacity style={styles.continueGoalBtn} onPress={onContinue}>
+            <LinearGradient
+              colors={['#F59E0B', '#D97706']}
+              style={styles.continueGoalGradient}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+            >
+              <Text style={styles.continueGoalText}>Continue Learning</Text>
+              <Feather name="arrow-right" size={20} color="#FFF" />
+            </LinearGradient>
+          </TouchableOpacity>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+}
+
+function DailyFocus({ item, onPress }) {
   const { t } = useLanguage();
 
   // Use first item or fallback if empty
@@ -862,30 +1031,37 @@ function DailyFocus({ item }) {
 
   return (
     <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.focusContainer}>
-      <LinearGradient
-        colors={["#1E1B4B", "#312E81"]}
-        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        style={styles.focusCard}
-      >
-        <MaterialCommunityIcons name="target" size={120} color="rgba(255,255,255,0.05)" style={styles.focusBgIcon} />
+      <TouchableOpacity onPress={onPress} activeOpacity={0.9}>
+        <LinearGradient
+          colors={["#1E1B4B", "#312E81"]}
+          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+          style={styles.focusCard}
+        >
+          <MaterialCommunityIcons name="target" size={120} color="rgba(255,255,255,0.05)" style={styles.focusBgIcon} />
 
-        <View style={styles.focusContent}>
-          <View>
-            <View style={styles.focusBadge}>
-              <Text style={styles.focusBadgeText}>{t('todaysGoal')}</Text>
+          <View style={styles.focusContent}>
+            <View>
+              <View style={styles.focusBadge}>
+                <Text style={styles.focusBadgeText}>{t('todaysGoal')}</Text>
+              </View>
+              <Text style={styles.focusTitle} numberOfLines={2}>{goalTitle}</Text>
+              <Text style={styles.focusSub} numberOfLines={1}>{goalSub}</Text>
             </View>
-            <Text style={styles.focusTitle} numberOfLines={2}>{goalTitle}</Text>
-            <Text style={styles.focusSub} numberOfLines={1}>{goalSub}</Text>
-          </View>
-          <View style={styles.ringContainer}>
-            <View style={styles.ringOuter}>
-              <View style={styles.ringInner}>
-                <Text style={styles.ringText}>{item ? "0%" : "0%"}</Text>
+            <View style={styles.ringContainer}>
+              <View style={styles.ringOuter}>
+                <View style={styles.ringInner}>
+                  <Text style={styles.ringText}>{item ? "0%" : "0%"}</Text>
+                </View>
               </View>
             </View>
           </View>
-        </View>
-      </LinearGradient>
+
+          <View style={styles.tapHint}>
+            <Text style={styles.tapHintText}>Tap to view details</Text>
+            <Feather name="chevron-right" size={14} color="rgba(255,255,255,0.6)" />
+          </View>
+        </LinearGradient>
+      </TouchableOpacity>
     </Animated.View>
   )
 }
@@ -966,34 +1142,146 @@ function CourseList({ items, onPlay }) {
   )
 }
 
-function NewArrivals() {
+function NewArrivals({ news = [], onOpenNews }) {
   const { t } = useLanguage();
   return (
     <View style={[styles.sectionContainer, { marginBottom: 100 }]}>
       <Text style={[styles.sectionTitle, { paddingHorizontal: 20, marginBottom: 15 }]}>{t('freshlyBrewed')}</Text>
       <View style={{ paddingHorizontal: 20 }}>
-        {RECENT_COURSES.map((course, index) => (
-          <Animated.View key={course.id} entering={FadeInDown.delay(800 + index * 100)}>
-            <TouchableOpacity style={styles.listCard}>
-              <Image source={{ uri: course.image }} style={styles.listImg} />
-              <View style={styles.listInfo}>
-                <View style={styles.tagRow}>
-                  <View style={styles.newTag}><Text style={styles.newTagText}>{t('newTag')}</Text></View>
-                  <View style={styles.starRow}>
-                    <Ionicons name="star" size={12} color="#F59E0B" />
-                    <Text style={styles.ratingVal}>{course.rating}</Text>
+        {news.length === 0 ? (
+          <View style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 16, padding: 30, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', borderStyle: 'dashed' }}>
+            <MaterialCommunityIcons name="newspaper-variant-outline" size={48} color="#4B5563" />
+            <Text style={{ color: '#9CA3AF', fontSize: 14, fontFamily: 'Poppins_500Medium', marginTop: 12, textAlign: 'center' }}>No news at this time</Text>
+            <Text style={{ color: '#6B7280', fontSize: 12, fontFamily: 'Poppins_400Regular', marginTop: 4 }}>Check back later for updates!</Text>
+          </View>
+        ) : (
+          news.map((item, index) => (
+            <Animated.View key={item.id} entering={FadeInDown.delay(800 + index * 100)}>
+              <TouchableOpacity style={styles.newsCard} onPress={() => onOpenNews && onOpenNews(item)}>
+                <Image source={{ uri: item.image }} style={styles.newsImg} />
+                <LinearGradient colors={['transparent', 'rgba(0,0,0,0.8)']} style={styles.newsOverlay}>
+                  <View style={styles.newsContent}>
+                    <View style={styles.newsMetaRow}>
+                      <Text style={styles.newsAuthor}>{item.author}</Text>
+                      <Text style={styles.newsDate}>• {item.date}</Text>
+                    </View>
+                    <Text style={styles.newsTitle}>{item.title}</Text>
+                    <Text style={styles.newsBody} numberOfLines={2}>{item.content}</Text>
                   </View>
-                </View>
-                <Text style={styles.listTitle}>{course.title}</Text>
-                <Text style={styles.listAuthor}>By {course.author}</Text>
-              </View>
-              <TouchableOpacity style={styles.saveBtn}>
-                <Feather name="bookmark" size={20} color="#CBD5E1" />
+                </LinearGradient>
               </TouchableOpacity>
-            </TouchableOpacity>
-          </Animated.View>
-        ))}
+            </Animated.View>
+          ))
+        )}
       </View>
+    </View>
+  )
+}
+
+// --- TOPIC QUIZZES DATA ---
+const LIVE_QUIZZES = [
+  {
+    id: 'q1',
+    title: 'Espresso Mastery',
+    questions: [
+      { question: "What is the ideal tamping pressure for espresso?", options: ["10 lbs", "30 lbs", "50 lbs", "100 lbs"], correct: 1 },
+      { question: "How long should a standard espresso shot take?", options: ["10-15s", "20-30s", "40-50s", "1 min"], correct: 1 },
+      { question: "Which part of the espresso is the 'crema'?", options: ["The dark bottom", "The golden foam on top", "The bitter aftertaste", "The grounds"], correct: 1 },
+      { question: "What temperature should water be for brewing?", options: ["190°F - 200°F", "212°F (Boiling)", "150°F", "Cold"], correct: 0 },
+      { question: "A double shot is typically how many ounces?", options: ["1 oz", "2 oz", "3 oz", "4 oz"], correct: 1 }
+    ],
+    time: '10 min',
+    difficulty: 'Hard',
+    image: 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?q=80&w=600'
+  },
+  {
+    id: 'q2',
+    title: 'Waffle Crisp Science',
+    questions: [
+      { question: "What ingredient adds the most crispness?", options: ["Milk", "Cornstarch/Rice Flour", "Sugar", "Eggs"], correct: 1 },
+      { question: "When should you flip the waffle maker?", options: ["Immediately", "After 1 min", "Never", "When it beeps"], correct: 0 },
+      { question: "Why do we let batter rest?", options: ["To thicken", "To relax gluten", "To cool down", "To separate"], correct: 1 },
+      { question: "What is the best way to keep waffles warm?", options: ["Stack them", "Cover with foil", "Wire rack in oven", "Microwave"], correct: 2 },
+      { question: "Overmixing the batter causes what?", options: ["Fluffiness", "Toughness", "Sweetness", "Crispness"], correct: 1 }
+    ],
+    time: '15 min',
+    difficulty: 'Medium',
+    image: 'https://images.unsplash.com/photo-1568051243851-f9b136146e97?q=80&w=600'
+  },
+  {
+    id: 'q3',
+    title: 'Customer Hygiene',
+    questions: [
+      { question: "How long should you wash your hands?", options: ["5 seconds", "10 seconds", "20 seconds", "1 minute"], correct: 2 },
+      { question: "When should you wear gloves?", options: ["Always", "Handling ready-to-eat food", "Taking cash", "Sweeping"], correct: 1 },
+      { question: "What is the danger zone for food temp?", options: ["0-32°F", "40-140°F", "150-200°F", "300°F+"], correct: 1 },
+      { question: "How to dry hands?", options: ["Apron", "Air dry", "Paper towel", "Shake them"], correct: 2 },
+      { question: "Sanitizer water should be?", options: ["Boiling", "Lukewarm", "Freezing", "Room Temp"], correct: 1 }
+    ],
+    time: '20 min',
+    difficulty: 'Easy',
+    image: 'https://images.unsplash.com/photo-1584634731339-252c581abfc5?q=80&w=600'
+  },
+];
+
+function TopicQuizzes({ quizzes = [], onStartQuiz }) {
+  const { t } = useLanguage();
+  return (
+    <View style={styles.sectionContainer}>
+      <View style={[styles.sectionHeader, { paddingHorizontal: 20 }]}>
+        <Text style={styles.sectionTitle}>Live Topic Quizzes</Text>
+        <TouchableOpacity>
+          <Text style={{ color: '#F59E0B', fontFamily: 'Poppins_600SemiBold', fontSize: 13 }}>See All</Text>
+        </TouchableOpacity>
+      </View>
+
+      {quizzes.length === 0 ? (
+        <View style={{ marginHorizontal: 20, marginBottom: 20, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 16, padding: 30, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', borderStyle: 'dashed' }}>
+          <MaterialCommunityIcons name="head-question-outline" size={48} color="#4B5563" />
+          <Text style={{ color: '#9CA3AF', fontSize: 14, fontFamily: 'Poppins_500Medium', marginTop: 12, textAlign: 'center' }}>No quizzes available</Text>
+          <Text style={{ color: '#6B7280', fontSize: 12, fontFamily: 'Poppins_400Regular', marginTop: 4 }}>New quizzes coming soon!</Text>
+        </View>
+      ) : (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20, paddingBottom: 20 }}>
+          {quizzes.map((quiz, index) => (
+            <Animated.View key={quiz.id} entering={FadeInRight.delay(400 + index * 100)}>
+              <TouchableOpacity style={styles.topicQuizCard} onPress={() => onStartQuiz(quiz)}>
+                <Image source={{ uri: quiz.image }} style={styles.topicQuizBg} />
+                <LinearGradient colors={['transparent', 'rgba(0,0,0,0.95)']} style={styles.topicQuizGradient}>
+
+                  <View style={styles.topicQuizTop}>
+                    <BlurView intensity={30} tint="light" style={styles.topicQuizBadge}>
+                      <Text style={[styles.topicQuizBadgeText, { color: quiz.difficulty === 'Hard' ? '#EF4444' : quiz.difficulty === 'Medium' ? '#F59E0B' : '#10B981' }]}>
+                        {quiz.difficulty}
+                      </Text>
+                    </BlurView>
+                  </View>
+
+                  <View>
+                    <Text style={styles.topicQuizTitle}>{quiz.title}</Text>
+                    <View style={styles.topicQuizMetaRow}>
+                      <View style={styles.topicQuizMetaItem}>
+                        <MaterialCommunityIcons name="help-circle-outline" size={14} color="#CBD5E1" />
+                        <Text style={styles.topicQuizMetaText}>{quiz.questions?.length || 0} Qs</Text>
+                      </View>
+                      <View style={styles.topicQuizMetaItem}>
+                        <MaterialCommunityIcons name="clock-outline" size={14} color="#CBD5E1" />
+                        <Text style={styles.topicQuizMetaText}>{quiz.time}</Text>
+                      </View>
+                    </View>
+
+                    <TouchableOpacity style={styles.startQuizBtnSmall} onPress={() => onStartQuiz(quiz)}>
+                      <Text style={styles.startQuizBtnText}>Start</Text>
+                      <Feather name="arrow-right" size={12} color="#FFF" />
+                    </TouchableOpacity>
+                  </View>
+
+                </LinearGradient>
+              </TouchableOpacity>
+            </Animated.View>
+          ))}
+        </ScrollView>
+      )}
     </View>
   )
 }
@@ -1334,4 +1622,69 @@ const styles = StyleSheet.create({
   detailTime: { fontSize: 13, fontFamily: "Poppins_500Medium", color: 'rgba(255,255,255,0.5)' },
   detailDivider: { height: 1, backgroundColor: 'rgba(255,255,255,0.1)', marginVertical: 20 },
   detailMessage: { fontSize: 16, fontFamily: "Poppins_400Regular", color: '#E2E8F0', lineHeight: 26 },
+
+  // --- GOAL MODAL STYLES ---
+  goalModalOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)' },
+  goalModalContent: { width: '85%', backgroundColor: '#FFF', borderRadius: 24, padding: 24, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.25, shadowRadius: 20, elevation: 10 },
+  closeGoalBtn: { position: 'absolute', top: 16, right: 16, zIndex: 10, backgroundColor: '#F3F4F6', borderRadius: 20, padding: 4 },
+  goalIconContainer: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#FEF3C7', justifyContent: 'center', alignItems: 'center', marginBottom: 20, borderWidth: 4, borderColor: '#FFFBEB' },
+  goalModalTitle: { fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: '#F59E0B', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
+  goalModalSub: { fontSize: 24, fontFamily: 'Poppins_700Bold', color: '#111827', textAlign: 'center', marginBottom: 20 },
+  goalDesc: { fontSize: 14, fontFamily: 'Poppins_400Regular', color: '#6B7280', textAlign: 'center', marginBottom: 24, lineHeight: 22 },
+
+  goalDetailsBox: { flexDirection: 'row', gap: 16, marginBottom: 24 },
+  goalDetailRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12 },
+  goalDetailText: { fontSize: 12, fontFamily: 'Poppins_500Medium', color: '#4B5563', marginLeft: 6 },
+
+  continueGoalBtn: { width: '100%', shadowColor: '#F59E0B', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 },
+  continueGoalGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, borderRadius: 16, gap: 8 },
+  continueGoalText: { fontSize: 16, fontFamily: 'Poppins_600SemiBold', color: '#FFF' },
+
+  // --- NEWS FEED STYLES ---
+  newsCard: { height: 200, borderRadius: 20, overflow: 'hidden', marginBottom: 16, backgroundColor: '#FFF', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 3 },
+  newsImg: { width: '100%', height: '100%' },
+  newsOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, height: '70%', justifyContent: 'flex-end', padding: 16 },
+  newsContent: {},
+  newsMetaRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
+  newsAuthor: { fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: '#F59E0B' },
+  newsDate: { fontSize: 12, fontFamily: 'Poppins_400Regular', color: '#D1D5DB' },
+  newsTitle: { fontSize: 18, fontFamily: 'Poppins_700Bold', color: '#FFF', marginBottom: 4, lineHeight: 24 },
+  newsBody: { fontSize: 13, fontFamily: 'Poppins_400Regular', color: 'rgba(255,255,255,0.9)', lineHeight: 18 },
+
+  tapHint: { flexDirection: 'row', alignItems: 'center', marginTop: 16, opacity: 0.7 },
+  tapHintText: { fontSize: 12, fontFamily: 'Poppins_500Medium', color: '#FFF', marginRight: 4 },
+
+  // --- NEWS DETAIL MODAL STYLES ---
+  newsModalContainer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center' },
+  newsModalContent: { flex: 1, backgroundColor: '#0F172A', marginTop: 0 },
+  newsHeroContainer: { height: 350, width: '100%', position: 'relative' },
+  newsHeroImage: { width: '100%', height: '100%' },
+  newsHeroGradient: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 200 },
+  closeNewsBtn: { position: 'absolute', top: 50, right: 20, zIndex: 10, borderRadius: 24, overflow: 'hidden' },
+  closeNewsBlur: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.3)' },
+  newsHeroText: { position: 'absolute', bottom: 30, left: 24, right: 24 },
+  newsBadge: { backgroundColor: '#F59E0B', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, alignSelf: 'flex-start', marginBottom: 12 },
+  newsBadgeText: { fontSize: 11, fontFamily: 'Poppins_700Bold', color: '#FFF', letterSpacing: 1 },
+  newsHeroTitle: { fontSize: 26, fontFamily: 'Poppins_700Bold', color: '#FFF', marginBottom: 8, lineHeight: 34 },
+  newsHeroMeta: { flexDirection: 'row', alignItems: 'center' },
+  newsHeroAuthor: { fontSize: 13, fontFamily: 'Poppins_600SemiBold', color: '#F59E0B' },
+  newsHeroDate: { fontSize: 13, fontFamily: 'Poppins_400Regular', color: '#CBD5E1' },
+  newsBodyContainer: { flex: 1 },
+  newsBodyText: { fontSize: 16, fontFamily: 'Poppins_400Regular', color: '#CBD5E1', lineHeight: 28 },
+  shareBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#334155', paddingVertical: 16, borderRadius: 16, marginTop: 40, borderWidth: 1, borderColor: '#475569' },
+  shareBtnText: { fontSize: 15, fontFamily: 'Poppins_600SemiBold', color: '#FFF' },
+
+  // --- TOPIC QUIZZES STYLES ---
+  topicQuizCard: { width: 180, height: 240, marginRight: 16, borderRadius: 24, overflow: 'hidden', backgroundColor: '#334155', shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 8 },
+  topicQuizBg: { width: '100%', height: '100%' },
+  topicQuizGradient: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'space-between', padding: 16 },
+  topicQuizTop: { flexDirection: 'row', justifyContent: 'flex-end' },
+  topicQuizBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.2)' },
+  topicQuizBadgeText: { fontSize: 10, fontFamily: 'Poppins_700Bold' },
+  topicQuizTitle: { fontSize: 16, fontFamily: 'Poppins_700Bold', color: '#FFF', marginBottom: 8, lineHeight: 22 },
+  topicQuizMetaRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
+  topicQuizMetaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  topicQuizMetaText: { fontSize: 11, fontFamily: 'Poppins_500Medium', color: '#CBD5E1' },
+  startQuizBtnSmall: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F59E0B', paddingVertical: 8, borderRadius: 10, gap: 6 },
+  startQuizBtnText: { fontSize: 12, fontFamily: 'Poppins_700Bold', color: '#FFF' },
 });

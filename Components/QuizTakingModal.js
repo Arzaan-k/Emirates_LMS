@@ -10,9 +10,9 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import API_URL from '../config';
 
 const { width } = Dimensions.get('window');
-const API_URL = "https://526f8b36f50f.ngrok-free.app";
 
 export default function QuizTakingModal({ visible, quiz, onClose, userName = "User" }) {
     const [currentIndex, setCurrentIndex] = useState(0);

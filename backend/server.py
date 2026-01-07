@@ -15,7 +15,7 @@ from pydantic import BaseModel
 # --- CONFIGURATION ---
 PORT = 8000
 HOST = "0.0.0.0"
-BASE_URL = "https://526f8b36f50f.ngrok-free.app" # Ngrok public URL
+BASE_URL = "http://192.168.0.136:8000"  # Local network IP for physical device
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
@@ -162,6 +162,12 @@ users_store: dict = {
 
 # ATTENDANCE/PUNCH IN-OUT STORE
 attendance_records: List[dict] = []  # {id, user_id, punch_in, punch_out, duration_minutes}
+
+# NEWS FEED STORE
+news_feed: List[dict] = []  # {id, title, content, author, image, date, created_at}
+
+# LIVE QUIZZES STORE (Topic Quizzes for Home Screen)
+live_quizzes: List[dict] = []  # {id, title, questions, time, difficulty, image}
 
 resource_categories: List[dict] = [
     {"id": "1", "name": "Standard SOPs", "icon": "file-document-outline", "color": ["#3B82F6", "#2563EB"], "bg": "#DBEAFE"},
@@ -511,6 +517,136 @@ async def delete_content(item_id: str):
          return {"status": "success"}
     
     raise HTTPException(status_code=404, detail="Content not found")
+
+# --- NEWS FEED ENDPOINTS ---
+
+@app.get("/news")
+async def get_news():
+    """Get all news articles, sorted by date (newest first)"""
+    return sorted(news_feed, key=lambda x: x.get('created_at', ''), reverse=True)
+
+@app.post("/news")
+async def create_news(
+    title: str = Form(...),
+    content: str = Form(...),
+    author: str = Form(...),
+    image: Optional[UploadFile] = File(None)
+):
+    """Create a new news article and broadcast to all users"""
+    news_id = str(uuid.uuid4())
+    
+    # Handle image upload
+    image_url = None
+    if image:
+        file_extension = image.filename.split('.')[-1]
+        file_name = f"news_{news_id}.{file_extension}"
+        file_path = os.path.join(UPLOAD_DIR, file_name)
+        with open(file_path, "wb") as f:
+            f.write(await image.read())
+        image_url = f"/uploads/{file_name}"
+    
+    news_item = {
+        "id": news_id,
+        "title": title,
+        "content": content,
+        "author": author,
+        "image": image_url or "https://images.unsplash.com/photo-1557682250-33bd709cbe85?w=800",
+        "date": "Just now",
+        "created_at": datetime.now().isoformat()
+    }
+    
+    news_feed.append(news_item)
+    logger.info(f"News Created: {title}")
+    
+    # Broadcast to all connected clients
+    await manager.broadcast({
+        "type": "NEWS_POSTED",
+        "data": news_item
+    })
+    
+    return {"status": "success", "data": news_item}
+
+@app.delete("/news/{news_id}")
+async def delete_news(news_id: str):
+    """Delete a news article"""
+    global news_feed
+    initial_len = len(news_feed)
+    news_feed = [n for n in news_feed if n.get("id") != news_id]
+    
+    if len(news_feed) < initial_len:
+        logger.info(f"News Deleted: {news_id}")
+        return {"status": "success"}
+    
+    raise HTTPException(status_code=404, detail="News not found")
+
+# --- LIVE QUIZZES ENDPOINTS ---
+
+@app.get("/live-quizzes")
+async def get_live_quizzes():
+    """Get all live topic quizzes"""
+    return live_quizzes
+
+@app.post("/live-quizzes")
+async def create_live_quiz(
+    title: str = Form(...),
+    difficulty: str = Form(...),
+    time: str = Form(...),
+    questions: str = Form(...),  # JSON string of questions array
+    image: Optional[UploadFile] = File(None)
+):
+    """Create a new topic quiz and broadcast to all users"""
+    quiz_id = str(uuid.uuid4())
+    
+    # Parse questions JSON
+    try:
+        questions_list = json.loads(questions)
+    except:
+        raise HTTPException(status_code=400, detail="Invalid questions format")
+    
+    # Handle image upload
+    image_url = None
+    if image:
+        file_extension = image.filename.split('.')[-1]
+        file_name = f"quiz_{quiz_id}.{file_extension}"
+        file_path = os.path.join(UPLOAD_DIR, file_name)
+        with open(file_path, "wb") as f:
+            f.write(await image.read())
+        image_url = f"/uploads/{file_name}"
+    
+    quiz_item = {
+        "id": quiz_id,
+        "title": title,
+        "difficulty": difficulty,
+        "time": time,
+        "questions": questions_list,
+        "image": image_url or "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800",
+        "created_at": datetime.now().isoformat()
+    }
+    
+    live_quizzes.append(quiz_item)
+    logger.info(f"Live Quiz Created: {title}")
+    
+    # Broadcast to all connected clients
+    await manager.broadcast({
+        "type": "QUIZ_POSTED",
+        "data": quiz_item
+    })
+    
+    return {"status": "success", "data": quiz_item}
+
+@app.delete("/live-quizzes/{quiz_id}")
+async def delete_live_quiz(quiz_id: str):
+    """Delete a live quiz"""
+    global live_quizzes
+    initial_len = len(live_quizzes)
+    live_quizzes = [q for q in live_quizzes if q.get("id") != quiz_id]
+    
+    if len(live_quizzes) < initial_len:
+        logger.info(f"Live Quiz Deleted: {quiz_id}")
+        return {"status": "success"}
+    
+    raise HTTPException(status_code=404, detail="Quiz not found")
+
 
 @app.post("/notifications/send") # Renamed/Updated to match ManagerDashboard call which was trying /notifications/send but server had /notify? No, ManagerDashboard calls /notifications/send in one place and /notify in another. Let's standardize to /notify, but ManagerDashboard uses /notifications/send. I will use /notify and update ManagerDashboard to match OR assume ManagerDashboard was wrong.
 # Actually, I'll stick to replacing the existing /notify and ensure ManagerDashboard uses it.
@@ -1436,7 +1572,7 @@ async def user_activity_report():
                         if r['user_id'] == user_id 
                         and r.get('punch_in', '').startswith(datetime.now().strftime('%Y-%m-%d'))]
         
-        total_hours_today = sum([r.get('duration_minutes', 0) for r in today_records]) / 60 if today_records else 0
+        total_hours_today = sum([(r.get('duration_minutes') or 0) for r in today_records]) / 60 if today_records else 0
         
         is_currently_working = any([not r.get('punch_out') for r in today_records])
         

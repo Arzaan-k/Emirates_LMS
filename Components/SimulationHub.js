@@ -5,6 +5,7 @@ import Animated, { FadeInUp, FadeInRight, Layout } from 'react-native-reanimated
 import { BlurView } from 'expo-blur';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import AIRoleplay from './AIRoleplay';
+import API_URL from '../config';
 
 const { width, height } = Dimensions.get('window');
 
@@ -26,7 +27,7 @@ export default function SimulationHub({ onClose }) {
 
     const fetchHistory = async () => {
         try {
-            const res = await fetch("https://526f8b36f50f.ngrok-free.app/ai/simulation/history");
+            const res = await fetch(`${API_URL}/ai/simulation/history`);
             const data = await res.json();
             setHistory(data);
         } catch (e) {
