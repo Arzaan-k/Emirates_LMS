@@ -31,6 +31,7 @@ import ModuleDetail from "./Screens/ModuleDetail";
 import Hierarchy from "./Screens/Hierarchy";
 import { LanguageProvider } from "./context/language.context";
 import Analytics from "./Screens/Analytics";
+import LiveTrackingScreen from './Screens/LiveTrackingScreen';
 
 LogBox.ignoreAllLogs();
 
@@ -112,6 +113,7 @@ function App() {
             <Stack.Screen name="ModuleDetail" component={ModuleDetail} />
             <Stack.Screen name="Hierarchy" component={Hierarchy} />
             <Stack.Screen name="Analytics" component={Analytics} />
+            <Stack.Screen name="LiveTracking" component={LiveTrackingScreen} />
           </Stack.Navigator>
         </NavigationContainer>
         {/* </NotificationProvider> */}

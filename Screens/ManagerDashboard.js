@@ -26,6 +26,7 @@ import Svg, { Circle, G, Text as SvgText } from 'react-native-svg';
 import { QuizCreationModal, QuizResultsModal } from '../Components/QuizModals';
 import EditNodeModal from '../Components/EditNodeModal';
 import BulkUploadModal from '../Components/BulkUploadModal'; // [NEW]
+import CreateUser from '../Screens/CreateUser';
 import API_URL from '../config';
 
 const { width, height } = Dimensions.get('window');
@@ -158,6 +159,7 @@ export default function ManagerDashboard({ route, navigation }) {
     const [resFile, setResFile] = useState(null);
     const [uploading, setUploading] = useState(false);
     const [isPathNode, setIsPathNode] = useState(false); // RESTORED
+    const [createUserVisible, setCreateUserVisible] = useState(false); // NEW
     const [bulkModalVisible, setBulkModalVisible] = useState(false); // [NEW]
 
     // Categories
@@ -402,6 +404,28 @@ export default function ManagerDashboard({ route, navigation }) {
         }
     };
 
+    // --- CREATE USER HANDLER ---
+    const handleCreateUser = async (userData) => {
+        try {
+            const response = await fetch(`${API_URL}/users/create`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(userData)
+            });
+
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                Alert.alert('Success', `User ${userData.name} created successfully!`);
+                setCreateUserVisible(false);
+            } else {
+                Alert.alert('Error', result.message || 'Failed to create user');
+            }
+        } catch (error) {
+            Alert.alert('Error', 'Network error. Please try again.');
+        }
+    };
+
     // --- ADVANCED HANDLERS [NEW] ---
     const openEditNode = (node) => {
         setSelectedNode(node);
@@ -634,12 +658,24 @@ export default function ManagerDashboard({ route, navigation }) {
                             <Text style={styles.actionText}>Bulk Upload</Text>
                         </TouchableOpacity>
 
-                        <TouchableOpacity style={styles.actionBtn} onPress={() => navigation.navigate('CreateUser')}>
+                        <TouchableOpacity style={styles.actionBtn} onPress={() => setCreateUserVisible(true)}>
                             <View style={[styles.actionIcon, { backgroundColor: '#ECFEFF' }]}>
                                 <Feather name="user-plus" size={24} color="#0891B2" />
                             </View>
                             <Text style={styles.actionText}>Create User</Text>
                         </TouchableOpacity>
+
+                        {/* LIVE TRACKING - NEW */}
+                        <TouchableOpacity
+                            style={styles.actionBtn}
+                            onPress={() => navigation.navigate('LiveTracking')}
+                        >
+                            <View style={[styles.actionIcon, { backgroundColor: '#DCFCE7' }]}>
+                                <Feather name="map-pin" size={24} color="#10B981" />
+                            </View>
+                            <Text style={styles.actionText}>Live Tracking</Text>
+                        </TouchableOpacity>
+
                         <TouchableOpacity
                             style={styles.actionBtn}
                             onPress={() => navigation.navigate('ProctoredAssessment', { userProfile })}
@@ -715,6 +751,13 @@ export default function ManagerDashboard({ route, navigation }) {
                     visible={bulkModalVisible}
                     onClose={() => setBulkModalVisible(false)}
                     onUploadComplete={() => setRefreshPath(prev => prev + 1)}
+                />
+
+                {/* CREATE USER MODAL */}
+                <CreateUser
+                    visible={createUserVisible}
+                    onClose={() => setCreateUserVisible(false)}
+                    onCreate={handleCreateUser}
                 />
 
                 {/* NOTIFICATION MODAL */}

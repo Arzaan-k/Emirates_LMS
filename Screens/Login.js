@@ -1,264 +1,370 @@
-// LoginScreen.js
-import { useNavigation } from '@react-navigation/native';
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  Image,
-  TextInput,
-  Pressable,
-  Alert,
-  Dimensions,
-  Platform,
-  KeyboardAvoidingView
+    View,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    StyleSheet,
+    Dimensions,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
+import { Feather } from '@expo/vector-icons';
 import Animated, {
-  FadeInUp,
-  FadeInDown,
-  useSharedValue,
-  useAnimatedStyle,
-  withRepeat,
-  withTiming,
-  Easing
+    useSharedValue,
+    useAnimatedStyle,
+    withRepeat,
+    withSequence,
+    withTiming,
+    Easing,
 } from 'react-native-reanimated';
-import { useLanguage } from "../context/language.context";
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 
 const { width, height } = Dimensions.get('window');
 
-// --- Waffle Background Element ---
-const FloatingWaffle = ({ delay, duration, size, top, left, rotate }) => {
-  const translateY = useSharedValue(0);
+// Floating Waffle Component
+const FloatingWaffle = ({ size, top, left, delay }) => {
+    const translateY = useSharedValue(0);
+    const rotate = useSharedValue(0);
+    const scale = useSharedValue(1);
 
-  useEffect(() => {
-    translateY.value = withRepeat(
-      withTiming(20, { duration: duration, easing: Easing.inOut(Easing.ease) }),
-      -1,
-      true
+    React.useEffect(() => {
+        translateY.value = withRepeat(
+            withSequence(
+                withTiming(-20, { duration: 2000 + delay, easing: Easing.inOut(Easing.ease) }),
+                withTiming(0, { duration: 2000 + delay, easing: Easing.inOut(Easing.ease) })
+            ),
+            -1,
+            false
+        );
+
+        rotate.value = withRepeat(
+            withSequence(
+                withTiming(10, { duration: 3000 + delay }),
+                withTiming(-10, { duration: 3000 + delay })
+            ),
+            -1,
+            true
+        );
+
+        scale.value = withRepeat(
+            withSequence(
+                withTiming(1.1, { duration: 1500 + delay }),
+                withTiming(1, { duration: 1500 + delay })
+            ),
+            -1,
+            true
+        );
+    }, []);
+
+    const animatedStyle = useAnimatedStyle(() => ({
+        transform: [
+            { translateY: translateY.value },
+            { rotate: `${rotate.value}deg` },
+            { scale: scale.value },
+        ],
+    }));
+
+    return (
+        <Animated.View
+            style={[
+                styles.floatingWaffle,
+                {
+                    top,
+                    left,
+                    width: size,
+                    height: size,
+                },
+                animatedStyle,
+            ]}
+        >
+            <Text style={{ fontSize: size * 0.8 }}>🧇</Text>
+        </Animated.View>
     );
-  }, []);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value }, { rotate: rotate }]
-  }));
-
-  return (
-    <Animated.View style={[{ position: 'absolute', top, left }, animatedStyle]}>
-      <MaterialCommunityIcons name="grid" size={size} color="rgba(255,255,255,0.15)" />
-    </Animated.View>
-  );
 };
 
-export default function LoginScreen() {
-  const navigation = /** @type {any} */ (useNavigation());
-  const { t } = useLanguage();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+// Sparkle Component
+const Sparkle = ({ size, top, left, delay }) => {
+    const opacity = useSharedValue(0);
+    const scale = useSharedValue(0);
 
-  // SIMPLIFIED CREDENTIALS - ONLY 2 ROLES
-  const STATIC_USERS = {
-    'user': { password: 'user@123', role: 'User', name: 'John Doe' },
-    'store.manager': { password: 'bw_store@2025', role: 'Store Manager', name: 'Sarah Store' },
-  };
+    React.useEffect(() => {
+        opacity.value = withRepeat(
+            withSequence(
+                withTiming(0, { duration: delay }),
+                withTiming(1, { duration: 800 }),
+                withTiming(0, { duration: 800 })
+            ),
+            -1,
+            false
+        );
 
-  const handleLogin = () => {
-    const user = STATIC_USERS[email.toLowerCase()];
+        scale.value = withRepeat(
+            withSequence(
+                withTiming(0, { duration: delay }),
+                withTiming(1.2, { duration: 800 }),
+                withTiming(0, { duration: 800 })
+            ),
+            -1,
+            false
+        );
+    }, []);
 
-    if (user && user.password === password) {
-      if (user.role === 'Store Manager') {
-        navigation.navigate('ManagerDashboard', { userProfile: user });
-      } else {
-        // Default: User role
-        navigation.navigate('Home', { userProfile: user });
-      }
-    } else {
-      Alert.alert('Login Failed', 'Invalid username or password');
-    }
-  };
+    const animatedStyle = useAnimatedStyle(() => ({
+        opacity: opacity.value,
+        transform: [{ scale: scale.value }],
+    }));
 
-  return (
-    <View style={styles.container}>
-      {/* 1. PREMIUM GRADIENT BACKGROUND */}
-      <LinearGradient
-        colors={['#fbbf24', '#d97706', '#92400e']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={StyleSheet.absoluteFill}
-      />
-
-      {/* 2. FLOATING WAFFLE ELEMENTS */}
-      <FloatingWaffle delay={0} duration={3000} size={120} top={height * 0.1} left={-20} rotate="15deg" />
-      <FloatingWaffle delay={500} duration={4000} size={80} top={height * 0.2} left={width - 50} rotate="-10deg" />
-      <FloatingWaffle delay={1000} duration={3500} size={150} top={height * 0.6} left={-40} rotate="30deg" />
-      <FloatingWaffle delay={200} duration={4500} size={100} top={height * 0.8} left={width - 80} rotate="-20deg" />
-
-
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={{ flex: 1, justifyContent: 'center', alignItems: 'center', width: '100%' }}
-      >
-        {/* 3. GLASSMORPHISM CARD */}
-        <Animated.View entering={FadeInUp.duration(1000).springify()}>
-          <BlurView intensity={30} tint="light" style={styles.glassCard}>
-
-            {/* LOGO */}
-            <Animated.View entering={FadeInDown.delay(200).duration(800)}>
-              <Image
-                source={require('../assets/BW_Logo.png')}
-                style={styles.logo}
-                resizeMode="contain"
-              />
-            </Animated.View>
-
-            <Animated.Text entering={FadeInDown.delay(300).duration(800)} style={styles.title}>
-              Belgian Waffle LMS
-            </Animated.Text>
-            <Animated.Text entering={FadeInDown.delay(400).duration(800)} style={styles.subtitle}>
-              {t('loginTitle')}
-            </Animated.Text>
-
-            {/* FORM */}
-            <View style={styles.form}>
-              {/* Email */}
-              <Animated.View entering={FadeInDown.delay(500).duration(800)} style={styles.inputContainer}>
-                <MaterialCommunityIcons name="email-outline" size={20} color="#FFF" style={styles.inputIcon} />
-                <TextInput
-                  placeholder="you@example.com"
-                  placeholderTextColor="rgba(255,255,255,0.6)"
-                  value={email}
-                  onChangeText={setEmail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  style={styles.input}
-                />
-              </Animated.View>
-
-              {/* Password */}
-              <Animated.View entering={FadeInDown.delay(600).duration(800)} style={styles.inputContainer}>
-                <MaterialCommunityIcons name="lock-outline" size={20} color="#FFF" style={styles.inputIcon} />
-                <TextInput
-                  placeholder="••••••••"
-                  placeholderTextColor="rgba(255,255,255,0.6)"
-                  value={password}
-                  onChangeText={setPassword}
-                  secureTextEntry
-                  style={styles.input}
-                />
-              </Animated.View>
-
-              {/* Forgot password */}
-              <Animated.View entering={FadeInDown.delay(700).duration(800)}>
-                <Pressable>
-                  <Text style={styles.forgot}>{t('forgotPassword')}</Text>
-                </Pressable>
-              </Animated.View>
-
-              {/* Login Button */}
-              <Animated.View entering={FadeInDown.delay(800).duration(800)}>
-                <Pressable style={styles.loginBtn} onPress={handleLogin}>
-                  <Text style={styles.loginText}>{t('loginBtn')}</Text>
-                </Pressable>
-              </Animated.View>
-
-            </View>
-          </BlurView>
+    return (
+        <Animated.View style={[styles.sparkle, { top, left, width: size, height: size }, animatedStyle]}>
+            <Text style={{ fontSize: size }}>✨</Text>
         </Animated.View>
+    );
+};
 
-      </KeyboardAvoidingView>
-    </View>
-  );
+export default function Login({ navigation }) {
+    const [username, setUsername] = useState('');
+    const [password, setPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
+
+    const handleLogin = () => {
+        // Simple authentication logic
+        if (username === 'user' && password === 'user@123') {
+            navigation.replace('Home', {
+                userProfile: { name: 'Aditya User', role: 'User', email: 'user' }
+            });
+        } else if (username === 'store.manager' && password === 'bw_store@2025') {
+            navigation.replace('ManagerDashboard', {
+                userProfile: { name: 'Store Manager', role: 'Store Manager', email: 'store.manager' }
+            });
+        } else {
+            Alert.alert('Invalid Credentials', 'Please check your username and password');
+        }
+    };
+
+    const handleForgotPassword = () => {
+        Alert.alert(
+            'Reset Password',
+            'Please contact your Store Manager or admin to reset your password.\n\nEmail: admin@belgianwaffle.com',
+            [{ text: 'OK', style: 'default' }]
+        );
+    };
+
+    return (
+        <View style={styles.container}>
+            {/* BACKGROUND GRADIENT */}
+            <LinearGradient
+                colors={['#FFFBEB', '#FFF7ED', '#FFFFFF', '#FEF3C7']}
+                style={StyleSheet.absoluteFill}
+            />
+
+            {/* FLOATING WAFFLES */}
+            <FloatingWaffle size={80} top={100} left={30} delay={0} />
+            <FloatingWaffle size={60} top={150} left={width - 80} delay={500} />
+            <FloatingWaffle size={70} top={height * 0.3} left={50} delay={1000} />
+            <FloatingWaffle size={50} top={height * 0.5} left={width - 70} delay={1500} />
+            <FloatingWaffle size={90} top={height * 0.7} left={width / 2 - 45} delay={800} />
+            <FloatingWaffle size={55} top={height * 0.8} left={40} delay={1200} />
+            <FloatingWaffle size={65} top={height * 0.6} left={width - 90} delay={300} />
+
+            {/* SPARKLES */}
+            <Sparkle size={20} top={120} left={100} delay={0} />
+            <Sparkle size={16} top={200} left={width - 100} delay={600} />
+            <Sparkle size={18} top={height * 0.4} left={80} delay={1200} />
+            <Sparkle size={14} top={height * 0.65} left={width - 60} delay={400} />
+
+            {/* LOGIN CARD */}
+            <KeyboardAvoidingView
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                style={styles.keyboardView}
+            >
+                <BlurView intensity={20} tint="light" style={styles.card}>
+                    {/* HEADER */}
+                    <View style={styles.header}>
+                        <Text style={styles.welcomeText}>Welcome to</Text>
+                        <Text style={styles.brandText}>Belgian Waffle LMS</Text>
+                        <Text style={styles.tagline}>Learn • Grow • Excel</Text>
+                    </View>
+
+                    {/* USERNAME INPUT */}
+                    <View style={styles.inputContainer}>
+                        <Feather name="user" size={20} color="#F59E0B" />
+                        <TextInput
+                            style={styles.input}
+                            placeholder="Username"
+                            placeholderTextColor="#9CA3AF"
+                            value={username}
+                            onChangeText={setUsername}
+                            autoCapitalize="none"
+                        />
+                    </View>
+
+                    {/* PASSWORD INPUT */}
+                    <View style={styles.inputContainer}>
+                        <Feather name="lock" size={20} color="#F59E0B" />
+                        <TextInput
+                            style={styles.input}
+                            placeholder="Password"
+                            placeholderTextColor="#9CA3AF"
+                            value={password}
+                            onChangeText={setPassword}
+                            secureTextEntry={!showPassword}
+                            autoCapitalize="none"
+                        />
+                        <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+                            <Feather name={showPassword ? 'eye' : 'eye-off'} size={20} color="#9CA3AF" />
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* FORGOT PASSWORD */}
+                    <TouchableOpacity onPress={handleForgotPassword} style={styles.forgotBtn}>
+                        <Text style={styles.forgotText}>Forgot Password?</Text>
+                    </TouchableOpacity>
+
+                    {/* LOGIN BUTTON */}
+                    <TouchableOpacity style={styles.loginBtn} onPress={handleLogin}>
+                        <LinearGradient
+                            colors={['#F59E0B', '#D97706']}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 0 }}
+                            style={styles.loginGradient}
+                        >
+                            <Text style={styles.loginText}>Sign In</Text>
+                            <Feather name="arrow-right" size={20} color="#FFF" />
+                        </LinearGradient>
+                    </TouchableOpacity>
+
+                    {/* DEMO CREDENTIALS HINT */}
+                    <View style={styles.hintBox}>
+                        <Feather name="info" size={14} color="#6B7280" />
+                        <Text style={styles.hintText}>
+                            Demo: user / user@123 or store.manager / bw_store@2025
+                        </Text>
+                    </View>
+                </BlurView>
+            </KeyboardAvoidingView>
+        </View>
+    );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  glassCard: {
-    width: width * 0.9,
-    paddingVertical: 40,
-    paddingHorizontal: 25,
-    borderRadius: 30,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)' // Fallback / Base tint
-  },
-  logo: {
-    width: 100,
-    height: 100,
-    marginBottom: 10,
-    shadowColor: "#F59E0B",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 20,
-  },
-  title: {
-    fontSize: 26,
-    fontFamily: 'Poppins_700Bold', // UPDATED FONT
-    color: '#FFF',
-    marginBottom: 5,
-    textAlign: 'center',
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4
-  },
-  subtitle: {
-    fontSize: 14,
-    fontFamily: 'Poppins_400Regular', // UPDATED FONT
-    color: 'rgba(255,255,255,0.8)',
-    marginBottom: 30,
-    textAlign: 'center',
-  },
-  form: {
-    width: '100%',
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    borderRadius: 15,
-    marginBottom: 15,
-    paddingHorizontal: 15,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)'
-  },
-  inputIcon: {
-    marginRight: 10
-  },
-  input: {
-    flex: 1,
-    paddingVertical: 15,
-    fontSize: 15,
-    color: '#FFF',
-    fontFamily: 'Poppins_400Regular'
-  },
-  forgot: {
-    fontSize: 13,
-    color: '#FCD34D', // Lighter amber
-    textAlign: 'right',
-    fontFamily: 'Poppins_500Medium',
-    marginBottom: 20
-  },
-  loginBtn: {
-    backgroundColor: '#F59E0B',
-    paddingVertical: 16,
-    borderRadius: 15,
-    alignItems: 'center',
-    shadowColor: "#F59E0B",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
-    elevation: 8,
-  },
-  loginText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontFamily: 'Poppins_700Bold',
-  },
+    container: {
+        flex: 1,
+    },
+    floatingWaffle: {
+        position: 'absolute',
+        opacity: 0.4,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    sparkle: {
+        position: 'absolute',
+    },
+    keyboardView: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+    },
+    card: {
+        width: '100%',
+        maxWidth: 400,
+        backgroundColor: 'rgba(255, 255, 255, 0.85)',
+        borderRadius: 32,
+        padding: 28,
+        shadowColor: '#F59E0B',
+        shadowOffset: { width: 0, height: 20 },
+        shadowOpacity: 0.3,
+        shadowRadius: 30,
+        elevation: 15,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.5)',
+    },
+    header: {
+        alignItems: 'center',
+        marginBottom: 32,
+    },
+    welcomeText: {
+        fontSize: 16,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        marginBottom: 4,
+    },
+    brandText: {
+        fontSize: 28,
+        fontFamily: 'Poppins_700Bold',
+        color: '#111827',
+        marginBottom: 8,
+    },
+    tagline: {
+        fontSize: 13,
+        fontFamily: 'Poppins_500Medium',
+        color: '#F59E0B',
+        letterSpacing: 2,
+    },
+    inputContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(255, 255, 255, 0.9)',
+        borderRadius: 16,
+        paddingHorizontal: 16,
+        height: 56,
+        marginBottom: 16,
+        borderWidth: 2,
+        borderColor: 'rgba(245, 158, 11, 0.1)',
+    },
+    input: {
+        flex: 1,
+        marginLeft: 12,
+        fontSize: 15,
+        fontFamily: 'Poppins_500Medium',
+        color: '#111827',
+    },
+    forgotBtn: {
+        alignSelf: 'flex-end',
+        marginBottom: 24,
+    },
+    forgotText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_500Medium',
+        color: '#F59E0B',
+    },
+    loginBtn: {
+        borderRadius: 16,
+        overflow: 'hidden',
+        marginBottom: 20,
+        shadowColor: '#F59E0B',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.4,
+        shadowRadius: 12,
+        elevation: 8,
+    },
+    loginGradient: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: 56,
+        gap: 8,
+    },
+    loginText: {
+        fontSize: 17,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF',
+    },
+    hintBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#F3F4F6',
+        padding: 12,
+        borderRadius: 12,
+        gap: 8,
+    },
+    hintText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        flex: 1,
+    },
 });

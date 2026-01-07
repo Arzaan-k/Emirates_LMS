@@ -25,15 +25,13 @@ const CreateUser = ({
         if (!name || !email || !password) return;
 
         const payload = { name, email, password, role };
-        // onCreate(payload);
+        onCreate(payload);
 
         // reset
         setName('');
         setEmail('');
         setPassword('');
         setRole('Employee');
-
-        onClose();
     };
 
     return (

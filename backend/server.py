@@ -150,6 +150,19 @@ quiz_store: List[dict] = []  # {id, title, description, questions, created_at, c
 quiz_submissions: List[dict] = []  # {id, quiz_id, user_name, answers, score, submitted_at}
 notification_store: List[dict] = [] # {id, title, message, type, created_at, read_by}
 resource_store: List[dict] = [] # {id, title, category, type, url, description, created_at, size}
+
+# LOCATION TRACKING STORE
+location_store: dict = {}  # {user_id: {user_id, name, latitude, longitude, timestamp, active}}
+
+# USER MANAGEMENT STORE
+users_store: dict = {
+    "user": {"email": "user", "name": "Aditya User", "password": "user@123", "role": "User"},
+    "store.manager": {"email": "store.manager", "name": "Store Manager", "password": "bw_store@2025", "role": "Store Manager"},
+}
+
+# ATTENDANCE/PUNCH IN-OUT STORE
+attendance_records: List[dict] = []  # {id, user_id, punch_in, punch_out, duration_minutes}
+
 resource_categories: List[dict] = [
     {"id": "1", "name": "Standard SOPs", "icon": "file-document-outline", "color": ["#3B82F6", "#2563EB"], "bg": "#DBEAFE"},
     {"id": "2", "name": "Video Tutorials", "icon": "play-circle-outline", "color": ["#F59E0B", "#D97706"], "bg": "#FEF3C7"},
@@ -1230,8 +1243,267 @@ async def mark_notification_read(notif_id: str, user_id: str = "user"):
             return {"status": "success"}
     raise HTTPException(status_code=404, detail="Notification not found")
 
+# ==========================================
+# LOCATION TRACKING APIs
+# ==========================================
+
+@app.post("/location/update")
+async def update_location(data: dict):
+    """
+    Employee sends GPS coordinates.
+    Stores in location_store with active=True.
+    """
+    user_id = data.get('user_id')
+    latitude = data.get('latitude')
+    longitude = data.get('longitude')
+    timestamp = data.get('timestamp')
+    
+    # Get user name from users_store
+    user_name = users_store.get(user_id, {}).get('name', user_id)
+    
+    location_store[user_id] = {
+        "user_id": user_id,
+        "name": user_name,
+        "latitude": latitude,
+        "longitude": longitude,
+        "timestamp": timestamp,
+        "active": True
+    }
+    
+    logger.info(f"Location updated for {user_name}: ({latitude}, {longitude})")
+    return {"status": "success"}
+
+
+@app.post("/location/stop")
+async def stop_location(data: dict):
+    """
+    Employee stops sharing location.
+    Sets active=False.
+    """
+    user_id = data.get('user_id')
+    if user_id in location_store:
+        location_store[user_id]["active"] = False
+        logger.info(f"Location tracking stopped for {user_id}")
+    return {"status": "stopped"}
+
+
+@app.get("/location/all")
+async def get_all_locations():
+    """
+    Returns all employee locations for Admin/Manager.
+    """
+    return list(location_store.values())
+
+
+# ==========================================
+# USER MANAGEMENT APIs
+# ==========================================
+
+@app.post("/users/create")
+async def create_user(data: dict):
+    """
+    Creates a new user account.
+    """
+    name = data.get('name')
+    email = data.get('email')
+    password = data.get('password')
+    role = data.get('role', 'Employee')
+    
+    # Validation
+    if not name or not email or not password:
+        return {"status": "error", "message": "Missing required fields"}
+    
+    # Check if user exists
+    if email in users_store:
+        return {"status": "error", "message": "User already exists"}
+    
+    # Create user
+    users_store[email] = {
+        "email": email,
+        "name": name,
+        "password": password,  # In production: hash this!
+        "role": role,
+        "created_at": datetime.now().isoformat()
+    }
+    
+    logger.info(f"User created: {name} ({email}) - Role: {role}")
+    return {"status": "success", "user_id": email}
+
+
+@app.get("/users/list")
+async def list_users():
+    """
+    Returns all users (without passwords).
+    """
+    users = []
+    for email, user_data in users_store.items():
+        users.append({
+            "email": user_data["email"],
+            "name": user_data["name"],
+            "role": user_data["role"]
+        })
+    return users
+
+
+# ==========================================
+# REPORTS APIs
+# ==========================================
+
+# ==========================================
+# ATTENDANCE APIs
+# ==========================================
+
+@app.post("/attendance/punch-in")
+async def punch_in(data: dict):
+    """
+    Employee punches in for work.
+    """
+    user_id = data.get('user_id')
+    timestamp = data.get('timestamp')
+    
+    # Check if already punched in
+    for record in attendance_records:
+        if record['user_id'] == user_id and not record.get('punch_out'):
+            return {"status": "error", "message": "Already punched in"}
+    
+    record = {
+        "id": str(len(attendance_records) + 1),
+        "user_id": user_id,
+        "punch_in": timestamp,
+        "punch_out": None,
+        "duration_minutes": None
+    }
+    
+    attendance_records.append(record)
+    logger.info(f"Punch in: {user_id} at {timestamp}")
+    return {"status": "success"}
+
+
+@app.post("/attendance/punch-out")
+async def punch_out(data: dict):
+    """
+    Employee punches out from work.
+    """
+    user_id = data.get('user_id')
+    timestamp = data.get('timestamp')
+    
+    # Find active attendance record
+    for record in attendance_records:
+        if record['user_id'] == user_id and not record.get('punch_out'):
+            record['punch_out'] = timestamp
+            
+            # Calculate duration
+            punch_in_dt = datetime.fromisoformat(record['punch_in'].replace('Z', '+00:00'))
+            punch_out_dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            duration = (punch_out_dt - punch_in_dt).total_seconds() / 60
+            record['duration_minutes'] = int(duration)
+            
+            logger.info(f"Punch out: {user_id} at {timestamp}, duration: {duration}min")
+            return {"status": "success", "duration_minutes": int(duration)}
+    
+    return {"status": "error", "message": "No active punch-in found"}
+
+
+@app.get("/attendance/history")
+async def attendance_history(user_id: str = None):
+    """
+    Returns attendance history.
+    """
+    if user_id:
+        return [r for r in attendance_records if r['user_id'] == user_id]
+    return attendance_records
+
+
+# ==========================================
+# REPORTS APIs
+# ==========================================
+
+@app.get("/reports/user-activity")
+async def user_activity_report():
+    """
+    Comprehensive user activity report.
+    """
+    report = []
+    for user_id, user in users_store.items():
+        # Get location info
+        loc = location_store.get(user_id, {})
+        
+        # Count quiz attempts
+        quiz_count = len([s for s in quiz_submissions if s.get('user_name') == user_id])
+        
+        # Get today's attendance
+        today_records = [r for r in attendance_records 
+                        if r['user_id'] == user_id 
+                        and r.get('punch_in', '').startswith(datetime.now().strftime('%Y-%m-%d'))]
+        
+        total_hours_today = sum([r.get('duration_minutes', 0) for r in today_records]) / 60 if today_records else 0
+        
+        is_currently_working = any([not r.get('punch_out') for r in today_records])
+        
+        report.append({
+            "user_id": user_id,
+            "name": user.get('name', user_id),
+            "email": user_id,
+            "role": user.get('role', 'Unknown'),
+            "location_sharing": loc.get('active', False),
+            "last_location_update": loc.get('timestamp', 'Never'),
+            "current_lat": loc.get('latitude'),
+            "current_lng": loc.get('longitude'),
+            "quizzes_completed": quiz_count,
+            "attendance_today": {
+                "is_working": is_currently_working,
+                "total_hours": round(total_hours_today, 2),
+                "punch_records": today_records
+            }
+        })
+    
+    return report
+
+
+@app.get("/reports/quiz-performance")
+async def quiz_performance_report():
+    """
+    Returns quiz performance statistics.
+    """
+    if not quiz_submissions:
+        return {"message": "No quiz submissions yet"}
+    
+    # Aggregate by quiz
+    quiz_stats = {}
+    for submission in quiz_submissions:
+        quiz_id = submission.get('quiz_id')
+        if quiz_id not in quiz_stats:
+            quiz_stats[quiz_id] = {
+                "quiz_id": quiz_id,
+                "attempts": 0,
+                "avg_score": 0,
+                "scores": []
+            }
+        quiz_stats[quiz_id]["attempts"] += 1
+        quiz_stats[quiz_id]["scores"].append(submission.get('score', 0))
+    
+    # Calculate averages
+    for quiz_id, stats in quiz_stats.items():
+        stats["avg_score"] = sum(stats["scores"]) / len(stats["scores"])
+        del stats["scores"]  # Remove raw scores from output
+    
+    return list(quiz_stats.values())
+
+
+@app.get("/reports/location-history")
+async def location_history_report():
+    """
+    Returns current location snapshot.
+    (In production, this would query a time-series database)
+    """
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "locations": list(location_store.values())
+    }
+
+
+# --- START SERVER ---
 if __name__ == "__main__":
     import uvicorn
-    # Run with: python server.py
-    print(f"Server starting on http://{HOST}:{PORT}")
+    logger.info(f"Starting BW LMS Backend on {HOST}:{PORT}")
     uvicorn.run(app, host=HOST, port=PORT)

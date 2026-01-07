@@ -28,7 +28,13 @@
     "plugins": [
       "expo-secure-store",
       "expo-font",
-      "react-native-iap"
+      "react-native-iap",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow Belgian Waffle LMS to use your location for attendance tracking and team coordination."
+        }
+      ]
     ]
   }
 }

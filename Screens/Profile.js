@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
     View,
     Text,
@@ -7,13 +7,18 @@ import {
     Image,
     TouchableOpacity,
     Dimensions,
+    Alert,
+    Switch,
+    ActivityIndicator,
 } from "react-native";
 import { Feather, MaterialCommunityIcons, FontAwesome5 } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import Svg, { Circle, G, Text as SvgText } from "react-native-svg";
 import { useLanguage } from "../context/language.context";
-import { Modal } from "react-native"; // Added Modal
+import { Modal } from "react-native";
+import * as Location from 'expo-location';
+import API_URL from '../config';
 
 const { width } = Dimensions.get("window");
 
@@ -348,9 +353,155 @@ const DonutChart = () => {
 };
 
 
-export default function Profile({ navigation }) {
+export default function Profile({ navigation, route }) {
     const insets = useSafeAreaInsets();
     const { t } = useLanguage();
+    const userProfile = route?.params?.userProfile || { name: 'Aditya User', email: 'user' };
+
+    // Location Tracking State
+    const [locationEnabled, setLocationEnabled] = useState(false);
+    const [locationInterval, setLocationInterval] = useState(null);
+    const [lastLocationUpdate, setLastLocationUpdate] = useState(null);
+
+    // Punch In/Out State
+    const [isPunchedIn, setIsPunchedIn] = useState(false);
+    const [punchInTime, setPunchInTime] = useState(null);
+    const [punchOutTime, setPunchOutTime] = useState(null);
+    const [workDuration, setWorkDuration] = useState('0h 0m');
+
+    // Location Tracking Functions
+    const startLocationTracking = async () => {
+        try {
+            // Request permission
+            let { status } = await Location.requestForegroundPermissionsAsync();
+            if (status !== 'granted') {
+                Alert.alert('Permission Denied', 'Location permission is required for tracking');
+                return;
+            }
+
+            setLocationEnabled(true);
+
+            // Start interval
+            const interval = setInterval(async () => {
+                try {
+                    let location = await Location.getCurrentPositionAsync({});
+                    const { latitude, longitude } = location.coords;
+                    const timestamp = new Date().toISOString();
+
+                    // Send to backend
+                    await fetch(`${API_URL}/location/update`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            user_id: userProfile.email,
+                            latitude,
+                            longitude,
+                            timestamp
+                        })
+                    });
+
+                    setLastLocationUpdate(new Date().toLocaleTimeString());
+                } catch (error) {
+                    console.error('Location update error:', error);
+                }
+            }, 10000); // 10 seconds
+
+            setLocationInterval(interval);
+            Alert.alert('Tracking Started', 'Your location is being shared every 10 seconds');
+        } catch (error) {
+            console.error('Start tracking error:', error);
+            Alert.alert('Error', 'Failed to start location tracking');
+        }
+    };
+
+    const stopLocationTracking = async () => {
+        if (locationInterval) {
+            clearInterval(locationInterval);
+            setLocationInterval(null);
+        }
+        setLocationEnabled(false);
+        setLastLocationUpdate(null);
+
+        // Notify backend
+        try {
+            await fetch(`${API_URL}/location/stop`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userProfile.email })
+            });
+        } catch (error) {
+            console.error('Stop tracking error:', error);
+        }
+
+        Alert.alert('Tracking Stopped', 'Location sharing has been disabled');
+    };
+
+    const handleLocationToggle = (value) => {
+        if (value) {
+            startLocationTracking();
+        } else {
+            stopLocationTracking();
+        }
+    };
+
+    // Punch In/Out Functions
+    const handlePunchIn = async () => {
+        const now = new Date();
+        setPunchInTime(now);
+        setIsPunchedIn(true);
+
+        try {
+            await fetch(`${API_URL}/attendance/punch-in`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    user_id: userProfile.email,
+                    timestamp: now.toISOString()
+                })
+            });
+            Alert.alert('Punched In', `Work started at ${now.toLocaleTimeString()}`);
+        } catch (error) {
+            console.error('Punch in error:', error);
+            Alert.alert('Error', 'Failed to punch in');
+        }
+    };
+
+    const handlePunchOut = async () => {
+        const now = new Date();
+        setPunchOutTime(now);
+        setIsPunchedIn(false);
+
+        if (punchInTime) {
+            const duration = now - punchInTime;
+            const hours = Math.floor(duration / (1000 * 60 * 60));
+            const minutes = Math.floor((duration % (1000 * 60 * 60)) / (1000 * 60));
+            setWorkDuration(`${hours}h ${minutes}m`);
+        }
+
+        try {
+            await fetch(`${API_URL}/attendance/punch-out`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    user_id: userProfile.email,
+                    timestamp: now.toISOString()
+                })
+            });
+            Alert.alert('Punched Out', `Work ended at ${now.toLocaleTimeString()}\nDuration: ${workDuration}`);
+        } catch (error) {
+            console.error('Punch out error:', error);
+            Alert.alert('Error', 'Failed to punch out');
+        }
+    };
+
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            if (locationInterval) {
+                clearInterval(locationInterval);
+            }
+        };
+    }, [locationInterval]);
 
     return (
         <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -361,14 +512,14 @@ export default function Profile({ navigation }) {
                     <View style={styles.identityRow}>
                         <View style={styles.avatarWrapper}>
                             <Image
-                                source={{ uri: "https://ui-avatars.com/api/?name=Aditya+User&background=F59E0B&color=fff&size=200" }}
+                                source={{ uri: `https://ui-avatars.com/api/?name=${userProfile.name}&background=F59E0B&color=fff&size=200` }}
                                 style={styles.avatar}
                             />
                             <View style={styles.onlineIndicator} />
                         </View>
                         <View style={styles.userInfo}>
-                            <Text style={styles.userName}>Aditya User</Text>
-                            <Text style={styles.userRole}>{t('storeManager')} • Mumbai</Text>
+                            <Text style={styles.userName}>{userProfile.name}</Text>
+                            <Text style={styles.userRole}>{userProfile.role} • Mumbai</Text>
                             <View style={styles.joinDateBadge}>
                                 <Feather name="calendar" size={10} color="#6B7280" />
                                 <Text style={styles.joinDateText}>{t('joined')} Nov 2024</Text>
@@ -400,6 +551,94 @@ export default function Profile({ navigation }) {
                             <Text style={styles.xpLabel}>{t('totalXP')}</Text>
                         </View>
                     </LinearGradient>
+                </View>
+
+                {/* LOCATION TRACKING CARD */}
+                <View style={styles.trackingCard}>
+                    <View style={styles.trackingHeader}>
+                        <View style={styles.trackingIcon}>
+                            <Feather name="map-pin" size={20} color="#10B981" />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.trackingTitle}>Location Sharing</Text>
+                            <Text style={styles.trackingSubtitle}>
+                                {locationEnabled ? `📍 Active • Last update: ${lastLocationUpdate || 'Starting...'}` : 'Enable to share your location'}
+                            </Text>
+                        </View>
+                        <Switch
+                            value={locationEnabled}
+                            onValueChange={handleLocationToggle}
+                            trackColor={{ false: '#E5E7EB', true: '#DCFCE7' }}
+                            thumbColor={locationEnabled ? '#10B981' : '#9CA3AF'}
+                        />
+                    </View>
+                    {locationEnabled && (
+                        <View style={styles.trackingInfo}>
+                            <Feather name="info" size={14} color="#6B7280" />
+                            <Text style={styles.trackingInfoText}>
+                                Updates every 10 seconds. Visible to Store Manager.
+                            </Text>
+                        </View>
+                    )}
+                </View>
+
+                {/* PUNCH IN/OUT CARD */}
+                <View style={styles.attendanceCard}>
+                    <View style={styles.attendanceHeader}>
+                        <View style={styles.attendanceIcon}>
+                            <Feather name="clock" size={20} color="#F59E0B" />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.attendanceTitle}>Attendance</Text>
+                            <Text style={styles.attendanceSubtitle}>
+                                {isPunchedIn
+                                    ? `🕐 Punched in at ${punchInTime?.toLocaleTimeString()}`
+                                    : punchOutTime
+                                        ? `✅ Worked ${workDuration} today`
+                                        : 'Start your shift'}
+                            </Text>
+                        </View>
+                    </View>
+
+                    <View style={styles.punchRow}>
+                        <TouchableOpacity
+                            style={[
+                                styles.punchBtn,
+                                isPunchedIn && styles.punchBtnDisabled
+                            ]}
+                            onPress={handlePunchIn}
+                            disabled={isPunchedIn}
+                        >
+                            <LinearGradient
+                                colors={isPunchedIn ? ['#E5E7EB', '#D1D5DB'] : ['#10B981', '#059669']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 0 }}
+                                style={styles.punchGradient}
+                            >
+                                <Feather name="log-in" size={18} color="#FFF" />
+                                <Text style={styles.punchText}>Punch In</Text>
+                            </LinearGradient>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={[
+                                styles.punchBtn,
+                                !isPunchedIn && styles.punchBtnDisabled
+                            ]}
+                            onPress={handlePunchOut}
+                            disabled={!isPunchedIn}
+                        >
+                            <LinearGradient
+                                colors={!isPunchedIn ? ['#E5E7EB', '#D1D5DB'] : ['#EF4444', '#DC2626']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 0 }}
+                                style={styles.punchGradient}
+                            >
+                                <Feather name="log-out" size={18} color="#FFF" />
+                                <Text style={styles.punchText}>Punch Out</Text>
+                            </LinearGradient>
+                        </TouchableOpacity>
+                    </View>
                 </View>
 
                 {/* PREMIUM CALENDAR */}
@@ -638,5 +877,126 @@ const styles = StyleSheet.create({
     noActivity: { alignItems: 'center', paddingVertical: 30 },
     noActText: { color: '#9CA3AF', marginTop: 12, fontFamily: "Poppins_400Regular", marginBottom: 20 },
     startBtn: { backgroundColor: '#F59E0B', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12, shadowColor: "#F59E0B", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
-    startBtnText: { color: '#FFF', fontSize: 14, fontFamily: "Poppins_700Bold" }
+    startBtnText: { color: '#FFF', fontSize: 14, fontFamily: "Poppins_700Bold" },
+
+    // LOCATION TRACKING STYLES
+    trackingCard: {
+        backgroundColor: '#FFF',
+        borderRadius: 20,
+        padding: 20,
+        marginHorizontal: 20,
+        marginTop: 20,
+        shadowColor: '#10B981',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 12,
+        elevation: 4,
+    },
+    trackingHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+    },
+    trackingIcon: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: '#DCFCE7',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    trackingTitle: {
+        fontSize: 16,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#111827',
+    },
+    trackingSubtitle: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        marginTop: 2,
+    },
+    trackingInfo: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginTop: 12,
+        padding: 12,
+        backgroundColor: '#F9FAFB',
+        borderRadius: 12,
+    },
+    trackingInfoText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        flex: 1,
+    },
+
+    // ATTENDANCE/PUNCH IN-OUT STYLES
+    attendanceCard: {
+        backgroundColor: '#FFF',
+        borderRadius: 20,
+        padding: 20,
+        marginHorizontal: 20,
+        marginTop: 16,
+        shadowColor: '#F59E0B',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 12,
+        elevation: 4,
+    },
+    attendanceHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        marginBottom: 16,
+    },
+    attendanceIcon: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: '#FEF3C7',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    attendanceTitle: {
+        fontSize: 16,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#111827',
+    },
+    attendanceSubtitle: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        marginTop: 2,
+    },
+    punchRow: {
+        flexDirection: 'row',
+        gap: 12,
+    },
+    punchBtn: {
+        flex: 1,
+        borderRadius: 14,
+        overflow: 'hidden',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 8,
+        elevation: 4,
+    },
+    punchBtnDisabled: {
+        opacity: 0.5,
+    },
+    punchGradient: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: 50,
+        gap: 8,
+    },
+    punchText: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF',
+    },
 });
