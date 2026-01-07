@@ -617,13 +617,19 @@ export default function ManagerDashboard({ route, navigation }) {
                     {/* QUICK ACTIONS */}
                     <Text style={styles.sectionTitle}>Quick Actions</Text>
                     <View style={styles.actionGrid}>
-                        <TouchableOpacity style={styles.actionBtn}>
+                        <TouchableOpacity
+                            style={styles.actionBtn}
+                            onPress={() => navigation.navigate('TeamList')}
+                        >
                             <View style={[styles.actionIcon, { backgroundColor: '#E0F2FE' }]}>
                                 <Feather name="users" size={24} color="#0284C7" />
                             </View>
                             <Text style={styles.actionText}>Team List</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={styles.actionBtn}>
+                        <TouchableOpacity
+                            style={styles.actionBtn}
+                            onPress={() => navigation.navigate('Analytics', { userProfile })}
+                        >
                             <View style={[styles.actionIcon, { backgroundColor: '#FCE7F3' }]}>
                                 <Feather name="bar-chart-2" size={24} color="#DB2777" />
                             </View>
@@ -635,7 +641,10 @@ export default function ManagerDashboard({ route, navigation }) {
                             </View>
                             <Text style={styles.actionText}>Assign Quiz</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={styles.actionBtn}>
+                        <TouchableOpacity
+                            style={styles.actionBtn}
+                            onPress={() => navigation.navigate('Audits')}
+                        >
                             <View style={[styles.actionIcon, { backgroundColor: '#DCFCE7' }]}>
                                 <Feather name="check-square" size={24} color="#16A34A" />
                             </View>

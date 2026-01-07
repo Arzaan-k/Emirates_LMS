@@ -32,6 +32,8 @@ import Hierarchy from "./Screens/Hierarchy";
 import { LanguageProvider } from "./context/language.context";
 import Analytics from "./Screens/Analytics";
 import LiveTrackingScreen from './Screens/LiveTrackingScreen';
+import TeamListScreen from './Screens/TeamListScreen';
+import AuditsScreen from './Screens/AuditsScreen';
 
 LogBox.ignoreAllLogs();
 
@@ -114,6 +116,8 @@ function App() {
             <Stack.Screen name="Hierarchy" component={Hierarchy} />
             <Stack.Screen name="Analytics" component={Analytics} />
             <Stack.Screen name="LiveTracking" component={LiveTrackingScreen} />
+            <Stack.Screen name="TeamList" component={TeamListScreen} />
+            <Stack.Screen name="Audits" component={AuditsScreen} />
           </Stack.Navigator>
         </NavigationContainer>
         {/* </NotificationProvider> */}
