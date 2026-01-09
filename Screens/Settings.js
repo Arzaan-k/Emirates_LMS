@@ -1,12 +1,51 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { LANGUAGES, useLanguage } from '../context/language.context';
+import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { CommonActions } from '@react-navigation/native';
 
 export default function Settings({ navigation }) {
     const insets = useSafeAreaInsets();
     const { language, changeLanguage, t } = useLanguage();
+
+    const handleLogout = async () => {
+        Alert.alert(
+            "Logout",
+            "Are you sure you want to logout?",
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Logout",
+                    style: "destructive",
+                    onPress: async () => {
+                        try {
+                            // Clear tokens
+                            if (Platform.OS === 'web') {
+                                await AsyncStorage.removeItem('accessToken');
+                                await AsyncStorage.removeItem('userRole');
+                            } else {
+                                await SecureStore.deleteItemAsync('accessToken');
+                                await SecureStore.deleteItemAsync('userRole');
+                            }
+                            // Reset navigation to Login
+                            navigation.dispatch(
+                                CommonActions.reset({
+                                    index: 0,
+                                    routes: [{ name: 'Login' }],
+                                })
+                            );
+                        } catch (e) {
+                            console.error("Logout error:", e);
+                            Alert.alert("Error", "Failed to logout. Please try again.");
+                        }
+                    }
+                }
+            ]
+        );
+    };
 
     return (
         <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -16,20 +55,20 @@ export default function Settings({ navigation }) {
                     <Feather name="arrow-left" size={24} color="#111827" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>{t('settings')}</Text>
-                <View style={{ width: 40 }} /> 
+                <View style={{ width: 40 }} />
             </View>
 
             <ScrollView contentContainerStyle={styles.content}>
-                
+
                 {/* Language Section */}
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>{t('language')}</Text>
                     <View style={styles.card}>
                         {Object.entries(LANGUAGES).map(([code, name], index) => (
-                            <TouchableOpacity 
-                                key={code} 
+                            <TouchableOpacity
+                                key={code}
                                 style={[
-                                    styles.optionRow, 
+                                    styles.optionRow,
                                     index !== Object.keys(LANGUAGES).length - 1 && styles.borderBottom
                                 ]}
                                 onPress={() => changeLanguage(code)}
@@ -49,19 +88,20 @@ export default function Settings({ navigation }) {
                 {/* Other Settings (Placeholder) */}
                 <View style={styles.section}>
                     <View style={styles.card}>
-                         <TouchableOpacity style={styles.optionRow}>
-                             <View style={styles.optionLeft}>
+                        <TouchableOpacity style={styles.optionRow}>
+                            <View style={styles.optionLeft}>
                                 <Feather name="bell" size={20} color="#4B5563" />
                                 <Text style={styles.optionText}>Notifications</Text>
-                             </View>
-                             <Feather name="chevron-right" size={20} color="#9CA3AF" />
-                         </TouchableOpacity>
+                            </View>
+                            <Feather name="chevron-right" size={20} color="#9CA3AF" />
+                        </TouchableOpacity>
                     </View>
                 </View>
-                
-                 <TouchableOpacity style={styles.logoutBtn}>
+
+                <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+                    <Feather name="log-out" size={20} color="#EF4444" style={{ marginRight: 8 }} />
                     <Text style={styles.logoutText}>{t('logout')}</Text>
-                 </TouchableOpacity>
+                </TouchableOpacity>
 
             </ScrollView>
         </View>
@@ -70,11 +110,11 @@ export default function Settings({ navigation }) {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#F9FAFB' },
-    header: { 
-        flexDirection: 'row', 
-        alignItems: 'center', 
-        justifyContent: 'space-between', 
-        paddingHorizontal: 20, 
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 20,
         paddingBottom: 20,
         backgroundColor: '#FFF'
     },
@@ -88,7 +128,7 @@ const styles = StyleSheet.create({
     borderBottom: { borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
     optionLeft: { flexDirection: 'row', alignItems: 'center' },
     optionText: { fontSize: 16, fontFamily: 'Poppins_500Medium', color: '#111827', marginLeft: 12 },
-    
-    logoutBtn: { backgroundColor: '#FEE2E2', padding: 16, borderRadius: 16, alignItems: 'center', marginTop: 20 },
+
+    logoutBtn: { flexDirection: 'row', backgroundColor: '#FEE2E2', padding: 16, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginTop: 20 },
     logoutText: { color: '#EF4444', fontFamily: 'Poppins_700Bold', fontSize: 16 }
 });

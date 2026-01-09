@@ -16,7 +16,7 @@ from groq import Groq
 # --- CONFIGURATION ---
 PORT = 8000
 HOST = "0.0.0.0"
-BASE_URL = "http://192.168.29.119:8000"  # Local network IP for physical device
+BASE_URL = "http://192.168.0.136:8000:8000"  # Local network IP for physical device
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
@@ -65,10 +65,10 @@ def generate_elevenlabs_audio(text):
 
 # --- LOAD AI MODELS ---
 import whisper
-logger.info("Loading OpenAI Whisper Model...")
-# Run on CPU
+logger.info("Loading OpenAI Whisper Model (Small - fast with good accuracy)...")
+# Small model is 2-3x faster than medium while still having good multilingual support
 whisper_model = whisper.load_model("small")
-logger.info("OpenAI Whisper Model Loaded (Small).")
+logger.info("OpenAI Whisper Model Loaded (Small - optimized for speed).")
 
 # --- APP SETUP ---
 app = FastAPI(title="BW LMS Realtime Backend")
@@ -1061,6 +1061,7 @@ async def generate_quiz_from_content(
     title: str = Form(...),
     difficulty: str = Form("Medium"),
     num_questions: int = Form(5),
+    preview_only: str = Form("false"),  # NEW: If 'true', returns questions without saving/broadcasting
     file: UploadFile = File(...)
 ):
     """
@@ -1070,6 +1071,12 @@ async def generate_quiz_from_content(
     quiz_id = str(uuid.uuid4())
     extracted_text = ""
     
+    import time
+    start_time = time.time()
+    print(f"\n{'='*50}")
+    print(f"🚀 AI QUIZ GENERATION STARTED")
+    print(f"{'='*50}")
+    
     # Save uploaded file
     file_extension = file.filename.split('.')[-1].lower()
     temp_filename = f"temp_{quiz_id}.{file_extension}"
@@ -1077,6 +1084,9 @@ async def generate_quiz_from_content(
     
     with open(temp_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
+    
+    upload_time = time.time()
+    print(f"📁 File uploaded: {time.time() - start_time:.2f}s")
     
     content_type = file.content_type or ""
     logger.info(f"AI Quiz Gen: Processing {file.filename} ({content_type})")
@@ -1088,21 +1098,37 @@ async def generate_quiz_from_content(
         if any(x in content_type for x in ["video", "audio"]) or file_extension in ["mp4", "mp3", "wav", "m4a", "webm"]:
             logger.info("Extracting audio and transcribing with Whisper...")
             
-            # Extract audio if video
+            # Extract audio if video (crop to first 15 seconds for speed)
             if "video" in content_type or file_extension in ["mp4", "webm"]:
+                crop_start = time.time()
                 from moviepy.editor import VideoFileClip
                 video = VideoFileClip(temp_path)
+                # Crop to first 15 seconds for fast processing
+                duration = min(video.duration, 15)
+                cropped_video = video.subclip(0, duration)
                 audio_path = temp_path.replace(f".{file_extension}", ".mp3")
-                video.audio.write_audiofile(audio_path, verbose=False, logger=None)
+                cropped_video.audio.write_audiofile(audio_path, verbose=False, logger=None)
+                cropped_video.close()
                 video.close()
+                print(f"🎬 Video cropped ({duration}s): {time.time() - crop_start:.2f}s")
             else:
                 audio_path = temp_path
             
-            # Transcribe with Whisper
+            # Transcribe with Whisper (optimized for speed)
+            whisper_start = time.time()
+            print(f"🎤 Starting Whisper transcription...")
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, lambda: whisper_model.transcribe(audio_path))
+            result = await loop.run_in_executor(
+                None, 
+                lambda: whisper_model.transcribe(
+                    audio_path, 
+                    language="en",  # English-only for speed
+                    fp16=False,     # CPU optimization
+                    condition_on_previous_text=False  # Faster, prevents loops
+                )
+            )
             extracted_text = result.get("text", "")
-            logger.info(f"Whisper transcription: {len(extracted_text)} chars")
+            print(f"🎤 Whisper transcription done: {time.time() - whisper_start:.2f}s ({len(extracted_text)} chars)")
             
         # PDF: Use PyMuPDF (fitz)
         elif "pdf" in content_type or file_extension == "pdf":
@@ -1182,6 +1208,8 @@ IMPORTANT:
 - Make questions appropriate for the difficulty level
 - Return ONLY the JSON array, no other text"""
 
+        groq_start = time.time()
+        print(f"🤖 Starting Groq AI quiz generation...")
         loop = asyncio.get_event_loop()
         completion = await loop.run_in_executor(None, lambda: groq_client.chat.completions.create(
             model="llama-3.1-8b-instant",
@@ -1191,7 +1219,9 @@ IMPORTANT:
         ))
         
         response_content = completion.choices[0].message.content.strip()
-        logger.info(f"Groq response: {response_content[:500]}...")
+        print(f"🤖 Groq AI done: {time.time() - groq_start:.2f}s")
+        print(f"✅ TOTAL TIME: {time.time() - start_time:.2f}s")
+        print(f"{'='*50}\n")
         
         # Parse JSON from response
         import re
@@ -1213,6 +1243,12 @@ IMPORTANT:
             "image": "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800",
             "created_at": datetime.now().isoformat()
         }
+        
+        # If preview_only, return without saving or broadcasting
+        is_preview = preview_only.lower() == 'true'
+        if is_preview:
+            logger.info(f"AI Quiz Preview: {title} ({len(questions_list)} questions)")
+            return {"status": "success", "data": quiz_item, "preview": True}
         
         live_quizzes.append(quiz_item)
         logger.info(f"AI Quiz Created: {title} ({len(questions_list)} questions)")
@@ -1656,26 +1692,34 @@ async def process_roleplay_logic(user_text: str, history: List[dict]):
         
         system_prompt = """
         You are an angry Indian customer at 'The Belgian Waffle Co.'.
-        The user is the store manager or support agent.
+        The user is the store manager or support agent trying to resolve your complaint.
 
         CONTEXT:
         - You ordered a 'Triple Chocolate Waffle' 45 minutes ago via Swiggy/Zomato.
-        - The delivery is late, and when it arrived, the waffle was COLD and SOGGY.
-        - You are very frustrated and hungry.
+        - The delivery arrived VERY LATE, and the waffle was COLD and SOGGY.
+        - You are extremely frustrated, hungry, and considering leaving a bad review.
+        - You speak naturally in Hinglish (Hindi + English mix).
         
         TASK:
-        1.  Analyze the User's response for empathy, politeness, and problem solving.
-        2.  Generate a Score (0-100) based on their performance.
-        3.  Provide a short, constructive TIP on how they could improve (max 10 words).
-        4.  Continue the roleplay conversation as the customer. Speak naturally in Hinglish (Hindi + English mix).
-        5.  Be dramatic but realistic. If they apologize well, calm down slightly. If they are rude, get angrier.
+        1. Analyze the User's response for: EMPATHY, POLITENESS, PROBLEM-SOLVING, and PROFESSIONALISM.
+        2. Generate a Score (0-100) based on their overall performance.
+        3. Generate an EMPATHY score (0-100) specifically measuring how well they acknowledged your feelings.
+        4. Track RESOLUTION PROGRESS (0-100): How close is the user to resolving your complaint?
+           - 0-20: No resolution attempted
+           - 21-50: Acknowledged issue, but no concrete solution
+           - 51-80: Offered partial solution (apology, small compensation)
+           - 81-100: Full resolution (refund, replacement, sincere apology with compensation)
+        5. Provide a short, constructive TIP on how they could improve (max 15 words).
+        6. Continue the roleplay as the customer. Be realistic - if they resolve well, calm down. If rude, get angrier!
         
         OUTPUT FORMAT (JSON ONLY):
         {
-            "customer_response": "Arre bhai, kya mazaak hai? ...",
+            "customer_response": "Arre bhai, kya mazaak hai ye? Itna wait kiya maine!",
             "mood_score": 20,
             "user_score": 75,
-            "improvement_tip": "Be more apologetic."
+            "empathy_score": 60,
+            "resolution_progress": 30,
+            "improvement_tip": "Offer a concrete solution like refund or replacement."
         }
         """
         
@@ -1886,14 +1930,15 @@ async def roleplay_voice_endpoint(file: UploadFile = File(...), history: str = F
         file_size = os.path.getsize(temp_filename)
         logger.info(f"Received Audio File: {temp_filename}, Size: {file_size} bytes")
 
-        # 2. TRANSCRIBE (WHISPER - OpenAI Version)
-        # OpenAI Whisper returns a dict -> result["text"]
-        # Added prompt for Hinglish context
-        result = whisper_model.transcribe(temp_filename, initial_prompt="Conversation in Hindi and English about food delivery and customer complaints.") 
+        # 2. TRANSCRIBE (WHISPER - English Only for best accuracy)
+        result = whisper_model.transcribe(
+            temp_filename, 
+            language="en",  # English only for best accuracy
+            fp16=False,     # CPU optimization
+            condition_on_previous_text=False  # Faster, prevents repetition loops
+        )
         user_text = result["text"].strip()
-        logger.info(f"Whisper Result Keys: {result.keys()}")
-        logger.info(f"Detected Language: {result.get('language')}")
-        logger.info(f"Transcribed: {user_text}")
+        logger.info(f"Transcribed: {user_text[:80]}...")
         
         # Cleanup
         os.remove(temp_filename)
@@ -1964,6 +2009,22 @@ async def get_notifications(user_id: Optional[str] = "user"):
         n_copy["isRead"] = user_id in n["read_by"]
         results.append(n_copy)
     return results
+
+@app.get("/notifications/crucial")
+async def get_crucial_notifications(user_id: str = "user"):
+    """Returns the first unread crucial notification for this user (for blocking modal)"""
+    for n in notification_store:
+        if n.get("type") == "crucial" and user_id not in n.get("read_by", []):
+            return {
+                "id": n["id"],
+                "title": n["title"],
+                "message": n["message"],
+                "type": n["type"],
+                "read": False,
+                "created_at": n.get("created_at")
+            }
+    # No unread crucial notifications
+    return {"id": None, "read": True}
 
 @app.post("/notifications/{notif_id}/read")
 async def mark_notification_read(notif_id: str, user_id: str = "user"):

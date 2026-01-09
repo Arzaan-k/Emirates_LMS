@@ -9,7 +9,7 @@ import * as FileSystem from 'expo-file-system';
 
 // TODO: Move this to .env in production
 import API_URL from '../config';
-// const API_URL = "http://192.168.0.136:8000"; // Ensure this matches Home.js
+// const API_URL = "http://192.168.0.136:8000:8000"; // Ensure this matches Home.js
 const { width, height } = Dimensions.get('window');
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -26,6 +26,7 @@ export default function AIRoleplay({ onClose, scenario }) {
     const [recording, setRecording] = useState(null);
     const [isRecording, setIsRecording] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
+    const [resolutionProgress, setResolutionProgress] = useState(0); // 0-100 - How close to resolving
 
     // Audio Playback State
     const [playingMsgId, setPlayingMsgId] = useState(null);
@@ -199,7 +200,10 @@ export default function AIRoleplay({ onClose, scenario }) {
             };
 
             setChat(prev => [...prev, aiMsg]);
-            setMood(data.mood_score); // FIXED: mood -> mood_score
+            setMood(data.mood_score); // Update Customer Mood
+            if (data.resolution_progress !== undefined) {
+                setResolutionProgress(data.resolution_progress);
+            }
 
             if (data.audio_base64) {
                 // Use the existing playBase64Audio function
@@ -254,6 +258,9 @@ export default function AIRoleplay({ onClose, scenario }) {
 
             setChat(prev => [...prev, aiMsg]);
             setMood(data.mood_score); // Update Customer Mood
+            if (data.resolution_progress !== undefined) {
+                setResolutionProgress(data.resolution_progress);
+            }
 
             // AUTO PLAY AUDIO
             if (data.audio_base64) {
@@ -300,11 +307,45 @@ export default function AIRoleplay({ onClose, scenario }) {
         }
     };
 
+    // --- DYNAMIC THEME BASED ON MOOD ---
+    const getMoodTheme = (currentMood) => {
+        if (currentMood < 40) {
+            return {
+                gradient: ['#1a0000', '#3d0000', '#1F2937'],
+                accent: '#EF4444',
+                emoji: '😠',
+                bgOpacity: 0.15,
+                label: 'Angry Customer',
+                hint: 'Stay calm, show empathy'
+            };
+        }
+        if (currentMood < 70) {
+            return {
+                gradient: ['#1a1400', '#3d2800', '#1F2937'],
+                accent: '#F59E0B',
+                emoji: '😐',
+                bgOpacity: 0.12,
+                label: 'Annoyed',
+                hint: 'Keep listening'
+            };
+        }
+        return {
+            gradient: ['#001a10', '#003d20', '#1F2937'],
+            accent: '#10B981',
+            emoji: '😊',
+            bgOpacity: 0.10,
+            label: 'Satisfied',
+            hint: 'Great work!'
+        };
+    };
+
     const getMoodColor = (currentMood) => {
         if (currentMood < 40) return '#EF4444'; // Red for angry
         if (currentMood < 70) return '#F59E0B'; // Orange for annoyed
         return '#10B981'; // Green for satisfied
     };
+
+    const theme = getMoodTheme(mood);
 
     // --- START SESSION EFFECT ---
     useEffect(() => {
@@ -398,14 +439,51 @@ export default function AIRoleplay({ onClose, scenario }) {
 
     return (
         <View style={styles.container}>
-            {/* HEADER */}
-            <BlurView intensity={20} tint="dark" style={[styles.header, { paddingTop: insets.top }]}>
+            {/* DYNAMIC GRADIENT BACKGROUND */}
+            <LinearGradient
+                colors={theme.gradient}
+                style={StyleSheet.absoluteFill}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+            />
+
+            {/* GHOST WAFFLE DECORATIONS */}
+            <View style={styles.ghostContainer} pointerEvents="none">
+                <Animated.Text
+                    entering={FadeInUp.delay(100)}
+                    style={[styles.ghostWaffle, { top: '8%', left: '5%', opacity: theme.bgOpacity, transform: [{ rotate: '-15deg' }] }]}
+                >🧇</Animated.Text>
+                <Animated.Text
+                    entering={FadeInUp.delay(200)}
+                    style={[styles.ghostWaffle, { top: '12%', right: '8%', opacity: theme.bgOpacity, transform: [{ rotate: '20deg' }], fontSize: 32 }]}
+                >🧇</Animated.Text>
+                <Animated.Text
+                    entering={FadeInUp.delay(300)}
+                    style={[styles.ghostWaffle, { bottom: '25%', left: '3%', opacity: theme.bgOpacity, transform: [{ rotate: '10deg' }] }]}
+                >🧇</Animated.Text>
+                <Animated.Text
+                    entering={FadeInUp.delay(400)}
+                    style={[styles.ghostWaffle, { bottom: '15%', right: '5%', opacity: theme.bgOpacity, transform: [{ rotate: '-25deg' }], fontSize: 28 }]}
+                >🧇</Animated.Text>
+            </View>
+
+            {/* PREMIUM HEADER */}
+            <BlurView intensity={30} tint="dark" style={[styles.header, { paddingTop: insets.top }]}>
                 <TouchableOpacity onPress={onClose} style={styles.backBtn}>
                     <Feather name="arrow-left" size={24} color="#FFF" />
                 </TouchableOpacity>
                 <View style={{ alignItems: 'center' }}>
-                    <Text style={styles.headerTitle}>{scenario ? scenario.title : "Simulation"}</Text>
-                    <Text style={styles.headerSub}>AI Customer Training</Text>
+                    {/* Brand Badge */}
+                    <View style={styles.brandBadge}>
+                        <Text style={styles.brandEmoji}>🧇</Text>
+                        <Text style={styles.brandText}>Belgian Waffle Co.</Text>
+                    </View>
+                    <Text style={styles.headerTitle}>{scenario ? scenario.title : "Customer Simulation"}</Text>
+                    {/* Mood Status Pill */}
+                    <View style={[styles.moodPill, { backgroundColor: `${theme.accent}20`, borderColor: theme.accent }]}>
+                        <Text style={styles.moodEmoji}>{theme.emoji}</Text>
+                        <Text style={[styles.moodPillText, { color: theme.accent }]}>{theme.label}</Text>
+                    </View>
                 </View>
                 <TouchableOpacity onPress={handleEndSession} style={styles.endBtn}>
                     <Text style={styles.endText}>End</Text>
@@ -414,17 +492,50 @@ export default function AIRoleplay({ onClose, scenario }) {
 
             {/* AVATAR AREA */}
             <View style={styles.avatarContainer}>
-                <View style={[styles.avatarCircle, { borderColor: getMoodColor(mood) }]}>
-                    {/* Placeholder for real 3D avatar or image */}
-                    <MaterialCommunityIcons
-                        name={mood < 40 ? "emoticon-angry" : mood > 70 ? "emoticon-happy" : "emoticon-neutral"}
-                        size={80}
-                        color="#FFF"
-                    />
+                {/* Avatar with Dynamic Glow */}
+                <View style={[styles.avatarGlow, { shadowColor: theme.accent }]}>
+                    <View style={[styles.avatarCircle, { borderColor: theme.accent }]}>
+                        <Text style={styles.avatarEmoji}>{theme.emoji}</Text>
+                    </View>
                 </View>
-                <View style={styles.moodBadge}>
-                    <Text style={styles.moodText}>{mood}% Satisfaction</Text>
-                    <View style={[styles.moodBar, { width: `${mood}%`, backgroundColor: getMoodColor(mood) }]} />
+
+                {/* Satisfaction Meter */}
+                <View style={styles.meterContainer}>
+                    <View style={styles.meterHeader}>
+                        <Text style={styles.meterLabel}>Customer Satisfaction</Text>
+                        <Text style={[styles.meterValue, { color: theme.accent }]}>{mood}%</Text>
+                    </View>
+                    <View style={styles.meterBarBg}>
+                        <Animated.View
+                            style={[styles.meterBarFill, { width: `${mood}%`, backgroundColor: theme.accent }]}
+                        />
+                    </View>
+                </View>
+
+                {/* Resolution Progress */}
+                <View style={styles.resolutionContainer}>
+                    <View style={styles.resolutionHeader}>
+                        <Text style={styles.resolutionLabel}>🎯 Resolution Progress</Text>
+                        <Text style={[styles.resolutionPercent, { color: resolutionProgress > 70 ? '#10B981' : resolutionProgress > 40 ? '#F59E0B' : '#EF4444' }]}>
+                            {resolutionProgress}%
+                        </Text>
+                    </View>
+                    <View style={styles.resolutionBarBg}>
+                        <Animated.View
+                            style={[
+                                styles.resolutionBarFill,
+                                {
+                                    width: `${resolutionProgress}%`,
+                                    backgroundColor: resolutionProgress > 70 ? '#10B981' : resolutionProgress > 40 ? '#F59E0B' : '#EF4444'
+                                }
+                            ]}
+                        />
+                    </View>
+                    <Text style={styles.resolutionHint}>
+                        {resolutionProgress < 30 ? '💡 Acknowledge the issue first' :
+                            resolutionProgress < 60 ? '💡 Offer a solution' :
+                                resolutionProgress < 90 ? '💡 Almost there! Confirm resolution' : '🎉 Issue resolved!'}
+                    </Text>
                 </View>
             </View>
 
@@ -432,32 +543,37 @@ export default function AIRoleplay({ onClose, scenario }) {
             <ScrollView
                 ref={scrollViewRef}
                 style={styles.chatArea}
-                contentContainerStyle={{ padding: 20 }}
+                contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
                 onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
             >
                 {chat.map(msg => renderMsg(msg))}
 
                 {isProcessing && (
                     <View style={styles.typingIndicator}>
-                        <ActivityIndicator size="small" color="#FFF" />
-                        <Text style={styles.typingText}>Customer is typing...</Text>
+                        <View style={styles.typingDots}>
+                            <Animated.View entering={FadeInUp.delay(0).duration(500)} style={styles.typingDot} />
+                            <Animated.View entering={FadeInUp.delay(100).duration(500)} style={styles.typingDot} />
+                            <Animated.View entering={FadeInUp.delay(200).duration(500)} style={styles.typingDot} />
+                        </View>
+                        <Text style={styles.typingText}>Customer is responding...</Text>
                     </View>
                 )}
             </ScrollView>
 
-            {/* INPUT AREA */}
-            <View style={styles.controls}>
+            {/* PREMIUM INPUT AREA */}
+            <BlurView intensity={40} tint="dark" style={styles.controls}>
                 <View style={styles.inputRow}>
                     <TextInput
                         style={styles.input}
-                        placeholder="Type your response..."
-                        placeholderTextColor="rgba(255,255,255,0.5)"
+                        placeholder="Type your response to the customer..."
+                        placeholderTextColor="rgba(255,255,255,0.4)"
                         value={reply}
                         onChangeText={setReply}
                         editable={!isProcessing && !isRecording}
+                        multiline
                     />
                     {reply.length > 0 ? (
-                        <TouchableOpacity style={styles.sendBtn} onPress={handleSend}>
+                        <TouchableOpacity style={[styles.sendBtn, { backgroundColor: theme.accent }]} onPress={handleSend}>
                             <Feather name="send" size={20} color="#FFF" />
                         </TouchableOpacity>
                     ) : (
@@ -471,8 +587,10 @@ export default function AIRoleplay({ onClose, scenario }) {
                         </TouchableOpacity>
                     )}
                 </View>
-                <Text style={styles.hintText}>Hold mic to speak, or type your reply.</Text>
-            </View>
+                <Text style={styles.hintText}>
+                    {isRecording ? '🎤 Recording... Release to send' : '💬 Type or hold mic to speak'}
+                </Text>
+            </BlurView>
         </View>
     );
 }
@@ -538,5 +656,44 @@ const styles = StyleSheet.create({
     micActive: { backgroundColor: '#EF4444' },
     sendBtn: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#4F46E5', justifyContent: 'center', alignItems: 'center' },
 
-    hintText: { color: "rgba(255,255,255,0.4)", fontSize: 12, textAlign: 'center', fontFamily: "Poppins_400Regular" }
+    hintText: { color: "rgba(255,255,255,0.5)", fontSize: 12, textAlign: 'center', fontFamily: "Poppins_400Regular" },
+
+    // Ghost Waffle Decorations
+    ghostContainer: { ...StyleSheet.absoluteFillObject, overflow: 'hidden', zIndex: 0 },
+    ghostWaffle: { position: 'absolute', fontSize: 40 },
+
+    // Brand Badge
+    brandBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(245, 158, 11, 0.15)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginBottom: 6 },
+    brandEmoji: { fontSize: 14, marginRight: 4 },
+    brandText: { color: '#F59E0B', fontSize: 10, fontFamily: 'Poppins_600SemiBold', letterSpacing: 0.5 },
+
+    // Mood Status Pill
+    moodPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, marginTop: 6 },
+    moodEmoji: { fontSize: 12, marginRight: 4 },
+    moodPillText: { fontSize: 10, fontFamily: 'Poppins_600SemiBold' },
+
+    // Avatar with Glow
+    avatarGlow: { shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6, shadowRadius: 20, elevation: 15 },
+    avatarEmoji: { fontSize: 60 },
+
+    // Satisfaction Meter
+    meterContainer: { marginTop: 16, width: '85%', backgroundColor: 'rgba(0,0,0,0.4)', padding: 14, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+    meterHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+    meterLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontFamily: 'Poppins_500Medium' },
+    meterValue: { fontSize: 18, fontFamily: 'Poppins_700Bold' },
+    meterBarBg: { height: 10, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 5, overflow: 'hidden' },
+    meterBarFill: { height: '100%', borderRadius: 5 },
+
+    // Resolution Progress Bar
+    resolutionContainer: { marginTop: 12, width: '85%', backgroundColor: 'rgba(0,0,0,0.3)', padding: 12, borderRadius: 14 },
+    resolutionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+    resolutionLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontFamily: 'Poppins_500Medium' },
+    resolutionPercent: { fontSize: 13, fontFamily: 'Poppins_700Bold' },
+    resolutionBarBg: { height: 6, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 3, overflow: 'hidden' },
+    resolutionBarFill: { height: '100%', borderRadius: 3 },
+    resolutionHint: { color: 'rgba(255,255,255,0.5)', fontSize: 10, fontFamily: 'Poppins_400Regular', marginTop: 6, textAlign: 'center' },
+
+    // Typing Indicator
+    typingDots: { flexDirection: 'row', marginRight: 8 },
+    typingDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.5)', marginHorizontal: 2 },
 });

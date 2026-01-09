@@ -29,9 +29,12 @@ import BulkUploadModal from '../Components/BulkUploadModal'; // [NEW]
 import BucketManagementModal from '../Components/BucketManagementModal'; // [NEW] Bucket management
 import CreateUser from '../Screens/CreateUser';
 import API_URL from '../config';
+import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { CommonActions } from '@react-navigation/native';
 
 const { width, height } = Dimensions.get('window');
-// const API_URL = "http://192.168.0.136:8000"; // Updated for physical device using local IP
+// const API_URL = "http://192.168.0.136:8000:8000"; // Updated for physical device using local IP
 
 // MOCK DATA GENERATORS
 const getDashboardData = (role) => {
@@ -457,6 +460,7 @@ export default function ManagerDashboard({ route, navigation }) {
             formData.append('title', topicQuizTitle);
             formData.append('difficulty', topicQuizDifficulty);
             formData.append('num_questions', String(aiQuizNumQuestions));
+            formData.append('preview_only', 'true'); // Don't post, just generate
             formData.append('file', {
                 uri: aiQuizFile.uri,
                 name: aiQuizFile.name,
@@ -469,14 +473,22 @@ export default function ManagerDashboard({ route, navigation }) {
             });
 
             const result = await response.json();
-            if (result.status === 'success') {
-                Alert.alert("Success", `AI Quiz created with ${result.data.questions?.length || 0} questions!`);
-                setQuizCreationVisible(false);
-                setTopicQuizTitle('');
-                setTopicQuizDifficulty('Medium');
+            if (result.status === 'success' && result.data?.questions) {
+                // Fill the form with generated questions for manual editing
+                const generatedQuestions = result.data.questions.map(q => ({
+                    question: q.question || '',
+                    options: q.options?.map(o => typeof o === 'string' ? o : o.text) || ['', '', '', ''],
+                    correct: q.correctIndex || q.correct || 0
+                }));
+
+                setTopicQuizQuestions(generatedQuestions);
+                setQuizMode('manual'); // Switch to manual mode for editing
                 setAiQuizFile(null);
-                setAiQuizNumQuestions(5);
-                setQuizMode('manual');
+                Alert.alert(
+                    "AI Quiz Generated!",
+                    `${generatedQuestions.length} questions generated. Please review and edit before posting.`,
+                    [{ text: "OK" }]
+                );
             } else {
                 Alert.alert("Error", result.detail || "Failed to generate quiz.");
             }
@@ -768,6 +780,41 @@ export default function ManagerDashboard({ route, navigation }) {
         }
     };
 
+    // --- LOGOUT HANDLER ---
+    const handleLogout = async () => {
+        Alert.alert(
+            "Logout",
+            "Are you sure you want to logout?",
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Logout",
+                    style: "destructive",
+                    onPress: async () => {
+                        try {
+                            if (Platform.OS === 'web') {
+                                await AsyncStorage.removeItem('accessToken');
+                                await AsyncStorage.removeItem('userRole');
+                            } else {
+                                await SecureStore.deleteItemAsync('accessToken');
+                                await SecureStore.deleteItemAsync('userRole');
+                            }
+                            navigation.dispatch(
+                                CommonActions.reset({
+                                    index: 0,
+                                    routes: [{ name: 'Login' }],
+                                })
+                            );
+                        } catch (e) {
+                            console.error('Logout error:', e);
+                            Alert.alert('Error', 'Failed to logout. Please try again.');
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
 
 
     return (
@@ -781,7 +828,7 @@ export default function ManagerDashboard({ route, navigation }) {
             >
                 <SafeAreaView style={{ flex: 1 }}>
                     <View style={styles.headerContent}>
-                        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                        <TouchableOpacity onPress={handleLogout} style={styles.backBtn}>
                             <Feather name="log-out" size={20} color="rgba(255,255,255,0.8)" />
                         </TouchableOpacity>
                         <View>
@@ -852,12 +899,15 @@ export default function ManagerDashboard({ route, navigation }) {
                             </View>
                             <Text style={styles.actionText}>Reports</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={styles.actionBtn} onPress={() => setQuizModalVisible(true)}>
-                            <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
-                                <MaterialCommunityIcons name="clipboard-check" size={24} color="#F59E0B" />
-                            </View>
-                            <Text style={styles.actionText}>Assign Quiz</Text>
-                        </TouchableOpacity>
+                        {/* ASSIGN QUIZ - Hidden for Store Manager */}
+                        {role !== 'Store Manager' && (
+                            <TouchableOpacity style={styles.actionBtn} onPress={() => setQuizModalVisible(true)}>
+                                <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
+                                    <MaterialCommunityIcons name="clipboard-check" size={24} color="#F59E0B" />
+                                </View>
+                                <Text style={styles.actionText}>Assign Quiz</Text>
+                            </TouchableOpacity>
+                        )}
                         <TouchableOpacity
                             style={styles.actionBtn}
                             onPress={() => navigation.navigate('Audits')}

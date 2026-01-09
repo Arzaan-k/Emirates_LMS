@@ -1,5 +1,5 @@
 // Screens/Home.js
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
   FadeInDown,
   FadeInRight,
+  FadeInUp,
   useSharedValue,
   useAnimatedStyle,
   withRepeat,
@@ -404,66 +405,341 @@ function ProctoredFeedSection({ data, onStart }) {
 
 // ... (NotificationToast Unchanged)
 
-// --- NEW: CRUCIAL NOTIFICATION COMPONENT ---
+// --- NEW: PREMIUM CRUCIAL NOTIFICATION COMPONENT ---
 function CrucialNotificationModal({ notification, onAcknowledge }) {
   const [shake, setShake] = useState(0);
-  const [isChecked, setIsChecked] = useState(false); // [NEW]
+  const [isChecked, setIsChecked] = useState(false);
+  const [scrollProgress, setScrollProgress] = useState(0);
+  const insets = useSafeAreaInsets();
 
   if (!notification) return null;
 
   const handlePressOutside = () => {
     setShake(prev => prev + 1);
+    // Reset shake after animation
+    setTimeout(() => setShake(0), 500);
   };
 
-  const animatedStyle = {
-    transform: [{ translateX: shake % 2 === 0 ? 0 : 10 }]
+  const handleScroll = (event) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const progress = Math.min(100, (contentOffset.y / (contentSize.height - layoutMeasurement.height)) * 100);
+    setScrollProgress(Math.max(scrollProgress, progress));
   };
+
+  const canCheckbox = scrollProgress > 80 || (notification.message && notification.message.length < 200);
 
   return (
     <Modal visible={true} transparent animationType="fade">
-      <View style={styles.crucialOverlay}>
-        <BlurView intensity={90} tint="dark" style={StyleSheet.absoluteFill} />
-        <TouchableOpacity style={styles.crucialClickLayer} onPress={handlePressOutside} activeOpacity={1}>
-          <Animated.View style={[styles.crucialCard, animatedStyle]}>
-            <View style={styles.crucialIconBg}>
-              <MaterialCommunityIcons name="alert-decagram" size={48} color="#EF4444" />
-            </View>
-            <Text style={styles.crucialLabel}>CRITICAL UPDATE</Text>
-            <Text style={styles.crucialTitle}>{notification.title}</Text>
-            <Text style={styles.crucialMsg}>{notification.message}</Text>
+      <View style={crucialStyles.overlay}>
+        {/* Premium Gradient Background */}
+        <LinearGradient
+          colors={['rgba(15, 23, 42, 0.98)', 'rgba(30, 27, 75, 0.98)', 'rgba(15, 23, 42, 0.98)']}
+          style={StyleSheet.absoluteFill}
+        />
 
-            <View style={styles.crucialDivider} />
+        {/* Ghost Waffle Decorations */}
+        <View style={crucialStyles.ghostContainer} pointerEvents="none">
+          <Text style={[crucialStyles.ghostWaffle, { top: '5%', left: '10%', transform: [{ rotate: '-15deg' }] }]}>🧇</Text>
+          <Text style={[crucialStyles.ghostWaffle, { top: '15%', right: '8%', transform: [{ rotate: '20deg' }] }]}>🧇</Text>
+          <Text style={[crucialStyles.ghostWaffle, { bottom: '20%', left: '5%', transform: [{ rotate: '10deg' }] }]}>🧇</Text>
+          <Text style={[crucialStyles.ghostWaffle, { bottom: '10%', right: '12%', transform: [{ rotate: '-25deg' }] }]}>🧇</Text>
+        </View>
 
-            {/* CHECKBOX */}
-            <TouchableOpacity
-              style={styles.crucialCheckboxRow}
-              onPress={() => setIsChecked(!isChecked)}
-              activeOpacity={0.8}
-            >
-              <View style={[styles.crucialCheckbox, isChecked && styles.crucialCheckboxChecked]}>
-                {isChecked && <Feather name="check" size={14} color="#FFF" />}
+        <TouchableOpacity
+          style={crucialStyles.clickLayer}
+          onPress={handlePressOutside}
+          activeOpacity={1}
+        >
+          <Animated.View
+            entering={FadeInUp.springify().damping(15)}
+            style={[
+              crucialStyles.card,
+              shake > 0 && { transform: [{ translateX: shake % 2 === 0 ? 0 : 8 }] }
+            ]}
+          >
+            {/* Glassmorphism Background */}
+            <BlurView intensity={40} tint="dark" style={crucialStyles.cardBlur}>
+              {/* Alert Icon with Glow */}
+              <View style={crucialStyles.iconGlow}>
+                <View style={crucialStyles.iconBg}>
+                  <MaterialCommunityIcons name="alert-decagram" size={44} color="#EF4444" />
+                </View>
               </View>
-              <Text style={styles.crucialCheckboxText}>I have read it entirely</Text>
-            </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.crucialAckBtn, !isChecked && { opacity: 0.5, backgroundColor: '#4B5563' }]}
-              onPress={() => isChecked && onAcknowledge(notification.id)}
-              disabled={!isChecked}
-            >
-              <Text style={styles.crucialAckText}>{isChecked ? "Acknowledge" : "Read Above First"}</Text>
-              {isChecked && <Feather name="check-circle" size={18} color="#FFF" />}
-            </TouchableOpacity>
+              {/* Priority Badge */}
+              <View style={crucialStyles.priorityBadge}>
+                <View style={crucialStyles.priorityDot} />
+                <Text style={crucialStyles.priorityText}>CRITICAL UPDATE</Text>
+              </View>
 
-            {shake > 0 && (
-              <Text style={styles.crucialWarn}>You must acknowledge this before continuing.</Text>
-            )}
+              {/* Content */}
+              <Text style={crucialStyles.title}>{notification.title}</Text>
+
+              <ScrollView
+                style={crucialStyles.scrollArea}
+                onScroll={handleScroll}
+                scrollEventThrottle={16}
+                showsVerticalScrollIndicator={true}
+              >
+                <Text style={crucialStyles.message}>{notification.message}</Text>
+              </ScrollView>
+
+              {/* Waffle Divider */}
+              <View style={crucialStyles.dividerRow}>
+                <View style={crucialStyles.dividerLine} />
+                <Text style={crucialStyles.dividerEmoji}>🧇</Text>
+                <View style={crucialStyles.dividerLine} />
+              </View>
+
+              {/* Checkbox with Premium Styling */}
+              <TouchableOpacity
+                style={[
+                  crucialStyles.checkboxRow,
+                  !canCheckbox && crucialStyles.checkboxDisabled
+                ]}
+                onPress={() => canCheckbox && setIsChecked(!isChecked)}
+                activeOpacity={canCheckbox ? 0.8 : 1}
+              >
+                <View style={[
+                  crucialStyles.checkbox,
+                  isChecked && crucialStyles.checkboxChecked
+                ]}>
+                  {isChecked && <Feather name="check" size={14} color="#FFF" />}
+                </View>
+                <Text style={[
+                  crucialStyles.checkboxText,
+                  !canCheckbox && { color: 'rgba(255,255,255,0.3)' }
+                ]}>
+                  {canCheckbox ? "I have read the entire notification" : "Please scroll to read the full message"}
+                </Text>
+              </TouchableOpacity>
+
+              {/* Acknowledge Button */}
+              <TouchableOpacity
+                style={[
+                  crucialStyles.ackBtn,
+                  !isChecked && crucialStyles.ackBtnDisabled
+                ]}
+                onPress={() => isChecked && onAcknowledge(notification.id)}
+                disabled={!isChecked}
+                activeOpacity={isChecked ? 0.8 : 1}
+              >
+                <LinearGradient
+                  colors={isChecked ? ['#EF4444', '#DC2626'] : ['#4B5563', '#374151']}
+                  style={crucialStyles.ackBtnGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                >
+                  <Text style={crucialStyles.ackBtnText}>
+                    {isChecked ? "Acknowledge & Continue" : "Read Above First"}
+                  </Text>
+                  {isChecked && <Feather name="check-circle" size={18} color="#FFF" style={{ marginLeft: 8 }} />}
+                </LinearGradient>
+              </TouchableOpacity>
+
+              {/* Warning Text */}
+              {shake > 0 && (
+                <Animated.Text
+                  entering={FadeInUp.duration(300)}
+                  style={crucialStyles.warnText}
+                >
+                  ⚠️ You must acknowledge this to continue using the app
+                </Animated.Text>
+              )}
+            </BlurView>
           </Animated.View>
         </TouchableOpacity>
       </View>
     </Modal>
   );
 }
+
+// Premium Crucial Notification Styles
+const crucialStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ghostContainer: {
+    ...StyleSheet.absoluteFillObject,
+    overflow: 'hidden',
+  },
+  ghostWaffle: {
+    position: 'absolute',
+    fontSize: 48,
+    opacity: 0.08,
+  },
+  clickLayer: {
+    flex: 1,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  card: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: 32,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.4,
+    shadowRadius: 32,
+    elevation: 24,
+  },
+  cardBlur: {
+    padding: 28,
+    alignItems: 'center',
+    backgroundColor: 'rgba(30, 27, 75, 0.8)',
+  },
+  iconGlow: {
+    padding: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    marginBottom: 16,
+  },
+  iconBg: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  priorityBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  priorityDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#EF4444',
+    marginRight: 8,
+  },
+  priorityText: {
+    color: '#EF4444',
+    fontSize: 11,
+    fontFamily: 'Poppins_700Bold',
+    letterSpacing: 2,
+  },
+  title: {
+    color: '#FFF',
+    fontSize: 22,
+    fontFamily: 'Poppins_700Bold',
+    textAlign: 'center',
+    marginBottom: 12,
+    lineHeight: 30,
+  },
+  scrollArea: {
+    maxHeight: 180,
+    width: '100%',
+    marginBottom: 16,
+  },
+  message: {
+    color: '#CBD5E1',
+    fontSize: 15,
+    fontFamily: 'Poppins_400Regular',
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    marginVertical: 20,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  dividerEmoji: {
+    fontSize: 20,
+    marginHorizontal: 12,
+    opacity: 0.6,
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 16,
+    marginBottom: 20,
+    width: '100%',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  checkboxDisabled: {
+    opacity: 0.5,
+  },
+  checkbox: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    marginRight: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#10B981',
+    borderColor: '#10B981',
+  },
+  checkboxText: {
+    flex: 1,
+    color: '#E5E7EB',
+    fontSize: 14,
+    fontFamily: 'Poppins_500Medium',
+  },
+  ackBtn: {
+    width: '100%',
+    borderRadius: 18,
+    overflow: 'hidden',
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  ackBtnDisabled: {
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  ackBtnGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 18,
+    paddingHorizontal: 24,
+  },
+  ackBtnText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  warnText: {
+    color: '#F87171',
+    fontSize: 13,
+    fontFamily: 'Poppins_500Medium',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+});
 
 function HomeContent({ onOpenTool, onOpenTwin }) {
   const navigation = useNavigation();
@@ -484,6 +760,7 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   const [assignedProctoring, setAssignedProctoring] = useState([]);
   const [pathNodes, setPathNodes] = useState([]);
   const [crucialNotif, setCrucialNotif] = useState(null);
+  const acknowledgedNotifIds = useRef(new Set()); // Track acknowledged notifications locally
   const [goalModalVisible, setGoalModalVisible] = useState(false);
 
   const [allNotifications, setAllNotifications] = useState([]);
@@ -496,6 +773,8 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
 
   const handleAcknowledge = async (id) => {
     try {
+      // Add to local tracking FIRST to prevent re-display
+      acknowledgedNotifIds.current.add(id);
       await fetch(`${API_URL}/notifications/${id}/read`, { method: 'POST' });
       setCrucialNotif(null);
     } catch (e) {
@@ -590,7 +869,23 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
     }
   };
 
+  // FETCH CRUCIAL NOTIFICATIONS - Runs on load to block app if needed
+  const fetchCrucialNotifications = async () => {
+    try {
+      const res = await fetch(`${API_URL}/notifications/crucial`);
+      const data = await res.json();
+      // If there's an unread crucial notification AND not already acknowledged locally
+      if (data && data.id && !data.read && !acknowledgedNotifIds.current.has(data.id)) {
+        setCrucialNotif(data);
+      }
+    } catch (e) {
+      console.log("Error fetching crucial notifications", e);
+    }
+  };
+
   useEffect(() => {
+    // CRITICAL: Fetch crucial notifications FIRST to block app if needed
+    fetchCrucialNotifications();
     fetchPathNodes();
     fetchNotifications();
     fetchNews();
@@ -629,7 +924,10 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
           setAllNotifications(prev => [notif, ...prev]);
           setTimeout(() => setNotification(null), 5000);
         } else if (message.type === "CRUCIAL_NOTIFICATION") {
-          setCrucialNotif(message.data);
+          // Only show if not already acknowledged locally
+          if (message.data?.id && !acknowledgedNotifIds.current.has(message.data.id)) {
+            setCrucialNotif(message.data);
+          }
         } else if (message.type === "proctored") {
           setAssignedProctoring(prev => [message.data, ...prev]);
           const notif = {

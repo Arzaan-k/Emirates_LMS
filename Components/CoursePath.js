@@ -32,7 +32,7 @@ const AMPLITUDE = width * 0.28;
 const CENTER_X = width / 2;
 import API_URL from '../config';
 
-// const API_URL = "http://192.168.0.136:8000"; // Physical Device
+// const API_URL = "http://192.168.0.136:8000:8000"; // Physical Device
 const ICONS = ["coffee", "water", "flower", "cog", "flask", "clipboard-list", "account-heart"]; // Pool for dynamic items
 
 // Mock Data
