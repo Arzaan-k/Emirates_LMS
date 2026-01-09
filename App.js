@@ -35,6 +35,7 @@ import Analytics from "./Screens/Analytics";
 import LiveTrackingScreen from './Screens/LiveTrackingScreen';
 import TeamListScreen from './Screens/TeamListScreen';
 import AuditsScreen from './Screens/AuditsScreen';
+import DisclaimerModal from './Components/DisclaimerModal'; // Global disclaimer
 
 LogBox.ignoreAllLogs();
 
@@ -124,8 +125,9 @@ function App() {
           </NavigationContainer>
           {/* </NotificationProvider> */}
         </LanguageProvider>
-      </ThemeProvider>
-    </SafeAreaProvider>
+      </ThemeProvider >
+      <DisclaimerModal />
+    </SafeAreaProvider >
   );
 }
 

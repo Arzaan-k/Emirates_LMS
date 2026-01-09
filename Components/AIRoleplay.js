@@ -9,9 +9,10 @@ import * as FileSystem from 'expo-file-system';
 
 // TODO: Move this to .env in production
 import API_URL from '../config';
-// const API_URL = "http://192.168.0.136:8000:8000"; // Ensure this matches Home.js
+// const API_URL = "http://172.20.10.2:8000:8000"; // Ensure this matches Home.js
 const { width, height } = Dimensions.get('window');
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import LanguageDisclaimerModal from './LanguageDisclaimerModal'; // [NEW] Disclaimer
 
 // Mock initial data
 const MESSAGES = [

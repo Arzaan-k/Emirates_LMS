@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "LMS_BW",
+    "name": "BelgianWaffle",
     "slug": "LMS_BW",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/BW_Logo.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
@@ -17,7 +17,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/BW_Logo.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
@@ -28,7 +28,7 @@
       "package": "com.gajjoshi.LMS_BW"
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./favicon.ico"
     },
     "plugins": [
       "expo-secure-store",

@@ -15,7 +15,7 @@ const SECTIONS = [
 ];
 
 import API_URL from '../config';
-// const API_URL = "http://192.168.0.136:8000:8000";
+// const API_URL = "http://172.20.10.2:8000:8000";
 
 export default function AIScanner({ onClose }) {
     const [step, setStep] = useState(1); // 1: Select, 2: Camera, 3: Analysis

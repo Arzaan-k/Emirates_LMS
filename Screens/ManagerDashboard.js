@@ -34,7 +34,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CommonActions } from '@react-navigation/native';
 
 const { width, height } = Dimensions.get('window');
-// const API_URL = "http://192.168.0.136:8000:8000"; // Updated for physical device using local IP
+// const API_URL = "http://172.20.10.2:8000:8000"; // Updated for physical device using local IP
 
 // MOCK DATA GENERATORS
 const getDashboardData = (role) => {

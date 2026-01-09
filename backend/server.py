@@ -16,7 +16,7 @@ from groq import Groq
 # --- CONFIGURATION ---
 PORT = 8000
 HOST = "0.0.0.0"
-BASE_URL = "http://192.168.0.136:8000:8000"  # Local network IP for physical device
+BASE_URL = "https://793f456d9585.ngrok-free.app"  # Local network IP for physical device
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
