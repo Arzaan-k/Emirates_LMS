@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
     View,
     Text,
@@ -7,7 +7,9 @@ import {
     Dimensions,
     ScrollView,
     Image,
-    SafeAreaView
+    SafeAreaView,
+    Alert,
+    Modal as RNModal
 } from 'react-native';
 import { MaterialCommunityIcons, Feather, Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -22,6 +24,7 @@ import Animated, {
     withTiming
 } from 'react-native-reanimated';
 import { Video, ResizeMode } from 'expo-av';
+import API_URL from '../config';
 
 const { width, height } = Dimensions.get('window');
 
@@ -36,182 +39,285 @@ const TabButton = ({ title, active, onPress }) => (
     </TouchableOpacity>
 );
 
-export default function LessonView({ lesson, onClose }) {
+export default function LessonView({ lesson, onClose, userEmail = "user" }) {
     const [activeTab, setActiveTab] = useState('transcript');
     const [currentQuizIdx, setCurrentQuizIdx] = useState(0);
     const [quizScore, setQuizScore] = useState(0);
     const [quizComplete, setQuizComplete] = useState(false);
     const [selectedOption, setSelectedOption] = useState(null);
+    const [moduleCompleted, setModuleCompleted] = useState(false);
     const videoRef = useRef(null);
 
-    // Parse Quiz Data safely
-    const quizData = lesson.quiz && lesson.quiz.questions ? lesson.quiz.questions : [];
+    // Parse Quiz Data safely - handle both array (from AI) and object with 'questions' key formats
+    const parseQuizData = () => {
+        if (!lesson.quiz) return [];
+        // If quiz is already an array, use it directly
+        if (Array.isArray(lesson.quiz)) return lesson.quiz;
+        // If quiz has a 'questions' property, use that
+        if (lesson.quiz.questions && Array.isArray(lesson.quiz.questions)) return lesson.quiz.questions;
+        return [];
+    };
+
+    const quizData = parseQuizData();
     const transcriptText = lesson.transcript || lesson.desc || "No transcript available for this lesson.";
 
+    // Track quiz completion to backend for XP and recommendations
+    const trackQuizCompletion = async (finalScore, totalQuestions) => {
+        try {
+            const formData = new FormData();
+            formData.append("user_email", userEmail);
+            formData.append("quiz_id", lesson.id || "unknown");
+            formData.append("quiz_title", lesson.title || "Unknown Quiz");
+            formData.append("score", finalScore.toString());
+            formData.append("total_questions", totalQuestions.toString());
+            formData.append("bucket", lesson.bucket || "general");
+
+            await fetch(`${API_URL}/recommendations/track-quiz`, {
+                method: "POST",
+                body: formData,
+            });
+            console.log("Quiz completion tracked for recommendations");
+        } catch (err) {
+            console.error("Error tracking quiz:", err);
+        }
+    };
+
+    // Track module/lesson completion
+    const trackModuleCompletion = async () => {
+        if (moduleCompleted) return; // Already tracked
+        try {
+            const formData = new FormData();
+            formData.append("user_email", userEmail);
+            formData.append("course_id", lesson.id || "unknown");
+            formData.append("course_title", lesson.title || "Unknown Module");
+            formData.append("bucket", lesson.bucket || "general");
+            formData.append("xp_earned", (lesson.xp || 50).toString());
+
+            await fetch(`${API_URL}/recommendations/track-completion`, {
+                method: "POST",
+                body: formData,
+            });
+            setModuleCompleted(true);
+            console.log("Module completion tracked for recommendations");
+        } catch (err) {
+            console.error("Error tracking module:", err);
+        }
+    };
+
+    // Track when video ends
+    const handleVideoPlaybackStatus = (status) => {
+        if (status.didJustFinish && !moduleCompleted) {
+            trackModuleCompletion();
+        }
+    };
+
     const handleOptionSelect = (idx) => {
+        if (!quizData[currentQuizIdx]) return; // Safety check
         setSelectedOption(idx);
+
+        const isCorrect = idx === quizData[currentQuizIdx]?.correctIndex;
+        const newScore = isCorrect ? quizScore + 1 : quizScore;
+
         setTimeout(() => {
-            if (idx === quizData[currentQuizIdx].correctIndex) {
+            if (isCorrect) {
                 setQuizScore(prev => prev + 1);
             }
             if (currentQuizIdx < quizData.length - 1) {
                 setCurrentQuizIdx(prev => prev + 1);
                 setSelectedOption(null);
             } else {
+                // Quiz is complete
                 setQuizComplete(true);
+                const finalScore = isCorrect ? quizScore + 1 : quizScore;
+                trackQuizCompletion(finalScore, quizData.length);
+                // Also track module completion when quiz is done
+                trackModuleCompletion();
             }
         }, 800);
     };
 
     return (
-        <Animated.View entering={FadeInDown.duration(400)} exiting={FadeOutDown.duration(300)} style={styles.container}>
-            {/* BACKGROUND */}
-            <LinearGradient colors={['#1F2937', '#111827']} style={StyleSheet.absoluteFill} />
+        <RNModal visible={true} animationType="slide" onRequestClose={onClose} presentationStyle="fullScreen">
+            <View style={styles.container}>
+                {/* BACKGROUND */}
+                <LinearGradient colors={['#1F2937', '#111827']} style={StyleSheet.absoluteFill} />
 
-            <SafeAreaView style={{ flex: 1 }}>
-                {/* HEADER */}
-                <View style={styles.header}>
-                    <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-                        <Feather name="chevron-down" size={24} color="#FFF" />
-                    </TouchableOpacity>
-                    <View style={{ flex: 1, alignItems: 'center' }}>
-                        <Text style={styles.headerTitle}>{lesson.title?.toUpperCase() || "LESSON"}</Text>
-                        <Text style={styles.headerSubtitle}>Pro Training</Text>
-                    </View>
-                    <TouchableOpacity style={styles.menuBtn}>
-                        <Feather name="more-horizontal" size={24} color="#FFF" />
-                    </TouchableOpacity>
-                </View>
-
-                {/* VIDEO PLAYER */}
-                <View style={styles.videoContainer}>
-                    {lesson.videoUrl ? (
-                        <Video
-                            ref={videoRef}
-                            style={StyleSheet.absoluteFill}
-                            source={{
-                                uri: lesson.videoUrl,
-                            }}
-                            useNativeControls
-                            resizeMode={ResizeMode.CONTAIN}
-                            isLooping={false}
-                            shouldPlay={true}
-                        />
-                    ) : (
-                        <LinearGradient
-                            colors={['#374151', '#1F2937']}
-                            style={styles.videoPlaceholder}
-                        >
-                            <MaterialCommunityIcons name="video-off-outline" size={64} color="rgba(255,255,255,0.5)" />
-                            <Text style={styles.videoDuration}>No Video Source</Text>
-                        </LinearGradient>
-                    )}
-                </View>
-
-                {/* TABS */}
-                <View style={styles.tabBar}>
-                    <TabButton title="Transcript" active={activeTab === 'transcript'} onPress={() => setActiveTab('transcript')} />
-                    <TabButton title="Quiz" active={activeTab === 'quiz'} onPress={() => setActiveTab('quiz')} />
-                    <TabButton title="Resources" active={activeTab === 'resources'} onPress={() => setActiveTab('resources')} />
-                </View>
-
-                {/* CONTENT AREA */}
-                <View style={styles.contentArea}>
-
-                    {/* TRANSCRIPT VIEW */}
-                    {activeTab === 'transcript' && (
-                        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20 }}>
-                            <Animated.Text entering={FadeInDown.delay(100)} style={styles.transcriptText}>
-                                {transcriptText}
-                            </Animated.Text>
-                        </ScrollView>
-                    )}
-
-                    {/* QUIZ VIEW */}
-                    {activeTab === 'quiz' && (
-                        <View style={styles.quizContainer}>
-                            {!quizComplete ? (
-                                <Animated.View entering={FadeInRight} key={currentQuizIdx} style={{ flex: 1 }}>
-                                    <View style={styles.questionCounter}>
-                                        <Text style={styles.counterText}>Question {currentQuizIdx + 1}/{quizData.length}</Text>
-                                    </View>
-                                    <Text style={styles.questionText}>{quizData[currentQuizIdx].question}</Text>
-
-                                    {quizData[currentQuizIdx].options.map((option, idx) => {
-                                        const isSelected = selectedOption === idx;
-                                        const isCorrect = idx === quizData[currentQuizIdx].correctIndex;
-
-                                        let borderColor = '#374151';
-                                        let bgColor = '#1F2937';
-                                        if (isSelected) {
-                                            borderColor = isCorrect ? '#10B981' : '#EF4444';
-                                            bgColor = isCorrect ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)';
-                                        }
-
-                                        return (
-                                            <TouchableOpacity
-                                                key={idx}
-                                                onPress={() => handleOptionSelect(idx)}
-                                                disabled={selectedOption !== null}
-                                                style={[styles.quizOption, { borderColor, backgroundColor: bgColor }]}
-                                            >
-                                                <Text style={[styles.quizOptionText, isSelected && { color: isCorrect ? '#10B981' : '#EF4444' }]}>
-                                                    {option}
-                                                </Text>
-                                                {isSelected && (
-                                                    <Feather name={isCorrect ? "check-circle" : "x-circle"} size={20} color={isCorrect ? '#10B981' : '#EF4444'} />
-                                                )}
-                                            </TouchableOpacity>
-                                        )
-                                    })}
-                                </Animated.View>
-                            ) : (
-                                <View style={styles.quizResult}>
-                                    <MaterialCommunityIcons name="trophy-outline" size={64} color="#FBBF24" />
-                                    <Text style={styles.resultTitle}>Quiz Complete!</Text>
-                                    <Text style={styles.resultScore}>You scored {quizScore}/{quizData.length}</Text>
-                                    <TouchableOpacity style={styles.restartBtn} onPress={() => {
-                                        setQuizComplete(false);
-                                        setCurrentQuizIdx(0);
-                                        setQuizScore(0);
-                                    }}>
-                                        <Text style={styles.restartBtnText}>Retry Quiz</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            )}
+                <SafeAreaView style={{ flex: 1 }}>
+                    {/* ... content ... */}
+                    {/* HEADER */}
+                    <View style={styles.header}>
+                        <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+                            <Feather name="chevron-down" size={24} color="#FFF" />
+                        </TouchableOpacity>
+                        <View style={{ flex: 1, alignItems: 'center' }}>
+                            <Text style={styles.headerTitle}>{lesson.title?.toUpperCase() || "LESSON"}</Text>
+                            <Text style={styles.headerSubtitle}>Pro Training</Text>
                         </View>
-                    )}
+                        <TouchableOpacity style={styles.menuBtn}>
+                            <Feather name="more-horizontal" size={24} color="#FFF" />
+                        </TouchableOpacity>
+                    </View>
 
-                    {/* RESOURCES VIEW */}
-                    {activeTab === 'resources' && (
-                        <ScrollView contentContainerStyle={{ padding: 20 }}>
-                            <TouchableOpacity style={styles.resourceCard}>
-                                <View style={styles.resourceIconBg}>
-                                    <MaterialCommunityIcons name="file-pdf-box" size={24} color="#EF4444" />
-                                </View>
-                                <View>
-                                    <Text style={styles.resourceTitle}>Espresso Cheat Sheet</Text>
-                                    <Text style={styles.resourceSub}>PDF • 2.4 MB</Text>
-                                </View>
-                                <Feather name="download" size={20} color="#9CA3AF" style={{ marginLeft: 'auto' }} />
-                            </TouchableOpacity>
+                    {/* VIDEO PLAYER */}
+                    <View style={styles.videoContainer}>
+                        {lesson.videoUrl ? (
+                            <Video
+                                ref={videoRef}
+                                style={StyleSheet.absoluteFill}
+                                source={{
+                                    uri: lesson.videoUrl,
+                                }}
+                                useNativeControls
+                                resizeMode={ResizeMode.CONTAIN}
+                                isLooping={false}
+                                shouldPlay={true}
+                                onPlaybackStatusUpdate={handleVideoPlaybackStatus}
+                            />
+                        ) : (
+                            <LinearGradient
+                                colors={['#374151', '#1F2937']}
+                                style={styles.videoPlaceholder}
+                            >
+                                <MaterialCommunityIcons name="video-off-outline" size={64} color="rgba(255,255,255,0.5)" />
+                                <Text style={styles.videoDuration}>No Video Source</Text>
+                            </LinearGradient>
+                        )}
+                    </View>
 
-                            <TouchableOpacity style={styles.resourceCard}>
-                                <View style={styles.resourceIconBg}>
-                                    <MaterialCommunityIcons name="link-variant" size={24} color="#3B82F6" />
-                                </View>
-                                <View>
-                                    <Text style={styles.resourceTitle}>Understanding Extraction</Text>
-                                    <Text style={styles.resourceSub}>External Link</Text>
-                                </View>
-                                <Feather name="external-link" size={20} color="#9CA3AF" style={{ marginLeft: 'auto' }} />
-                            </TouchableOpacity>
-                        </ScrollView>
-                    )}
-                </View>
+                    {/* TABS */}
+                    <View style={styles.tabBar}>
+                        <TabButton title="Transcript" active={activeTab === 'transcript'} onPress={() => setActiveTab('transcript')} />
+                        <TabButton title="Quiz" active={activeTab === 'quiz'} onPress={() => setActiveTab('quiz')} />
+                        <TabButton title="Resources" active={activeTab === 'resources'} onPress={() => setActiveTab('resources')} />
+                    </View>
 
-            </SafeAreaView>
-        </Animated.View>
+                    {/* CONTENT AREA */}
+                    <View style={styles.contentArea}>
+
+                        {/* TRANSCRIPT VIEW */}
+                        {activeTab === 'transcript' && (
+                            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20 }}>
+                                <Animated.Text entering={FadeInDown.delay(100)} style={styles.transcriptText}>
+                                    {transcriptText}
+                                </Animated.Text>
+                            </ScrollView>
+                        )}
+
+                        {/* QUIZ VIEW */}
+                        {activeTab === 'quiz' && (
+                            <View style={styles.quizContainer}>
+                                {quizData.length === 0 ? (
+                                    <View style={styles.quizResult}>
+                                        <MaterialCommunityIcons name="clipboard-text-outline" size={64} color="#6B7280" />
+                                        <Text style={styles.resultTitle}>No Quiz Available</Text>
+                                        <Text style={styles.resultScore}>This lesson doesn't have a quiz yet.</Text>
+                                    </View>
+                                ) : !quizComplete ? (
+                                    <Animated.View entering={FadeInRight} key={currentQuizIdx} style={{ flex: 1 }}>
+                                        <ScrollView
+                                            showsVerticalScrollIndicator={false}
+                                            contentContainerStyle={{ paddingBottom: 100 }} // Ensure bottom content is accessible
+                                        >
+                                            <View style={styles.questionCounter}>
+                                                <Text style={styles.counterText}>Question {currentQuizIdx + 1}/{quizData.length}</Text>
+                                            </View>
+                                            <Text style={styles.questionText}>{quizData[currentQuizIdx]?.question || "Question not available"}</Text>
+
+                                            {(quizData[currentQuizIdx]?.options || []).map((option, idx) => {
+                                                const isSelected = selectedOption === idx;
+                                                const isCorrect = idx === quizData[currentQuizIdx]?.correctIndex;
+
+                                                let borderColor = '#374151';
+                                                let bgColor = '#1F2937';
+                                                if (isSelected) {
+                                                    borderColor = isCorrect ? '#10B981' : '#EF4444';
+                                                    bgColor = isCorrect ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)';
+                                                }
+
+                                                return (
+                                                    <TouchableOpacity
+                                                        key={idx}
+                                                        onPress={() => handleOptionSelect(idx)}
+                                                        disabled={selectedOption !== null}
+                                                        style={[styles.quizOption, { borderColor, backgroundColor: bgColor }]}
+                                                    >
+                                                        <Text style={[styles.quizOptionText, isSelected && { color: isCorrect ? '#10B981' : '#EF4444' }]}>
+                                                            {option}
+                                                        </Text>
+                                                        {isSelected && (
+                                                            <Feather name={isCorrect ? "check-circle" : "x-circle"} size={20} color={isCorrect ? '#10B981' : '#EF4444'} />
+                                                        )}
+                                                    </TouchableOpacity>
+                                                )
+                                            })}
+                                        </ScrollView>
+                                    </Animated.View>
+                                ) : (
+                                    <View style={styles.quizResult}>
+                                        <MaterialCommunityIcons name="trophy-outline" size={64} color="#FBBF24" />
+                                        <Text style={styles.resultTitle}>Quiz Complete!</Text>
+                                        <Text style={styles.resultScore}>You scored {quizScore}/{quizData.length}</Text>
+
+                                        {/* XP Earned Badge */}
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 16, backgroundColor: 'rgba(245, 158, 11, 0.2)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 }}>
+                                            <MaterialCommunityIcons name="star" size={20} color="#FBBF24" />
+                                            <Text style={{ color: '#FBBF24', marginLeft: 6, fontFamily: 'Poppins_600SemiBold', fontSize: 14 }}>
+                                                +{lesson.xp || 50} XP Earned!
+                                            </Text>
+                                        </View>
+
+                                        {moduleCompleted && (
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12, backgroundColor: 'rgba(16, 185, 129, 0.2)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 }}>
+                                                <MaterialCommunityIcons name="check-circle" size={20} color="#10B981" />
+                                                <Text style={{ color: '#10B981', marginLeft: 6, fontFamily: 'Poppins_600SemiBold', fontSize: 14 }}>
+                                                    Module Completed
+                                                </Text>
+                                            </View>
+                                        )}
+
+                                        <TouchableOpacity style={styles.restartBtn} onPress={() => {
+                                            setQuizComplete(false);
+                                            setCurrentQuizIdx(0);
+                                            setQuizScore(0);
+                                        }}>
+                                            <Text style={styles.restartBtnText}>Retry Quiz</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
+                            </View>
+                        )}
+
+                        {/* RESOURCES VIEW */}
+                        {activeTab === 'resources' && (
+                            <ScrollView contentContainerStyle={{ padding: 20 }}>
+                                <TouchableOpacity style={styles.resourceCard}>
+                                    <View style={styles.resourceIconBg}>
+                                        <MaterialCommunityIcons name="file-pdf-box" size={24} color="#EF4444" />
+                                    </View>
+                                    <View>
+                                        <Text style={styles.resourceTitle}>Espresso Cheat Sheet</Text>
+                                        <Text style={styles.resourceSub}>PDF • 2.4 MB</Text>
+                                    </View>
+                                    <Feather name="download" size={20} color="#9CA3AF" style={{ marginLeft: 'auto' }} />
+                                </TouchableOpacity>
+
+                                <TouchableOpacity style={styles.resourceCard}>
+                                    <View style={styles.resourceIconBg}>
+                                        <MaterialCommunityIcons name="link-variant" size={24} color="#3B82F6" />
+                                    </View>
+                                    <View>
+                                        <Text style={styles.resourceTitle}>Understanding Extraction</Text>
+                                        <Text style={styles.resourceSub}>External Link</Text>
+                                    </View>
+                                    <Feather name="external-link" size={20} color="#9CA3AF" style={{ marginLeft: 'auto' }} />
+                                </TouchableOpacity>
+                            </ScrollView>
+                        )}
+                    </View>
+
+                </SafeAreaView>
+            </View>
+        </RNModal>
     );
 }
 

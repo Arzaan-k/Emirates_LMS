@@ -1,0 +1,143 @@
+﻿Defaulting to user installation because normal site-packages is not writeable
+Collecting fastapi==0.115.0 (from -r backend/requirements.txt (line 2))
+  Using cached fastapi-0.115.0-py3-none-any.whl.metadata (27 kB)
+Collecting uvicorn==0.30.6 (from uvicorn[standard]==0.30.6->-r backend/requirements.txt (line 3))
+  Using cached uvicorn-0.30.6-py3-none-any.whl.metadata (6.6 kB)
+Collecting python-multipart==0.0.9 (from -r backend/requirements.txt (line 4))
+  Using cached python_multipart-0.0.9-py3-none-any.whl.metadata (2.5 kB)
+Collecting pydantic==2.9.0 (from -r backend/requirements.txt (line 5))
+  Using cached pydantic-2.9.0-py3-none-any.whl.metadata (146 kB)
+Collecting openai-whisper==20231117 (from -r backend/requirements.txt (line 8))
+  Using cached openai-whisper-20231117.tar.gz (798 kB)
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'error'
+pip :   error: 
+subprocess-exited-with-error
+At line:1 char:1
++ pip install -r 
+backend/requirements.txt 
+2>&1 | Out-File -FilePath 
+ins ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~
+    + CategoryInfo           
+   : NotSpecified: (  error  
+  : subprocess-exited-with   
+ -error:String) [], Remot    
+eException
+    + FullyQualifiedErrorId  
+   : NativeCommandError
+ 
+  
+  Getting requirements to 
+build wheel did not run 
+successfully.
+  exit code: 1
+  
+  [25 lines of output]
+  <string>:5: UserWarning: 
+pkg_resources is deprecated 
+as an API. See https://setupt
+ools.pypa.io/en/latest/pkg_re
+sources.html. The 
+pkg_resources package is 
+slated for removal as early 
+as 2025-11-30. Refrain from 
+using this package or pin to 
+Setuptools<81.
+  Traceback (most recent 
+call last):
+    File "C:\Python314\Lib\si
+te-packages\pip\_vendor\pypro
+ject_hooks\_in_process\_in_pr
+ocess.py", line 389, in 
+<module>
+      main()
+      ~~~~^^
+    File "C:\Python314\Lib\si
+te-packages\pip\_vendor\pypro
+ject_hooks\_in_process\_in_pr
+ocess.py", line 373, in main
+      json_out["return_val"] 
+= 
+hook(**hook_input["kwargs"])
+                             
+  
+~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+    File "C:\Python314\Lib\si
+te-packages\pip\_vendor\pypro
+ject_hooks\_in_process\_in_pr
+ocess.py", line 143, in 
+get_requires_for_build_wheel
+      return 
+hook(config_settings)
+    File "C:\Users\msi user\A
+ppData\Local\Temp\pip-build-e
+nv-b6_7wn1x\overlay\Lib\site-
+packages\setuptools\build_met
+a.py", line 331, in 
+get_requires_for_build_wheel
+      return self._get_build_
+requires(config_settings, 
+requirements=[])
+             ~~~~~~~~~~~~~~~~
+~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^
+    File "C:\Users\msi user\A
+ppData\Local\Temp\pip-build-e
+nv-b6_7wn1x\overlay\Lib\site-
+packages\setuptools\build_met
+a.py", line 301, in 
+_get_build_requires
+      self.run_setup()
+      ~~~~~~~~~~~~~~^^
+    File "C:\Users\msi user\A
+ppData\Local\Temp\pip-build-e
+nv-b6_7wn1x\overlay\Lib\site-
+packages\setuptools\build_met
+a.py", line 512, in run_setup
+      super().run_setup(setup
+_script=setup_script)
+      ~~~~~~~~~~~~~~~~~^^^^^^
+^^^^^^^^^^^^^^^^^^^^^
+    File "C:\Users\msi user\A
+ppData\Local\Temp\pip-build-e
+nv-b6_7wn1x\overlay\Lib\site-
+packages\setuptools\build_met
+a.py", line 317, in run_setup
+      exec(code, locals())
+      ~~~~^^^^^^^^^^^^^^^^
+    File "<string>", line 
+21, in <module>
+    File "<string>", line 
+11, in read_version
+  KeyError: '__version__'
+  [end of output]
+  
+  note: This error 
+originates from a 
+subprocess, and is likely 
+not a problem with pip.
+
+[notice] A new release of 
+pip is available: 25.2 -> 
+25.3
+[notice] To update, run: 
+python.exe -m pip install 
+--upgrade pip
+error: 
+subprocess-exited-with-error
+
+Getting requirements to 
+build wheel did not run 
+successfully.
+exit code: 1
+
+See above for output.
+
+note: This error originates 
+from a subprocess, and is 
+likely not a problem with 
+pip.

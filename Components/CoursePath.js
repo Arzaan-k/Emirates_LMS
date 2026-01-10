@@ -215,10 +215,22 @@ const LevelDetailModal = ({ visible, level, onClose, onStart }) => {
 
 import LessonView from './LessonView';
 
-export default function CoursePath() {
+import ConfettiSystem from './ConfettiSystem';
+
+const CAR_IMAGE = require('../assets/images/path_car.png');
+
+export default function CoursePath({ userEmail = "user" }) {
     const [selectedLevel, setSelectedLevel] = useState(null);
     const [activeLesson, setActiveLesson] = useState(null);
     const [levels, setLevels] = useState([]);
+    const [showConfetti, setShowConfetti] = useState(false);
+
+    // Animation State
+    const carX = useSharedValue(CENTER_X);
+    const carY = useSharedValue(100);
+    const prevActiveIndex = React.useRef(0);
+
+    const isFirstLoad = React.useRef(true);
 
     useEffect(() => {
         fetchPathNodes();
@@ -226,34 +238,66 @@ export default function CoursePath() {
 
     const fetchPathNodes = async () => {
         try {
-            console.log("Fetching path nodes from:", `${API_URL}/path/nodes`);
-            const response = await fetch(`${API_URL}/path/nodes`);
+            // Add timestamp to prevent caching
+            const response = await fetch(`${API_URL}/path/nodes?user_email=${userEmail}&t=${Date.now()}`);
             const data = await response.json();
-            console.log("Path nodes response:", data);
 
             if (data && data.length > 0) {
-                // Map backend data to UI Nodes
                 const mappedLevels = data.map((item, index) => ({
-                    id: item.videoUrl || index, // Use URL as unique ID
+                    id: item.id || item.videoUrl || index,
                     title: item.title,
                     desc: item.description,
-                    transcript: item.transcript, // Pass transcript to lesson
-                    icon: ICONS[index % ICONS.length], // Cycle through icons
-                    status: index === 0 ? "active" : "locked", // Linear unlock logic: 1st Active, others Locked
-                    lessonCount: 1, // Single video per node for now
+                    transcript: item.transcript,
+                    icon: ICONS[index % ICONS.length],
+                    status: item.status || (index === 0 ? "active" : "locked"),
+                    lessonCount: 1,
                     xp: item.xp || 50,
                     videoUrl: item.videoUrl,
-                    quiz: item.quiz
+                    quiz: item.quiz,
+                    bucket: item.bucket || "general"
                 }));
+
                 setLevels(mappedLevels);
-            } else {
-                console.log("No path nodes found. Data:", data);
-                // Optional: Force a refresh or show empty state
+                updateCarPosition(mappedLevels);
             }
         } catch (error) {
             console.error("Error fetching path:", error);
-            // Alert for user feedback
-            // alert("Debug: Error fetching path. Check console.");
+        }
+    };
+
+    const updateCarPosition = (currentLevels) => {
+        // Find current active node index
+        let activeIdx = currentLevels.findIndex(l => l.status === 'active');
+        if (activeIdx === -1) {
+            // If all completed, maybe define a finish line or stay at last
+            activeIdx = currentLevels.length - 1;
+        }
+
+        const targetPos = getPosition(activeIdx);
+
+        if (isFirstLoad.current) {
+            // Initial placement - no animation
+            carX.value = targetPos.x;
+            carY.value = targetPos.y;
+            isFirstLoad.current = false;
+            prevActiveIndex.current = activeIdx;
+        } else {
+            // If progressed
+            if (activeIdx > prevActiveIndex.current) {
+                // Trigger Animation
+                carX.value = withSpring(targetPos.x, { damping: 12 });
+                carY.value = withTiming(targetPos.y, { duration: 1500, easing: Easing.bezier(0.25, 0.1, 0.25, 1) });
+
+                // Show Confetti
+                setShowConfetti(true);
+                setTimeout(() => setShowConfetti(false), 4000);
+
+                prevActiveIndex.current = activeIdx;
+            } else {
+                // Just sync if went backward or same
+                carX.value = targetPos.x;
+                carY.value = targetPos.y;
+            }
         }
     };
 
@@ -263,23 +307,29 @@ export default function CoursePath() {
         return { x, y };
     };
 
+    // Animated Style for Car
+    const carStyle = useAnimatedStyle(() => ({
+        transform: [
+            { translateX: carX.value - 30 }, // Centering (width 60)
+            { translateY: carY.value - 40 }, // Resting on top
+            { scale: withSequence(withTiming(1.1, { duration: 500 }), withTiming(1, { duration: 500 })) } // Idle breath
+        ]
+    }));
+
     const renderCurvedConnections = () => {
-        // Create a single path string for optimized rendering?
-        // Or multiple segments. Multiple segments allows coloring.
         return levels.map((item, index) => {
             if (index === levels.length - 1) return null;
 
             const curr = getPosition(index);
             const next = getPosition(index + 1);
 
-            // Control Points for Curve
             const cp1x = curr.x;
             const cp1y = curr.y + (VERTICAL_SPACING / 2);
             const cp2x = next.x;
             const cp2y = next.y - (VERTICAL_SPACING / 2);
 
-            const isUnlocked = levels[index + 1].status !== "locked";
-            const color = isUnlocked ? "#F59E0B" : "#E5E7EB";
+            const isNextUnlocked = levels[index + 1].status !== "locked";
+            const color = isNextUnlocked ? "#F59E0B" : "#E5E7EB";
 
             return (
                 <Path
@@ -288,7 +338,7 @@ export default function CoursePath() {
                     stroke={color}
                     strokeWidth="10"
                     strokeLinecap="round"
-                    strokeDasharray={!isUnlocked ? "15, 15" : ""}
+                    strokeDasharray={!isNextUnlocked ? "15, 15" : ""}
                     fill="none"
                 />
             )
@@ -296,16 +346,23 @@ export default function CoursePath() {
     }
 
     const handleNodePress = (item) => {
+        // Allow re-playing completed, or playing active. Block locked.
+        if (item.status === 'locked') return;
         setSelectedLevel(item);
     };
 
     const handleStartLesson = () => {
         const lessonToStart = selectedLevel;
-        setSelectedLevel(null); // Close modal
-        // Small delay to allow modal exit animation if desired, or instant switch
+        setSelectedLevel(null);
         setTimeout(() => {
             setActiveLesson(lessonToStart);
         }, 100);
+    };
+
+    const handleLessonClose = () => {
+        setActiveLesson(null);
+        // Refresh progress to trigger car movement if level completed
+        fetchPathNodes();
     };
 
     const totalHeight = levels.length * VERTICAL_SPACING + 250;
@@ -317,16 +374,6 @@ export default function CoursePath() {
                 contentContainerStyle={{ height: totalHeight }}
                 showsVerticalScrollIndicator={false}
             >
-                {/* DEBUG OVERLAY */}
-                {levels.length === 0 && (
-                    <View style={{ padding: 20, backgroundColor: '#FEF2F2', margin: 20, borderRadius: 10, borderWidth: 1, borderColor: '#EF4444' }}>
-                        <Text style={{ color: '#B91C1C', fontFamily: 'Poppins_700Bold' }}>DEBUG INFO:</Text>
-                        <Text style={{ color: '#EF4444' }}>0 Path Nodes Loaded.</Text>
-                        <Text style={{ color: '#EF4444', fontSize: 10, marginTop: 5 }}>API: {API_URL}</Text>
-                        <Text style={{ color: '#EF4444', fontSize: 10 }}>Check console logs for details.</Text>
-                    </View>
-                )}
-
                 <View style={styles.pathArea}>
                     {/* DECORATIONS */}
                     <MaterialCommunityIcons name="cloud" size={50} color="#E5E7EB" style={{ position: 'absolute', top: 50, left: 20, opacity: 0.5 }} />
@@ -337,6 +384,13 @@ export default function CoursePath() {
                     <Svg height={totalHeight} width={width} style={styles.svgLayer}>
                         {renderCurvedConnections()}
                     </Svg>
+
+                    {/* PLAYER CAR */}
+                    <Animated.Image
+                        source={CAR_IMAGE}
+                        style={[styles.playerCar, carStyle]}
+                        resizeMode="contain"
+                    />
 
                     {/* NODES */}
                     {levels.map((item, index) => {
@@ -365,9 +419,13 @@ export default function CoursePath() {
             {activeLesson && (
                 <LessonView
                     lesson={activeLesson}
-                    onClose={() => setActiveLesson(null)}
+                    onClose={handleLessonClose}
+                    userEmail={userEmail}
                 />
             )}
+
+            {/* CONFETTI OVERLAY */}
+            <ConfettiSystem trigger={showConfetti} />
         </>
     );
 }
@@ -567,5 +625,11 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontFamily: "Poppins_700Bold",
         letterSpacing: 1,
+    },
+    playerCar: {
+        width: 60,
+        height: 60,
+        position: 'absolute',
+        zIndex: 20,
     },
 });

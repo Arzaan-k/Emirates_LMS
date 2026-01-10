@@ -1004,6 +1004,8 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
           onPress={() => setGoalModalVisible(true)}
         />
 
+        <AIRecommendationsCard navigation={navigation} />
+
         <AIToolsSection onOpenTool={onOpenTool} />
 
         <TopicQuizzes
@@ -1379,6 +1381,62 @@ function DailyFocus({ item, onPress }) {
       </TouchableOpacity>
     </Animated.View>
   )
+}
+
+// --- AI RECOMMENDATIONS CARD ---
+function AIRecommendationsCard({ navigation }) {
+  const { t } = useLanguage();
+
+  return (
+    <Animated.View entering={FadeInDown.delay(350).duration(600)} style={styles.recsContainer}>
+      <TouchableOpacity
+        onPress={() => navigation.navigate('Recommendations')}
+        activeOpacity={0.9}
+      >
+        <LinearGradient
+          colors={["#312E81", "#1E1B4B", "#0F172A"]}
+          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+          style={styles.recsCard}
+        >
+          {/* Decorative Icons */}
+          <View style={styles.recsDecorContainer} pointerEvents="none">
+            <MaterialCommunityIcons name="brain" size={80} color="rgba(99, 102, 241, 0.1)" style={{ position: 'absolute', top: -10, right: -10, transform: [{ rotate: '15deg' }] }} />
+            <MaterialCommunityIcons name="lightbulb-on" size={50} color="rgba(245, 158, 11, 0.1)" style={{ position: 'absolute', bottom: 10, left: 10, transform: [{ rotate: '-10deg' }] }} />
+          </View>
+
+          <View style={styles.recsContent}>
+            <View style={styles.recsLeft}>
+              <View style={styles.recsBadge}>
+                <MaterialCommunityIcons name="robot" size={12} color="#FFF" />
+                <Text style={styles.recsBadgeText}>AI POWERED</Text>
+              </View>
+              <Text style={styles.recsTitle}>Smart Recommendations</Text>
+              <Text style={styles.recsDesc}>Personalized courses based on your skill gaps and learning history</Text>
+            </View>
+
+            <View style={styles.recsRight}>
+              <View style={styles.recsIconBg}>
+                <MaterialCommunityIcons name="lightbulb-on-outline" size={28} color="#F59E0B" />
+              </View>
+              <View style={styles.recsArrow}>
+                <Feather name="chevron-right" size={20} color="rgba(255,255,255,0.7)" />
+              </View>
+            </View>
+          </View>
+
+          {/* Mini Skill Indicators */}
+          <View style={styles.recsSkillRow}>
+            <View style={[styles.recsSkillDot, { backgroundColor: '#EF4444' }]} />
+            <Text style={styles.recsSkillText}>Identify gaps</Text>
+            <View style={[styles.recsSkillDot, { backgroundColor: '#F59E0B' }]} />
+            <Text style={styles.recsSkillText}>Get suggestions</Text>
+            <View style={[styles.recsSkillDot, { backgroundColor: '#10B981' }]} />
+            <Text style={styles.recsSkillText}>Improve skills</Text>
+          </View>
+        </LinearGradient>
+      </TouchableOpacity>
+    </Animated.View>
+  );
 }
 
 function AIToolsSection({ onOpenTool }) {
@@ -2002,4 +2060,21 @@ const styles = StyleSheet.create({
   topicQuizMetaText: { fontSize: 11, fontFamily: 'Poppins_500Medium', color: '#CBD5E1' },
   startQuizBtnSmall: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F59E0B', paddingVertical: 8, borderRadius: 10, gap: 6 },
   startQuizBtnText: { fontSize: 12, fontFamily: 'Poppins_700Bold', color: '#FFF' },
+
+  // --- AI RECOMMENDATIONS CARD STYLES ---
+  recsContainer: { paddingHorizontal: 20, marginBottom: 20 },
+  recsCard: { borderRadius: 24, padding: 20, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(99, 102, 241, 0.3)', shadowColor: '#6366F1', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.2, shadowRadius: 16, elevation: 8 },
+  recsDecorContainer: { ...StyleSheet.absoluteFillObject },
+  recsContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 },
+  recsLeft: { flex: 1, marginRight: 12 },
+  recsBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(99, 102, 241, 0.3)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, alignSelf: 'flex-start', marginBottom: 10, gap: 4 },
+  recsBadgeText: { fontSize: 10, fontFamily: 'Poppins_700Bold', color: '#A5B4FC', letterSpacing: 0.5 },
+  recsTitle: { fontSize: 18, fontFamily: 'Poppins_700Bold', color: '#FFF', marginBottom: 6, lineHeight: 24 },
+  recsDesc: { fontSize: 13, fontFamily: 'Poppins_400Regular', color: '#94A3B8', lineHeight: 19 },
+  recsRight: { alignItems: 'center' },
+  recsIconBg: { width: 56, height: 56, borderRadius: 18, backgroundColor: 'rgba(245, 158, 11, 0.15)', justifyContent: 'center', alignItems: 'center', marginBottom: 8, borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.3)' },
+  recsArrow: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
+  recsSkillRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)' },
+  recsSkillDot: { width: 8, height: 8, borderRadius: 4 },
+  recsSkillText: { fontSize: 11, fontFamily: 'Poppins_500Medium', color: '#94A3B8', marginRight: 8 },
 });
