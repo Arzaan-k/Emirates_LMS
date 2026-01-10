@@ -16,7 +16,7 @@ from groq import Groq
 # --- CONFIGURATION ---
 PORT = 8000
 HOST = "0.0.0.0"
-BASE_URL = "http://192.168.1.144:8000"  # Local network IP for physical device
+BASE_URL = "http://192.168.29.119:8000"  # Local network IP for physical device
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
@@ -1015,7 +1015,7 @@ async def create_news(
         file_path = os.path.join(UPLOAD_DIR, file_name)
         with open(file_path, "wb") as f:
             f.write(await image.read())
-        image_url = f"/uploads/{file_name}"
+        image_url = f"{BASE_URL}/uploads/{file_name}"
     
     news_item = {
         "id": news_id,
@@ -1083,7 +1083,7 @@ async def create_live_quiz(
         file_path = os.path.join(UPLOAD_DIR, file_name)
         with open(file_path, "wb") as f:
             f.write(await image.read())
-        image_url = f"/uploads/{file_name}"
+        image_url = f"{BASE_URL}/uploads/{file_name}"
     
     quiz_item = {
         "id": quiz_id,
@@ -2555,25 +2555,7 @@ async def bulk_upload_assessment(
 # AI COURSE RECOMMENDATION SYSTEM APIs
 # ==========================================
 
-def get_or_create_learning_profile(user_email: str) -> dict:
-    """Get existing learning profile or create a new one for the user."""
-    if user_email not in user_learning_profiles:
-        user_learning_profiles[user_email] = {
-            "user_email": user_email,
-            "skill_scores": {key: {"score": 0, "max_score": 0, "attempts": 0} for key in skill_categories.keys()},
-            "total_xp": 0,
-            "courses_completed": 0,
-            "assessments_completed": 0,
-            "quizzes_completed": 0,
-            "total_time_spent_seconds": 0,
-            "last_activity": None,
-            "learning_streak": 0,
-            "weak_areas": [],
-            "strong_areas": [],
-            "created_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat()
-        }
-    return user_learning_profiles[user_email]
+
 
 
 def categorize_content_by_skill(title: str, description: str = "") -> List[str]:
@@ -2597,16 +2579,28 @@ def categorize_content_by_skill(title: str, description: str = "") -> List[str]:
 
 def calculate_skill_gaps(user_email: str) -> List[dict]:
     """Analyze user's performance data to identify skill gaps."""
-    profile = get_or_create_learning_profile(user_email)
+    # START DEBUG LOG
+    logger.info(f"--- Calculating Gaps for {user_email} ---")
+    
+    profile = ensure_user_profile(user_email)
     skill_gaps = []
     
     for skill_key, skill_data in skill_categories.items():
         user_skill = profile["skill_scores"].get(skill_key, {"score": 0, "max_score": 0, "attempts": 0})
         
-        if user_skill["max_score"] > 0:
-            percentage = (user_skill["score"] / user_skill["max_score"]) * 100
+        # Ensure we read numeric values safely
+        score = user_skill.get("score", 0)
+        max_score = user_skill.get("max_score", 0)
+        attempts = user_skill.get("attempts", 0)
+        
+        if max_score > 0:
+            percentage = (score / max_score) * 100
         else:
             percentage = 0
+            
+        # DEBUG LOG
+        if attempts > 0:
+            logger.info(f"Skill: {skill_key} | Score: {score}/{max_score} | Attempts: {attempts} | Pct: {percentage}%")
             
         # A skill is considered weak if score is below 70% or no attempts made
         gap_level = "critical" if percentage < 50 else "moderate" if percentage < 70 else "minor" if percentage < 85 else "none"
@@ -2616,12 +2610,12 @@ def calculate_skill_gaps(user_email: str) -> List[dict]:
             "skill_name": skill_data["name"],
             "icon": skill_data["icon"],
             "color": skill_data["color"],
-            "current_score": user_skill["score"],
-            "max_score": user_skill["max_score"],
+            "current_score": score,
+            "max_score": max_score,
             "percentage": round(percentage, 1),
-            "attempts": user_skill["attempts"],
+            "attempts": attempts,
             "gap_level": gap_level,
-            "needs_improvement": percentage < 70 or user_skill["attempts"] == 0
+            "needs_improvement": percentage < 70 or attempts == 0
         })
     
     # Sort by gap severity (critical first, then moderate, then minor)
@@ -2633,7 +2627,7 @@ def calculate_skill_gaps(user_email: str) -> List[dict]:
 
 def update_skill_score(user_email: str, skill_key: str, score: int, max_score: int, source_type: str, source_id: str):
     """Update a user's skill score based on assessment/quiz results."""
-    profile = get_or_create_learning_profile(user_email)
+    profile = ensure_user_profile(user_email)
     
     if skill_key in profile["skill_scores"]:
         profile["skill_scores"][skill_key]["score"] += score
@@ -2680,7 +2674,7 @@ async def track_course_completion(
 ):
     """Track when a user completes a course/module and update their learning profile."""
     try:
-        profile = get_or_create_learning_profile(user_email)
+        profile = ensure_user_profile(user_email)
         
         # Determine skill categories from course title
         matched_skills = categorize_content_by_skill(course_title, bucket or "")
@@ -2739,7 +2733,7 @@ async def track_quiz_submission(
 ):
     """Track quiz submissions and update skill scores."""
     try:
-        profile = get_or_create_learning_profile(user_email)
+        profile = ensure_user_profile(user_email)
         
         # Determine skill categories from quiz title
         matched_skills = categorize_content_by_skill(quiz_title)
@@ -2793,7 +2787,7 @@ async def track_assessment_completion(
 ):
     """Track proctored assessment completions and update skill scores."""
     try:
-        profile = get_or_create_learning_profile(user_email)
+        profile = ensure_user_profile(user_email)
         
         # Determine skill categories from assessment title
         matched_skills = categorize_content_by_skill(assessment_title)
@@ -2840,7 +2834,7 @@ async def track_assessment_completion(
 async def get_learning_profile(user_email: str):
     """Get a user's complete learning profile including skill scores and gaps."""
     try:
-        profile = get_or_create_learning_profile(user_email)
+        profile = ensure_user_profile(user_email)
         skill_gaps = calculate_skill_gaps(user_email)
         
         # Get recent completions
@@ -2902,7 +2896,7 @@ async def get_skill_gaps(user_email: str):
 async def generate_recommendations(user_email: str, limit: int = 5):
     """Generate AI-powered personalized course recommendations based on skill gaps and learning history."""
     try:
-        profile = get_or_create_learning_profile(user_email)
+        profile = ensure_user_profile(user_email)
         skill_gaps = calculate_skill_gaps(user_email)
         
         # Get available courses
@@ -2932,6 +2926,11 @@ async def generate_recommendations(user_email: str, limit: int = 5):
         from groq import Groq
         groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
         
+        # Build JSON strings before the f-string to avoid syntax issues
+        weak_skills_json = json.dumps([{"skill": g["skill_name"], "score": g["percentage"], "level": g["gap_level"]} for g in weak_skills], indent=2)
+        strong_skills_json = json.dumps([{"skill": g["skill_name"], "score": g["percentage"]} for g in strong_skills], indent=2)
+        courses_json = json.dumps(course_summaries, indent=2)
+        
         prompt = f"""You are an AI learning advisor for a restaurant training platform. Analyze the user's learning profile and recommend the most relevant courses.
 
 USER LEARNING PROFILE:
@@ -2942,13 +2941,13 @@ USER LEARNING PROFILE:
 
 SKILL GAP ANALYSIS:
 Weak Areas (Need Improvement):
-{json.dumps([{{"skill": g["skill_name"], "score": g["percentage"], "level": g["gap_level"]}} for g in weak_skills], indent=2)}
+{weak_skills_json}
 
 Strong Areas:
-{json.dumps([{{"skill": g["skill_name"], "score": g["percentage"]}} for g in strong_skills], indent=2)}
+{strong_skills_json}
 
 AVAILABLE COURSES (Not Yet Completed):
-{json.dumps(course_summaries, indent=2)}
+{courses_json}
 
 Based on this analysis, recommend up to {limit} courses that would best help this user improve their weak areas. Prioritize courses that address critical skill gaps.
 
@@ -3109,7 +3108,7 @@ async def track_interaction(
         user_interactions.append(interaction)
         
         # Update learning profile last activity
-        profile = get_or_create_learning_profile(user_email)
+        profile = ensure_user_profile(user_email)
         profile["last_activity"] = datetime.now().isoformat()
         
         logger.info(f"Interaction tracked: {user_email} - {interaction_type} on {content_type} {content_id}")
@@ -3206,10 +3205,10 @@ async def get_recommendation_analytics():
 
 # Helper to ensure profile exists
 def ensure_user_profile(user_email: str):
+    """Ensure user profile exists with proper skill_scores structure including attempts."""
     if user_email not in user_learning_profiles:
-        # Check if user exists in users_store to get name context if needed
         user_learning_profiles[user_email] = {
-            "skill_scores": {k: {"score": 0, "max_score": 0, "percentage": 0} for k in skill_categories.keys()},
+            "skill_scores": {k: {"score": 0, "max_score": 0, "percentage": 0, "attempts": 0} for k in skill_categories.keys()},
             "total_xp": 0,
             "courses_completed": 0,
             "quizzes_completed": 0,
@@ -3219,7 +3218,53 @@ def ensure_user_profile(user_email: str):
             "weak_areas": [],
             "strong_areas": []
         }
+    else:
+        # Ensure all skill_scores have 'attempts' key (for backward compatibility)
+        for k in skill_categories.keys():
+            if k not in user_learning_profiles[user_email]["skill_scores"]:
+                user_learning_profiles[user_email]["skill_scores"][k] = {"score": 0, "max_score": 0, "percentage": 0, "attempts": 0}
+            elif "attempts" not in user_learning_profiles[user_email]["skill_scores"][k]:
+                user_learning_profiles[user_email]["skill_scores"][k]["attempts"] = 0
     return user_learning_profiles[user_email]
+
+def find_skill_key_from_content(bucket: str, title: str = ""):
+    """Find the best matching skill category key from bucket name or content title."""
+    text = (bucket + " " + (title or "")).lower()
+    
+    # Explicit bucket name mappings (handles common variations)
+    bucket_mappings = {
+        "product training": "product_knowledge",
+        "product knowledge": "product_knowledge",
+        "customer service": "customer_service",
+        "safety & hygiene": "safety_hygiene",
+        "safety hygiene": "safety_hygiene",
+        "safety": "safety_hygiene",
+        "operations": "operations",
+        "espresso & coffee": "espresso_coffee",
+        "espresso": "espresso_coffee",
+        "coffee": "espresso_coffee",
+        "onboarding": "onboarding",
+        "onboarding essentials": "onboarding",
+        "general": "onboarding",  # Default general content to onboarding
+    }
+    
+    # First try explicit bucket mapping
+    bucket_lower = bucket.lower().strip()
+    if bucket_lower in bucket_mappings:
+        return bucket_mappings[bucket_lower]
+    
+    # Then try direct bucket match to skill key
+    if bucket_lower in skill_categories:
+        return bucket_lower
+    
+    # Then try keyword matching from skill_categories
+    for skill_key, skill_data in skill_categories.items():
+        for keyword in skill_data.get("keywords", []):
+            if keyword.lower() in text:
+                return skill_key
+    
+    # Default to onboarding for unmatched content
+    return "onboarding"
 
 @app.post("/recommendations/track-quiz")
 async def track_quiz(
@@ -3227,8 +3272,10 @@ async def track_quiz(
     quiz_id: str = Form(...),
     score: int = Form(...),
     total_questions: int = Form(...),
-    bucket: str = Form("general")
+    bucket: str = Form("general"),
+    quiz_title: str = Form(None)  # Optional title from frontend
 ):
+    """Track quiz completion and award XP based on score."""
     try:
         profile = ensure_user_profile(user_email)
         
@@ -3236,39 +3283,49 @@ async def track_quiz(
         profile["quizzes_completed"] += 1
         profile["last_activity"] = datetime.now().isoformat()
         
-        # Calculate XP based on score (e.g., 10 XP per correct answer)
-        xp_earned = int(score) * 10
+        # Calculate XP based on score (10 XP per correct answer + 5 bonus per correct)
+        correct_count = int(score)
+        total = int(total_questions)
+        percentage = (correct_count / total * 100) if total > 0 else 0
+        
+        # XP Formula: Base (10 per correct) + Bonus if >70% (extra 25 XP)
+        xp_earned = correct_count * 10
+        if percentage >= 70:
+            xp_earned += 25  # Bonus for good performance
+        if percentage >= 90:
+            xp_earned += 25  # Extra bonus for excellent performance
+            
         profile["total_xp"] += xp_earned
         
-        # Update Skill Score if bucket maps to a skill
-        skill_key = None
-        # Try to match bucket to skill category
-        for key, val in skill_categories.items():
-            if bucket.lower() == key or bucket.lower() in [k.lower() for k in val.get("keywords", [])]:
-                skill_key = key
-                break
+        # Update Skill Score - use title for better categorization
+        skill_key = find_skill_key_from_content(bucket, quiz_title or "")
         
-        if not skill_key and bucket in skill_categories:
-            skill_key = bucket
-            
+        logger.info(f"[SKILL DEBUG] bucket='{bucket}', title='{quiz_title}', matched_skill='{skill_key}'")
+        
         if skill_key and skill_key in profile["skill_scores"]:
             current_skill = profile["skill_scores"][skill_key]
-            current_skill["score"] += int(score)
-            current_skill["max_score"] += int(total_questions)
+            current_skill["score"] += correct_count
+            current_skill["max_score"] += total
+            current_skill["attempts"] = current_skill.get("attempts", 0) + 1
             if current_skill["max_score"] > 0:
                 current_skill["percentage"] = int((current_skill["score"] / current_skill["max_score"]) * 100)
+            logger.info(f"[SKILL DEBUG] Updated {skill_key}: score={current_skill['score']}/{current_skill['max_score']}, attempts={current_skill['attempts']}, pct={current_skill.get('percentage', 0)}%")
+        else:
+            logger.warning(f"[SKILL DEBUG] Skill key '{skill_key}' not found in profile skill_scores!")
         
-        logger.info(f" tracked quiz for {user_email}: +{xp_earned} XP")
+        logger.info(f"Quiz tracked for {user_email}: {correct_count}/{total} correct, +{xp_earned} XP, skill: {skill_key}")
         
         return {
             "status": "success", 
             "xp_earned": xp_earned, 
             "total_xp": profile["total_xp"],
-            "message": f"Quiz tracked. +{xp_earned} XP"
+            "percentage": round(percentage, 1),
+            "message": f"Quiz completed! +{xp_earned} XP"
         }
     except Exception as e:
         logger.error(f"Track quiz error: {e}")
-        print(f"Track quiz error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         # Return success anyway to not block UI
         return {"status": "error", "message": str(e)}
 
@@ -3277,37 +3334,58 @@ async def track_completion(
     user_email: str = Form(...),
     course_id: str = Form(...),
     bucket: str = Form("general"),
-    xp_earned: int = Form(50)
+    xp_earned: int = Form(50),
+    course_title: str = Form(None)  # Optional title from frontend
 ):
+    """Track module/course completion and award XP."""
     try:
         profile = ensure_user_profile(user_email)
         
+        # Find skill key using title for better categorization
+        skill_key = find_skill_key_from_content(bucket, course_title or "")
+        
+        # Calculate actual XP (base + skill matching bonus if skill found)
+        actual_xp = int(xp_earned)
+        if skill_key and skill_key != "onboarding":  # Bonus for non-default skill match
+            actual_xp += 10
+        
         profile["courses_completed"] += 1
-        profile["total_xp"] += int(xp_earned)
+        profile["total_xp"] += actual_xp
         profile["last_activity"] = datetime.now().isoformat()
+        
+        # Update skill score if matched
+        if skill_key and skill_key in profile["skill_scores"]:
+            current_skill = profile["skill_scores"][skill_key]
+            current_skill["score"] += 1  # Completion counts as 1 point
+            current_skill["max_score"] += 1
+            current_skill["attempts"] = current_skill.get("attempts", 0) + 1
+            if current_skill["max_score"] > 0:
+                current_skill["percentage"] = int((current_skill["score"] / current_skill["max_score"]) * 100)
         
         # Record specific completion
         completion_record = {
             "id": str(uuid.uuid4()),
             "user_email": user_email,
             "course_id": course_id,
+            "course_title": course_title,
             "bucket": bucket,
-            "xp": int(xp_earned),
+            "xp": actual_xp,
             "completed_at": datetime.now().isoformat()
         }
         course_completions.append(completion_record)
         
-        logger.info(f" tracked module completion for {user_email}: +{xp_earned} XP")
+        logger.info(f"Module completion tracked for {user_email}: +{actual_xp} XP")
         
         return {
             "status": "success",
-            "xp_earned": xp_earned,
+            "xp_earned": actual_xp,
             "total_xp": profile["total_xp"],
-            "message": "Module completion tracked"
+            "message": f"Module completed! +{actual_xp} XP"
         }
     except Exception as e:
         logger.error(f"Track completion error: {e}")
-        print(f"Track completion error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return {"status": "error", "message": str(e)}
 
 

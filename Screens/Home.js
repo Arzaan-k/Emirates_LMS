@@ -473,6 +473,16 @@ function CrucialNotificationModal({ notification, onAcknowledge }) {
               </View>
 
               {/* Content */}
+              {notification.mediaUrl && (
+                <View style={{ marginBottom: 16, borderRadius: 12, overflow: 'hidden' }}>
+                  <Image
+                    source={{ uri: notification.mediaUrl }}
+                    style={{ width: '100%', height: 200, borderRadius: 12 }}
+                    resizeMode="cover"
+                  />
+                </View>
+              )}
+
               <Text style={crucialStyles.title}>{notification.title}</Text>
 
               <ScrollView
