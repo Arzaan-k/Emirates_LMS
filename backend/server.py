@@ -2585,6 +2585,34 @@ def calculate_skill_gaps(user_email: str) -> List[dict]:
     profile = ensure_user_profile(user_email)
     skill_gaps = []
     
+    # NEW LOGIC: Calculate based on Module Completion (Completed / Total)
+    
+    # 1. Total Modules Map
+    total_modules_per_skill = {k: 0 for k in skill_categories}
+    for item in content_store:
+        # Use simple mapping (bucket priority)
+        item_bucket = item.get("bucket", "")
+        item_title = item.get("title", "")
+        key = find_skill_key_from_content(item_bucket, item_title)
+        if key in total_modules_per_skill:
+            total_modules_per_skill[key] += 1
+            
+    # 2. Completed Modules Map (Unique content completion)
+    completed_modules_per_skill = {k: 0 for k in skill_categories}
+    user_completions = [c for c in course_completions if c["user_email"] == user_email]
+    
+    completed_ids = set()
+    for c in user_completions:
+        cid = c.get("course_id")
+        if cid and cid not in completed_ids:
+            completed_ids.add(cid)
+            # Find usage bucket/title from completion record
+            c_bucket = c.get("bucket", "")
+            c_title = c.get("course_title", "")
+            key = find_skill_key_from_content(c_bucket, c_title)
+            if key in completed_modules_per_skill:
+                 completed_modules_per_skill[key] += 1
+    
     for skill_key, skill_data in skill_categories.items():
         user_skill = profile["skill_scores"].get(skill_key, {"score": 0, "max_score": 0, "attempts": 0})
         
@@ -2593,14 +2621,33 @@ def calculate_skill_gaps(user_email: str) -> List[dict]:
         max_score = user_skill.get("max_score", 0)
         attempts = user_skill.get("attempts", 0)
         
-        if max_score > 0:
-            percentage = (score / max_score) * 100
+        # Calculate percentage based on modules completed
+        total_mod = total_modules_per_skill.get(skill_key, 0)
+        completed_mod = completed_modules_per_skill.get(skill_key, 0)
+        
+        if total_mod > 0:
+            percentage = (completed_mod / total_mod) * 100
         else:
-            percentage = 0
+            # If no modules are defined, but user has completion, assume 100%
+            percentage = 100 if completed_mod > 0 else 0
+            
+        # Cap at 100
+        percentage = min(100.0, percentage)
+
+        # Fix for "Not started" showing when percentage > 0
+        # If user has completed modules, treat it as at least 1 attempt
+        if attempts == 0 and completed_mod > 0:
+            attempts = 1
+            
+        # Determine strict status text
+        status_text = "Not Started"
+        if percentage >= 100:
+            status_text = "Completed"
+        elif percentage > 0:
+            status_text = "In Progress"
             
         # DEBUG LOG
-        if attempts > 0:
-            logger.info(f"Skill: {skill_key} | Score: {score}/{max_score} | Attempts: {attempts} | Pct: {percentage}%")
+        logger.info(f"Skill: {skill_key} | Modules: {completed_mod}/{total_mod} | Pct: {percentage}% | Status: {status_text}")
             
         # A skill is considered weak if score is below 70% or no attempts made
         gap_level = "critical" if percentage < 50 else "moderate" if percentage < 70 else "minor" if percentage < 85 else "none"
@@ -2615,7 +2662,10 @@ def calculate_skill_gaps(user_email: str) -> List[dict]:
             "percentage": round(percentage, 1),
             "attempts": attempts,
             "gap_level": gap_level,
-            "needs_improvement": percentage < 70 or attempts == 0
+            "status": status_text,  # Explicit status for UI
+            "needs_improvement": percentage < 70 or attempts == 0,
+            "modules_completed": completed_mod,
+            "total_modules": total_mod
         })
     
     # Sort by gap severity (critical first, then moderate, then minor)
