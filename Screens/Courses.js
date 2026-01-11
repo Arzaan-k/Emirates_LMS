@@ -7,6 +7,9 @@ import {
     ScrollView,
     Dimensions,
     TextInput,
+    ActivityIndicator,
+    KeyboardAvoidingView,
+    Platform
 } from "react-native";
 import { MaterialCommunityIcons, Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -51,10 +54,132 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
 
 import API_URL from "../config";
 
+// --- ASK AI CHAT MODAL ---
+function AskAIChatModal({ visible, courseData, onClose }) {
+    const [question, setQuestion] = useState('');
+    const [messages, setMessages] = useState([]); // {role: 'user'|'ai', content: ''}
+    const [loading, setLoading] = useState(false);
+
+    const handleSend = async () => {
+        if (!question.trim()) return;
+
+        const userMsg = { role: 'user', content: question };
+        setMessages(prev => [...prev, userMsg]);
+        setQuestion('');
+        setLoading(true);
+
+        try {
+            const response = await fetch(`${API_URL}/ask-ai`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    course_id: courseData.id,
+                    question: userMsg.content
+                })
+            });
+            const data = await response.json();
+            console.log(data);
+
+            const aiMsg = { role: 'ai', content: data.answer || "Sorry, I couldn't generate an answer." };
+            setMessages(prev => [...prev, aiMsg]);
+        } catch (error) {
+            const errorMsg = { role: 'ai', content: "Error connecting to AI. Please try again." };
+            setMessages(prev => [...prev, errorMsg]);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    if (!visible || !courseData) return null;
+
+    return (
+        <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+            <KeyboardAvoidingView
+                behavior={Platform.OS === "ios" ? "padding" : "height"}
+                style={{ flex: 1, backgroundColor: '#FFF' }}
+            >
+                {/* HEADER */}
+                <View style={{ padding: 20, borderBottomWidth: 1, borderBottomColor: '#F3F4F6', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <View>
+                        <Text style={{ fontSize: 18, fontFamily: 'Poppins_700Bold', color: '#111827' }}>Ask AI Assistant</Text>
+                        <Text style={{ fontSize: 12, color: '#6B7280', fontFamily: 'Poppins_400Regular' }}>Context: {courseData.title.substring(0, 30)}...</Text>
+                    </View>
+                    <TouchableOpacity onPress={onClose} style={{ padding: 5 }}>
+                        <Feather name="x" size={24} color="#6B7280" />
+                    </TouchableOpacity>
+                </View>
+
+                {/* MESSAGES */}
+                <ScrollView
+                    style={{ flex: 1, padding: 20 }}
+                    contentContainerStyle={{ paddingBottom: 20 }}
+                    ref={ref => ref?.scrollToEnd({ animated: true })}
+                >
+                    {messages.length === 0 && (
+                        <View style={{ alignItems: 'center', marginTop: 50, opacity: 0.7 }}>
+                            <MaterialCommunityIcons name="robot-outline" size={60} color="#E5E7EB" />
+                            <Text style={{ marginTop: 15, color: '#9CA3AF', fontFamily: 'Poppins_500Medium', textAlign: 'center' }}>
+                                Ask me anything about this course!{"\n"}I've watched the video so you don't have to.
+                            </Text>
+                        </View>
+                    )}
+
+                    {messages.map((msg, idx) => (
+                        <View key={idx} style={{
+                            alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                            backgroundColor: msg.role === 'user' ? '#7C3AED' : '#F3F4F6',
+                            padding: 12,
+                            borderRadius: 16,
+                            borderBottomRightRadius: msg.role === 'user' ? 2 : 16,
+                            borderBottomLeftRadius: msg.role === 'ai' ? 2 : 16,
+                            marginBottom: 10,
+                            maxWidth: '80%'
+                        }}>
+                            <Text style={{
+                                color: msg.role === 'user' ? '#FFF' : '#374151',
+                                fontFamily: 'Poppins_400Regular',
+                                lineHeight: 20
+                            }}>
+                                {msg.content}
+                            </Text>
+                        </View>
+                    ))}
+                    {loading && (
+                        <View style={{ alignSelf: 'flex-start', padding: 12, backgroundColor: '#F3F4F6', borderRadius: 16, borderBottomLeftRadius: 2 }}>
+                            <ActivityIndicator size="small" color="#6B7280" />
+                        </View>
+                    )}
+                </ScrollView>
+
+                {/* INPUT */}
+                <View style={{ padding: 15, borderTopWidth: 1, borderTopColor: '#F3F4F6', backgroundColor: '#FFF' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', borderRadius: 25, paddingHorizontal: 15, borderWidth: 1, borderColor: '#E5E7EB' }}>
+                        <TextInput
+                            style={{ flex: 1, height: 50, fontFamily: 'Poppins_400Regular' }}
+                            placeholder="Type your question..."
+                            value={question}
+                            onChangeText={setQuestion}
+                            onSubmitEditing={handleSend}
+                        />
+                        <TouchableOpacity
+                            onPress={handleSend}
+                            disabled={!question.trim() || loading}
+                            style={{ padding: 8, backgroundColor: question.trim() ? '#7C3AED' : '#E5E7EB', borderRadius: 20 }}
+                        >
+                            <Feather name="arrow-up" size={20} color={question.trim() ? "#FFF" : "#9CA3AF"} />
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </KeyboardAvoidingView>
+        </Modal>
+    );
+}
+
 const AllCourses = () => {
     const [search, setSearch] = useState("");
     const [selectedCat, setSelectedCat] = useState("All");
     const [modalVisible, setModalVisible] = useState(false);
+    const [chatVisible, setChatVisible] = useState(false); // [NEW] Chat Modal State
     const [currentVideo, setCurrentVideo] = useState(null);
     const [courses, setCourses] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -136,6 +261,11 @@ const AllCourses = () => {
     const playVideo = (course) => {
         setCurrentVideo(course);
         setModalVisible(true);
+    };
+
+    const openChat = (course) => {
+        setCurrentVideo(course); // Set context course
+        setChatVisible(true);
     };
 
     return (
@@ -252,7 +382,22 @@ const AllCourses = () => {
                                     <Text style={styles.ratingText}>{course.rating}</Text>
                                 </View>
                             </View>
-                            <Feather name="play-circle" size={24} color="#F59E0B" />
+
+                            <View style={{ alignItems: 'flex-end', gap: 10 }}>
+                                <Feather name="play-circle" size={24} color="#F59E0B" />
+
+                                {/* ASK AI BUTTON */}
+                                <TouchableOpacity
+                                    onPress={(e) => {
+                                        e.stopPropagation(); // Prevent opening video
+                                        openChat(course);
+                                    }}
+                                    style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#EEF2FF', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: '#C7D2FE' }}
+                                >
+                                    <MaterialCommunityIcons name="robot" size={12} color="#4F46E5" />
+                                    <Text style={{ fontSize: 10, fontFamily: 'Poppins_600SemiBold', color: '#4F46E5', marginLeft: 4 }}>Ask AI</Text>
+                                </TouchableOpacity>
+                            </View>
                         </TouchableOpacity>
                     ))
                 )}
@@ -263,6 +408,14 @@ const AllCourses = () => {
                 videoData={currentVideo}
                 onClose={() => setModalVisible(false)}
             />
+
+            {/* ASK AI MODAL */}
+            <AskAIChatModal
+                visible={chatVisible}
+                courseData={currentVideo}
+                onClose={() => setChatVisible(false)}
+            />
+
         </View>
     );
 };

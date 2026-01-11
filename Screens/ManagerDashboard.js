@@ -27,6 +27,7 @@ import { QuizCreationModal, QuizResultsModal } from '../Components/QuizModals';
 import EditNodeModal from '../Components/EditNodeModal';
 import BulkUploadModal from '../Components/BulkUploadModal'; // [NEW]
 import BucketManagementModal from '../Components/BucketManagementModal'; // [NEW] Bucket management
+import AccessControlModal from '../Components/AccessControlModal'; // [NEW] Hierarchy & Access Control
 import CreateUser from '../Screens/CreateUser';
 import API_URL from '../config';
 import * as SecureStore from 'expo-secure-store';
@@ -201,6 +202,9 @@ export default function ManagerDashboard({ route, navigation }) {
     const [bucketModalVisible, setBucketModalVisible] = useState(false);
     const [courseBuckets, setCourseBuckets] = useState([]);
     const [selectedBucket, setSelectedBucket] = useState(null);
+
+    // [NEW] Access Control Modal State
+    const [accessControlVisible, setAccessControlVisible] = useState(false);
     const [loadingBuckets, setLoadingBuckets] = useState(false);
 
     useEffect(() => {
@@ -999,6 +1003,17 @@ export default function ManagerDashboard({ route, navigation }) {
                             <Text style={styles.actionText}>Send Notif</Text>
                         </TouchableOpacity>
 
+                        {/* ACCESS CONTROL - NEW */}
+                        <TouchableOpacity
+                            style={styles.actionBtn}
+                            onPress={() => setAccessControlVisible(true)}
+                        >
+                            <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
+                                <MaterialCommunityIcons name="shield-lock-outline" size={24} color="#D97706" />
+                            </View>
+                            <Text style={styles.actionText}>Access Control</Text>
+                        </TouchableOpacity>
+
                         {/* [NEW] MANAGE BUCKETS BUTTON */}
                         <TouchableOpacity
                             style={styles.actionBtn}
@@ -1608,6 +1623,12 @@ export default function ManagerDashboard({ route, navigation }) {
                     </View>
                 </Modal>
             </View>
+
+            {/* ACCESS CONTROL MODAL */}
+            <AccessControlModal
+                visible={accessControlVisible}
+                onClose={() => setAccessControlVisible(false)}
+            />
         </View>
     );
 }

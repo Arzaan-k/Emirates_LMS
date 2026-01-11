@@ -13,6 +13,35 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from groq import Groq
 
+from sentence_transformers import SentenceTransformer
+import faiss
+import numpy as np
+
+rag_model = SentenceTransformer("all-MiniLM-L6-v2")
+
+rag_index = faiss.IndexFlatL2(384)
+rag_metadata = []
+
+def chunk_text(text, chunk_size=200, overlap=40):
+    words = text.split()
+    chunks = []
+    for i in range(0, len(words), chunk_size - overlap):
+        chunk = " ".join(words[i:i+chunk_size])
+        chunks.append(chunk)
+    return chunks
+
+
+def add_course_to_rag(course_id, transcript):
+    chunks = chunk_text(transcript)
+
+    for chunk in chunks:
+        emb = rag_model.encode(chunk)
+        rag_index.add(np.array([emb]).astype("float32"))
+        rag_metadata.append({
+            "course_id": course_id,
+            "text": chunk
+        })
+
 # --- CONFIGURATION ---
 PORT = 8000
 HOST = "0.0.0.0"
@@ -150,6 +179,10 @@ class QuizSubmission(BaseModel):
     user_name: str
     answers: List[int]
 
+class AskAIRequest(BaseModel):
+    course_id: str
+    question: str
+
 class HygieneAnalysis(BaseModel):
     section: str
     score: int
@@ -267,6 +300,92 @@ recommendation_history: List[dict] = []  # {id, user_email, recommendations, gen
 # INTERACTION LOGS - Track all user interactions for analysis
 user_interactions: List[dict] = []  # {id, user_email, interaction_type, content_id, content_type, duration_seconds, timestamp, metadata}
 
+# ==========================================
+# HIERARCHY & LEVEL-BASED ACCESS CONTROL
+# ==========================================
+
+# HIERARCHY STORE - Dynamic organizational hierarchy (ordered from top to bottom)
+hierarchy_store: List[dict] = [
+    {"id": "1", "role": "Ops Manager", "name": "Operations Manager", "icon": "account-cog", "color": "#9333EA", "order": 1},
+    {"id": "2", "role": "City Manager", "name": "City Manager", "icon": "city", "color": "#2563EB", "order": 2},
+    {"id": "3", "role": "Deputy City Manager", "name": "Deputy City Manager", "icon": "city-variant", "color": "#0891B2", "order": 3},
+    {"id": "4", "role": "Area Manager", "name": "Area Manager", "icon": "map-marker-radius", "color": "#059669", "order": 4},
+    {"id": "5", "role": "Deputy Area Manager", "name": "Deputy Area Manager", "icon": "map-marker", "color": "#10B981", "order": 5},
+    {"id": "6", "role": "Store Manager", "name": "Store Manager", "icon": "store", "color": "#D97706", "order": 6},
+    {"id": "7", "role": "Assistant Store Manager", "name": "Assistant Store Manager", "icon": "store-outline", "color": "#F59E0B", "order": 7},
+    {"id": "8", "role": "Shift Manager", "name": "Shift Manager", "icon": "clock-outline", "color": "#EF4444", "order": 8},
+    {"id": "9", "role": "Gold Waffler", "name": "Gold Waffler", "icon": "medal-outline", "color": "#F59E0B", "order": 9},
+    {"id": "10", "role": "Silver Waffler", "name": "Silver Waffler", "icon": "medal-outline", "color": "#9CA3AF", "order": 10},
+    {"id": "11", "role": "Waffler", "name": "Waffler", "icon": "account", "color": "#6B7280", "order": 11},
+]
+
+# LEVEL CONFIG STORE - Requirements for each employee level
+# Defines how many nodes/courses need to be completed to reach a level
+level_config_store: dict = {
+    "Waffler": {
+        "min_nodes": 0,
+        "description": "Starting level for new team members",
+        "icon": "account",
+        "color": "#6B7280",
+        "next_level": "Silver Waffler"
+    },
+    "Silver Waffler": {
+        "min_nodes": 10,
+        "description": "Completed basic training modules",
+        "icon": "medal-outline",
+        "color": "#9CA3AF",
+        "next_level": "Gold Waffler"
+    },
+    "Gold Waffler": {
+        "min_nodes": 25,
+        "description": "Expert level with advanced training",
+        "icon": "medal",
+        "color": "#F59E0B",
+        "next_level": "Shift Manager"
+    },
+    "Shift Manager": {
+        "min_nodes": 40,
+        "description": "Leadership track initiated",
+        "icon": "clock-outline",
+        "color": "#EF4444",
+        "next_level": "Assistant Store Manager"
+    },
+    "Assistant Store Manager": {
+        "min_nodes": 60,
+        "description": "Store management training",
+        "icon": "store-outline",
+        "color": "#F59E0B",
+        "next_level": "Store Manager"
+    },
+}
+
+# ACCESS CONTROL STORE - Granular course access per role+level
+# Maps role -> level -> list of accessible course IDs (or "ALL" for full access)
+# If a role is not in this store, they have access to ALL courses
+access_control_store: dict = {
+    "Waffler": {
+        "accessible_courses": [],  # List of specific course IDs accessible to Wafflers
+        "accessible_buckets": ["1"],  # Onboarding bucket only by default
+        "max_courses_visible": 5  # How many courses from each accessible bucket are visible
+    },
+    "Silver Waffler": {
+        "accessible_courses": [],
+        "accessible_buckets": ["1", "2", "3"],  # Onboarding, Product Training, Safety
+        "max_courses_visible": 15
+    },
+    "Gold Waffler": {
+        "accessible_courses": [],
+        "accessible_buckets": ["1", "2", "3", "4"],  # Add Customer Service
+        "max_courses_visible": 30
+    },
+    "Shift Manager": {
+        "accessible_courses": [],
+        "accessible_buckets": ["1", "2", "3", "4", "5"],  # All buckets
+        "max_courses_visible": -1  # -1 means unlimited
+    },
+    # Higher roles have full access by default (not listed = full access)
+}
+
 
 # --- KNOWLEDGE BASE ENDPOINTS ---
 
@@ -348,7 +467,262 @@ async def delete_course_bucket(bucket_id: str):
     
     raise HTTPException(status_code=404, detail="Bucket not found")
 
+# ==========================================
+# HIERARCHY & ACCESS CONTROL ENDPOINTS
+# ==========================================
+
+@app.get("/admin/hierarchy")
+async def get_hierarchy():
+    """Get the organizational hierarchy structure"""
+    return sorted(hierarchy_store, key=lambda x: x.get("order", 999))
+
+@app.post("/admin/hierarchy")
+async def update_hierarchy(roles: str = Form(...)):
+    """Update the entire hierarchy structure (JSON array of roles)"""
+    global hierarchy_store
+    try:
+        new_hierarchy = json.loads(roles)
+        # Validate and assign order
+        for i, role in enumerate(new_hierarchy):
+            if "id" not in role:
+                role["id"] = str(uuid.uuid4())
+            role["order"] = i + 1
+        hierarchy_store = new_hierarchy
+        logger.info(f"Hierarchy updated with {len(new_hierarchy)} roles")
+        return {"status": "success", "hierarchy": hierarchy_store}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON format")
+
+@app.post("/admin/hierarchy/role")
+async def add_hierarchy_role(
+    role: str = Form(...),
+    name: str = Form(...),
+    icon: str = Form("account"),
+    color: str = Form("#6B7280"),
+    order: int = Form(None)
+):
+    """Add a new role to the hierarchy"""
+    new_role = {
+        "id": str(uuid.uuid4()),
+        "role": role,
+        "name": name,
+        "icon": icon,
+        "color": color,
+        "order": order if order else len(hierarchy_store) + 1
+    }
+    hierarchy_store.append(new_role)
+    hierarchy_store.sort(key=lambda x: x.get("order", 999))
+    logger.info(f"Hierarchy role added: {role}")
+    return {"status": "success", "role": new_role}
+
+@app.delete("/admin/hierarchy/role/{role_id}")
+async def delete_hierarchy_role(role_id: str):
+    """Delete a role from the hierarchy"""
+    global hierarchy_store
+    initial_len = len(hierarchy_store)
+    hierarchy_store = [r for r in hierarchy_store if r.get("id") != role_id]
+    
+    if len(hierarchy_store) < initial_len:
+        # Re-order remaining roles
+        for i, role in enumerate(hierarchy_store):
+            role["order"] = i + 1
+        logger.info(f"Hierarchy role deleted: {role_id}")
+        return {"status": "success"}
+    raise HTTPException(status_code=404, detail="Role not found")
+
+@app.get("/admin/level-config")
+async def get_level_config():
+    """Get level requirements configuration"""
+    return level_config_store
+
+@app.post("/admin/level-config")
+async def update_level_config(config: str = Form(...)):
+    """Update level configuration (JSON object)"""
+    global level_config_store
+    try:
+        new_config = json.loads(config)
+        level_config_store = new_config
+        logger.info("Level configuration updated")
+        return {"status": "success", "config": level_config_store}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON format")
+
+@app.post("/admin/level-config/{level_name}")
+async def update_single_level_config(
+    level_name: str,
+    min_nodes: int = Form(...),
+    description: str = Form(None),
+    next_level: str = Form(None)
+):
+    """Update a single level's configuration"""
+    if level_name not in level_config_store:
+        level_config_store[level_name] = {
+            "min_nodes": min_nodes,
+            "description": description or f"Level: {level_name}",
+            "icon": "medal-outline",
+            "color": "#6B7280",
+            "next_level": next_level
+        }
+    else:
+        level_config_store[level_name]["min_nodes"] = min_nodes
+        if description:
+            level_config_store[level_name]["description"] = description
+        if next_level:
+            level_config_store[level_name]["next_level"] = next_level
+    
+    logger.info(f"Level config updated for {level_name}: min_nodes={min_nodes}")
+    return {"status": "success", "level": level_name, "config": level_config_store[level_name]}
+
+@app.get("/admin/access-rules")
+async def get_access_rules():
+    """Get access control rules for all roles"""
+    return access_control_store
+
+@app.post("/admin/access-rules")
+async def update_access_rules(rules: str = Form(...)):
+    """Update all access control rules (JSON object)"""
+    global access_control_store
+    try:
+        new_rules = json.loads(rules)
+        access_control_store = new_rules
+        logger.info("Access control rules updated")
+        return {"status": "success", "rules": access_control_store}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON format")
+
+@app.post("/admin/access-rules/{role_name}")
+async def update_role_access(
+    role_name: str,
+    accessible_courses: str = Form("[]"),  # JSON array of course IDs
+    accessible_buckets: str = Form("[]"),  # JSON array of bucket IDs
+    max_courses_visible: int = Form(-1)
+):
+    """Update access rules for a specific role"""
+    try:
+        courses = json.loads(accessible_courses)
+        buckets = json.loads(accessible_buckets)
+        
+        access_control_store[role_name] = {
+            "accessible_courses": courses,
+            "accessible_buckets": buckets,
+            "max_courses_visible": max_courses_visible
+        }
+        
+        logger.info(f"Access rules updated for {role_name}")
+        return {"status": "success", "role": role_name, "rules": access_control_store[role_name]}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON format")
+
+@app.get("/admin/access-rules/{role_name}/courses")
+async def get_accessible_courses_for_role(role_name: str):
+    """Get list of accessible courses for a specific role"""
+    rules = access_control_store.get(role_name)
+    
+    if not rules:
+        # Role has full access
+        return {"role": role_name, "full_access": True, "courses": content_store}
+    
+    accessible_courses = []
+    accessible_buckets = rules.get("accessible_buckets", [])
+    specific_courses = rules.get("accessible_courses", [])
+    max_visible = rules.get("max_courses_visible", -1)
+    
+    # Get courses from accessible buckets
+    for item in content_store:
+        if item.get("isPathNode", False):
+            bucket_id = item.get("bucket")
+            course_id = item.get("id")
+            
+            # Check if specifically allowed OR in an accessible bucket
+            if course_id in specific_courses or bucket_id in accessible_buckets:
+                accessible_courses.append(item)
+    
+    # Apply max visible limit if set
+    if max_visible > 0:
+        accessible_courses = accessible_courses[:max_visible]
+    
+    return {"role": role_name, "full_access": False, "courses": accessible_courses}
+
+@app.get("/user/level-progress/{user_email}")
+async def get_user_level_progress(user_email: str):
+    """Get user's current level and progress to next level"""
+    # Get user's completed courses count
+    user_completions = [c for c in course_completions if c.get("user_email") == user_email]
+    completed_count = len(user_completions)
+    
+    # Get user from store
+    user = users_store.get(user_email, {})
+    current_role = user.get("role", "Waffler")
+    
+    # Check if current role is a progressable level
+    level_info = level_config_store.get(current_role)
+    
+    if not level_info:
+        # Not a progressable role (e.g., Store Manager, Area Manager)
+        return {
+            "user_email": user_email,
+            "current_level": current_role,
+            "completed_nodes": completed_count,
+            "is_manager": True,
+            "can_progress": False
+        }
+    
+    # Calculate progress to next level
+    next_level = level_info.get("next_level")
+    next_level_info = level_config_store.get(next_level) if next_level else None
+    
+    nodes_for_next = next_level_info.get("min_nodes", 999) if next_level_info else 999
+    progress_percent = min(100, int((completed_count / nodes_for_next) * 100)) if nodes_for_next > 0 else 100
+    
+    return {
+        "user_email": user_email,
+        "current_level": current_role,
+        "current_level_info": level_info,
+        "completed_nodes": completed_count,
+        "next_level": next_level,
+        "nodes_for_next_level": nodes_for_next,
+        "nodes_remaining": max(0, nodes_for_next - completed_count),
+        "progress_percent": progress_percent,
+        "is_manager": False,
+        "can_progress": next_level is not None and completed_count >= nodes_for_next
+    }
+
+@app.post("/user/check-level-up/{user_email}")
+async def check_and_apply_level_up(user_email: str):
+    """Check if user qualifies for level up and apply it"""
+    progress = await get_user_level_progress(user_email)
+    
+    if progress.get("can_progress"):
+        new_level = progress.get("next_level")
+        
+        # Update user's role in store
+        if user_email in users_store:
+            old_level = users_store[user_email].get("role")
+            users_store[user_email]["role"] = new_level
+            logger.info(f"User {user_email} leveled up from {old_level} to {new_level}")
+            
+            # Broadcast level-up event
+            await manager.broadcast({
+                "type": "LEVEL_UP",
+                "data": {
+                    "user_email": user_email,
+                    "old_level": old_level,
+                    "new_level": new_level,
+                    "completed_nodes": progress.get("completed_nodes")
+                }
+            })
+            
+            return {
+                "status": "success",
+                "leveled_up": True,
+                "old_level": old_level,
+                "new_level": new_level
+            }
+    
+    return {"status": "success", "leveled_up": False, "current_level": progress.get("current_level")}
+
 # --- PROCTORED ASSESSMENT ENDPOINTS ---
+
 
 @app.get("/proctored-assessments")
 async def get_proctored_assessments():
@@ -1426,11 +1800,41 @@ async def mark_notification_read(notif_id: str):
 async def get_path_nodes(user_email: str = "user"):
     """
     Returns ordered learning path nodes with user-specific status (completed, active, locked).
+    Now includes role-based access filtering based on access_control_store.
     """
+    # Get user info for access control
+    user = users_store.get(user_email, {})
+    user_role = user.get("role", "Waffler")
+    
     # Filter path nodes
     raw_nodes = [item for item in content_store if item.get("isPathNode", False)]
     # Sort by timestamp (oldest first = linear order)
     raw_nodes.sort(key=lambda x: x["timestamp"])
+    
+    # Apply access control filtering
+    access_rules = access_control_store.get(user_role)
+    
+    if access_rules:
+        # User has restricted access
+        accessible_buckets = access_rules.get("accessible_buckets", [])
+        accessible_courses = access_rules.get("accessible_courses", [])
+        max_visible = access_rules.get("max_courses_visible", -1)
+        
+        filtered_nodes = []
+        for node in raw_nodes:
+            bucket_id = node.get("bucket")
+            course_id = node.get("id")
+            
+            # Check if course is accessible (either specifically allowed or in accessible bucket)
+            if course_id in accessible_courses or bucket_id in accessible_buckets:
+                filtered_nodes.append(node)
+        
+        # Apply max visible limit if set
+        if max_visible > 0:
+            filtered_nodes = filtered_nodes[:max_visible]
+        
+        raw_nodes = filtered_nodes
+    # else: user has full access (not in access_control_store means all access)
     
     # Get user's completed course IDs
     user_completed_ids = {c["course_id"] for c in course_completions if c["user_email"] == user_email}
@@ -2502,6 +2906,101 @@ async def ai_generate_assessment(req: AiGenRequest):
         logger.error(f"AI Gen Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/ask-ai")
+async def ask_ai_about_course(req: AskAIRequest):
+    try:
+        if not req.question.strip():
+            return {"answer": "Please ask a valid question."}
+
+        context_text = ""
+        
+        # Try RAG first if index has data
+        if rag_index.ntotal > 0:
+            try:
+                # 1. Embed Question
+                q_emb = rag_model.encode(req.question)
+
+                # 2. Vector Search
+                k = min(8, rag_index.ntotal)  # Don't request more than available
+                D, I = rag_index.search(np.array([q_emb]).astype("float32"), k)
+
+                # 3. Filter only this course
+                context_chunks = []
+                for idx in I[0]:
+                    if idx >= 0 and idx < len(rag_metadata):
+                        meta = rag_metadata[idx]
+                        if meta["course_id"] == req.course_id:
+                            context_chunks.append(meta["text"])
+
+                if context_chunks:
+                    context_text = "\n\n".join(context_chunks[:4])
+            except Exception as rag_error:
+                logger.warning(f"RAG search failed, falling back to transcript: {rag_error}")
+        
+        # Fallback: Use transcript directly from content_store
+        if not context_text:
+            course = None
+            for item in content_store:
+                if item.get("id") == req.course_id:
+                    course = item
+                    break
+            
+            if not course:
+                return {"answer": "Course not found. Please make sure the course exists."}
+            
+            transcript = course.get("transcript", "")
+            
+            if not transcript or len(transcript.strip()) < 50:
+                return {
+                    "answer": "This course doesn't have a transcript yet. The AI assistant needs the video to be processed first. Please try again after the video has been fully uploaded and processed."
+                }
+            
+            # Use first 4000 chars of transcript
+            context_text = transcript[:4000]
+        
+        # Prepare prompts
+        system_prompt = """You are an AI tutor for a training course at Belgian Waffle.
+Answer questions ONLY based on the provided transcript context.
+If the answer is not in the transcript, say "This topic is not covered in this course."
+Keep answers concise, clear, and helpful. Use bullet points if listing multiple items."""
+        
+        user_prompt = f"""Transcript Context:
+{context_text}
+
+Question: {req.question}
+
+Answer:"""
+        
+        # Call Groq API
+        try:
+            client = Groq(api_key="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")
+            
+            completion = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=400
+            )
+            
+            answer = completion.choices[0].message.content.strip()
+            
+            return {"answer": answer}
+            
+        except Exception as groq_error:
+            logger.error(f"Groq API Error: {groq_error}")
+            return {
+                "answer": "I'm having trouble connecting to the AI service. Please try again in a moment."
+            }
+
+    except Exception as e:
+        logger.error(f"Ask AI Error: {e}")
+        return {
+            "answer": "An error occurred while processing your question. Please try again."
+        }
+
 @app.post("/proctored-assessments/bulk-upload")
 async def bulk_upload_assessment(
     title: str = Form(...),
@@ -2760,11 +3259,19 @@ async def track_course_completion(
         
         logger.info(f"Course completion tracked: {user_email} completed '{course_title}' with score {score}/{max_score}")
         
+        # Check for level up after completion
+        level_up_result = None
+        try:
+            level_up_result = await check_and_apply_level_up(user_email)
+        except Exception as level_err:
+            logger.warning(f"Level up check failed (non-critical): {level_err}")
+        
         return {
             "status": "success",
             "completion": completion,
             "xp_earned": 50 + (score * 2),
-            "total_xp": profile["total_xp"]
+            "total_xp": profile["total_xp"],
+            "level_up": level_up_result
         }
         
     except Exception as e:
