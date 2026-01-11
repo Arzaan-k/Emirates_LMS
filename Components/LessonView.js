@@ -83,8 +83,10 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
     };
 
     // Track module/lesson completion
+    const [completionResult, setCompletionResult] = useState(null);
+
     const trackModuleCompletion = async () => {
-        if (moduleCompleted) return; // Already tracked
+        if (moduleCompleted) return null; // Already tracked
         try {
             const formData = new FormData();
             formData.append("user_email", userEmail);
@@ -93,16 +95,26 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
             formData.append("bucket", lesson.bucket || "general");
             formData.append("xp_earned", (lesson.xp || 50).toString());
 
-            await fetch(`${API_URL}/recommendations/track-completion`, {
+            const response = await fetch(`${API_URL}/recommendations/track-completion`, {
                 method: "POST",
                 body: formData,
             });
+            const result = await response.json();
             setModuleCompleted(true);
-            console.log("Module completion tracked for recommendations");
+            setCompletionResult(result);
+            console.log("Module completion tracked:", result);
+            return result;
         } catch (err) {
             console.error("Error tracking module:", err);
+            return null;
         }
     };
+
+    // Handle closing - pass completion result to parent
+    const handleClose = () => {
+        onClose(completionResult);
+    };
+
 
     // Track when video ends
     const handleVideoPlaybackStatus = (status) => {
@@ -137,7 +149,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
     };
 
     return (
-        <RNModal visible={true} animationType="slide" onRequestClose={onClose} presentationStyle="fullScreen">
+        <RNModal visible={true} animationType="slide" onRequestClose={handleClose} presentationStyle="fullScreen">
             <View style={styles.container}>
                 {/* BACKGROUND */}
                 <LinearGradient colors={['#1F2937', '#111827']} style={StyleSheet.absoluteFill} />
@@ -146,7 +158,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
                     {/* ... content ... */}
                     {/* HEADER */}
                     <View style={styles.header}>
-                        <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+                        <TouchableOpacity onPress={handleClose} style={styles.closeBtn}>
                             <Feather name="chevron-down" size={24} color="#FFF" />
                         </TouchableOpacity>
                         <View style={{ flex: 1, alignItems: 'center' }}>

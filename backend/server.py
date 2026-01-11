@@ -3770,7 +3770,9 @@ def ensure_user_profile(user_email: str):
             "courses_completed": 0,
             "quizzes_completed": 0,
             "assessments_completed": 0,
+            "total_time_spent_seconds": 0,  # Track total time spent
             "last_activity": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
             "learning_streak": 0,
             "weak_areas": [],
             "strong_areas": []
@@ -3782,7 +3784,13 @@ def ensure_user_profile(user_email: str):
                 user_learning_profiles[user_email]["skill_scores"][k] = {"score": 0, "max_score": 0, "percentage": 0, "attempts": 0}
             elif "attempts" not in user_learning_profiles[user_email]["skill_scores"][k]:
                 user_learning_profiles[user_email]["skill_scores"][k]["attempts"] = 0
+        # Ensure missing fields exist (backward compatibility)
+        if "total_time_spent_seconds" not in user_learning_profiles[user_email]:
+            user_learning_profiles[user_email]["total_time_spent_seconds"] = 0
+        if "updated_at" not in user_learning_profiles[user_email]:
+            user_learning_profiles[user_email]["updated_at"] = datetime.now().isoformat()
     return user_learning_profiles[user_email]
+
 
 def find_skill_key_from_content(bucket: str, title: str = ""):
     """Find the best matching skill category key from bucket name or content title."""
@@ -3931,19 +3939,118 @@ async def track_completion(
         }
         course_completions.append(completion_record)
         
+        # === LEVEL ADVANCEMENT LOGIC ===
+        level_up = False
+        new_role = None
+        
+        # Ensure user exists in users_store
+        if user_email not in users_store:
+            users_store[user_email] = {
+                "email": user_email,
+                "role": "Waffler",
+                "created_at": datetime.now().isoformat()
+            }
+        
+        user_data = users_store.get(user_email)
+        current_role = user_data.get("role", "Waffler")
+        
+        # Define Hierarchy Order
+        HIERARCHY = ['Waffler', 'Silver Waffler', 'Gold Waffler', 'Shift Manager', 'Assistant Store Manager']
+        
+        if current_role in HIERARCHY:
+            current_idx = HIERARCHY.index(current_role)
+            
+            # Check for promotion if not at top level
+            if current_idx < len(HIERARCHY) - 1:
+                # Get requirements for CURRENT level
+                # User must complete ALL courses assigned to their current level to advance
+                role_rules = access_control_store.get(current_role, {})
+                required_courses = role_rules.get("accessible_courses", [])
+                
+                if required_courses:
+                    # Check if user has completed ALL required courses
+                    user_completed_ids = [c["course_id"] for c in course_completions if c["user_email"] == user_email]
+                    
+                    # Check subset
+                    all_completed = all(req_id in user_completed_ids for req_id in required_courses)
+                    
+                    if all_completed:
+                        # PROMOTE USER
+                        next_role = HIERARCHY[current_idx + 1]
+                        user_data["role"] = next_role
+                        users_store[user_email] = user_data  # Save updated role
+                        level_up = True
+                        new_role = next_role
+                        logger.info(f"USER PROMOTED: {user_email} -> {next_role}")
+
+
         logger.info(f"Module completion tracked for {user_email}: +{actual_xp} XP")
         
         return {
             "status": "success",
             "xp_earned": actual_xp,
             "total_xp": profile["total_xp"],
-            "message": f"Module completed! +{actual_xp} XP"
+            "message": f"Module completed! +{actual_xp} XP",
+            "level_up": level_up,
+            "new_level": new_role
         }
     except Exception as e:
         logger.error(f"Track completion error: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return {"status": "error", "message": str(e)}
+
+@app.get("/user/level-progress/{user_email}")
+async def get_user_level_progress(user_email: str):
+    """Get detailed progress towards next level"""
+    try:
+        # Ensure user exists in users_store
+        if user_email not in users_store:
+            users_store[user_email] = {
+                "email": user_email,
+                "role": "Waffler",
+                "created_at": datetime.now().isoformat()
+            }
+            
+        user_data = users_store.get(user_email)
+        current_role = user_data.get("role", "Waffler")
+
+        
+        # Define Hierarchy
+        HIERARCHY = ['Waffler', 'Silver Waffler', 'Gold Waffler', 'Shift Manager', 'Assistant Store Manager']
+        
+        # Get requirements for CURRENT level
+        role_rules = access_control_store.get(current_role, {})
+        required_course_ids = role_rules.get("accessible_courses", [])
+        
+        # Get user completions
+        user_completed_ids = [c["course_id"] for c in course_completions if c["user_email"] == user_email]
+        
+        # Count how many required courses are done
+        completed_count = sum(1 for cid in required_course_ids if cid in user_completed_ids)
+        total_required = len(required_course_ids)
+        
+        next_level = None
+        if current_role in HIERARCHY:
+            idx = HIERARCHY.index(current_role)
+            if idx < len(HIERARCHY) - 1:
+                next_level = HIERARCHY[idx + 1]
+        
+        # Get total global completed nodes for display
+        total_completed_nodes = len(set(user_completed_ids))
+        
+        return {
+            "current_level": current_role,
+            "next_level": next_level,
+            "nodes_completed_in_level": completed_count,
+            "nodes_required_in_level": total_required,
+            "completed_nodes": total_completed_nodes, # Total global
+            "nodes_remaining": max(0, total_required - completed_count),
+            "progress_percent": int((completed_count / total_required * 100)) if total_required > 0 else 100
+        }
+    except Exception as e:
+        logger.error(f"Level progress error: {e}")
+        return {"error": str(e)}
 
 
 if __name__ == "__main__":

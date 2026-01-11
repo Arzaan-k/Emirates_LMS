@@ -151,40 +151,46 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                         <Text style={styles.addBtnText}>Select Videos</Text>
                     </TouchableOpacity>
 
-                    {/* [NEW] BUCKET SELECTOR */}
                     <Text style={styles.sectionLabel}>Course Bucket (Optional)</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.bucketScroll}>
-                        <TouchableOpacity
-                            onPress={() => setSelectedBucket(null)}
-                            style={[
-                                styles.bucketChip,
-                                !selectedBucket && styles.bucketChipSelected
-                            ]}
+                    <View style={{ height: 50 }}>
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            style={styles.bucketScroll}
+                            contentContainerStyle={{ alignItems: 'center', paddingRight: 20 }}
                         >
-                            <MaterialCommunityIcons name="close-circle" size={16} color={!selectedBucket ? '#FFF' : '#6B7280'} />
-                            <Text style={[styles.bucketChipText, !selectedBucket && { color: '#FFF' }]}>None</Text>
-                        </TouchableOpacity>
-                        {courseBuckets.map((bucket) => (
                             <TouchableOpacity
-                                key={bucket.id}
-                                onPress={() => setSelectedBucket(bucket.name)}
+                                onPress={() => setSelectedBucket(null)}
                                 style={[
                                     styles.bucketChip,
-                                    selectedBucket === bucket.name && { backgroundColor: bucket.color, borderColor: bucket.color }
+                                    !selectedBucket && styles.bucketChipSelected
                                 ]}
                             >
-                                <MaterialCommunityIcons
-                                    name={bucket.icon || 'folder'}
-                                    size={16}
-                                    color={selectedBucket === bucket.name ? '#FFF' : bucket.color}
-                                />
-                                <Text style={[
-                                    styles.bucketChipText,
-                                    selectedBucket === bucket.name && { color: '#FFF' }
-                                ]}>{bucket.name}</Text>
+                                <MaterialCommunityIcons name="close-circle" size={16} color={!selectedBucket ? '#FFF' : '#6B7280'} />
+                                <Text style={[styles.bucketChipText, !selectedBucket && { color: '#FFF' }]}>None</Text>
                             </TouchableOpacity>
-                        ))}
-                    </ScrollView>
+                            {courseBuckets.map((bucket) => (
+                                <TouchableOpacity
+                                    key={bucket.id}
+                                    onPress={() => setSelectedBucket(bucket.name)}
+                                    style={[
+                                        styles.bucketChip,
+                                        selectedBucket === bucket.name && { backgroundColor: bucket.color, borderColor: bucket.color }
+                                    ]}
+                                >
+                                    <MaterialCommunityIcons
+                                        name={bucket.icon || 'folder'}
+                                        size={16}
+                                        color={selectedBucket === bucket.name ? '#FFF' : bucket.color}
+                                    />
+                                    <Text style={[
+                                        styles.bucketChipText,
+                                        selectedBucket === bucket.name && { color: '#FFF' }
+                                    ]}>{bucket.name}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </View>
 
                     {/* PATH TOGGLE */}
                     <View style={styles.optionRow}>
