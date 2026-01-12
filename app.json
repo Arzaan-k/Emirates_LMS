@@ -39,7 +39,8 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Allow Belgian Waffle LMS to use your location for attendance tracking and team coordination."
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "extra": {
       "eas": {

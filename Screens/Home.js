@@ -209,14 +209,21 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
         </TouchableOpacity>
 
         {/* VIDEO PLAYER */}
-        <Video
-          source={{ uri: videoData.videoUrl }}
-          style={{ width: '100%', height: 250, marginTop: 40 }}
-          useNativeControls
-          resizeMode={ResizeMode.CONTAIN}
-          shouldPlay
-          onError={(e) => console.log("Video Error:", e)}
-        />
+        {videoData.videoUrl?.includes('youtube.com') || videoData.videoUrl?.includes('youtu.be') ? (
+          <YouTubePlayer
+            url={videoData.videoUrl}
+            style={{ marginTop: 40 }}
+          />
+        ) : (
+          <Video
+            source={{ uri: videoData.videoUrl }}
+            style={{ width: '100%', height: 250, marginTop: 40 }}
+            useNativeControls
+            resizeMode={ResizeMode.CONTAIN}
+            shouldPlay
+            onError={(e) => console.log("Video Error:", e)}
+          />
+        )}
 
         {/* INTERACTIVE SECTION */}
         <View style={styles.interactiveContainer}>
@@ -394,6 +401,53 @@ function ProctoredFeedSection({ data, onStart }) {
               </View>
               <View style={styles.proctorFeedBadge}>
                 <Text style={styles.proctorFeedBadgeText}>{t('official')}</Text>
+              </View>
+            </TouchableOpacity>
+          </Animated.View>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+// --- NEW: MEETINGS FEED SECTION ---
+function MeetingsFeedSection({ data, onJoin }) {
+  const { t } = useLanguage();
+  if (!data || data.length === 0) return null;
+
+  const formatTime = (isoString) => {
+    try {
+      const date = new Date(isoString);
+      return date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return '';
+    }
+  };
+
+  return (
+    <View style={styles.sectionContainer}>
+      <View style={[styles.sectionHeader, { paddingHorizontal: 20 }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#6366F1', marginRight: 8 }} />
+          <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Upcoming Meetings</Text>
+        </View>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20, paddingBottom: 10 }}>
+        {data.map((item, index) => (
+          <Animated.View key={index} entering={FadeInRight.duration(500)} style={styles.meetingFeedCard}>
+            <TouchableOpacity
+              style={styles.meetingFeedCardInner}
+              onPress={() => onJoin(item)}
+            >
+              <View style={styles.meetingFeedIcon}>
+                <MaterialCommunityIcons name="video" size={24} color="#FFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.meetingFeedTitle} numberOfLines={1}>{item.title}</Text>
+                <Text style={styles.meetingFeedMeta}>{formatTime(item.scheduled_at)} • {item.duration_minutes}min</Text>
+              </View>
+              <View style={styles.meetingFeedBadge}>
+                <Text style={styles.meetingFeedBadgeText}>Join</Text>
               </View>
             </TouchableOpacity>
           </Animated.View>
@@ -781,6 +835,9 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   const [newsData, setNewsData] = useState([]);
   const [liveQuizzesData, setLiveQuizzesData] = useState([]);
 
+  // [NEW] MEETINGS STATE
+  const [upcomingMeetings, setUpcomingMeetings] = useState([]);
+
   const handleAcknowledge = async (id) => {
     try {
       // Add to local tracking FIRST to prevent re-display
@@ -893,6 +950,21 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
     }
   };
 
+  // [NEW] FETCH MEETINGS
+  const fetchMeetings = async () => {
+    try {
+      const response = await fetch(`${API_URL}/meetings`);
+      const data = await response.json();
+      if (Array.isArray(data)) {
+        // Filter only scheduled/ongoing meetings
+        const active = data.filter(m => m.status !== 'ended');
+        setUpcomingMeetings(active);
+      }
+    } catch (error) {
+      console.error("Error fetching meetings:", error);
+    }
+  };
+
   useEffect(() => {
     // CRITICAL: Fetch crucial notifications FIRST to block app if needed
     fetchCrucialNotifications();
@@ -901,6 +973,7 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
     fetchNews();
     fetchLiveQuizzes();
     fetchProctoredAssessments();
+    fetchMeetings(); // [NEW]
   }, []);
 
   useEffect(() => {
@@ -940,6 +1013,12 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
           }
         } else if (message.type === "proctored") {
           setAssignedProctoring(prev => [message.data, ...prev]);
+        } else if (message.type === "MEETING_SCHEDULED") {
+          // [NEW] Handle new meeting notification
+          setUpcomingMeetings(prev => [message.data, ...prev]);
+        } else if (message.type === "MEETING_ENDED") {
+          // Remove ended meeting from list
+          setUpcomingMeetings(prev => prev.filter(m => m.id !== message.data.meeting_id));
           const notif = {
             title: "Locked Assessment!",
             message: message.data.title,
@@ -1005,6 +1084,16 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
         <QuizFeedSection
           data={assignedQuizzes}
           onStart={(quiz) => startQuiz(quiz)}
+        />
+
+        {/* [NEW] MEETINGS FEED */}
+        <MeetingsFeedSection
+          data={upcomingMeetings}
+          onJoin={(meeting) => navigation.navigate('MeetingRoom', {
+            meeting,
+            userEmail: 'user@company.com',
+            userName: 'User'
+          })}
         />
 
         <DigitalTwinCard onOpen={onOpenTwin} />
@@ -1927,6 +2016,15 @@ const styles = StyleSheet.create({
   proctorFeedMeta: { color: "#94A3B8", fontSize: 12, fontFamily: "Poppins_400Regular" },
   proctorFeedBadge: { position: 'absolute', top: 12, right: 12, backgroundColor: '#EF4444', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
   proctorFeedBadgeText: { color: '#FFF', fontSize: 9, fontFamily: "Poppins_700Bold" },
+
+  // [NEW] MEETING FEED STYLES
+  meetingFeedCard: { width: 280, marginRight: 16, marginBottom: 5 },
+  meetingFeedCardInner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#4F46E5', padding: 14, borderRadius: 20, shadowColor: "#4F46E5", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.25, shadowRadius: 10, elevation: 6 },
+  meetingFeedIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.15)', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
+  meetingFeedTitle: { color: "#FFF", fontSize: 14, fontFamily: "Poppins_600SemiBold", marginBottom: 2 },
+  meetingFeedMeta: { color: "rgba(255,255,255,0.8)", fontSize: 12, fontFamily: "Poppins_400Regular" },
+  meetingFeedBadge: { position: 'absolute', top: 12, right: 12, backgroundColor: '#10B981', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
+  meetingFeedBadgeText: { color: '#FFF', fontSize: 10, fontFamily: "Poppins_600SemiBold" },
 
   // NOTIFICATIONS
   overlayContainer: { position: 'absolute', top: 120, left: 0, right: 0, paddingHorizontal: 20, zIndex: 9999 },

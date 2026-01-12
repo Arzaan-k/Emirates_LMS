@@ -33,6 +33,9 @@ import API_URL from '../config';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CommonActions } from '@react-navigation/native';
+import MeetingSchedulerModal from '../Components/MeetingScheduler'; // [NEW] Virtual meetings
+
+
 
 const { width, height } = Dimensions.get('window');
 // const API_URL = "http://172.20.10.2:8000:8000"; // Updated for physical device using local IP
@@ -151,6 +154,7 @@ const FeedItem = ({ item, index }) => {
 }
 
 export default function ManagerDashboard({ route, navigation }) {
+    const [meetingModalVisible, setMeetingModalVisible] = useState(false);
     const { userProfile } = route.params || {};
     const role = userProfile?.role || "Manager";
     const name = userProfile?.name || "User";
@@ -1024,6 +1028,17 @@ export default function ManagerDashboard({ route, navigation }) {
                             </View>
                             <Text style={styles.actionText}>Manage Buckets</Text>
                         </TouchableOpacity>
+
+                        {/* [NEW] SCHEDULE MEETING BUTTON */}
+                        <TouchableOpacity
+                            style={styles.actionBtn}
+                            onPress={() => setMeetingModalVisible(true)}
+                        >
+                            <View style={[styles.actionIcon, { backgroundColor: '#DBEAFE' }]}>
+                                <MaterialCommunityIcons name="video-plus" size={24} color="#2563EB" />
+                            </View>
+                            <Text style={styles.actionText}>Schedule Meeting</Text>
+                        </TouchableOpacity>
                     </View>
 
                     {/* --- [NEW] MANAGE LEARNING PATH SECTION --- */}
@@ -1052,577 +1067,584 @@ export default function ManagerDashboard({ route, navigation }) {
                         )}
                     </ScrollView>
 
-                </ScrollView >
+                </ScrollView>
+            </View>
 
-                {/* MODALS */}
-                <EditNodeModal
-                    visible={editModalVisible}
-                    node={selectedNode}
-                    onClose={() => setEditModalVisible(false)}
-                    onSave={handleUpdateNode}
-                    onDelete={handleDeleteNode}
-                    onGenerateQuiz={handleGenerateQuiz}
-                />
+            {/* MODALS */}
+            <EditNodeModal
+                visible={editModalVisible}
+                node={selectedNode}
+                onClose={() => setEditModalVisible(false)}
+                onSave={handleUpdateNode}
+                onDelete={handleDeleteNode}
+                onGenerateQuiz={handleGenerateQuiz}
+            />
 
-                {/* BULK UPLOAD MODAL */}
-                <BulkUploadModal
-                    visible={bulkModalVisible}
-                    onClose={() => setBulkModalVisible(false)}
-                    onUploadComplete={() => setRefreshPath(prev => prev + 1)}
-                />
+            {/* BULK UPLOAD MODAL */}
+            <BulkUploadModal
+                visible={bulkModalVisible}
+                onClose={() => setBulkModalVisible(false)}
+                onUploadComplete={() => setRefreshPath(prev => prev + 1)}
+            />
 
-                {/* [NEW] BUCKET MANAGEMENT MODAL */}
-                <BucketManagementModal
-                    visible={bucketModalVisible}
-                    onClose={() => setBucketModalVisible(false)}
-                    onBucketsChanged={fetchBuckets}
-                />
+            {/* [NEW] BUCKET MANAGEMENT MODAL */}
+            <BucketManagementModal
+                visible={bucketModalVisible}
+                onClose={() => setBucketModalVisible(false)}
+                onBucketsChanged={fetchBuckets}
+            />
 
-                {/* CREATE USER MODAL */}
-                <CreateUser
-                    visible={createUserVisible}
-                    onClose={() => setCreateUserVisible(false)}
-                    onCreate={handleCreateUser}
-                />
+            <MeetingSchedulerModal
+                visible={meetingModalVisible}
+                onClose={() => setMeetingModalVisible(false)}
+                hostName={name}
+                hostEmail={userProfile?.email || 'manager@company.com'}
+            />
 
-                {/* NOTIFICATION MODAL */}
-                <Modal visible={notifModalVisible} animationType="slide" transparent>
-                    <View style={styles.modalOverlay}>
-                        <View style={styles.modalContent}>
-                            <View style={styles.modalHeader}>
-                                <Text style={styles.modalTitle}>Send Notification</Text>
-                                <TouchableOpacity onPress={() => setNotifModalVisible(false)}>
-                                    <Feather name="x" size={24} color="#374151" />
+            {/* CREATE USER MODAL */}
+            <CreateUser
+                visible={createUserVisible}
+                onClose={() => setCreateUserVisible(false)}
+                onCreate={handleCreateUser}
+            />
+
+            {/* NOTIFICATION MODAL */}
+            <Modal visible={notifModalVisible} animationType="slide" transparent>
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Send Notification</Text>
+                            <TouchableOpacity onPress={() => setNotifModalVisible(false)}>
+                                <Feather name="x" size={24} color="#374151" />
+                            </TouchableOpacity>
+                        </View>
+
+                        <Text style={styles.inputLabel}>Title</Text>
+                        <TextInput
+                            style={styles.input}
+                            placeholder="Notification Title"
+                            value={notifTitle}
+                            onChangeText={setNotifTitle}
+                        />
+
+                        <Text style={styles.inputLabel}>Message</Text>
+                        <TextInput
+                            style={[styles.input, { height: 100 }]}
+                            placeholder="Message content..."
+                            value={notifMessage}
+                            onChangeText={setNotifMessage}
+                            multiline
+                        />
+
+                        <TouchableOpacity
+                            style={styles.toggleRow}
+                            onPress={() => setIsCrucial(!isCrucial)}
+                        >
+                            <View style={[styles.checkbox, isCrucial && { backgroundColor: '#EF4444', borderColor: '#EF4444' }]}>
+                                {isCrucial && <Feather name="check" size={14} color="#FFF" />}
+                            </View>
+                            <Text style={styles.toggleLabel}>Mark as Crucial (Blocking)</Text>
+                        </TouchableOpacity>
+
+                        {/* FILE PICKER */}
+                        <TouchableOpacity
+                            style={[styles.filePickBtn, notifFile && styles.filePickBtnActive]}
+                            onPress={pickNotifFile}
+                        >
+                            <Feather name={notifFile ? "check" : "camera"} size={20} color={notifFile ? "#FFF" : "#6B7280"} />
+                            <Text style={[styles.filePickText, notifFile && { color: '#FFF' }]}>
+                                {notifFile ? "Media Attached" : "Attach Image/Video"}
+                            </Text>
+                            {notifFile && (
+                                <TouchableOpacity onPress={() => setNotifFile(null)} style={{ marginLeft: 10 }}>
+                                    <Feather name="x" size={18} color="#FFF" />
+                                </TouchableOpacity>
+                            )}
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={[styles.uploadBtn, { backgroundColor: isCrucial ? '#EF4444' : '#10B981' }]}
+                            onPress={handleSendNotification}
+                        >
+                            {uploading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.uploadBtnText}>Send Notification</Text>}
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* PREMIUM UPLOAD MODAL */}
+            <Modal visible={uploadVisible} animationType="slide" transparent>
+                <View style={styles.modalOverlay}>
+                    <View style={[styles.modalContent, { maxHeight: height * 0.8 }]}>
+                        {/* PREMIUM HEADER - GRADIENT */}
+                        <LinearGradient
+                            colors={['#7C3AED', '#4F46E5']}
+                            style={{ margin: -2, padding: 20, borderTopLeftRadius: 24, borderTopRightRadius: 24, marginBottom: 15 }}
+                            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                        >
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                    <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
+                                        <Feather name="upload-cloud" size={18} color="#FFF" />
+                                    </View>
+                                    <Text style={{ fontSize: 18, color: '#FFF', fontFamily: 'Poppins_700Bold' }}>Knowledge Base</Text>
+                                </View>
+                                <TouchableOpacity onPress={() => setUploadVisible(false)} style={{ backgroundColor: 'rgba(255,255,255,0.2)', padding: 5, borderRadius: 8 }}>
+                                    <Feather name="x" size={20} color="#FFF" />
                                 </TouchableOpacity>
                             </View>
+                        </LinearGradient>
 
+                        <ScrollView showsVerticalScrollIndicator={false}>
                             <Text style={styles.inputLabel}>Title</Text>
                             <TextInput
                                 style={styles.input}
-                                placeholder="Notification Title"
-                                value={notifTitle}
-                                onChangeText={setNotifTitle}
+                                placeholder="e.g. Grinder Maintenance Manual"
+                                value={resTitle}
+                                onChangeText={setResTitle}
                             />
 
-                            <Text style={styles.inputLabel}>Message</Text>
+                            <Text style={styles.inputLabel}>Category</Text>
+                            {!newCatMode ? (
+                                <View style={{ marginBottom: 15 }}>
+                                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
+                                        {categories.map((cat, i) => (
+                                            <TouchableOpacity
+                                                key={i}
+                                                onPress={() => setResCategory(cat.name)}
+                                                style={{
+                                                    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, marginRight: 8,
+                                                    backgroundColor: resCategory === cat.name ? '#7C3AED' : '#F3F4F6',
+                                                    borderWidth: 1, borderColor: resCategory === cat.name ? '#7C3AED' : '#E5E7EB'
+                                                }}
+                                            >
+                                                <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: resCategory === cat.name ? '#FFF' : '#4B5563' }}>{cat.name}</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                        <TouchableOpacity
+                                            onPress={() => setNewCatMode(true)}
+                                            style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: '#FFF', borderWidth: 1, borderColor: '#7C3AED', borderStyle: 'dashed' }}
+                                        >
+                                            <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: '#7C3AED' }}>+ New</Text>
+                                        </TouchableOpacity>
+                                    </ScrollView>
+                                </View>
+                            ) : (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15, gap: 10 }}>
+                                    <TextInput
+                                        style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                                        placeholder="New Category Name"
+                                        value={newCatName}
+                                        onChangeText={setNewCatName}
+                                    />
+                                    <TouchableOpacity onPress={handleCreateCategory} style={{ backgroundColor: '#7C3AED', padding: 12, borderRadius: 12 }}>
+                                        <Feather name="check" size={20} color="#FFF" />
+                                    </TouchableOpacity>
+                                    <TouchableOpacity onPress={() => setNewCatMode(false)} style={{ backgroundColor: '#F3F4F6', padding: 12, borderRadius: 12 }}>
+                                        <Feather name="x" size={20} color="#6B7280" />
+                                    </TouchableOpacity>
+                                </View>
+                            )}
+
+                            <Text style={styles.inputLabel}>File (PDF, Video, Excel...)</Text>
+                            <TouchableOpacity
+                                style={[styles.fileBtn, { borderStyle: 'dashed', borderWidth: 2, borderColor: resFile ? '#10B981' : '#D1D5DB', backgroundColor: resFile ? '#ECFDF5' : '#F9FAFB', height: 100, flexDirection: 'column', gap: 5 }]}
+                                onPress={pickResourceFile}
+                            >
+                                <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: resFile ? '#D1FAE5' : '#E5E7EB', justifyContent: 'center', alignItems: 'center' }}>
+                                    <Feather name={resFile ? "check" : "file-plus"} size={20} color={resFile ? "#10B981" : "#6B7280"} />
+                                </View>
+                                <Text style={[styles.fileBtnText, { textAlign: 'center' }]}>
+                                    {resFile ? resFile.name : "Tap to Select File"}
+                                </Text>
+                                {resFile && <Text style={{ fontSize: 10, color: '#6B7280' }}>{(resFile.size / 1024 / 1024).toFixed(2)} MB</Text>}
+                            </TouchableOpacity>
+
+                            <Text style={styles.inputLabel}>Description</Text>
                             <TextInput
-                                style={[styles.input, { height: 100 }]}
-                                placeholder="Message content..."
-                                value={notifMessage}
-                                onChangeText={setNotifMessage}
+                                style={[styles.input, { height: 80 }]}
+                                placeholder="Brief summary used for AI Search..."
+                                value={resDesc}
+                                onChangeText={setResDesc}
                                 multiline
                             />
 
-                            <TouchableOpacity
-                                style={styles.toggleRow}
-                                onPress={() => setIsCrucial(!isCrucial)}
-                            >
-                                <View style={[styles.checkbox, isCrucial && { backgroundColor: '#EF4444', borderColor: '#EF4444' }]}>
-                                    {isCrucial && <Feather name="check" size={14} color="#FFF" />}
-                                </View>
-                                <Text style={styles.toggleLabel}>Mark as Crucial (Blocking)</Text>
-                            </TouchableOpacity>
-
-                            {/* FILE PICKER */}
-                            <TouchableOpacity
-                                style={[styles.filePickBtn, notifFile && styles.filePickBtnActive]}
-                                onPress={pickNotifFile}
-                            >
-                                <Feather name={notifFile ? "check" : "camera"} size={20} color={notifFile ? "#FFF" : "#6B7280"} />
-                                <Text style={[styles.filePickText, notifFile && { color: '#FFF' }]}>
-                                    {notifFile ? "Media Attached" : "Attach Image/Video"}
-                                </Text>
-                                {notifFile && (
-                                    <TouchableOpacity onPress={() => setNotifFile(null)} style={{ marginLeft: 10 }}>
-                                        <Feather name="x" size={18} color="#FFF" />
+                            {/* [NEW] Course Bucket Selector */}
+                            <Text style={styles.inputLabel}>Course Bucket (Optional)</Text>
+                            <View style={{ marginBottom: 15 }}>
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
+                                    <TouchableOpacity
+                                        onPress={() => setSelectedBucket(null)}
+                                        style={{
+                                            paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginRight: 8,
+                                            backgroundColor: !selectedBucket ? '#6366F1' : '#F3F4F6',
+                                            borderWidth: 1, borderColor: !selectedBucket ? '#6366F1' : '#E5E7EB',
+                                            flexDirection: 'row', alignItems: 'center'
+                                        }}
+                                    >
+                                        <MaterialCommunityIcons name="close-circle" size={14} color={!selectedBucket ? '#FFF' : '#6B7280'} style={{ marginRight: 4 }} />
+                                        <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: !selectedBucket ? '#FFF' : '#4B5563' }}>None</Text>
                                     </TouchableOpacity>
-                                )}
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                style={[styles.uploadBtn, { backgroundColor: isCrucial ? '#EF4444' : '#10B981' }]}
-                                onPress={handleSendNotification}
-                            >
-                                {uploading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.uploadBtnText}>Send Notification</Text>}
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </Modal>
-
-                {/* PREMIUM UPLOAD MODAL */}
-                <Modal visible={uploadVisible} animationType="slide" transparent>
-                    <View style={styles.modalOverlay}>
-                        <View style={[styles.modalContent, { maxHeight: height * 0.8 }]}>
-                            {/* PREMIUM HEADER - GRADIENT */}
-                            <LinearGradient
-                                colors={['#7C3AED', '#4F46E5']}
-                                style={{ margin: -2, padding: 20, borderTopLeftRadius: 24, borderTopRightRadius: 24, marginBottom: 15 }}
-                                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-                            >
-                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                        <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
-                                            <Feather name="upload-cloud" size={18} color="#FFF" />
-                                        </View>
-                                        <Text style={{ fontSize: 18, color: '#FFF', fontFamily: 'Poppins_700Bold' }}>Knowledge Base</Text>
-                                    </View>
-                                    <TouchableOpacity onPress={() => setUploadVisible(false)} style={{ backgroundColor: 'rgba(255,255,255,0.2)', padding: 5, borderRadius: 8 }}>
-                                        <Feather name="x" size={20} color="#FFF" />
-                                    </TouchableOpacity>
-                                </View>
-                            </LinearGradient>
-
-                            <ScrollView showsVerticalScrollIndicator={false}>
-                                <Text style={styles.inputLabel}>Title</Text>
-                                <TextInput
-                                    style={styles.input}
-                                    placeholder="e.g. Grinder Maintenance Manual"
-                                    value={resTitle}
-                                    onChangeText={setResTitle}
-                                />
-
-                                <Text style={styles.inputLabel}>Category</Text>
-                                {!newCatMode ? (
-                                    <View style={{ marginBottom: 15 }}>
-                                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
-                                            {categories.map((cat, i) => (
-                                                <TouchableOpacity
-                                                    key={i}
-                                                    onPress={() => setResCategory(cat.name)}
-                                                    style={{
-                                                        paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, marginRight: 8,
-                                                        backgroundColor: resCategory === cat.name ? '#7C3AED' : '#F3F4F6',
-                                                        borderWidth: 1, borderColor: resCategory === cat.name ? '#7C3AED' : '#E5E7EB'
-                                                    }}
-                                                >
-                                                    <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: resCategory === cat.name ? '#FFF' : '#4B5563' }}>{cat.name}</Text>
-                                                </TouchableOpacity>
-                                            ))}
-                                            <TouchableOpacity
-                                                onPress={() => setNewCatMode(true)}
-                                                style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: '#FFF', borderWidth: 1, borderColor: '#7C3AED', borderStyle: 'dashed' }}
-                                            >
-                                                <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: '#7C3AED' }}>+ New</Text>
-                                            </TouchableOpacity>
-                                        </ScrollView>
-                                    </View>
-                                ) : (
-                                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15, gap: 10 }}>
-                                        <TextInput
-                                            style={[styles.input, { flex: 1, marginBottom: 0 }]}
-                                            placeholder="New Category Name"
-                                            value={newCatName}
-                                            onChangeText={setNewCatName}
-                                        />
-                                        <TouchableOpacity onPress={handleCreateCategory} style={{ backgroundColor: '#7C3AED', padding: 12, borderRadius: 12 }}>
-                                            <Feather name="check" size={20} color="#FFF" />
-                                        </TouchableOpacity>
-                                        <TouchableOpacity onPress={() => setNewCatMode(false)} style={{ backgroundColor: '#F3F4F6', padding: 12, borderRadius: 12 }}>
-                                            <Feather name="x" size={20} color="#6B7280" />
-                                        </TouchableOpacity>
-                                    </View>
-                                )}
-
-                                <Text style={styles.inputLabel}>File (PDF, Video, Excel...)</Text>
-                                <TouchableOpacity
-                                    style={[styles.fileBtn, { borderStyle: 'dashed', borderWidth: 2, borderColor: resFile ? '#10B981' : '#D1D5DB', backgroundColor: resFile ? '#ECFDF5' : '#F9FAFB', height: 100, flexDirection: 'column', gap: 5 }]}
-                                    onPress={pickResourceFile}
-                                >
-                                    <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: resFile ? '#D1FAE5' : '#E5E7EB', justifyContent: 'center', alignItems: 'center' }}>
-                                        <Feather name={resFile ? "check" : "file-plus"} size={20} color={resFile ? "#10B981" : "#6B7280"} />
-                                    </View>
-                                    <Text style={[styles.fileBtnText, { textAlign: 'center' }]}>
-                                        {resFile ? resFile.name : "Tap to Select File"}
-                                    </Text>
-                                    {resFile && <Text style={{ fontSize: 10, color: '#6B7280' }}>{(resFile.size / 1024 / 1024).toFixed(2)} MB</Text>}
-                                </TouchableOpacity>
-
-                                <Text style={styles.inputLabel}>Description</Text>
-                                <TextInput
-                                    style={[styles.input, { height: 80 }]}
-                                    placeholder="Brief summary used for AI Search..."
-                                    value={resDesc}
-                                    onChangeText={setResDesc}
-                                    multiline
-                                />
-
-                                {/* [NEW] Course Bucket Selector */}
-                                <Text style={styles.inputLabel}>Course Bucket (Optional)</Text>
-                                <View style={{ marginBottom: 15 }}>
-                                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
+                                    {courseBuckets.map((bucket, i) => (
                                         <TouchableOpacity
-                                            onPress={() => setSelectedBucket(null)}
+                                            key={bucket.id}
+                                            onPress={() => setSelectedBucket(bucket.name)}
                                             style={{
                                                 paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginRight: 8,
-                                                backgroundColor: !selectedBucket ? '#6366F1' : '#F3F4F6',
-                                                borderWidth: 1, borderColor: !selectedBucket ? '#6366F1' : '#E5E7EB',
+                                                backgroundColor: selectedBucket === bucket.name ? bucket.color : '#F3F4F6',
+                                                borderWidth: 1, borderColor: selectedBucket === bucket.name ? bucket.color : '#E5E7EB',
                                                 flexDirection: 'row', alignItems: 'center'
                                             }}
                                         >
-                                            <MaterialCommunityIcons name="close-circle" size={14} color={!selectedBucket ? '#FFF' : '#6B7280'} style={{ marginRight: 4 }} />
-                                            <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: !selectedBucket ? '#FFF' : '#4B5563' }}>None</Text>
-                                        </TouchableOpacity>
-                                        {courseBuckets.map((bucket, i) => (
-                                            <TouchableOpacity
-                                                key={bucket.id}
-                                                onPress={() => setSelectedBucket(bucket.name)}
-                                                style={{
-                                                    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginRight: 8,
-                                                    backgroundColor: selectedBucket === bucket.name ? bucket.color : '#F3F4F6',
-                                                    borderWidth: 1, borderColor: selectedBucket === bucket.name ? bucket.color : '#E5E7EB',
-                                                    flexDirection: 'row', alignItems: 'center'
-                                                }}
-                                            >
-                                                <MaterialCommunityIcons
-                                                    name={bucket.icon || 'folder'}
-                                                    size={14}
-                                                    color={selectedBucket === bucket.name ? '#FFF' : bucket.color}
-                                                    style={{ marginRight: 4 }}
-                                                />
-                                                <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: selectedBucket === bucket.name ? '#FFF' : '#4B5563' }}>{bucket.name}</Text>
-                                            </TouchableOpacity>
-                                        ))}
-                                    </ScrollView>
-                                </View>
-
-                                {/* RESTORED: Add to Path Toggle */}
-                                <TouchableOpacity
-                                    style={styles.toggleRow}
-                                    onPress={() => setIsPathNode(!isPathNode)}
-                                >
-                                    <View style={[styles.checkbox, isPathNode && { backgroundColor: '#7C3AED', borderColor: '#7C3AED' }]}>
-                                        {isPathNode && <Feather name="check" size={14} color="#FFF" />}
-                                    </View>
-                                    <Text style={styles.toggleLabel}>Add to Learning Path (Mandatory Training)</Text>
-                                </TouchableOpacity>
-
-                                <TouchableOpacity
-                                    style={[styles.uploadBtn, { marginTop: 10 }, uploading && styles.disabledBtn]}
-                                    onPress={handleUploadResource}
-                                    disabled={uploading}
-                                >
-                                    {uploading ? <ActivityIndicator color="#FFF" /> : (
-                                        <>
-                                            <Feather name="upload" size={18} color="#FFF" style={{ marginRight: 8 }} />
-                                            <Text style={styles.uploadBtnText}>Upload & Publish</Text>
-                                        </>
-                                    )}
-                                </TouchableOpacity>
-                            </ScrollView>
-                        </View>
-                    </View>
-                </Modal >
-
-
-                {/* QUIZ CREATION MODAL */}
-                <QuizCreationModal
-                    visible={quizModalVisible}
-                    onClose={() => setQuizModalVisible(false)}
-                    quizTitle={quizTitle}
-                    setQuizTitle={setQuizTitle}
-                    quizDescription={quizDescription}
-                    setQuizDescription={setQuizDescription}
-                    currentQuestion={currentQuestion}
-                    setCurrentQuestion={setCurrentQuestion}
-                    options={options}
-                    setOptions={setOptions}
-                    correctIndex={correctIndex}
-                    setCorrectIndex={setCorrectIndex}
-                    questions={questions}
-                    onAddQuestion={addQuestion}
-                    onPublish={createQuiz}
-                />
-
-                {/* QUIZ RESULTS MODAL */}
-                <QuizResultsModal
-                    visible={resultsModalVisible}
-                    onClose={() => setResultsModalVisible(false)}
-                    resultsData={selectedQuizResults}
-                />
-
-                {/* NEWS CREATION MODAL */}
-                <Modal visible={newsModalVisible} animationType="slide" transparent>
-                    <View style={styles.modalOverlay}>
-                        <View style={[styles.modalContent, { maxHeight: '85%' }]}>
-                            <View style={styles.modalHeader}>
-                                <Text style={styles.modalTitle}>📰 Post News</Text>
-                                <TouchableOpacity onPress={() => setNewsModalVisible(false)}>
-                                    <Feather name="x" size={24} color="#6B7280" />
-                                </TouchableOpacity>
-                            </View>
-
-                            <ScrollView showsVerticalScrollIndicator={false}>
-                                <Text style={styles.inputLabel}>Title *</Text>
-                                <TextInput
-                                    style={styles.input}
-                                    placeholder="e.g. New Summer Menu Launch!"
-                                    value={newsTitle}
-                                    onChangeText={setNewsTitle}
-                                />
-
-                                <Text style={styles.inputLabel}>Author *</Text>
-                                <TextInput
-                                    style={styles.input}
-                                    placeholder="e.g. HR Team, Head Chef..."
-                                    value={newsAuthor}
-                                    onChangeText={setNewsAuthor}
-                                />
-
-                                <Text style={styles.inputLabel}>Content *</Text>
-                                <TextInput
-                                    style={[styles.input, { height: 120, textAlignVertical: 'top' }]}
-                                    placeholder="Write the news content..."
-                                    value={newsContent}
-                                    onChangeText={setNewsContent}
-                                    multiline
-                                />
-
-                                <Text style={styles.inputLabel}>Image (Optional)</Text>
-                                <TouchableOpacity
-                                    style={[styles.fileBtn, { borderStyle: 'dashed', borderWidth: 2, borderColor: newsImage ? '#10B981' : '#D1D5DB', backgroundColor: newsImage ? '#ECFDF5' : '#F9FAFB', height: 80 }]}
-                                    onPress={async () => {
-                                        const result = await ImagePicker.launchImageLibraryAsync({
-                                            mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                                            quality: 0.8
-                                        });
-                                        if (!result.canceled) {
-                                            setNewsImage(result.assets[0]);
-                                        }
-                                    }}
-                                >
-                                    <Feather name={newsImage ? "check" : "image"} size={24} color={newsImage ? "#10B981" : "#6B7280"} />
-                                    <Text style={styles.fileBtnText}>
-                                        {newsImage ? "Image Selected" : "Add Cover Image"}
-                                    </Text>
-                                </TouchableOpacity>
-
-                                <TouchableOpacity
-                                    style={[styles.uploadBtn, { opacity: postingNews ? 0.6 : 1 }]}
-                                    onPress={handlePostNews}
-                                    disabled={postingNews}
-                                >
-                                    {postingNews ? <ActivityIndicator color="#FFF" /> : (
-                                        <>
-                                            <MaterialCommunityIcons name="send" size={18} color="#FFF" style={{ marginRight: 8 }} />
-                                            <Text style={styles.uploadBtnText}>Publish News</Text>
-                                        </>
-                                    )}
-                                </TouchableOpacity>
-                            </ScrollView>
-                        </View>
-                    </View>
-                </Modal>
-
-                {/* TOPIC QUIZ CREATION MODAL */}
-                <Modal visible={quizCreationVisible} animationType="slide" transparent>
-                    <View style={styles.modalOverlay}>
-                        <View style={[styles.modalContent, { maxHeight: '90%' }]}>
-                            <View style={styles.modalHeader}>
-                                <Text style={styles.modalTitle}>🧠 Create Topic Quiz</Text>
-                                <TouchableOpacity onPress={() => setQuizCreationVisible(false)}>
-                                    <Feather name="x" size={24} color="#6B7280" />
-                                </TouchableOpacity>
-                            </View>
-
-                            <ScrollView showsVerticalScrollIndicator={false}>
-                                {/* AI/MANUAL TOGGLE */}
-                                <View style={{ flexDirection: 'row', backgroundColor: '#F3F4F6', borderRadius: 12, padding: 4, marginBottom: 20 }}>
-                                    <TouchableOpacity
-                                        style={{ flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: 'center', backgroundColor: quizMode === 'manual' ? '#FFF' : 'transparent' }}
-                                        onPress={() => setQuizMode('manual')}
-                                    >
-                                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                            <Feather name="edit-3" size={16} color={quizMode === 'manual' ? '#4F46E5' : '#6B7280'} />
-                                            <Text style={{ marginLeft: 6, fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: quizMode === 'manual' ? '#4F46E5' : '#6B7280' }}>Manual</Text>
-                                        </View>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        style={{ flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: 'center', backgroundColor: quizMode === 'ai' ? '#FFF' : 'transparent' }}
-                                        onPress={() => setQuizMode('ai')}
-                                    >
-                                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                            <MaterialCommunityIcons name="robot-outline" size={18} color={quizMode === 'ai' ? '#7C3AED' : '#6B7280'} />
-                                            <Text style={{ marginLeft: 6, fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: quizMode === 'ai' ? '#7C3AED' : '#6B7280' }}>AI Generate</Text>
-                                        </View>
-                                    </TouchableOpacity>
-                                </View>
-
-                                <Text style={styles.inputLabel}>Quiz Title *</Text>
-                                <TextInput
-                                    style={styles.input}
-                                    placeholder="e.g. Espresso Mastery"
-                                    value={topicQuizTitle}
-                                    onChangeText={setTopicQuizTitle}
-                                />
-
-                                <View style={{ flexDirection: 'row', gap: 12 }}>
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={styles.inputLabel}>Difficulty</Text>
-                                        <View style={{ flexDirection: 'row', gap: 8 }}>
-                                            {['Easy', 'Medium', 'Hard'].map(d => (
-                                                <TouchableOpacity
-                                                    key={d}
-                                                    onPress={() => setTopicQuizDifficulty(d)}
-                                                    style={{
-                                                        paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
-                                                        backgroundColor: topicQuizDifficulty === d ?
-                                                            (d === 'Easy' ? '#10B981' : d === 'Medium' ? '#F59E0B' : '#EF4444') : '#F3F4F6'
-                                                    }}
-                                                >
-                                                    <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: topicQuizDifficulty === d ? '#FFF' : '#4B5563' }}>{d}</Text>
-                                                </TouchableOpacity>
-                                            ))}
-                                        </View>
-                                    </View>
-                                    {quizMode === 'manual' && (
-                                        <View style={{ flex: 1 }}>
-                                            <Text style={styles.inputLabel}>Time</Text>
-                                            <TextInput
-                                                style={styles.input}
-                                                placeholder="e.g. 10 min"
-                                                value={topicQuizTime}
-                                                onChangeText={setTopicQuizTime}
+                                            <MaterialCommunityIcons
+                                                name={bucket.icon || 'folder'}
+                                                size={14}
+                                                color={selectedBucket === bucket.name ? '#FFF' : bucket.color}
+                                                style={{ marginRight: 4 }}
                                             />
-                                        </View>
-                                    )}
+                                            <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: selectedBucket === bucket.name ? '#FFF' : '#4B5563' }}>{bucket.name}</Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </ScrollView>
+                            </View>
+
+                            {/* RESTORED: Add to Path Toggle */}
+                            <TouchableOpacity
+                                style={styles.toggleRow}
+                                onPress={() => setIsPathNode(!isPathNode)}
+                            >
+                                <View style={[styles.checkbox, isPathNode && { backgroundColor: '#7C3AED', borderColor: '#7C3AED' }]}>
+                                    {isPathNode && <Feather name="check" size={14} color="#FFF" />}
                                 </View>
+                                <Text style={styles.toggleLabel}>Add to Learning Path (Mandatory Training)</Text>
+                            </TouchableOpacity>
 
-                                {/* AI MODE CONTENT */}
-                                {quizMode === 'ai' && (
-                                    <View style={{ marginTop: 15 }}>
-                                        <Text style={styles.inputLabel}>Upload Content (Video, PDF, Image, Text)</Text>
-                                        <TouchableOpacity
-                                            style={{
-                                                borderWidth: 2, borderStyle: 'dashed', borderRadius: 16, padding: 20,
-                                                borderColor: aiQuizFile ? '#7C3AED' : '#D1D5DB',
-                                                backgroundColor: aiQuizFile ? '#F5F3FF' : '#F9FAFB',
-                                                alignItems: 'center', marginBottom: 15
-                                            }}
-                                            onPress={pickAiQuizFile}
-                                        >
-                                            <View style={{ width: 50, height: 50, borderRadius: 25, backgroundColor: aiQuizFile ? '#7C3AED' : '#E5E7EB', justifyContent: 'center', alignItems: 'center', marginBottom: 10 }}>
-                                                <MaterialCommunityIcons name={aiQuizFile ? "check" : "file-upload-outline"} size={24} color={aiQuizFile ? "#FFF" : "#6B7280"} />
-                                            </View>
-                                            <Text style={{ fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: aiQuizFile ? '#7C3AED' : '#4B5563' }}>
-                                                {aiQuizFile ? aiQuizFile.name : 'Tap to Select File'}
-                                            </Text>
-                                            <Text style={{ fontSize: 11, color: '#9CA3AF', marginTop: 4 }}>
-                                                Supported: MP4, PDF, JPG, PNG, TXT
-                                            </Text>
-                                        </TouchableOpacity>
-
-                                        <Text style={styles.inputLabel}>Number of Questions: {aiQuizNumQuestions}</Text>
-                                        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 20 }}>
-                                            {[3, 5, 7, 10].map(n => (
-                                                <TouchableOpacity
-                                                    key={n}
-                                                    onPress={() => setAiQuizNumQuestions(n)}
-                                                    style={{
-                                                        flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center',
-                                                        backgroundColor: aiQuizNumQuestions === n ? '#7C3AED' : '#F3F4F6'
-                                                    }}
-                                                >
-                                                    <Text style={{ fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: aiQuizNumQuestions === n ? '#FFF' : '#4B5563' }}>{n}</Text>
-                                                </TouchableOpacity>
-                                            ))}
-                                        </View>
-
-                                        <TouchableOpacity
-                                            style={[styles.uploadBtn, { backgroundColor: '#7C3AED', opacity: generatingAiQuiz ? 0.6 : 1 }]}
-                                            onPress={handleGenerateAiQuiz}
-                                            disabled={generatingAiQuiz}
-                                        >
-                                            {generatingAiQuiz ? (
-                                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                                    <ActivityIndicator color="#FFF" />
-                                                    <Text style={[styles.uploadBtnText, { marginLeft: 10 }]}>AI Generating...</Text>
-                                                </View>
-                                            ) : (
-                                                <>
-                                                    <MaterialCommunityIcons name="robot" size={18} color="#FFF" style={{ marginRight: 8 }} />
-                                                    <Text style={styles.uploadBtnText}>Generate Quiz with AI</Text>
-                                                </>
-                                            )}
-                                        </TouchableOpacity>
-                                    </View>
-                                )}
-
-                                {/* MANUAL MODE CONTENT */}
-                                {quizMode === 'manual' && (
+                            <TouchableOpacity
+                                style={[styles.uploadBtn, { marginTop: 10 }, uploading && styles.disabledBtn]}
+                                onPress={handleUploadResource}
+                                disabled={uploading}
+                            >
+                                {uploading ? <ActivityIndicator color="#FFF" /> : (
                                     <>
-                                        <Text style={[styles.inputLabel, { marginTop: 15 }]}>Questions</Text>
-                                        {topicQuizQuestions.map((q, qi) => (
-                                            <View key={qi} style={{ backgroundColor: '#F9FAFB', padding: 12, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#E5E7EB' }}>
-                                                <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: '#6B7280', marginBottom: 8 }}>Question {qi + 1}</Text>
-                                                <TextInput
-                                                    style={[styles.input, { marginBottom: 8 }]}
-                                                    placeholder="Enter question..."
-                                                    value={q.question}
-                                                    onChangeText={(text) => {
-                                                        const updated = [...topicQuizQuestions];
-                                                        updated[qi].question = text;
-                                                        setTopicQuizQuestions(updated);
-                                                    }}
-                                                />
-                                                {q.options.map((opt, oi) => (
-                                                    <View key={oi} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                                                        <TouchableOpacity
-                                                            onPress={() => {
-                                                                const updated = [...topicQuizQuestions];
-                                                                updated[qi].correct = oi;
-                                                                setTopicQuizQuestions(updated);
-                                                            }}
-                                                            style={{
-                                                                width: 24, height: 24, borderRadius: 12, borderWidth: 2,
-                                                                borderColor: q.correct === oi ? '#10B981' : '#D1D5DB',
-                                                                backgroundColor: q.correct === oi ? '#10B981' : 'transparent',
-                                                                justifyContent: 'center', alignItems: 'center'
-                                                            }}
-                                                        >
-                                                            {q.correct === oi && <Feather name="check" size={12} color="#FFF" />}
-                                                        </TouchableOpacity>
-                                                        <TextInput
-                                                            style={[styles.input, { flex: 1, marginBottom: 0 }]}
-                                                            placeholder={`Option ${oi + 1}`}
-                                                            value={opt}
-                                                            onChangeText={(text) => {
-                                                                const updated = [...topicQuizQuestions];
-                                                                updated[qi].options[oi] = text;
-                                                                setTopicQuizQuestions(updated);
-                                                            }}
-                                                        />
-                                                    </View>
-                                                ))}
-                                            </View>
-                                        ))}
-
-                                        <TouchableOpacity
-                                            style={{ padding: 12, backgroundColor: '#F3F4F6', borderRadius: 12, alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: '#E5E7EB', borderStyle: 'dashed' }}
-                                            onPress={() => setTopicQuizQuestions([...topicQuizQuestions, { question: '', options: ['', '', '', ''], correct: 0 }])}
-                                        >
-                                            <Feather name="plus" size={20} color="#6B7280" />
-                                            <Text style={{ fontSize: 12, fontFamily: 'Poppins_500Medium', color: '#6B7280', marginTop: 4 }}>Add Question</Text>
-                                        </TouchableOpacity>
-
-                                        <TouchableOpacity
-                                            style={[styles.uploadBtn, { opacity: postingQuiz ? 0.6 : 1 }]}
-                                            onPress={handlePostTopicQuiz}
-                                            disabled={postingQuiz}
-                                        >
-                                            {postingQuiz ? <ActivityIndicator color="#FFF" /> : (
-                                                <>
-                                                    <MaterialCommunityIcons name="send" size={18} color="#FFF" style={{ marginRight: 8 }} />
-                                                    <Text style={styles.uploadBtnText}>Publish Quiz</Text>
-                                                </>
-                                            )}
-                                        </TouchableOpacity>
+                                        <Feather name="upload" size={18} color="#FFF" style={{ marginRight: 8 }} />
+                                        <Text style={styles.uploadBtnText}>Upload & Publish</Text>
                                     </>
                                 )}
-                            </ScrollView>
-                        </View>
+                            </TouchableOpacity>
+                        </ScrollView>
                     </View>
-                </Modal>
-            </View>
+                </View>
+            </Modal >
+
+
+            {/* QUIZ CREATION MODAL */}
+            <QuizCreationModal
+                visible={quizModalVisible}
+                onClose={() => setQuizModalVisible(false)}
+                quizTitle={quizTitle}
+                setQuizTitle={setQuizTitle}
+                quizDescription={quizDescription}
+                setQuizDescription={setQuizDescription}
+                currentQuestion={currentQuestion}
+                setCurrentQuestion={setCurrentQuestion}
+                options={options}
+                setOptions={setOptions}
+                correctIndex={correctIndex}
+                setCorrectIndex={setCorrectIndex}
+                questions={questions}
+                onAddQuestion={addQuestion}
+                onPublish={createQuiz}
+            />
+
+            {/* QUIZ RESULTS MODAL */}
+            <QuizResultsModal
+                visible={resultsModalVisible}
+                onClose={() => setResultsModalVisible(false)}
+                resultsData={selectedQuizResults}
+            />
+
+            {/* NEWS CREATION MODAL */}
+            <Modal visible={newsModalVisible} animationType="slide" transparent>
+                <View style={styles.modalOverlay}>
+                    <View style={[styles.modalContent, { maxHeight: '85%' }]}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>📰 Post News</Text>
+                            <TouchableOpacity onPress={() => setNewsModalVisible(false)}>
+                                <Feather name="x" size={24} color="#6B7280" />
+                            </TouchableOpacity>
+                        </View>
+
+                        <ScrollView showsVerticalScrollIndicator={false}>
+                            <Text style={styles.inputLabel}>Title *</Text>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="e.g. New Summer Menu Launch!"
+                                value={newsTitle}
+                                onChangeText={setNewsTitle}
+                            />
+
+                            <Text style={styles.inputLabel}>Author *</Text>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="e.g. HR Team, Head Chef..."
+                                value={newsAuthor}
+                                onChangeText={setNewsAuthor}
+                            />
+
+                            <Text style={styles.inputLabel}>Content *</Text>
+                            <TextInput
+                                style={[styles.input, { height: 120, textAlignVertical: 'top' }]}
+                                placeholder="Write the news content..."
+                                value={newsContent}
+                                onChangeText={setNewsContent}
+                                multiline
+                            />
+
+                            <Text style={styles.inputLabel}>Image (Optional)</Text>
+                            <TouchableOpacity
+                                style={[styles.fileBtn, { borderStyle: 'dashed', borderWidth: 2, borderColor: newsImage ? '#10B981' : '#D1D5DB', backgroundColor: newsImage ? '#ECFDF5' : '#F9FAFB', height: 80 }]}
+                                onPress={async () => {
+                                    const result = await ImagePicker.launchImageLibraryAsync({
+                                        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                                        quality: 0.8
+                                    });
+                                    if (!result.canceled) {
+                                        setNewsImage(result.assets[0]);
+                                    }
+                                }}
+                            >
+                                <Feather name={newsImage ? "check" : "image"} size={24} color={newsImage ? "#10B981" : "#6B7280"} />
+                                <Text style={styles.fileBtnText}>
+                                    {newsImage ? "Image Selected" : "Add Cover Image"}
+                                </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={[styles.uploadBtn, { opacity: postingNews ? 0.6 : 1 }]}
+                                onPress={handlePostNews}
+                                disabled={postingNews}
+                            >
+                                {postingNews ? <ActivityIndicator color="#FFF" /> : (
+                                    <>
+                                        <MaterialCommunityIcons name="send" size={18} color="#FFF" style={{ marginRight: 8 }} />
+                                        <Text style={styles.uploadBtnText}>Publish News</Text>
+                                    </>
+                                )}
+                            </TouchableOpacity>
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* TOPIC QUIZ CREATION MODAL */}
+            <Modal visible={quizCreationVisible} animationType="slide" transparent>
+                <View style={styles.modalOverlay}>
+                    <View style={[styles.modalContent, { maxHeight: '90%' }]}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>🧠 Create Topic Quiz</Text>
+                            <TouchableOpacity onPress={() => setQuizCreationVisible(false)}>
+                                <Feather name="x" size={24} color="#6B7280" />
+                            </TouchableOpacity>
+                        </View>
+
+                        <ScrollView showsVerticalScrollIndicator={false}>
+                            {/* AI/MANUAL TOGGLE */}
+                            <View style={{ flexDirection: 'row', backgroundColor: '#F3F4F6', borderRadius: 12, padding: 4, marginBottom: 20 }}>
+                                <TouchableOpacity
+                                    style={{ flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: 'center', backgroundColor: quizMode === 'manual' ? '#FFF' : 'transparent' }}
+                                    onPress={() => setQuizMode('manual')}
+                                >
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                        <Feather name="edit-3" size={16} color={quizMode === 'manual' ? '#4F46E5' : '#6B7280'} />
+                                        <Text style={{ marginLeft: 6, fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: quizMode === 'manual' ? '#4F46E5' : '#6B7280' }}>Manual</Text>
+                                    </View>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={{ flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: 'center', backgroundColor: quizMode === 'ai' ? '#FFF' : 'transparent' }}
+                                    onPress={() => setQuizMode('ai')}
+                                >
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                        <MaterialCommunityIcons name="robot-outline" size={18} color={quizMode === 'ai' ? '#7C3AED' : '#6B7280'} />
+                                        <Text style={{ marginLeft: 6, fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: quizMode === 'ai' ? '#7C3AED' : '#6B7280' }}>AI Generate</Text>
+                                    </View>
+                                </TouchableOpacity>
+                            </View>
+
+                            <Text style={styles.inputLabel}>Quiz Title *</Text>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="e.g. Espresso Mastery"
+                                value={topicQuizTitle}
+                                onChangeText={setTopicQuizTitle}
+                            />
+
+                            <View style={{ flexDirection: 'row', gap: 12 }}>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.inputLabel}>Difficulty</Text>
+                                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                                        {['Easy', 'Medium', 'Hard'].map(d => (
+                                            <TouchableOpacity
+                                                key={d}
+                                                onPress={() => setTopicQuizDifficulty(d)}
+                                                style={{
+                                                    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
+                                                    backgroundColor: topicQuizDifficulty === d ?
+                                                        (d === 'Easy' ? '#10B981' : d === 'Medium' ? '#F59E0B' : '#EF4444') : '#F3F4F6'
+                                                }}
+                                            >
+                                                <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: topicQuizDifficulty === d ? '#FFF' : '#4B5563' }}>{d}</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                </View>
+                                {quizMode === 'manual' && (
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.inputLabel}>Time</Text>
+                                        <TextInput
+                                            style={styles.input}
+                                            placeholder="e.g. 10 min"
+                                            value={topicQuizTime}
+                                            onChangeText={setTopicQuizTime}
+                                        />
+                                    </View>
+                                )}
+                            </View>
+
+                            {/* AI MODE CONTENT */}
+                            {quizMode === 'ai' && (
+                                <View style={{ marginTop: 15 }}>
+                                    <Text style={styles.inputLabel}>Upload Content (Video, PDF, Image, Text)</Text>
+                                    <TouchableOpacity
+                                        style={{
+                                            borderWidth: 2, borderStyle: 'dashed', borderRadius: 16, padding: 20,
+                                            borderColor: aiQuizFile ? '#7C3AED' : '#D1D5DB',
+                                            backgroundColor: aiQuizFile ? '#F5F3FF' : '#F9FAFB',
+                                            alignItems: 'center', marginBottom: 15
+                                        }}
+                                        onPress={pickAiQuizFile}
+                                    >
+                                        <View style={{ width: 50, height: 50, borderRadius: 25, backgroundColor: aiQuizFile ? '#7C3AED' : '#E5E7EB', justifyContent: 'center', alignItems: 'center', marginBottom: 10 }}>
+                                            <MaterialCommunityIcons name={aiQuizFile ? "check" : "file-upload-outline"} size={24} color={aiQuizFile ? "#FFF" : "#6B7280"} />
+                                        </View>
+                                        <Text style={{ fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: aiQuizFile ? '#7C3AED' : '#4B5563' }}>
+                                            {aiQuizFile ? aiQuizFile.name : 'Tap to Select File'}
+                                        </Text>
+                                        <Text style={{ fontSize: 11, color: '#9CA3AF', marginTop: 4 }}>
+                                            Supported: MP4, PDF, JPG, PNG, TXT
+                                        </Text>
+                                    </TouchableOpacity>
+
+                                    <Text style={styles.inputLabel}>Number of Questions: {aiQuizNumQuestions}</Text>
+                                    <View style={{ flexDirection: 'row', gap: 8, marginBottom: 20 }}>
+                                        {[3, 5, 7, 10].map(n => (
+                                            <TouchableOpacity
+                                                key={n}
+                                                onPress={() => setAiQuizNumQuestions(n)}
+                                                style={{
+                                                    flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center',
+                                                    backgroundColor: aiQuizNumQuestions === n ? '#7C3AED' : '#F3F4F6'
+                                                }}
+                                            >
+                                                <Text style={{ fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: aiQuizNumQuestions === n ? '#FFF' : '#4B5563' }}>{n}</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+
+                                    <TouchableOpacity
+                                        style={[styles.uploadBtn, { backgroundColor: '#7C3AED', opacity: generatingAiQuiz ? 0.6 : 1 }]}
+                                        onPress={handleGenerateAiQuiz}
+                                        disabled={generatingAiQuiz}
+                                    >
+                                        {generatingAiQuiz ? (
+                                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                                <ActivityIndicator color="#FFF" />
+                                                <Text style={[styles.uploadBtnText, { marginLeft: 10 }]}>AI Generating...</Text>
+                                            </View>
+                                        ) : (
+                                            <>
+                                                <MaterialCommunityIcons name="robot" size={18} color="#FFF" style={{ marginRight: 8 }} />
+                                                <Text style={styles.uploadBtnText}>Generate Quiz with AI</Text>
+                                            </>
+                                        )}
+                                    </TouchableOpacity>
+                                </View>
+                            )}
+
+                            {/* MANUAL MODE CONTENT */}
+                            {quizMode === 'manual' && (
+                                <>
+                                    <Text style={[styles.inputLabel, { marginTop: 15 }]}>Questions</Text>
+                                    {topicQuizQuestions.map((q, qi) => (
+                                        <View key={qi} style={{ backgroundColor: '#F9FAFB', padding: 12, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#E5E7EB' }}>
+                                            <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: '#6B7280', marginBottom: 8 }}>Question {qi + 1}</Text>
+                                            <TextInput
+                                                style={[styles.input, { marginBottom: 8 }]}
+                                                placeholder="Enter question..."
+                                                value={q.question}
+                                                onChangeText={(text) => {
+                                                    const updated = [...topicQuizQuestions];
+                                                    updated[qi].question = text;
+                                                    setTopicQuizQuestions(updated);
+                                                }}
+                                            />
+                                            {q.options.map((opt, oi) => (
+                                                <View key={oi} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                                                    <TouchableOpacity
+                                                        onPress={() => {
+                                                            const updated = [...topicQuizQuestions];
+                                                            updated[qi].correct = oi;
+                                                            setTopicQuizQuestions(updated);
+                                                        }}
+                                                        style={{
+                                                            width: 24, height: 24, borderRadius: 12, borderWidth: 2,
+                                                            borderColor: q.correct === oi ? '#10B981' : '#D1D5DB',
+                                                            backgroundColor: q.correct === oi ? '#10B981' : 'transparent',
+                                                            justifyContent: 'center', alignItems: 'center'
+                                                        }}
+                                                    >
+                                                        {q.correct === oi && <Feather name="check" size={12} color="#FFF" />}
+                                                    </TouchableOpacity>
+                                                    <TextInput
+                                                        style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                                                        placeholder={`Option ${oi + 1}`}
+                                                        value={opt}
+                                                        onChangeText={(text) => {
+                                                            const updated = [...topicQuizQuestions];
+                                                            updated[qi].options[oi] = text;
+                                                            setTopicQuizQuestions(updated);
+                                                        }}
+                                                    />
+                                                </View>
+                                            ))}
+                                        </View>
+                                    ))}
+
+                                    <TouchableOpacity
+                                        style={{ padding: 12, backgroundColor: '#F3F4F6', borderRadius: 12, alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: '#E5E7EB', borderStyle: 'dashed' }}
+                                        onPress={() => setTopicQuizQuestions([...topicQuizQuestions, { question: '', options: ['', '', '', ''], correct: 0 }])}
+                                    >
+                                        <Feather name="plus" size={20} color="#6B7280" />
+                                        <Text style={{ fontSize: 12, fontFamily: 'Poppins_500Medium', color: '#6B7280', marginTop: 4 }}>Add Question</Text>
+                                    </TouchableOpacity>
+
+                                    <TouchableOpacity
+                                        style={[styles.uploadBtn, { opacity: postingQuiz ? 0.6 : 1 }]}
+                                        onPress={handlePostTopicQuiz}
+                                        disabled={postingQuiz}
+                                    >
+                                        {postingQuiz ? <ActivityIndicator color="#FFF" /> : (
+                                            <>
+                                                <MaterialCommunityIcons name="send" size={18} color="#FFF" style={{ marginRight: 8 }} />
+                                                <Text style={styles.uploadBtnText}>Publish Quiz</Text>
+                                            </>
+                                        )}
+                                    </TouchableOpacity>
+                                </>
+                            )}
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
 
             {/* ACCESS CONTROL MODAL */}
             <AccessControlModal

@@ -36,6 +36,7 @@ import LiveTrackingScreen from './Screens/LiveTrackingScreen';
 import TeamListScreen from './Screens/TeamListScreen';
 import AuditsScreen from './Screens/AuditsScreen';
 import Recommendations from './Screens/Recommendations';
+import MeetingRoom from './Screens/MeetingRoom';
 import DisclaimerModal from './Components/DisclaimerModal'; // Global disclaimer
 
 LogBox.ignoreAllLogs();
@@ -123,6 +124,7 @@ function App() {
               <Stack.Screen name="TeamList" component={TeamListScreen} />
               <Stack.Screen name="Audits" component={AuditsScreen} />
               <Stack.Screen name="Recommendations" component={Recommendations} />
+              <Stack.Screen name="MeetingRoom" component={MeetingRoom} />
             </Stack.Navigator>
           </NavigationContainer>
           {/* </NotificationProvider> */}

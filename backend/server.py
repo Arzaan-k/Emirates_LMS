@@ -215,6 +215,9 @@ news_feed: List[dict] = []  # {id, title, content, author, image, date, created_
 # LIVE QUIZZES STORE (Topic Quizzes for Home Screen)
 live_quizzes: List[dict] = []  # {id, title, questions, time, difficulty, image}
 
+# MEETINGS STORE - Virtual meetings/video calls
+meetings_store: List[dict] = []  # {id, title, description, scheduled_at, duration_minutes, host_name, host_email, room_id, created_at, status}
+
 resource_categories: List[dict] = [
     {"id": "1", "name": "Standard SOPs", "icon": "file-document-outline", "color": ["#3B82F6", "#2563EB"], "bg": "#DBEAFE"},
     {"id": "2", "name": "Video Tutorials", "icon": "play-circle-outline", "color": ["#F59E0B", "#D97706"], "bg": "#FEF3C7"},
@@ -385,6 +388,172 @@ access_control_store: dict = {
     },
     # Higher roles have full access by default (not listed = full access)
 }
+
+
+# ==========================================
+# MEETINGS/VIDEO CALL ENDPOINTS
+# ==========================================
+
+@app.get("/meetings")
+async def get_meetings():
+    """Get all upcoming and ongoing meetings"""
+    # Sort by scheduled_at, upcoming first
+    return sorted(meetings_store, key=lambda x: x.get('scheduled_at', ''), reverse=False)
+
+@app.get("/meetings/{meeting_id}")
+async def get_meeting(meeting_id: str):
+    """Get a specific meeting by ID"""
+    for meeting in meetings_store:
+        if meeting.get("id") == meeting_id:
+            return meeting
+    raise HTTPException(status_code=404, detail="Meeting not found")
+
+@app.post("/meetings")
+async def create_meeting(
+    title: str = Form(...),
+    description: str = Form(""),
+    scheduled_at: str = Form(...),  # ISO format datetime string
+    duration_minutes: int = Form(30),
+    host_name: str = Form(...),
+    host_email: str = Form(...)
+):
+    """Create a new virtual meeting and notify all users"""
+    meeting_id = str(uuid.uuid4())
+    room_id = f"bw-meeting-{meeting_id[:8]}"  # Short room ID for joining
+    
+    new_meeting = {
+        "id": meeting_id,
+        "title": title,
+        "description": description,
+        "scheduled_at": scheduled_at,
+        "duration_minutes": duration_minutes,
+        "host_name": host_name,
+        "host_email": host_email,
+        "room_id": room_id,
+        "status": "scheduled",  # scheduled, ongoing, ended
+        "created_at": datetime.now().isoformat(),
+        "participants": []  # List of {user_email, user_name, joined_at}
+    }
+    
+    meetings_store.insert(0, new_meeting)
+    logger.info(f"Meeting Created: {title} scheduled for {scheduled_at} by {host_name}")
+    
+    # Broadcast meeting notification to all connected clients
+    await manager.broadcast({
+        "type": "MEETING_SCHEDULED",
+        "data": new_meeting
+    })
+    
+    # Also create a notification entry
+    meeting_notif = {
+        "id": str(uuid.uuid4()),
+        "title": f"📅 Meeting: {title}",
+        "message": f"{host_name} scheduled a meeting for {scheduled_at[:16].replace('T', ' at ')}. Tap to join when it starts.",
+        "type": "meeting",
+        "meeting_id": meeting_id,
+        "created_at": datetime.now().isoformat(),
+        "read_by": []
+    }
+    notification_store.append(meeting_notif)
+    
+    await manager.broadcast({
+        "type": "NOTIFICATION",
+        "data": meeting_notif
+    })
+    
+    return {"status": "success", "meeting": new_meeting}
+
+@app.post("/meetings/{meeting_id}/join")
+async def join_meeting(
+    meeting_id: str,
+    user_email: str = Form(...),
+    user_name: str = Form(...)
+):
+    """Mark a user as joined a meeting"""
+    for meeting in meetings_store:
+        if meeting.get("id") == meeting_id:
+            # Check if already joined
+            for p in meeting.get("participants", []):
+                if p.get("user_email") == user_email:
+                    return {"status": "success", "message": "Already joined", "meeting": meeting}
+            
+            # Add participant
+            meeting["participants"].append({
+                "user_email": user_email,
+                "user_name": user_name,
+                "joined_at": datetime.now().isoformat()
+            })
+            
+            # Update status to ongoing if first participant
+            if meeting["status"] == "scheduled":
+                meeting["status"] = "ongoing"
+            
+            logger.info(f"User {user_name} joined meeting: {meeting['title']}")
+            
+            # Broadcast participant joined
+            await manager.broadcast({
+                "type": "MEETING_PARTICIPANT_JOINED",
+                "data": {
+                    "meeting_id": meeting_id,
+                    "participant": {"user_email": user_email, "user_name": user_name}
+                }
+            })
+            
+            return {"status": "success", "meeting": meeting}
+    
+    raise HTTPException(status_code=404, detail="Meeting not found")
+
+@app.post("/meetings/{meeting_id}/leave")
+async def leave_meeting(
+    meeting_id: str,
+    user_email: str = Form(...)
+):
+    """Mark a user as left a meeting"""
+    for meeting in meetings_store:
+        if meeting.get("id") == meeting_id:
+            meeting["participants"] = [
+                p for p in meeting.get("participants", [])
+                if p.get("user_email") != user_email
+            ]
+            
+            # If no participants left and host also left, end meeting
+            if len(meeting["participants"]) == 0:
+                meeting["status"] = "ended"
+            
+            logger.info(f"User {user_email} left meeting: {meeting['title']}")
+            return {"status": "success"}
+    
+    raise HTTPException(status_code=404, detail="Meeting not found")
+
+@app.put("/meetings/{meeting_id}/end")
+async def end_meeting(meeting_id: str):
+    """End a meeting (host only)"""
+    for meeting in meetings_store:
+        if meeting.get("id") == meeting_id:
+            meeting["status"] = "ended"
+            logger.info(f"Meeting ended: {meeting['title']}")
+            
+            await manager.broadcast({
+                "type": "MEETING_ENDED",
+                "data": {"meeting_id": meeting_id, "title": meeting["title"]}
+            })
+            
+            return {"status": "success"}
+    
+    raise HTTPException(status_code=404, detail="Meeting not found")
+
+@app.delete("/meetings/{meeting_id}")
+async def delete_meeting(meeting_id: str):
+    """Cancel/delete a meeting"""
+    global meetings_store
+    initial_len = len(meetings_store)
+    meetings_store = [m for m in meetings_store if m.get("id") != meeting_id]
+    
+    if len(meetings_store) < initial_len:
+        logger.info(f"Meeting Deleted: {meeting_id}")
+        return {"status": "success"}
+    
+    raise HTTPException(status_code=404, detail="Meeting not found")
 
 
 # --- KNOWLEDGE BASE ENDPOINTS ---
@@ -1268,6 +1437,167 @@ class ConnectionManager:
                 logger.error(f"Error broadcasting: {e}")
 
 manager = ConnectionManager()
+
+@app.get("/meetings")
+async def get_meetings():
+    """Get all upcoming and ongoing meetings"""
+    # Sort by scheduled_at, upcoming first
+    return sorted(meetings_store, key=lambda x: x.get('scheduled_at', ''), reverse=False)
+
+@app.get("/meetings/{meeting_id}")
+async def get_meeting(meeting_id: str):
+    """Get a specific meeting by ID"""
+    for meeting in meetings_store:
+        if meeting.get("id") == meeting_id:
+            return meeting
+    raise HTTPException(status_code=404, detail="Meeting not found")
+
+@app.post("/meetings")
+async def create_meeting(
+    title: str = Form(...),
+    description: str = Form(""),
+    scheduled_at: str = Form(...),  # ISO format datetime string
+    duration_minutes: int = Form(30),
+    host_name: str = Form(...),
+    host_email: str = Form(...)
+):
+    """Create a new virtual meeting and notify all users"""
+    meeting_id = str(uuid.uuid4())
+    room_id = f"bw-meeting-{meeting_id[:8]}"  # Short room ID for joining
+    
+    new_meeting = {
+        "id": meeting_id,
+        "title": title,
+        "description": description,
+        "scheduled_at": scheduled_at,
+        "duration_minutes": duration_minutes,
+        "host_name": host_name,
+        "host_email": host_email,
+        "room_id": room_id,
+        "status": "scheduled",  # scheduled, ongoing, ended
+        "created_at": datetime.now().isoformat(),
+        "participants": []  # List of {user_email, user_name, joined_at}
+    }
+    
+    meetings_store.insert(0, new_meeting)
+    logger.info(f"Meeting Created: {title} scheduled for {scheduled_at} by {host_name}")
+    
+    # Broadcast meeting notification to all connected clients
+    await manager.broadcast({
+        "type": "MEETING_SCHEDULED",
+        "data": new_meeting
+    })
+    
+    # Also create a notification entry
+    meeting_notif = {
+        "id": str(uuid.uuid4()),
+        "title": f"📅 Meeting: {title}",
+        "message": f"{host_name} scheduled a meeting for {scheduled_at[:16].replace('T', ' at ')}. Tap to join when it starts.",
+        "type": "meeting",
+        "meeting_id": meeting_id,
+        "created_at": datetime.now().isoformat(),
+        "read_by": []
+    }
+    notification_store.append(meeting_notif)
+    
+    await manager.broadcast({
+        "type": "NOTIFICATION",
+        "data": meeting_notif
+    })
+    
+    return {"status": "success", "meeting": new_meeting}
+
+@app.post("/meetings/{meeting_id}/join")
+async def join_meeting(
+    meeting_id: str,
+    user_email: str = Form(...),
+    user_name: str = Form(...)
+):
+    """Mark a user as joined a meeting"""
+    for meeting in meetings_store:
+        if meeting.get("id") == meeting_id:
+            # Check if already joined
+            for p in meeting.get("participants", []):
+                if p.get("user_email") == user_email:
+                    return {"status": "success", "message": "Already joined", "meeting": meeting}
+            
+            # Add participant
+            meeting["participants"].append({
+                "user_email": user_email,
+                "user_name": user_name,
+                "joined_at": datetime.now().isoformat()
+            })
+            
+            # Update status to ongoing if first participant
+            if meeting["status"] == "scheduled":
+                meeting["status"] = "ongoing"
+            
+            logger.info(f"User {user_name} joined meeting: {meeting['title']}")
+            
+            # Broadcast participant joined
+            await manager.broadcast({
+                "type": "MEETING_PARTICIPANT_JOINED",
+                "data": {
+                    "meeting_id": meeting_id,
+                    "participant": {"user_email": user_email, "user_name": user_name}
+                }
+            })
+            
+            return {"status": "success", "meeting": meeting}
+    
+    raise HTTPException(status_code=404, detail="Meeting not found")
+
+@app.post("/meetings/{meeting_id}/leave")
+async def leave_meeting(
+    meeting_id: str,
+    user_email: str = Form(...)
+):
+    """Mark a user as left a meeting"""
+    for meeting in meetings_store:
+        if meeting.get("id") == meeting_id:
+            meeting["participants"] = [
+                p for p in meeting.get("participants", [])
+                if p.get("user_email") != user_email
+            ]
+            
+            # If no participants left and host also left, end meeting
+            if len(meeting["participants"]) == 0:
+                meeting["status"] = "ended"
+            
+            logger.info(f"User {user_email} left meeting: {meeting['title']}")
+            return {"status": "success"}
+    
+    raise HTTPException(status_code=404, detail="Meeting not found")
+
+@app.put("/meetings/{meeting_id}/end")
+async def end_meeting(meeting_id: str):
+    """End a meeting (host only)"""
+    for meeting in meetings_store:
+        if meeting.get("id") == meeting_id:
+            meeting["status"] = "ended"
+            logger.info(f"Meeting ended: {meeting['title']}")
+            
+            await manager.broadcast({
+                "type": "MEETING_ENDED",
+                "data": {"meeting_id": meeting_id, "title": meeting["title"]}
+            })
+            
+            return {"status": "success"}
+    
+    raise HTTPException(status_code=404, detail="Meeting not found")
+
+@app.delete("/meetings/{meeting_id}")
+async def delete_meeting(meeting_id: str):
+    """Cancel/delete a meeting"""
+    global meetings_store
+    initial_len = len(meetings_store)
+    meetings_store = [m for m in meetings_store if m.get("id") != meeting_id]
+    
+    if len(meetings_store) < initial_len:
+        logger.info(f"Meeting Deleted: {meeting_id}")
+        return {"status": "success"}
+    
+    raise HTTPException(status_code=404, detail="Meeting not found")
 
 # --- ENDPOINTS ---
 
