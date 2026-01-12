@@ -4383,6 +4383,344 @@ async def get_user_level_progress(user_email: str):
         return {"error": str(e)}
 
 
+# ==========================================
+# INTERACTIVE SIMULATION APIs
+# ==========================================
+
+# --- SIMULATION DATA STORES ---
+simulations_store = []  # Store all simulations
+simulation_progress_store = []  # Store user progress/completions
+
+# Initialize with sample simulation
+simulations_store.append({
+    "id": "sim-default-1",
+    "title": "Making the Perfect Belgian Waffle",
+    "description": "Learn the step-by-step process of preparing and serving our signature Belgian waffle from start to finish.",
+    "category": "waffle",
+    "difficulty": "Easy",
+    "thumbnailUrl": "https://images.unsplash.com/photo-1562376552-0d160a2f238d?w=600",
+    "estimatedTime": "8 min",
+    "maxScore": 30,
+    "nodes": [
+        {
+            "id": "node-1",
+            "title": "Entering the Kitchen",
+            "description": "The shift starts. Time to prepare the waffle station.",
+            "isStart": True,
+            "videoUrl": None,
+            "options": [
+                {"id": "opt-1", "text": "Put on apron and wash hands", "isCorrect": True, "nextNodeId": "node-2", "consequence": ""},
+                {"id": "opt-2", "text": "Start mixing batter immediately", "isCorrect": False, "consequence": "Starting without proper hygiene can contaminate food and spread bacteria."},
+                {"id": "opt-3", "text": "Check your phone first", "isCorrect": False, "consequence": "Using your phone in the kitchen area violates food safety protocols."},
+                {"id": "opt-4", "text": "Talk to colleagues", "isCorrect": False, "consequence": "Delaying preparation can impact service time and customer satisfaction."},
+            ],
+        },
+        {
+            "id": "node-2",
+            "title": "Preparing the Batter",
+            "description": "The batter needs to be prepared correctly for the perfect waffle.",
+            "isStart": False,
+            "videoUrl": None,
+            "options": [
+                {"id": "opt-5", "text": "Follow the recipe card exactly", "isCorrect": True, "nextNodeId": "node-3", "consequence": ""},
+                {"id": "opt-6", "text": "Add extra sugar for taste", "isCorrect": False, "consequence": "Modifying recipes affects consistency and can upset customer expectations."},
+                {"id": "opt-7", "text": "Use yesterday's leftover batter", "isCorrect": False, "consequence": "Old batter may have bacterial growth and produces inferior results."},
+                {"id": "opt-8", "text": "Skip measuring ingredients", "isCorrect": False, "consequence": "Inconsistent measurements lead to unpredictable product quality."},
+            ],
+        },
+        {
+            "id": "node-3",
+            "title": "Operating the Waffle Iron",
+            "description": "Time to cook the waffle to golden perfection.",
+            "isStart": False,
+            "videoUrl": None,
+            "options": [
+                {"id": "opt-9", "text": "Preheat and grease the iron properly", "isCorrect": True, "nextNodeId": None, "consequence": ""},
+                {"id": "opt-10", "text": "Pour batter on cold iron", "isCorrect": False, "consequence": "Cold iron causes sticking and uneven cooking."},
+                {"id": "opt-11", "text": "Overfill the iron with batter", "isCorrect": False, "consequence": "Overflow creates mess, waste, and fire hazards."},
+                {"id": "opt-12", "text": "Open iron repeatedly to check", "isCorrect": False, "consequence": "Opening during cooking releases heat and creates uneven texture."},
+            ],
+        },
+    ],
+    "createdAt": datetime.now().isoformat(),
+    "updatedAt": datetime.now().isoformat(),
+})
+
+# --- PYDANTIC MODELS ---
+class SimulationOption(BaseModel):
+    id: str
+    text: str
+    isCorrect: bool
+    nextNodeId: Optional[str] = None
+    consequence: Optional[str] = ""
+
+class SimulationNode(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = ""
+    isStart: bool = False
+    videoUrl: Optional[str] = None
+    options: List[dict]
+
+class SimulationData(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = ""
+    category: str = "waffle"
+    difficulty: str = "Medium"
+    thumbnailUrl: Optional[str] = None
+    estimatedTime: Optional[str] = "5 min"
+    maxScore: Optional[int] = 0
+    nodes: List[dict]
+    createdAt: Optional[str] = None
+    updatedAt: Optional[str] = None
+
+class SimulationProgress(BaseModel):
+    userId: str
+    simulationId: str
+    score: int
+    totalSteps: int
+    wrongAttempts: int
+    timeSpentSeconds: int
+    attemptHistory: List[dict] = []
+    completedAt: str
+
+class ConsequenceRequest(BaseModel):
+    scenario: str
+    currentStep: str
+    wrongOption: str
+
+
+@app.get("/simulations")
+async def get_all_simulations():
+    """Get all available simulations."""
+    return simulations_store
+
+
+@app.get("/simulation/{simulation_id}")
+async def get_simulation(simulation_id: str):
+    """Get a specific simulation by ID."""
+    for sim in simulations_store:
+        if sim["id"] == simulation_id:
+            return sim
+    raise HTTPException(status_code=404, detail="Simulation not found")
+
+
+@app.post("/simulation/save")
+async def save_simulation(simulation: SimulationData):
+    """Create or update a simulation."""
+    sim_dict = simulation.dict()
+    
+    # Check if exists (update) or new (create)
+    existing_idx = None
+    for i, sim in enumerate(simulations_store):
+        if sim["id"] == simulation.id:
+            existing_idx = i
+            break
+    
+    if existing_idx is not None:
+        # Update existing
+        sim_dict["updatedAt"] = datetime.now().isoformat()
+        sim_dict["createdAt"] = simulations_store[existing_idx].get("createdAt", datetime.now().isoformat())
+        simulations_store[existing_idx] = sim_dict
+        logger.info(f"Simulation updated: {simulation.title}")
+    else:
+        # Create new
+        sim_dict["createdAt"] = datetime.now().isoformat()
+        sim_dict["updatedAt"] = datetime.now().isoformat()
+        simulations_store.append(sim_dict)
+        logger.info(f"Simulation created: {simulation.title}")
+    
+    return {"success": True, "id": simulation.id}
+
+
+@app.delete("/simulation/{simulation_id}")
+async def delete_simulation(simulation_id: str):
+    """Delete a simulation."""
+    global simulations_store
+    simulations_store = [s for s in simulations_store if s["id"] != simulation_id]
+    logger.info(f"Simulation deleted: {simulation_id}")
+    return {"success": True}
+
+
+@app.post("/simulation/upload-video")
+async def upload_simulation_video(video: UploadFile = File(...)):
+    """Upload a video clip for a simulation step."""
+    try:
+        # Generate unique filename
+        file_ext = video.filename.split(".")[-1] if "." in video.filename else "mp4"
+        unique_filename = f"sim_video_{uuid.uuid4()}.{file_ext}"
+        file_path = os.path.join(UPLOAD_DIR, unique_filename)
+        
+        # Save file
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(video.file, buffer)
+        
+        video_url = f"{BASE_URL}/uploads/{unique_filename}"
+        logger.info(f"Simulation video uploaded: {unique_filename}")
+        
+        return {"success": True, "url": video_url, "filename": unique_filename}
+    except Exception as e:
+        logger.error(f"Video upload error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/simulation/complete")
+async def complete_simulation(progress: SimulationProgress):
+    """Record simulation completion and update recommendations."""
+    try:
+        progress_dict = progress.dict()
+        
+        # Find simulation title
+        sim_title = "Unknown"
+        for sim in simulations_store:
+            if sim["id"] == progress.simulationId:
+                sim_title = sim["title"]
+                break
+        
+        progress_dict["simulationTitle"] = sim_title
+        progress_dict["id"] = str(uuid.uuid4())
+        
+        simulation_progress_store.append(progress_dict)
+        logger.info(f"Simulation completed: {progress.userId} finished '{sim_title}' with score {progress.score}")
+        
+        # Calculate performance metrics for recommendation engine
+        max_score = progress.totalSteps * 10
+        percentage = (progress.score / max_score * 100) if max_score > 0 else 0
+        
+        # Flag weak areas based on attempt history
+        weak_areas = []
+        for attempt in progress.attemptHistory:
+            if not attempt.get("isCorrect"):
+                weak_areas.append(attempt.get("nodeId"))
+        
+        # Update learning profile for recommendations (if learning profile exists)
+        try:
+            # Find related category for skill gap update
+            for sim in simulations_store:
+                if sim["id"] == progress.simulationId:
+                    category = sim.get("category", "general")
+                    # Log for recommendation engine integration
+                    logger.info(f"Recommendation data: User {progress.userId}, Category: {category}, Score: {percentage}%, Weak areas: {weak_areas}")
+                    break
+        except Exception as e:
+            logger.warning(f"Could not update recommendation engine: {e}")
+        
+        return {
+            "success": True,
+            "message": "Progress saved",
+            "percentage": round(percentage, 1),
+            "weakAreas": weak_areas
+        }
+    except Exception as e:
+        logger.error(f"Complete simulation error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/simulation/history/user")
+async def get_user_simulation_history(user_id: str = "user"):
+    """Get simulation history for a user."""
+    user_history = [p for p in simulation_progress_store if p.get("userId") == user_id]
+    return sorted(user_history, key=lambda x: x.get("completedAt", ""), reverse=True)
+
+
+@app.get("/simulation/history/all")
+async def get_all_simulation_history():
+    """Get all simulation history (for admin/manager)."""
+    return sorted(simulation_progress_store, key=lambda x: x.get("completedAt", ""), reverse=True)
+
+
+@app.get("/simulation/analytics/{simulation_id}")
+async def get_simulation_analytics(simulation_id: str):
+    """Get analytics for a specific simulation."""
+    progress_list = [p for p in simulation_progress_store if p.get("simulationId") == simulation_id]
+    
+    if not progress_list:
+        return {
+            "simulationId": simulation_id,
+            "totalAttempts": 0,
+            "averageScore": 0,
+            "averageTime": 0,
+            "completionRate": 0
+        }
+    
+    total_attempts = len(progress_list)
+    avg_score = sum(p.get("score", 0) for p in progress_list) / total_attempts
+    avg_time = sum(p.get("timeSpentSeconds", 0) for p in progress_list) / total_attempts
+    
+    # Calculate most failed steps
+    failed_steps = {}
+    for progress in progress_list:
+        for attempt in progress.get("attemptHistory", []):
+            if not attempt.get("isCorrect"):
+                node_id = attempt.get("nodeId", "unknown")
+                failed_steps[node_id] = failed_steps.get(node_id, 0) + 1
+    
+    return {
+        "simulationId": simulation_id,
+        "totalAttempts": total_attempts,
+        "averageScore": round(avg_score, 1),
+        "averageTimeSeconds": round(avg_time, 1),
+        "mostFailedSteps": failed_steps
+    }
+
+
+@app.post("/simulation/generate-consequence")
+async def generate_consequence(request: ConsequenceRequest):
+    """Generate AI consequence for wrong choice."""
+    try:
+        from groq import Groq
+        groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY", "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"))
+        
+        prompt = f"""
+        You are a training simulation for 'The Belgian Waffle Co.' restaurant.
+        
+        Scenario: {request.scenario}
+        Current Step: {request.currentStep}
+        Wrong Choice Selected: {request.wrongOption}
+        
+        Generate a SHORT, impactful consequence (2-3 sentences max) explaining what could go wrong if the employee makes this choice in real life.
+        Focus on:
+        - Food safety risks
+        - Customer satisfaction impact
+        - Business/reputation consequences
+        - Team/colleague effects
+        
+        Be specific and realistic. Don't be preachy.
+        
+        Return ONLY the consequence text, no formatting.
+        """
+        
+        completion = groq_client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama-3.3-70b-versatile",
+            temperature=0.7,
+            max_tokens=150
+        )
+        
+        consequence = completion.choices[0].message.content.strip()
+        logger.info(f"Generated consequence for: {request.wrongOption[:30]}...")
+        
+        return {"consequence": consequence}
+    except Exception as e:
+        logger.error(f"Consequence generation error: {e}")
+        return {"consequence": "This action could lead to problems. Think carefully about the correct procedure!"}
+
+
+@app.get("/simulation/leaderboard/{simulation_id}")
+async def get_simulation_leaderboard(simulation_id: str, limit: int = 10):
+    """Get leaderboard for a specific simulation."""
+    progress_list = [p for p in simulation_progress_store if p.get("simulationId") == simulation_id]
+    
+    # Sort by score (desc), then by time (asc)
+    sorted_list = sorted(
+        progress_list,
+        key=lambda x: (-x.get("score", 0), x.get("timeSpentSeconds", 9999))
+    )
+    
+    return sorted_list[:limit]
+
+
 if __name__ == "__main__":
     import uvicorn
     logger.info(f"Starting BW LMS Backend on {HOST}:{PORT}")

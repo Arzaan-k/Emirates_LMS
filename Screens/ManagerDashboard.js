@@ -34,6 +34,7 @@ import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CommonActions } from '@react-navigation/native';
 import MeetingSchedulerModal from '../Components/MeetingScheduler'; // [NEW] Virtual meetings
+import SimulationAdminManager from '../Components/SimulationAdminManager'; // [NEW] Interactive Simulations Admin
 
 
 
@@ -210,6 +211,10 @@ export default function ManagerDashboard({ route, navigation }) {
     // [NEW] Access Control Modal State
     const [accessControlVisible, setAccessControlVisible] = useState(false);
     const [loadingBuckets, setLoadingBuckets] = useState(false);
+
+    // [NEW] Simulation Flow Builder State
+    const [simulationBuilderVisible, setSimulationBuilderVisible] = useState(false);
+    const [editingSimulation, setEditingSimulation] = useState(null);
 
     useEffect(() => {
         if (uploadVisible) {
@@ -1039,6 +1044,17 @@ export default function ManagerDashboard({ route, navigation }) {
                             </View>
                             <Text style={styles.actionText}>Schedule Meeting</Text>
                         </TouchableOpacity>
+
+                        {/* [NEW] MANAGE SIMULATIONS BUTTON */}
+                        <TouchableOpacity
+                            style={styles.actionBtn}
+                            onPress={() => setSimulationBuilderVisible(true)}
+                        >
+                            <View style={[styles.actionIcon, { backgroundColor: '#F3E8FF' }]}>
+                                <MaterialCommunityIcons name="movie-filter" size={24} color="#7C3AED" />
+                            </View>
+                            <Text style={styles.actionText}>Manage Simulations</Text>
+                        </TouchableOpacity>
                     </View>
 
                     {/* --- [NEW] MANAGE LEARNING PATH SECTION --- */}
@@ -1100,6 +1116,18 @@ export default function ManagerDashboard({ route, navigation }) {
                 hostName={name}
                 hostEmail={userProfile?.email || 'manager@company.com'}
             />
+
+            {/* [NEW] SIMULATION ADMIN MANAGER - Full Screen */}
+            {simulationBuilderVisible && (
+                <Modal visible={simulationBuilderVisible} animationType="slide">
+                    <SimulationAdminManager
+                        onClose={() => {
+                            setSimulationBuilderVisible(false);
+                            setEditingSimulation(null);
+                        }}
+                    />
+                </Modal>
+            )}
 
             {/* CREATE USER MODAL */}
             <CreateUser

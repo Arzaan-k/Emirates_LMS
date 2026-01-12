@@ -37,7 +37,8 @@ import Resources from "./Resources";
 import Profile from "./Profile";
 
 // Import AI Components
-import SimulationHub from "../Components/SimulationHub";
+import SimulationHub from "../Components/SimulationHub"; // RESTORED: Customer Simulation (AI Roleplay)
+import InteractiveSimulationHub from "../Components/InteractiveSimulationHub"; // NEW: Interactive Video Simulations
 import AIScanner from "../Components/AIScanner";
 import AIFlashcards from "../Components/AIFlashcards";
 import AIChatBot from "../Components/AIChatBot";
@@ -1272,6 +1273,7 @@ const RECENT_COURSES = [
 
 const AI_TOOLS = [
   { id: 'roleplay', title: 'Customer Sim', desc: 'Practice Empathy', icon: 'chat-processing-outline', color: ['#8B5CF6', '#7C3AED'], accent: '#FFF' },
+  { id: 'videosim', title: 'Video Training', desc: 'Interactive Sims', icon: 'movie-filter', color: ['#EC4899', '#BE185D'], accent: '#FFF' },
   { id: 'scanner', title: 'Hygiene Scan', desc: 'AR Inspection', icon: 'camera-iris', color: ['#10B981', '#059669'], accent: '#FFF' },
   { id: 'flashcards', title: 'Wiki Cards', desc: 'Rapid Recall', icon: 'cards-playing-outline', color: ['#F59E0B', '#D97706'], accent: '#FFF' },
 ];
@@ -1328,28 +1330,29 @@ function SearchBar() {
   );
 }
 
-// ------ NEW: DIGITAL TWIN HERO CARD ------
+// ------ INTERACTIVE SIMULATION HERO CARD ------
+// NOTE: This replaces the old Digital Twin card with Interactive Video Simulations
 function DigitalTwinCard({ onOpen }) {
   const { t } = useLanguage();
   return (
     <Animated.View entering={FadeInDown.delay(200).duration(800)} style={styles.twinContainer}>
       <TouchableOpacity style={styles.twinCard} activeOpacity={0.9} onPress={onOpen}>
         <ImageBackground
-          source={{ uri: "https://images.unsplash.com/photo-1556910103-1c02745a30bf?q=80&w=2000&auto=format&fit=crop" }}
+          source={{ uri: "https://images.unsplash.com/photo-1562376552-0d160a2f238d?q=80&w=2000&auto=format&fit=crop" }}
           style={styles.twinBg}
           imageStyle={{ borderRadius: 24, opacity: 0.6 }}
         >
           <LinearGradient colors={["transparent", "rgba(0,0,0,0.9)"]} style={styles.twinGradient}>
             <View style={styles.twinBadge}>
-              <MaterialCommunityIcons name="virtual-reality" size={14} color="#FFF" style={{ marginRight: 4 }} />
-              <Text style={styles.twinBadgeText}>{t('digitalTwin')}</Text>
+              <MaterialCommunityIcons name="movie-filter" size={14} color="#FFF" style={{ marginRight: 4 }} />
+              <Text style={styles.twinBadgeText}>INTERACTIVE</Text>
             </View>
-            <Text style={styles.twinTitle}>{t('storeSimulation')}</Text>
-            <Text style={styles.twinDesc}>Practice Waffle Making & Hygiene in a 2D Virtual Store.</Text>
+            <Text style={styles.twinTitle}>First-Person Simulations</Text>
+            <Text style={styles.twinDesc}>Experience real scenarios through immersive video training. Make choices, learn from consequences.</Text>
 
             <View style={styles.twinBtn}>
-              <Text style={styles.twinBtnText}>{t('enterSimulation')}</Text>
-              <Feather name="arrow-right" size={16} color="#000" />
+              <Text style={styles.twinBtnText}>Start Training</Text>
+              <Feather name="play" size={16} color="#000" />
             </View>
           </LinearGradient>
         </ImageBackground>
@@ -1842,6 +1845,7 @@ export default function Home() {
       {activeTool && !showTwin && (
         <View style={{ flex: 1, zIndex: 9999, backgroundColor: '#FFF' }}>
           {activeTool === 'roleplay' && <SimulationHub onClose={() => setActiveTool(null)} />}
+          {activeTool === 'videosim' && <InteractiveSimulationHub onClose={() => setActiveTool(null)} />}
           {activeTool === 'scanner' && <AIScanner onClose={() => setActiveTool(null)} />}
           {activeTool === 'flashcards' && <AIFlashcards onClose={() => setActiveTool(null)} />}
         </View>
@@ -1887,7 +1891,7 @@ export default function Home() {
             ),
           })}
         >
-          <Tab.Screen name="HomeTab" children={() => <HomeContent onOpenTool={setActiveTool} onOpenTwin={() => setShowTwin(true)} />} />
+          <Tab.Screen name="HomeTab" children={() => <HomeContent onOpenTool={setActiveTool} onOpenTwin={() => setActiveTool('videosim')} />} />
           <Tab.Screen name="CoursesTab" component={Courses} />
           <Tab.Screen name="ResourcesTab" component={Resources} />
           <Tab.Screen name="ProfileTab" component={Profile} />
