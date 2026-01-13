@@ -35,6 +35,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CommonActions } from '@react-navigation/native';
 import MeetingSchedulerModal from '../Components/MeetingScheduler'; // [NEW] Virtual meetings
 import SimulationAdminManager from '../Components/SimulationAdminManager'; // [NEW] Interactive Simulations Admin
+import CRMTicketModal from '../Components/CRMTicketModal'; // [NEW] CRM Tickets
 
 
 
@@ -156,10 +157,12 @@ const FeedItem = ({ item, index }) => {
 
 export default function ManagerDashboard({ route, navigation }) {
     const [meetingModalVisible, setMeetingModalVisible] = useState(false);
+    const [crmModalVisible, setCrmModalVisible] = useState(false); // [NEW]
     const { userProfile } = route.params || {};
     const role = userProfile?.role || "Manager";
     const name = userProfile?.name || "User";
     const data = getDashboardData(role);
+    console.log("ManagerDashboard rendered");
 
     // --- RESOURCE UPLOAD STATE ---
     const [uploadVisible, setUploadVisible] = useState(false);
@@ -1045,6 +1048,16 @@ export default function ManagerDashboard({ route, navigation }) {
                             <Text style={styles.actionText}>Schedule Meeting</Text>
                         </TouchableOpacity>
 
+                        <TouchableOpacity
+                            style={styles.actionBtn}
+                            onPress={() => setCrmModalVisible(true)}
+                        >
+                            <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
+                                <MaterialCommunityIcons name="ticket-account" size={24} color="#D97706" />
+                            </View>
+                            <Text style={styles.actionText}>CRM Tickets</Text>
+                        </TouchableOpacity>
+
                         {/* [NEW] MANAGE SIMULATIONS BUTTON */}
                         <TouchableOpacity
                             style={styles.actionBtn}
@@ -1678,6 +1691,12 @@ export default function ManagerDashboard({ route, navigation }) {
             <AccessControlModal
                 visible={accessControlVisible}
                 onClose={() => setAccessControlVisible(false)}
+            />
+
+            {/* CRM TICKET MODAL */}
+            <CRMTicketModal
+                visible={crmModalVisible}
+                onClose={() => setCrmModalVisible(false)}
             />
         </View>
     );

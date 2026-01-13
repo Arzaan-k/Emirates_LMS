@@ -85,6 +85,29 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
     // Track module/lesson completion
     const [completionResult, setCompletionResult] = useState(null);
 
+    // Attempt to assign a CRM task after course completion
+    const attemptCrmTaskAssignment = async (categoryId) => {
+        try {
+            const formData = new FormData();
+            formData.append("user_email", userEmail);
+            formData.append("user_name", "User"); // Could be passed as prop
+            formData.append("category_id", categoryId || lesson.bucket || "1");
+
+            const response = await fetch(`${API_URL}/crm/assign-task`, {
+                method: "POST",
+                body: formData,
+            });
+            const result = await response.json();
+            if (result.status === 'success') {
+                console.log("CRM Task assigned after completion:", result.assignment?.id);
+            } else {
+                console.log("No CRM tasks available for assignment");
+            }
+        } catch (err) {
+            console.log("CRM assignment check failed (non-critical):", err);
+        }
+    };
+
     const trackModuleCompletion = async () => {
         if (moduleCompleted) return null; // Already tracked
         try {
@@ -103,6 +126,11 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
             setModuleCompleted(true);
             setCompletionResult(result);
             console.log("Module completion tracked:", result);
+
+            // After successful completion, attempt to assign a CRM task
+            // This allows users to get real-world practice tickets
+            attemptCrmTaskAssignment(lesson.bucket);
+
             return result;
         } catch (err) {
             console.error("Error tracking module:", err);

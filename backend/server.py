@@ -218,6 +218,18 @@ live_quizzes: List[dict] = []  # {id, title, questions, time, difficulty, image}
 # MEETINGS STORE - Virtual meetings/video calls
 meetings_store: List[dict] = []  # {id, title, description, scheduled_at, duration_minutes, host_name, host_email, room_id, created_at, status}
 
+COURSE_TO_TICKET_TYPE = {
+    "1": ["Query", "Request"],      # Onboarding → General inquiries
+    "2": ["Query", "Request"],      # Product Training → Product questions
+    "3": ["Complaint"],             # Safety & Hygiene → Serious complaints
+    "4": ["Complaint"],             # Customer Service → Customer complaints
+    "5": ["Query", "Request"],      # Operations → Operational queries
+}
+
+crm_tickets: List[dict] = []  # Manager creates tickets from dashboard - no sample data
+
+crm_task_assignments: List[dict] = []
+
 resource_categories: List[dict] = [
     {"id": "1", "name": "Standard SOPs", "icon": "file-document-outline", "color": ["#3B82F6", "#2563EB"], "bg": "#DBEAFE"},
     {"id": "2", "name": "Video Tutorials", "icon": "play-circle-outline", "color": ["#F59E0B", "#D97706"], "bg": "#FEF3C7"},
@@ -555,6 +567,203 @@ async def delete_meeting(meeting_id: str):
     
     raise HTTPException(status_code=404, detail="Meeting not found")
 
+@app.get("/crm/tickets")
+async def get_crm_tickets():
+    """Get all CRM tickets (for admin/manager)"""
+    return crm_tickets
+
+@app.get("/crm/tickets/available")
+async def get_available_tickets(category_id: str = None):
+    """Get unassigned tickets, optionally filtered by category"""
+    available = [t for t in crm_tickets if t.get("status") == "open" and t.get("assigned_to") is None]
+    if category_id:
+        available = [t for t in available if t.get("category_id") == category_id]
+    return available
+
+@app.get("/crm/tickets/{ticket_id}")
+async def get_ticket_by_id(ticket_id: str):
+    """Get a specific ticket by ID"""
+    for ticket in crm_tickets:
+        if ticket.get("id") == ticket_id:
+            return ticket
+    raise HTTPException(status_code=404, detail="Ticket not found")
+
+@app.post("/crm/tickets")
+async def create_crm_ticket(
+    type: str = Form(...),  # Query, Request, Complaint
+    category_id: str = Form(...),
+    customer_name: str = Form(...),
+    customer_email: str = Form(""),
+    customer_phone: str = Form(""),
+    subject: str = Form(...),
+    description: str = Form(...),
+    priority: str = Form("medium")  # low, medium, high, critical
+):
+    """Manager creates a new CRM ticket"""
+    new_ticket = {
+        "id": f"crm-{str(uuid.uuid4())[:8]}",
+        "type": type,
+        "category_id": category_id,
+        "customer_name": customer_name,
+        "customer_email": customer_email,
+        "customer_phone": customer_phone,
+        "subject": subject,
+        "description": description,
+        "priority": priority,
+        "status": "open",
+        "created_at": datetime.now().isoformat(),
+        "assigned_to": None
+    }
+    crm_tickets.append(new_ticket)
+    logger.info(f"CRM Ticket Created: {new_ticket['id']} - {subject}")
+    return {"status": "success", "ticket": new_ticket}
+
+@app.post("/crm/assign-task")
+async def assign_crm_task(
+    user_email: str = Form(...),
+    user_name: str = Form(...),
+    category_id: str = Form(...)  # Course category they completed
+):
+    """Assign an available CRM ticket to user after course completion
+    
+    Smart matching based on course type:
+    - Safety & Hygiene (3) or Customer Service (4) → Complaint tickets
+    - Other courses (1, 2, 5) → Query or Request tickets
+    """
+    # Get allowed ticket types for this course category
+    allowed_types = COURSE_TO_TICKET_TYPE.get(category_id, ["Query", "Request"])
+    
+    # Find unassigned ticket matching the allowed types
+    available_tickets = [
+        t for t in crm_tickets 
+        if t.get("type") in allowed_types 
+        and t.get("status") == "open" 
+        and t.get("assigned_to") is None
+    ]
+    
+    if not available_tickets:
+        # Fallback: Try any open ticket if no matching type available
+        available_tickets = [t for t in crm_tickets if t.get("status") == "open" and t.get("assigned_to") is None]
+    
+    if not available_tickets:
+        return {"status": "no_tickets", "message": "No tickets available for assignment"}
+    
+    # Pick the first available (could be randomized)
+    ticket = available_tickets[0]
+    
+    # Create assignment
+    assignment = {
+        "id": f"task-{str(uuid.uuid4())[:8]}",
+        "ticket_id": ticket["id"],
+        "user_email": user_email,
+        "user_name": user_name,
+        "course_category_id": category_id,
+        "assigned_at": datetime.now().isoformat(),
+        "status": "assigned",
+        "resolution": None,
+        "completed_at": None,
+        "xp_earned": 0
+    }
+    crm_task_assignments.append(assignment)
+    
+    # Mark ticket as assigned
+    ticket["assigned_to"] = user_email
+    ticket["status"] = "in_progress"
+    
+    logger.info(f"CRM Task Assigned: {assignment['id']} to {user_email}")
+    
+    # Broadcast notification to user
+    notification = {
+        "id": str(uuid.uuid4()),
+        "type": "crm_task",
+        "title": "🎯 Live Assessment Assigned!",
+        "description": f"Complete this real customer ticket: {ticket['subject']}",
+        "timestamp": datetime.now().isoformat(),
+        "read": False,
+        "task_id": assignment["id"],
+        "ticket": ticket
+    }
+    notification_store.append(notification)
+    
+    await manager.broadcast({
+        "type": "CRM_TASK_ASSIGNED",
+        "data": {
+            "assignment": assignment,
+            "ticket": ticket,
+            "notification": notification
+        }
+    })
+    
+    return {"status": "success", "assignment": assignment, "ticket": ticket}
+
+@app.get("/crm/my-tasks")
+async def get_my_crm_tasks(user_email: str):
+    """Get all CRM tasks assigned to a user"""
+    my_tasks = []
+    for assignment in crm_task_assignments:
+        if assignment.get("user_email") == user_email:
+            # Attach ticket details
+            ticket = next((t for t in crm_tickets if t.get("id") == assignment.get("ticket_id")), None)
+            my_tasks.append({
+                **assignment,
+                "ticket": ticket
+            })
+    return my_tasks
+
+@app.post("/crm/tasks/{task_id}/complete")
+async def complete_crm_task(
+    task_id: str,
+    resolution: str = Form(...)
+):
+    """Complete a CRM task with resolution - awards 50 XP"""
+    XP_REWARD = 50
+    
+    for assignment in crm_task_assignments:
+        if assignment.get("id") == task_id:
+            assignment["status"] = "completed"
+            assignment["resolution"] = resolution
+            assignment["completed_at"] = datetime.now().isoformat()
+            assignment["xp_earned"] = XP_REWARD
+            
+            # Update ticket status
+            for ticket in crm_tickets:
+                if ticket.get("id") == assignment.get("ticket_id"):
+                    ticket["status"] = "resolved"
+                    break
+            
+            logger.info(f"CRM Task Completed: {task_id} - Awarded {XP_REWARD} XP")
+            
+            # Broadcast completion
+            await manager.broadcast({
+                "type": "CRM_TASK_COMPLETED",
+                "data": {
+                    "task_id": task_id,
+                    "user_email": assignment.get("user_email"),
+                    "xp_earned": XP_REWARD
+                }
+            })
+            
+            return {
+                "status": "success",
+                "message": f"Task completed! You earned {XP_REWARD} XP",
+                "xp_earned": XP_REWARD,
+                "assignment": assignment
+            }
+    
+    raise HTTPException(status_code=404, detail="Task not found")
+
+@app.delete("/crm/tickets/{ticket_id}")
+async def delete_crm_ticket(ticket_id: str):
+    """Delete a CRM ticket (admin only)"""
+    global crm_tickets
+    initial_len = len(crm_tickets)
+    crm_tickets = [t for t in crm_tickets if t.get("id") != ticket_id]
+    
+    if len(crm_tickets) < initial_len:
+        logger.info(f"CRM Ticket Deleted: {ticket_id}")
+        return {"status": "success"}
+    
+    raise HTTPException(status_code=404, detail="Ticket not found")
 
 # --- KNOWLEDGE BASE ENDPOINTS ---
 

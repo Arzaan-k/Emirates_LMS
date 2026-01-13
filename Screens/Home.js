@@ -458,6 +458,92 @@ function MeetingsFeedSection({ data, onJoin }) {
   );
 }
 
+// --- NEW: CRM TASKS FEED SECTION ---
+const PRIORITY_COLORS = {
+  low: '#10B981',
+  medium: '#F59E0B',
+  high: '#EF4444',
+  critical: '#7C3AED'
+};
+
+const TYPE_ICONS = {
+  Query: 'help-circle',
+  Request: 'git-pull-request',
+  Complaint: 'alert-triangle'
+};
+
+function CRMTasksFeedSection({ data, onOpenTask }) {
+  if (!data || data.length === 0) return null;
+
+  // Filter to show only pending tasks
+  const pendingTasks = data.filter(t => t.status !== 'completed');
+  if (pendingTasks.length === 0) return null;
+
+  return (
+    <View style={styles.sectionContainer}>
+      <View style={[styles.sectionHeader, { paddingHorizontal: 20 }]}>
+        <View>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#F59E0B', marginRight: 8 }} />
+            <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>🎯 Live Assessments</Text>
+          </View>
+          <Text style={styles.sectionSubtitle}>Real customer tickets to practice</Text>
+        </View>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20, paddingBottom: 10 }}>
+        {pendingTasks.map((item, index) => {
+          const ticket = item.ticket || {};
+          const priorityColor = PRIORITY_COLORS[ticket.priority] || '#F59E0B';
+          const typeIcon = TYPE_ICONS[ticket.type] || 'file';
+
+          return (
+            <Animated.View key={item.id || index} entering={FadeInRight.delay(index * 100).duration(500)} style={styles.crmTaskCard}>
+              <TouchableOpacity
+                style={styles.crmTaskCardInner}
+                onPress={() => onOpenTask(item)}
+                activeOpacity={0.8}
+              >
+                {/* Priority color bar */}
+                <View style={[styles.crmPriorityBar, { backgroundColor: priorityColor }]} />
+
+                <View style={styles.crmTaskContent}>
+                  {/* Header with type badge and XP */}
+                  <View style={styles.crmTaskHeader}>
+                    <View style={styles.crmTypeBadge}>
+                      <Feather name={typeIcon} size={10} color="#A5B4FC" />
+                      <Text style={styles.crmTypeText}>{ticket.type || 'Task'}</Text>
+                    </View>
+                    <View style={styles.crmXpBadge}>
+                      <Text style={styles.crmXpText}>+50 XP</Text>
+                    </View>
+                  </View>
+
+                  {/* Title */}
+                  <Text style={styles.crmTaskTitle} numberOfLines={2}>{ticket.subject || 'Customer Ticket'}</Text>
+
+                  {/* Customer name */}
+                  <Text style={styles.crmTaskCustomer} numberOfLines={1}>
+                    <Feather name="user" size={10} color="#94A3B8" /> {ticket.customer_name || 'Customer'}
+                  </Text>
+
+                  {/* Footer */}
+                  <View style={styles.crmTaskFooter}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: priorityColor, marginRight: 6 }} />
+                      <Text style={[styles.crmStatusText, { color: priorityColor }]}>{ticket.priority?.toUpperCase() || 'MEDIUM'}</Text>
+                    </View>
+                    <Feather name="arrow-right" size={14} color="#9CA3AF" />
+                  </View>
+                </View>
+              </TouchableOpacity>
+            </Animated.View>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
 // ... (NotificationToast Unchanged)
 
 // --- NEW: PREMIUM CRUCIAL NOTIFICATION COMPONENT ---
@@ -838,6 +924,7 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
 
   // [NEW] MEETINGS STATE
   const [upcomingMeetings, setUpcomingMeetings] = useState([]);
+  const [crmTasks, setCrmTasks] = useState([]);
 
   const handleAcknowledge = async (id) => {
     try {
@@ -966,6 +1053,20 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
     }
   };
 
+  const fetchCrmTasks = async () => {
+    try {
+      // Use placeholder email - in real app this would come from auth context
+      const userEmail = 'user@example.com';
+      const response = await fetch(`${API_URL}/crm/my-tasks?user_email=${encodeURIComponent(userEmail)}`);
+      const data = await response.json();
+      if (Array.isArray(data)) {
+        setCrmTasks(data);
+      }
+    } catch (error) {
+      console.error("Error fetching CRM tasks:", error);
+    }
+  };
+
   useEffect(() => {
     // CRITICAL: Fetch crucial notifications FIRST to block app if needed
     fetchCrucialNotifications();
@@ -974,7 +1075,8 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
     fetchNews();
     fetchLiveQuizzes();
     fetchProctoredAssessments();
-    fetchMeetings(); // [NEW]
+    fetchMeetings();
+    fetchCrmTasks(); // [NEW]
   }, []);
 
   useEffect(() => {
@@ -1037,6 +1139,21 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
           // Real-time quiz update
           setLiveQuizzesData(prev => [message.data, ...prev]);
         }
+        else if (message.type === "CRM_TASK_ASSIGNED") {
+          // [NEW] Handle CRM task assignment
+          const taskData = message.data;
+          setCrmTasks(prev => [{ ...taskData.assignment, ticket: taskData.ticket }, ...prev]);
+          const notif = {
+            title: "🎯 Live Assessment Assigned!",
+            message: taskData.ticket?.subject || 'New CRM task',
+            type: "crm_task",
+            data: taskData,
+            created_at: new Date().toISOString()
+          };
+          setNotification(notif);
+          setAllNotifications(prev => [notif, ...prev]);
+          setTimeout(() => setNotification(null), 5000);
+        }
       } catch (err) {
         console.log("WS Error", err);
       }
@@ -1094,6 +1211,15 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
             meeting,
             userEmail: 'user@company.com',
             userName: 'User'
+          })}
+        />
+
+        {/* [NEW] CRM TASKS FEED - Live Assessments */}
+        <CRMTasksFeedSection
+          data={crmTasks}
+          onOpenTask={(task) => navigation.navigate('CRMTask', {
+            task,
+            userEmail: 'user@example.com'
           })}
         />
 
@@ -2189,4 +2315,20 @@ const styles = StyleSheet.create({
   recsSkillRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)' },
   recsSkillDot: { width: 8, height: 8, borderRadius: 4 },
   recsSkillText: { fontSize: 11, fontFamily: 'Poppins_500Medium', color: '#94A3B8', marginRight: 8 },
+  crmTaskCard: { width: 220, marginRight: 12 },
+  crmTaskCardInner: { backgroundColor: '#1E293B', borderRadius: 16, overflow: 'hidden', flexDirection: 'row' },
+  crmPriorityBar: { width: 4 },
+  crmTaskContent: { flex: 1, padding: 14 },
+  crmTaskHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  crmTypeBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(99, 102, 241, 0.3)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, gap: 4 },
+  crmTypeText: { fontSize: 10, fontFamily: 'Poppins_600SemiBold', color: '#A5B4FC' },
+  crmXpBadge: { backgroundColor: 'rgba(16, 185, 129, 0.2)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  crmXpText: { fontSize: 10, fontFamily: 'Poppins_700Bold', color: '#10B981' },
+  crmTaskTitle: { fontSize: 13, fontFamily: 'Poppins_600SemiBold', color: '#FFF', marginBottom: 6, lineHeight: 18 },
+  crmTaskCustomer: { fontSize: 11, fontFamily: 'Poppins_400Regular', color: '#94A3B8', marginBottom: 8 },
+  crmTaskFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  crmStatusText: { fontSize: 10, fontFamily: 'Poppins_600SemiBold' },
+  sectionSubtitle: { fontSize: 11, fontFamily: 'Poppins_400Regular', color: '#94A3B8', marginTop: 2 },
 });
+
+
