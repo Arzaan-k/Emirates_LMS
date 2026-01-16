@@ -75,28 +75,52 @@ export default function MeetingRoom({ route, navigation }) {
     const pulseAnim = useRef(new Animated.Value(1)).current;
     const chatScrollRef = useRef(null);
 
+    // Refs to track current values for PanResponder (to avoid stale closures)
+    const currentPathRef = useRef('');
+    const strokeColorRef = useRef('#FFFFFF');
+    const strokeWidthRef = useRef(4);
+    const toolRef = useRef('pen');
+    const viewModeRef = useRef('camera');
+
+    // Update refs when state changes
+    useEffect(() => { currentPathRef.current = currentPath; }, [currentPath]);
+    useEffect(() => { strokeColorRef.current = strokeColor; }, [strokeColor]);
+    useEffect(() => { strokeWidthRef.current = strokeWidth; }, [strokeWidth]);
+    useEffect(() => { toolRef.current = tool; }, [tool]);
+    useEffect(() => { viewModeRef.current = viewMode; }, [viewMode]);
+
     // Pan responder for whiteboard drawing
     const panResponder = useRef(
         PanResponder.create({
-            onStartShouldSetPanResponder: () => viewMode === 'whiteboard',
-            onMoveShouldSetPanResponder: () => viewMode === 'whiteboard',
+            onStartShouldSetPanResponder: () => viewModeRef.current === 'whiteboard',
+            onMoveShouldSetPanResponder: () => viewModeRef.current === 'whiteboard',
             onPanResponderGrant: (evt) => {
                 const { locationX, locationY } = evt.nativeEvent;
-                setCurrentPath(`M${locationX},${locationY}`);
+                const newPath = `M${locationX},${locationY}`;
+                currentPathRef.current = newPath;
+                setCurrentPath(newPath);
             },
             onPanResponderMove: (evt) => {
                 const { locationX, locationY } = evt.nativeEvent;
-                setCurrentPath(prev => `${prev} L${locationX},${locationY}`);
+                const newPath = `${currentPathRef.current} L${locationX},${locationY}`;
+                currentPathRef.current = newPath;
+                setCurrentPath(newPath);
             },
             onPanResponderRelease: () => {
-                if (currentPath) {
+                const pathToSave = currentPathRef.current;
+                if (pathToSave && pathToSave.length > 0) {
+                    const currentTool = toolRef.current;
+                    const currentColor = strokeColorRef.current;
+                    const currentWidth = strokeWidthRef.current;
+
                     setPaths(prev => [...prev, {
-                        d: currentPath,
-                        color: tool === 'eraser' ? '#1E293B' : strokeColor,
-                        width: tool === 'eraser' ? 20 : strokeWidth
+                        d: pathToSave,
+                        color: currentTool === 'eraser' ? '#1E293B' : currentColor,
+                        width: currentTool === 'eraser' ? 20 : currentWidth
                     }]);
-                    setCurrentPath('');
                 }
+                currentPathRef.current = '';
+                setCurrentPath('');
             },
         })
     ).current;

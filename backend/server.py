@@ -45,7 +45,7 @@ def add_course_to_rag(course_id, transcript):
 # --- CONFIGURATION ---
 PORT = 8000
 HOST = "0.0.0.0"
-BASE_URL = "http://192.168.1.36:8000"  # Local network IP for physical device
+BASE_URL = "http://192.168.29.119:8000"  # Local network IP for physical device
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
@@ -213,7 +213,9 @@ ALL_PRIVILEGES = [
     "post_quiz",           # Create quizzes
     "create_user",         # Create new users
     "live_tracking",       # Real-time location tracking
-    "proctored_assessment",# Proctored assessments
+    "proctored_assessment",# Access proctored assessments (take tests)
+    "proctored_create_manage",  # Create and manage proctored assessments
+    "proctored_view_results",   # View proctored assessment results
     "view_analytics",      # View analytics dashboard
     "send_notification",   # Send notifications
     "access_control",      # Manage access control
@@ -1464,9 +1466,12 @@ async def submit_assessment(
     user_name: str = Form(...),
     answers: str = Form(...),  # JSON string of answers array [0, 2, 1, 3, ...]
     time_taken_seconds: int = Form(...),
-    violations: int = Form(0)
+    violations: int = Form(0),
+    breach_log: str = Form("[]"),  # JSON string of breach log array
+    critical_breaches: int = Form(0),
+    warning_breaches: int = Form(0)
 ):
-    """Submit a proctored assessment attempt"""
+    """Submit a proctored assessment attempt with detailed breach tracking"""
     import json
     
     # Find assessment
@@ -1484,6 +1489,12 @@ async def submit_assessment(
     except:
         raise HTTPException(status_code=400, detail="Invalid answers format")
     
+    # Parse breach log
+    try:
+        breach_log_list = json.loads(breach_log)
+    except:
+        breach_log_list = []
+    
     # Calculate score
     correct_count = 0
     total = len(assessment["questions"])
@@ -1495,7 +1506,16 @@ async def submit_assessment(
     score_percent = (correct_count / total * 100) if total > 0 else 0
     passed = score_percent >= assessment.get("passing_score", 70)
     
-    # Create submission record
+    # Determine integrity status based on breaches
+    integrity_status = "clean"
+    if critical_breaches > 0:
+        integrity_status = "flagged"
+    elif warning_breaches > 2:
+        integrity_status = "suspicious"
+    elif violations > 0:
+        integrity_status = "minor_issues"
+    
+    # Create submission record with enhanced breach data
     submission = {
         "id": str(uuid.uuid4()),
         "assessment_id": assessment_id,
@@ -1506,15 +1526,20 @@ async def submit_assessment(
         "correct_count": correct_count,
         "total_questions": total,
         "score_percent": round(score_percent, 1),
+        "score": round(score_percent, 1),  # Alias for compatibility
         "passed": passed,
         "time_taken_seconds": time_taken_seconds,
         "time_limit_seconds": assessment.get("time_limit_minutes", 30) * 60,
         "violations": violations,
+        "breach_log": breach_log_list,
+        "critical_breaches": critical_breaches,
+        "warning_breaches": warning_breaches,
+        "integrity_status": integrity_status,
         "submitted_at": datetime.now().isoformat()
     }
     
     assessment_submissions.insert(0, submission)
-    logger.info(f"Assessment Submitted: {user_name} scored {score_percent}% on {assessment.get('title')}")
+    logger.info(f"Assessment Submitted: {user_name} scored {score_percent}% on {assessment.get('title')} (Breaches: {violations}, Critical: {critical_breaches})")
     
     return {
         "status": "success",
@@ -1524,7 +1549,8 @@ async def submit_assessment(
             "correct": correct_count,
             "total": total,
             "passed": passed,
-            "passing_score": assessment.get("passing_score", 70)
+            "passing_score": assessment.get("passing_score", 70),
+            "integrity_status": integrity_status
         }
     }
 
@@ -2259,11 +2285,32 @@ async def generate_quiz_from_content(
             try:
                 import pytesseract
                 from PIL import Image
+                import platform
+                
+                # Configure Tesseract path for Windows
+                if platform.system() == "Windows":
+                    tesseract_paths = [
+                        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+                        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+                        os.path.expanduser(r"~\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"),
+                    ]
+                    for path in tesseract_paths:
+                        if os.path.exists(path):
+                            pytesseract.pytesseract.tesseract_cmd = path
+                            logger.info(f"Found Tesseract at: {path}")
+                            break
+                    else:
+                        logger.warning("Tesseract not found in common paths, trying system PATH")
+                
                 img = Image.open(temp_path)
                 extracted_text = pytesseract.image_to_string(img)
                 logger.info(f"OCR extraction: {len(extracted_text)} chars")
-            except ImportError:
-                raise HTTPException(status_code=500, detail="Tesseract OCR not available")
+            except ImportError as e:
+                logger.error(f"OCR import error: {e}")
+                raise HTTPException(status_code=500, detail="Tesseract OCR libraries not installed")
+            except Exception as e:
+                logger.error(f"OCR processing error: {e}")
+                raise HTTPException(status_code=500, detail=f"OCR processing failed: {str(e)}")
                 
         # TEXT FILE: Read directly
         elif file_extension in ["txt", "md", "csv"]:
@@ -3282,7 +3329,7 @@ async def login_user(data: dict):
 @app.post("/users/create")
 async def create_user(data: dict):
     """
-    Creates a new user account with category and privileges.
+    Creates a new user account with category, privileges, and store assignment.
     """
     name = data.get('name')
     email = data.get('email')
@@ -3290,6 +3337,7 @@ async def create_user(data: dict):
     role = data.get('role', 'Employee')
     category = data.get('category', 'Employee')
     privileges = data.get('privileges', [])
+    store = data.get('store', 'Unassigned')
     
     # Validation
     if not name or not email or not password:
@@ -3315,17 +3363,18 @@ async def create_user(data: dict):
         "privileges": valid_privileges,
         "is_superadmin": category == 'Super Admin',
         "has_admin_access": has_admin_access,
+        "store": store,
         "created_at": datetime.now().isoformat()
     }
     
-    logger.info(f"User created: {name} ({email}) - Role: {role} - Category: {category} - Privileges: {valid_privileges}")
+    logger.info(f"User created: {name} ({email}) - Role: {role} - Store: {store} - Privileges: {valid_privileges}")
     return {"status": "success", "user_id": email, "privileges_count": len(valid_privileges)}
 
 
 @app.post("/users/update")
 async def update_user(data: dict):
     """
-    Updates an existing user's privileges and role.
+    Updates an existing user's privileges, role, and store assignment.
     """
     email = data.get('email')
     if not email or email not in users_store:
@@ -3350,15 +3399,25 @@ async def update_user(data: dict):
             
     if 'name' in data:
         user['name'] = data['name']
+    
+    if 'store' in data:
+        user['store'] = data['store']
         
-    logger.info(f"User updated: {email} - Privileges: {user.get('privileges')}")
+    logger.info(f"User updated: {email} - Store: {user.get('store')} - Privileges: {user.get('privileges')}")
     return {"status": "success", "message": "User updated successfully"}
 
 
 @app.get("/users/list")
-async def list_users():
+async def list_users(
+    page: int = 1,
+    limit: int = 50,
+    search: str = "",
+    store: str = "",
+    role: str = ""
+):
     """
-    Returns all users (without passwords).
+    Returns all users (without passwords) with pagination and filtering.
+    Supports search by name/email, filter by store and role.
     """
     users = []
     for email, user_data in users_store.items():
@@ -3369,9 +3428,35 @@ async def list_users():
             "category": user_data.get("category", "Employee"),
             "privileges": user_data.get("privileges", []),
             "is_superadmin": user_data.get("is_superadmin", False),
-            "has_admin_access": user_data.get("has_admin_access", False)
+            "has_admin_access": user_data.get("has_admin_access", False),
+            "store": user_data.get("store", "Unassigned"),
+            "created_at": user_data.get("created_at", "")
         })
-    return users
+    
+    # Apply filters
+    if search:
+        search_lower = search.lower()
+        users = [u for u in users if search_lower in u["name"].lower() or search_lower in u["email"].lower()]
+    
+    if store and store != "All":
+        users = [u for u in users if u["store"] == store]
+    
+    if role and role != "All":
+        users = [u for u in users if u["role"] == role]
+    
+    # Calculate pagination
+    total = len(users)
+    start = (page - 1) * limit
+    end = start + limit
+    paginated_users = users[start:end]
+    
+    return {
+        "users": paginated_users,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": (total + limit - 1) // limit if limit > 0 else 1
+    }
 
 
 @app.get("/users/privileges")
@@ -3390,7 +3475,9 @@ async def get_all_privileges():
         {"id": "post_quiz", "name": "Post Quiz", "description": "Create and post quizzes", "icon": "help-circle"},
         {"id": "create_user", "name": "Create User", "description": "Create new user accounts", "icon": "user-plus"},
         {"id": "live_tracking", "name": "Live Tracking", "description": "Real-time location tracking", "icon": "map-pin"},
-        {"id": "proctored_assessment", "name": "Proctored Assessment", "description": "Access proctored assessments", "icon": "shield"},
+        {"id": "proctored_assessment", "name": "Proctored Assessment", "description": "Access and take proctored assessments", "icon": "shield"},
+        {"id": "proctored_create_manage", "name": "Create/Manage Assessments", "description": "Create, edit, and delete proctored assessments", "icon": "edit-3", "category": "Proctored"},
+        {"id": "proctored_view_results", "name": "View Assessment Results", "description": "View proctored assessment submissions and results", "icon": "eye", "category": "Proctored"},
         {"id": "view_analytics", "name": "View Analytics", "description": "View detailed analytics", "icon": "trending-up"},
         {"id": "send_notification", "name": "Send Notification", "description": "Send notifications to users", "icon": "bell"},
         {"id": "access_control", "name": "Access Control", "description": "Manage user access controls", "icon": "lock"},
@@ -3440,6 +3527,144 @@ async def create_user_category(data: dict):
     return {"status": "success", "category": new_category}
 
 
+# STORES LIST - For assigning employees to stores
+STORES_LIST = [
+    {"id": "1", "name": "HQ", "city": "Mumbai", "region": "West"},
+    {"id": "2", "name": "Mumbai Central", "city": "Mumbai", "region": "West"},
+    {"id": "3", "name": "Mumbai Andheri", "city": "Mumbai", "region": "West"},
+    {"id": "4", "name": "Delhi CP", "city": "Delhi", "region": "North"},
+    {"id": "5", "name": "Delhi Saket", "city": "Delhi", "region": "North"},
+    {"id": "6", "name": "Delhi Gurgaon", "city": "Gurgaon", "region": "North"},
+    {"id": "7", "name": "Bangalore Indiranagar", "city": "Bangalore", "region": "South"},
+    {"id": "8", "name": "Bangalore Koramangala", "city": "Bangalore", "region": "South"},
+    {"id": "9", "name": "Chennai Anna Nagar", "city": "Chennai", "region": "South"},
+    {"id": "10", "name": "Hyderabad Jubilee Hills", "city": "Hyderabad", "region": "South"},
+    {"id": "11", "name": "Pune FC Road", "city": "Pune", "region": "West"},
+    {"id": "12", "name": "Kolkata Park Street", "city": "Kolkata", "region": "East"},
+]
+
+
+@app.get("/stores")
+async def get_stores():
+    """
+    Returns list of all stores for employee assignment.
+    """
+    return STORES_LIST
+
+
+@app.get("/stores/summary")
+async def get_stores_summary():
+    """
+    Returns stores with employee count for analytics.
+    """
+    store_summary = []
+    for store in STORES_LIST:
+        employee_count = sum(1 for u in users_store.values() if u.get("store") == store["name"])
+        store_summary.append({
+            **store,
+            "employee_count": employee_count
+        })
+    return store_summary
+
+
+@app.post("/users/bulk-upload")
+async def bulk_upload_users(file: UploadFile = File(...)):
+    """
+    Bulk upload users from Excel/CSV file.
+    Expected columns: Name, Email, Password, Role, Category, Store
+    """
+    try:
+        import pandas as pd
+        import io
+        
+        contents = await file.read()
+        
+        # Determine file type and read
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(io.BytesIO(contents))
+        else:
+            df = pd.read_excel(io.BytesIO(contents))
+        
+        # Normalize column names (case-insensitive)
+        df.columns = df.columns.str.strip().str.lower()
+        
+        created_count = 0
+        skipped_count = 0
+        errors = []
+        
+        for idx, row in df.iterrows():
+            try:
+                email = str(row.get('email', '')).strip()
+                name = str(row.get('name', '')).strip()
+                password = str(row.get('password', 'Welcome@123')).strip()
+                role = str(row.get('role', 'Employee')).strip()
+                category = str(row.get('category', 'Employee')).strip()
+                store = str(row.get('store', 'Unassigned')).strip()
+                
+                if not email or not name:
+                    errors.append(f"Row {idx + 2}: Missing name or email")
+                    skipped_count += 1
+                    continue
+                
+                if email in users_store:
+                    errors.append(f"Row {idx + 2}: User {email} already exists")
+                    skipped_count += 1
+                    continue
+                
+                # Create user
+                users_store[email] = {
+                    "email": email,
+                    "name": name,
+                    "password": password,
+                    "role": role,
+                    "category": category,
+                    "privileges": [],
+                    "is_superadmin": False,
+                    "has_admin_access": category in ['Super Admin', 'Manager', 'Supervisor'],
+                    "store": store,
+                    "created_at": datetime.now().isoformat()
+                }
+                created_count += 1
+                
+            except Exception as row_error:
+                errors.append(f"Row {idx + 2}: {str(row_error)}")
+                skipped_count += 1
+        
+        logger.info(f"Bulk upload completed: {created_count} created, {skipped_count} skipped")
+        
+        return {
+            "status": "success",
+            "created": created_count,
+            "skipped": skipped_count,
+            "errors": errors[:10]  # Return first 10 errors only
+        }
+        
+    except Exception as e:
+        logger.error(f"Bulk upload error: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to process file: {str(e)}")
+
+
+@app.get("/users/bulk-upload/template")
+async def get_bulk_upload_template():
+    """
+    Returns the expected format for bulk user upload.
+    """
+    return {
+        "columns": ["Name", "Email", "Password", "Role", "Category", "Store"],
+        "sample_rows": [
+            ["John Doe", "john.doe@company.com", "Welcome@123", "Waffler", "Employee", "Mumbai Central"],
+            ["Jane Smith", "jane.smith@company.com", "Welcome@123", "Silver Waffler", "Employee", "Delhi CP"],
+            ["Mike Wilson", "mike.wilson@company.com", "Welcome@123", "Store Manager", "Manager", "Bangalore Indiranagar"]
+        ],
+        "notes": [
+            "Password is optional - defaults to 'Welcome@123' if not provided",
+            "Role options: Waffler, Silver Waffler, Gold Waffler, Shift Manager, Store Manager, etc.",
+            "Category options: Employee, Supervisor, Manager, Super Admin",
+            "Store must match an existing store name from the stores list"
+        ]
+    }
+
+
 @app.get("/users/{email}")
 async def get_user(email: str):
     """
@@ -3455,6 +3680,9 @@ async def get_user(email: str):
         "role": user_data.get("role", "User"),
         "category": user_data.get("category", "Employee"),
         "privileges": user_data.get("privileges", []),
+        "is_superadmin": user_data.get("is_superadmin", False),
+        "has_admin_access": user_data.get("has_admin_access", False),
+        "store": user_data.get("store", "Unassigned"),
         "is_superadmin": user_data.get("is_superadmin", False),
         "has_admin_access": user_data.get("has_admin_access", False)
     }
