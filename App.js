@@ -31,7 +31,7 @@ import InterviewModules from "./Screens/InterviewModules";
 import ModuleDetail from "./Screens/ModuleDetail";
 import Hierarchy from "./Screens/Hierarchy";
 import { LanguageProvider } from "./context/language.context";
-import Analytics from "./Screens/Analytics";
+import Analytics from "./Screens/AdvancedAnalytics"; // NEW: Comprehensive Analytics Module
 import LiveTrackingScreen from './Screens/LiveTrackingScreen';
 import TeamListScreen from './Screens/TeamListScreen';
 import AuditsScreen from './Screens/AuditsScreen';

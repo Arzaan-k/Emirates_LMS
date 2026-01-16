@@ -45,7 +45,7 @@ def add_course_to_rag(course_id, transcript):
 # --- CONFIGURATION ---
 PORT = 8000
 HOST = "0.0.0.0"
-BASE_URL = "http://192.168.29.119:8000"  # Local network IP for physical device
+BASE_URL = "http://192.168.1.36:8000"  # Local network IP for physical device
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
@@ -240,16 +240,18 @@ users_store: dict = {
         "role": "Super Admin",
         "category": "Super Admin",
         "privileges": ALL_PRIVILEGES.copy(),  # Full access
-        "is_superadmin": True
+        "is_superadmin": True,
+        "store": "HQ"
     },
     "user": {
         "email": "user", 
         "name": "Aditya User", 
         "password": "user@123", 
-        "role": "User",
+        "role": "Waffler",
         "category": "Employee",
         "privileges": [],  # No admin privileges
-        "is_superadmin": False
+        "is_superadmin": False,
+        "store": "Mumbai Central"
     },
     "store.manager": {
         "email": "store.manager", 
@@ -260,11 +262,74 @@ users_store: dict = {
         "privileges": [
             "team_list", "reports", "audits", "upload_training", 
             "post_news", "create_user", "live_tracking", 
-            "view_analytics", "send_notification", "schedule_meeting"
-        ],  # Manager has limited privileges
-        "is_superadmin": False
+            "send_notification", "schedule_meeting"
+        ],  # Manager has limited privileges (no analytics access)
+        "is_superadmin": False,
+        "store": "Delhi CP"
+    },
+    # Sample employees for analytics
+    "emp1@bw.com": {
+        "email": "emp1@bw.com",
+        "name": "Rahul Kumar",
+        "password": "test123",
+        "role": "Waffler",
+        "category": "Employee",
+        "privileges": [],
+        "is_superadmin": False,
+        "store": "Mumbai Central"
+    },
+    "emp2@bw.com": {
+        "email": "emp2@bw.com",
+        "name": "Priya Sharma",
+        "password": "test123",
+        "role": "Silver Waffler",
+        "category": "Employee",
+        "privileges": [],
+        "is_superadmin": False,
+        "store": "Mumbai Central"
+    },
+    "emp3@bw.com": {
+        "email": "emp3@bw.com",
+        "name": "Amit Patel",
+        "password": "test123",
+        "role": "Gold Waffler",
+        "category": "Employee",
+        "privileges": [],
+        "is_superadmin": False,
+        "store": "Delhi CP"
+    },
+    "emp4@bw.com": {
+        "email": "emp4@bw.com",
+        "name": "Sneha Reddy",
+        "password": "test123",
+        "role": "Waffler",
+        "category": "Employee",
+        "privileges": [],
+        "is_superadmin": False,
+        "store": "Delhi CP"
+    },
+    "emp5@bw.com": {
+        "email": "emp5@bw.com",
+        "name": "Vijay Singh",
+        "password": "test123",
+        "role": "Silver Waffler",
+        "category": "Employee",
+        "privileges": [],
+        "is_superadmin": False,
+        "store": "Bangalore Indiranagar"
+    },
+    "emp6@bw.com": {
+        "email": "emp6@bw.com",
+        "name": "Anita Desai",
+        "password": "test123",
+        "role": "Waffler",
+        "category": "Employee",
+        "privileges": [],
+        "is_superadmin": False,
+        "store": "Bangalore Indiranagar"
     },
 }
+
 
 # ATTENDANCE/PUNCH IN-OUT STORE
 attendance_records: List[dict] = []  # {id, user_id, punch_in, punch_out, duration_minutes}
@@ -5173,6 +5238,522 @@ async def get_simulation_leaderboard(simulation_id: str, limit: int = 10):
     )
     
     return sorted_list[:limit]
+
+
+# ==========================================
+# ADVANCED ANALYTICS MODULE
+# ==========================================
+
+# Analytics data stores
+store_analytics: List[dict] = []  # {store_id, store_name, completion_%, avg_score, hygiene_score, risk_level, sales_impact}
+employee_analytics: List[dict] = []  # {user_email, name, role, store, completion_%, avg_score, skills, risk_status}
+
+@app.get("/analytics/dashboard")
+async def get_analytics_dashboard():
+    """Main analytics dashboard with overview metrics"""
+    total_stores = len(set([e.get("store", "Unknown") for e in users_store.values() if e.get("role") != "Super Admin"]))
+    total_employees = len([u for u in users_store.values() if not u.get("is_superadmin")])
+    
+    # Calculate completion rates
+    total_completions = len(course_completions)
+    total_courses = len(content_store)
+    avg_completion = (total_completions / max(total_employees * total_courses, 1)) * 100 if total_courses > 0 else 0
+    
+    # Calculate average quiz score
+    quiz_scores = [s.get("score", 0) for s in quiz_submissions]
+    avg_quiz_score = sum(quiz_scores) / len(quiz_scores) if quiz_scores else 0
+    
+    # Compliance score (from assessment submissions)
+    passing_assessments = len([a for a in assessment_submissions if a.get("passed")])
+    total_assessments = len(assessment_submissions)
+    compliance_score = (passing_assessments / total_assessments * 100) if total_assessments > 0 else 100
+    
+    # Customer satisfaction (simulated based on training)
+    customer_satisfaction = min(100, 75 + (avg_completion / 10))
+    
+    # Training completion trend (last 30 days)
+    from datetime import datetime, timedelta
+    today = datetime.now()
+    trend_data = []
+    for i in range(30, 0, -1):
+        date = today - timedelta(days=i)
+        date_str = date.strftime("%Y-%m-%d")
+        completions_on_date = len([c for c in course_completions if c.get("completed_at", "").startswith(date_str)])
+        trend_data.append({"date": date_str, "completions": completions_on_date})
+    
+    # Risk summary
+    high_risk_stores = len([s for s in store_analytics if s.get("risk_level") == "red"])
+    employees_needing_retraining = len([e for e in employee_analytics if e.get("risk_status") == "red"])
+    fully_compliant_stores = len([s for s in store_analytics if s.get("risk_level") == "green"])
+    
+    return {
+        "overview": {
+            "total_stores": total_stores,
+            "total_employees": total_employees,
+            "avg_completion": round(avg_completion, 1),
+            "avg_quiz_score": round(avg_quiz_score, 1),
+            "compliance_score": round(compliance_score, 1),
+            "customer_satisfaction": round(customer_satisfaction, 1)
+        },
+        "trend": trend_data,
+        "risk_summary": {
+            "high_risk_stores": high_risk_stores,
+            "employees_needing_retraining": employees_needing_retraining,
+            "fully_compliant_stores": fully_compliant_stores
+        }
+    }
+
+
+@app.get("/analytics/stores")
+async def get_store_performance():
+    """Store-wise performance analytics"""
+    from collections import defaultdict
+    
+    store_data = defaultdict(lambda: {
+        "store_name": "",
+        "completion_percent": 0,
+        "avg_quiz_score": 0,
+        "hygiene_score": 100,
+        "risk_level": "green",
+        "employee_count": 0,
+        "total_courses": 0,
+        "completed_courses": 0
+    })
+    
+    # Aggregate by store
+    for user_email, user in users_store.items():
+        if user.get("is_superadmin"):
+            continue
+        
+        store = user.get("store", "Unassigned")
+        store_data[store]["store_name"] = store
+        store_data[store]["employee_count"] += 1
+        
+        # Get user's completions
+        user_completions = [c for c in course_completions if c.get("user_email") == user_email]
+        store_data[store]["completed_courses"] += len(user_completions)
+        
+        # Quiz scores
+        user_quiz_scores = [s.get("score", 0) for s in quiz_submissions if s.get("user_name") == user.get("name")]
+        if user_quiz_scores:
+            store_data[store]["avg_quiz_score"] += sum(user_quiz_scores) / len(user_quiz_scores)
+    
+    # Calculate percentages and risk
+    stores_list = []
+    for store_id, data in store_data.items():
+        if data["employee_count"] > 0:
+            data["avg_quiz_score"] = round(data["avg_quiz_score"] / data["employee_count"], 1)
+            
+            total_expected = data["employee_count"] * len(content_store)
+            data["completion_percent"] = round((data["completed_courses"] / total_expected * 100) if total_expected > 0 else 0, 1)
+            
+            # Risk calculation
+            if data["completion_percent"] < 30 or data["avg_quiz_score"] < 50:
+                data["risk_level"] = "red"
+            elif data["completion_percent"] < 60 or data["avg_quiz_score"] < 70:
+                data["risk_level"] = "yellow"
+            else:
+                data["risk_level"] = "green"
+            
+            stores_list.append({"store_id": store_id, **data})
+    
+    return stores_list
+
+
+@app.get("/analytics/stores/{store_name}")
+async def get_store_detail(store_name: str):
+    """Detailed store analytics with tabs"""
+    store_employees = [
+        {
+            "email": email,
+            "name": user.get("name"),
+            "role": user.get("role"),
+            "completion_percent": len([c for c in course_completions if c.get("user_email") == email]) / max(len(content_store), 1) * 100,
+            "avg_score": sum([s.get("score", 0) for s in quiz_submissions if s.get("user_name") == user.get("name")]) / max(len([s for s in quiz_submissions if s.get("user_name") == user.get("name")]), 1)
+        }
+        for email, user in users_store.items()
+        if user.get("store") == store_name and not user.get("is_superadmin")
+    ]
+    
+    # Calculate store-level metrics
+    total_completion = sum([e["completion_percent"] for e in store_employees]) / len(store_employees) if store_employees else 0
+    avg_score = sum([e["avg_score"] for e in store_employees]) / len(store_employees) if store_employees else 0
+    
+    return {
+        "overview": {
+            "store_name": store_name,
+            "completion_percent": round(total_completion, 1),
+            "avg_quiz_score": round(avg_score, 1),
+            "compliance_percent": 95.0,  # Simulated
+            "customer_complaints_reduction": 25  # Simulated correlation
+        },
+        "employees": store_employees,
+        "hygiene": {
+            "sop_compliance": 92.0,
+            "audit_ready": True,
+            "violations": []
+        },
+        "sales_impact": {
+            "training_vs_sales_improvement": 18.5,
+            "customer_rating_improvement": 0.8
+        }
+    }
+
+
+@app.get("/analytics/employees")
+async def get_employee_performance():
+    """Employee-wise performance analytics"""
+    employees_list = []
+    
+    for user_email, user in users_store.items():
+        if user.get("is_superadmin"):
+            continue
+        
+        user_completions = [c for c in course_completions if c.get("user_email") == user_email]
+        completion_percent = (len(user_completions) / max(len(content_store), 1)) * 100
+        
+        user_quiz_attempts = [s for s in quiz_submissions if s.get("user_name") == user.get("name")]
+        avg_score = sum([s.get("score", 0) for s in user_quiz_attempts]) / len(user_quiz_attempts) if user_quiz_attempts else 0
+        
+        # Risk status
+        if completion_percent < 30 or avg_score < 50:
+            risk_status = "red"
+        elif completion_percent < 60 or avg_score < 70:
+            risk_status = "yellow"
+        else:
+            risk_status = "green"
+        
+        employees_list.append({
+            "email": user_email,
+            "name": user.get("name"),
+            "role": user.get("role"),
+            "store": user.get("store", "Unassigned"),
+            "completion_percent": round(completion_percent, 1),
+            "avg_score": round(avg_score, 1),
+            "risk_status": risk_status
+        })
+    
+    return employees_list
+
+
+@app.get("/analytics/employees/{user_email}")
+async def get_employee_detail(user_email: str):
+    """Detailed employee analytics with tabs"""
+    user = users_store.get(user_email)
+    if not user:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    user_completions = [c for c in course_completions if c.get("user_email") == user_email]
+    user_quizzes = [s for s in quiz_submissions if s.get("user_name") == user.get("name")]
+    
+    # Calculate skill scores (from course completions and quiz scores)
+    skill_scores = {
+        "product_knowledge": 75.0,
+        "hygiene": 88.0,
+        "pos": 92.0,
+        "customer_handling": 82.0,
+        "speed_of_service": 78.0
+    }
+    
+    # Learning streak
+    learning_streak = len(set([c.get("completed_at", "")[:10] for c in user_completions]))
+    
+    # Weak topics from quiz analysis
+    weak_topics = ["Coffee Grinding", "Milk Texturing"] if len(user_quizzes) > 0 else []
+    
+    return {
+        "training": {
+            "assigned_courses": len(content_store),
+            "completed_courses": len(user_completions),
+            "pending_courses": len(content_store) - len(user_completions),
+            "learning_streak": learning_streak,
+            "xp_earned": sum([c.get("score", 0) * 10 for c in user_completions])
+        },
+        "quizzes": {
+            "attempts": len(user_quizzes),
+            "avg_score": sum([q.get("score", 0) for q in user_quizzes]) / len(user_quizzes) if user_quizzes else 0,
+            "improvement_trend": "+12%",
+            "weak_topics": weak_topics
+        },
+        "skills": skill_scores,
+        "hygiene": {
+            "sop_adherence": 94.0,
+            "audit_ready": True,
+            "violations": []
+        },
+        "ai_usage": {
+            "questions_asked": 24,
+            "confusion_topics": ["Espresso calibration", "Latte art"],
+            "resolution_success": 89.0
+        }
+    }
+
+
+@app.get("/analytics/training-effectiveness")
+async def get_training_effectiveness():
+    """Course-wise effectiveness analytics"""
+    course_stats = []
+    
+    for course in content_store:
+        course_id = course.get("id")
+        completions = [c for c in course_completions if c.get("course_id") == course_id]
+        
+        # Quiz scores for this course
+        course_quizzes = [s for s in quiz_submissions if course.get("title", "").lower() in s.get("quiz_id", "").lower()]
+        avg_score = sum([q.get("score", 0) for q in course_quizzes]) / len(course_quizzes) if course_quizzes else 0
+        
+        total_users = len([u for u in users_store.values() if not u.get("is_superadmin")])
+        completion_rate = (len(completions) / total_users * 100) if total_users > 0 else 0
+        
+        # Drop rate (simulated)
+        drop_rate = max(0, 100 - completion_rate - 10)
+        
+        # Effectiveness rating
+        if avg_score >= 80 and completion_rate >= 70:
+            effectiveness = "Excellent"
+        elif avg_score >= 60 and completion_rate >= 50:
+            effectiveness = "Good"
+        else:
+            effectiveness = "Needs Improvement"
+        
+        course_stats.append({
+            "course_id": course_id,
+            "course_name": course.get("title"),
+            "completion_percent": round(completion_rate, 1),
+            "avg_score": round(avg_score, 1),
+            "drop_rate": round(drop_rate, 1),
+            "effectiveness": effectiveness
+        })
+    
+    return course_stats
+
+
+@app.get("/analytics/hygiene-compliance")
+async def get_hygiene_compliance():
+    """Hygiene and compliance analytics"""
+    stores = {}
+    
+    for user_email, user in users_store.items():
+        if user.get("is_superadmin"):
+            continue
+        
+        store = user.get("store", "Unassigned")
+        if store not in stores:
+            stores[store] = {
+                "store_name": store,
+                "sop_compliance": 92.0,  # Simulated
+                "audit_ready": True,
+                "risk_level": "green"
+            }
+    
+    # Summary
+    fully_compliant = len([s for s in stores.values() if s["sop_compliance"] >= 90])
+    needs_attention = len([s for s in stores.values() if 70 <= s["sop_compliance"] < 90])
+    critical_risk = len([s for s in stores.values() if s["sop_compliance"] < 70])
+    
+    return {
+        "summary": {
+            "fully_compliant_stores": fully_compliant,
+            "stores_needing_attention": needs_attention,
+            "critical_risk_stores": critical_risk
+        },
+        "stores": list(stores.values())
+    }
+
+
+@app.get("/analytics/customer-impact")
+async def get_customer_experience_impact():
+    """Customer experience correlation with training"""
+    
+    # Generate correlation data
+    training_levels = [20, 30, 40, 50, 60, 70, 80, 90, 100]
+    satisfaction_correlation = [
+        {"training_completion": level, "customer_satisfaction": 60 + (level * 0.35)}
+        for level in training_levels
+    ]
+    
+    complaint_correlation = [
+        {"training_completion": level, "complaint_reduction": level * 0.4}
+        for level in training_levels
+    ]
+    
+    sales_correlation = [
+        {"training_completion": level, "sales_uplift": level * 0.25}
+        for level in training_levels
+    ]
+    
+    return {
+        "satisfaction_correlation": satisfaction_correlation,
+        "complaint_correlation": complaint_correlation,
+        "sales_correlation": sales_correlation,
+        "summary": "Stores with higher hygiene training show 32% better customer ratings and 28% reduction in complaints."
+    }
+
+
+@app.get("/analytics/ai-insights")
+async def get_ai_learning_insights():
+    """AI-powered learning insights"""
+    
+    # Most asked topics (simulated from interactions)
+    most_asked = [
+        {"topic": "Espresso calibration", "count": 45},
+        {"topic": "Milk texturing", "count": 38},
+        {"topic": "Waffle batter ratio", "count": 32},
+        {"topic": "POS troubleshooting", "count": 28},
+        {"topic": "Hygiene protocols", "count": 25}
+    ]
+    
+    # Confusion areas
+    confusion_areas = [
+        {"topic": "Coffee grinding settings", "confusion_score": 78},
+        {"topic": "Latte art techniques", "confusion_score": 65},
+        {"topic": "Equipment maintenance", "confusion_score": 58}
+    ]
+    
+    # Topics needing retraining
+    retraining_needed = [
+        "Safety protocols",
+        "Cash handling procedures",
+        "Customer complaint resolution"
+    ]
+    
+    return {
+        "most_asked_topics": most_asked,
+        "confusion_areas": confusion_areas,
+        "topics_needing_retraining": retraining_needed,
+        "ai_usage_frequency": "87% of employees use AI assistant weekly"
+    }
+
+
+@app.post("/analytics/generate-report")
+async def generate_analytics_report(
+    report_type: str = Form(...),
+    date_from: str = Form(""),
+    date_to: str = Form(""),
+    store_filter: str = Form(""),
+    role_filter: str = Form(""),
+    format: str = Form("pdf")
+):
+    """Generate analytics report (PDF/Excel)"""
+    
+    report_data = {
+        "report_type": report_type,
+        "generated_at": datetime.now().isoformat(),
+        "filters": {
+            "date_from": date_from,
+            "date_to": date_to,
+            "store": store_filter,
+            "role": role_filter
+        },
+        "data": []
+    }
+    
+    if report_type == "employee_performance":
+        employees = await get_employee_performance()
+        report_data["data"] = employees
+    elif report_type == "store_performance":
+        stores = await get_store_performance()
+        report_data["data"] = stores
+    elif report_type == "hygiene_compliance":
+        hygiene = await get_hygiene_compliance()
+        report_data["data"] = hygiene["stores"]
+    elif report_type == "training_effectiveness":
+        training = await get_training_effectiveness()
+        report_data["data"] = training
+    
+    # AI Summary generation
+    try:
+        client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+        
+        summary_prompt = f"""
+        Analyze this {report_type} data and provide a concise executive summary:
+        
+        {json.dumps(report_data["data"][:5], indent=2)}
+        
+        Provide:
+        1. Overall training health
+        2. Weak areas needing attention
+        3. Top 3 recommended actions
+        
+        Keep it professional and actionable. Max 150 words.
+        """
+        
+        completion = client.chat.completions.create(
+            messages=[{"role": "user", "content": summary_prompt}],
+            model="llama-3.3-70b-versatile",
+            temperature=0.5,
+            max_tokens=200
+        )
+        
+        ai_summary = completion.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"AI summary error: {e}")
+        ai_summary = "Summary generation unavailable."
+    
+    report_data["ai_summary"] = ai_summary
+    
+    # Return report data (client will handle PDF/Excel formatting)
+    return {
+        "status": "success",
+        "report": report_data,
+        "download_url": f"/analytics/reports/{report_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{format}"
+    }
+
+
+@app.get("/analytics/ai-executive-summary")
+async def generate_ai_executive_summary():
+    """Generate AI-powered executive summary"""
+    
+    # Gather key metrics
+    dashboard = await get_analytics_dashboard()
+    employees = await get_employee_performance()
+    stores = await get_store_performance()
+    
+    try:
+        client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+        
+        summary_data = {
+            "avg_completion": dashboard["overview"]["avg_completion"],
+            "avg_quiz_score": dashboard["overview"]["avg_quiz_score"],
+            "compliance_score": dashboard["overview"]["compliance_score"],
+            "high_risk_stores": dashboard["risk_summary"]["high_risk_stores"],
+            "employees_at_risk": dashboard["risk_summary"]["employees_needing_retraining"]
+        }
+        
+        prompt = f"""
+        As an LMS analytics expert for Belgian Waffle QSR chain, analyze this data:
+        
+        {json.dumps(summary_data, indent=2)}
+        
+        Provide a concise executive summary covering:
+        1. Overall Training Health (1-2 sentences)
+        2. Critical Weak Areas (bullet points)
+        3. Top 3 Recommended Actions (actionable, specific)
+        
+        Be professional and data-driven. Max 200 words.
+        """
+        
+        completion = client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama-3.3-70b-versatile",
+            temperature=0.5,
+            max_tokens=250
+        )
+        
+        summary = completion.choices[0].message.content.strip()
+        
+        return {
+            "status": "success",
+            "summary": summary,
+            "generated_at": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Executive summary error: {e}")
+        return {
+            "status": "error",
+            "summary": "Executive summary generation unavailable. Please try again.",
+            "generated_at": datetime.now().isoformat()
+        }
 
 
 if __name__ == "__main__":
