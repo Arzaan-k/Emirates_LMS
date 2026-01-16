@@ -21,6 +21,7 @@ import Animated, {
     Easing,
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
+import API_URL from '../config';
 
 const { width, height } = Dimensions.get('window');
 
@@ -128,56 +129,40 @@ export default function Login({ navigation }) {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
+    const [loading, setLoading] = useState(false);
 
-    const handleLogin = () => {
-        // Simple authentication logic with superadmin support
-        if (username === 'superadmin' && password === 'superadmin@2025') {
-            // Superadmin - full access to everything
-            navigation.replace('ManagerDashboard', {
-                userProfile: {
-                    name: 'Super Admin',
-                    role: 'Super Admin',
-                    email: 'superadmin',
-                    category: 'Super Admin',
-                    is_superadmin: true,
-                    privileges: [
-                        'team_list', 'reports', 'assign_quiz', 'audits',
-                        'upload_training', 'bulk_upload', 'post_news', 'post_quiz',
-                        'create_user', 'live_tracking', 'proctored_assessment',
-                        'view_analytics', 'send_notification', 'access_control',
-                        'manage_buckets', 'schedule_meeting', 'crm_tickets',
-                        'manage_simulations', 'manage_learning_path'
-                    ]
-                }
+    const handleLogin = async () => {
+        if (!username || !password) {
+            Alert.alert('Missing Fields', 'Please enter both username and password.');
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const response = await fetch(`${API_URL}/users/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: username, password: password })
             });
-        } else if (username === 'user' && password === 'user@123') {
-            navigation.replace('Home', {
-                userProfile: {
-                    name: 'Aditya User',
-                    role: 'User',
-                    email: 'user',
-                    category: 'Employee',
-                    is_superadmin: false,
-                    privileges: []
+
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                const user = data.user;
+                // Determine destination based on role/access
+                if (user.has_admin_access || user.is_superadmin || user.role === 'Store Manager') {
+                    navigation.replace('ManagerDashboard', { userProfile: user });
+                } else {
+                    navigation.replace('Home', { userProfile: user });
                 }
-            });
-        } else if (username === 'store.manager' && password === 'bw_store@2025') {
-            navigation.replace('ManagerDashboard', {
-                userProfile: {
-                    name: 'Store Manager',
-                    role: 'Store Manager',
-                    email: 'store.manager',
-                    category: 'Manager',
-                    is_superadmin: false,
-                    privileges: [
-                        'team_list', 'reports', 'audits', 'upload_training',
-                        'post_news', 'create_user', 'live_tracking',
-                        'view_analytics', 'send_notification', 'schedule_meeting'
-                    ]
-                }
-            });
-        } else {
-            Alert.alert('Invalid Credentials', 'Please check your username and password');
+            } else {
+                Alert.alert('Login Failed', data.message || 'Invalid credentials');
+            }
+        } catch (error) {
+            console.error('Login error:', error);
+            Alert.alert('Error', 'Unable to connect to server. Please try again.');
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -261,15 +246,15 @@ export default function Login({ navigation }) {
                     </TouchableOpacity>
 
                     {/* LOGIN BUTTON */}
-                    <TouchableOpacity style={styles.loginBtn} onPress={handleLogin}>
+                    <TouchableOpacity style={styles.loginBtn} onPress={handleLogin} disabled={loading}>
                         <LinearGradient
                             colors={['#F59E0B', '#D97706']}
                             start={{ x: 0, y: 0 }}
                             end={{ x: 1, y: 0 }}
                             style={styles.loginGradient}
                         >
-                            <Text style={styles.loginText}>Sign In</Text>
-                            <Feather name="arrow-right" size={20} color="#FFF" />
+                            <Text style={styles.loginText}>{loading ? "Signing In..." : "Sign In"}</Text>
+                            {!loading && <Feather name="arrow-right" size={20} color="#FFF" />}
                         </LinearGradient>
                     </TouchableOpacity>
 

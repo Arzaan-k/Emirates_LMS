@@ -3178,6 +3178,38 @@ async def get_all_locations():
     return list(location_store.values())
 
 
+@app.post("/users/login")
+async def login_user(data: dict):
+    """
+    Authenticates a user and returns their profile.
+    """
+    email = data.get('email')
+    password = data.get('password')
+    
+    if not email or not password:
+        return {"status": "error", "message": "Email and password are required"}
+    
+    # Check credentials
+    if email in users_store:
+        user = users_store[email]
+        if user["password"] == password:
+            # Login successful
+            return {
+                "status": "success",
+                "user": {
+                    "email": user["email"],
+                    "name": user["name"],
+                    "role": user.get("role", "User"),
+                    "category": user.get("category", "Employee"),
+                    "privileges": user.get("privileges", []),
+                    "is_superadmin": user.get("is_superadmin", False),
+                    "has_admin_access": user.get("has_admin_access", False)
+                }
+            }
+            
+    return {"status": "error", "message": "Invalid credentials"}
+
+
 # ==========================================
 # USER MANAGEMENT APIs
 # ==========================================
