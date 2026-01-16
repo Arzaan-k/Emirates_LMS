@@ -162,7 +162,18 @@ export default function ManagerDashboard({ route, navigation }) {
     const role = userProfile?.role || "Manager";
     const name = userProfile?.name || "User";
     const data = getDashboardData(role);
-    console.log("ManagerDashboard rendered");
+
+    // Privilege checking for role-based access control
+    const isSuperAdmin = userProfile?.is_superadmin || userProfile?.role === 'Super Admin';
+    const userPrivileges = userProfile?.privileges || [];
+
+    // Helper function to check if user has a specific privilege
+    const hasPrivilege = (privilegeId) => {
+        if (isSuperAdmin) return true; // Superadmin has all privileges
+        return userPrivileges.includes(privilegeId);
+    };
+
+    console.log("ManagerDashboard rendered - isSuperAdmin:", isSuperAdmin, "Privileges:", userPrivileges.length);
 
     // --- RESOURCE UPLOAD STATE ---
     const [uploadVisible, setUploadVisible] = useState(false);
@@ -862,15 +873,7 @@ export default function ManagerDashboard({ route, navigation }) {
             <View style={styles.bodyContainer}>
                 <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
 
-                    {/* STATS GRID */}
-                    <Text style={styles.sectionTitle}>Key Performance Indicators</Text>
-                    <View style={styles.statsGrid}>
-                        {data.stats.map((item, index) => (
-                            <StatCard key={index} item={item} index={index} />
-                        ))}
-                    </View>
-
-                    {/* AI INSIGHT */}
+                    {/* AI INSIGHT - Moved to top to overlap header */}
                     <Animated.View entering={FadeInDown.delay(300)} style={styles.aiCard}>
                         <LinearGradient colors={['#4C1D95', '#6D28D9']} style={styles.aiGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
                             <View style={styles.aiHeader}>
@@ -886,6 +889,14 @@ export default function ManagerDashboard({ route, navigation }) {
                         </LinearGradient>
                     </Animated.View>
 
+                    {/* STATS GRID */}
+                    <Text style={styles.sectionTitle}>Key Performance Indicators</Text>
+                    <View style={styles.statsGrid}>
+                        {data.stats.map((item, index) => (
+                            <StatCard key={index} item={item} index={index} />
+                        ))}
+                    </View>
+
                     {/* ACTIVITY FEED */}
                     <View style={styles.feedSection}>
                         <Text style={styles.sectionTitle}>Live Activity</Text>
@@ -897,26 +908,34 @@ export default function ManagerDashboard({ route, navigation }) {
                     {/* QUICK ACTIONS */}
                     <Text style={styles.sectionTitle}>Quick Actions</Text>
                     <View style={styles.actionGrid}>
-                        <TouchableOpacity
-                            style={styles.actionBtn}
-                            onPress={() => navigation.navigate('TeamList')}
-                        >
-                            <View style={[styles.actionIcon, { backgroundColor: '#E0F2FE' }]}>
-                                <Feather name="users" size={24} color="#0284C7" />
-                            </View>
-                            <Text style={styles.actionText}>Team List</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={styles.actionBtn}
-                            onPress={() => navigation.navigate('Analytics', { userProfile })}
-                        >
-                            <View style={[styles.actionIcon, { backgroundColor: '#FCE7F3' }]}>
-                                <Feather name="bar-chart-2" size={24} color="#DB2777" />
-                            </View>
-                            <Text style={styles.actionText}>Reports</Text>
-                        </TouchableOpacity>
-                        {/* ASSIGN QUIZ - Hidden for Store Manager */}
-                        {role !== 'Store Manager' && (
+                        {/* TEAM LIST - requires team_list privilege */}
+                        {hasPrivilege('team_list') && (
+                            <TouchableOpacity
+                                style={styles.actionBtn}
+                                onPress={() => navigation.navigate('TeamList', { userProfile })}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#E0F2FE' }]}>
+                                    <Feather name="users" size={24} color="#0284C7" />
+                                </View>
+                                <Text style={styles.actionText}>Team List</Text>
+                            </TouchableOpacity>
+                        )}
+
+                        {/* REPORTS - requires reports privilege */}
+                        {hasPrivilege('reports') && (
+                            <TouchableOpacity
+                                style={styles.actionBtn}
+                                onPress={() => navigation.navigate('Analytics', { userProfile })}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#FCE7F3' }]}>
+                                    <Feather name="bar-chart-2" size={24} color="#DB2777" />
+                                </View>
+                                <Text style={styles.actionText}>Reports</Text>
+                            </TouchableOpacity>
+                        )}
+
+                        {/* ASSIGN QUIZ - requires assign_quiz privilege */}
+                        {hasPrivilege('assign_quiz') && (
                             <TouchableOpacity style={styles.actionBtn} onPress={() => setQuizModalVisible(true)}>
                                 <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
                                     <MaterialCommunityIcons name="clipboard-check" size={24} color="#F59E0B" />
@@ -924,177 +943,217 @@ export default function ManagerDashboard({ route, navigation }) {
                                 <Text style={styles.actionText}>Assign Quiz</Text>
                             </TouchableOpacity>
                         )}
-                        <TouchableOpacity
-                            style={styles.actionBtn}
-                            onPress={() => navigation.navigate('Audits')}
-                        >
-                            <View style={[styles.actionIcon, { backgroundColor: '#DCFCE7' }]}>
-                                <Feather name="check-square" size={24} color="#16A34A" />
-                            </View>
-                            <Text style={styles.actionText}>Audits</Text>
-                        </TouchableOpacity>
 
-                        {/* REPLACED SETTINGS WITH UPLOAD (For Demo) */}
-                        <TouchableOpacity style={styles.actionBtn} onPress={() => setUploadVisible(true)}>
-                            <View style={[styles.actionIcon, { backgroundColor: '#F3E8FF' }]}>
-                                <Feather name="upload-cloud" size={24} color="#7C3AED" />
-                            </View>
-                            <Text style={styles.actionText}>Upload Training</Text>
-                        </TouchableOpacity>
+                        {/* AUDITS - requires audits privilege */}
+                        {hasPrivilege('audits') && (
+                            <TouchableOpacity
+                                style={styles.actionBtn}
+                                onPress={() => navigation.navigate('Audits')}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#DCFCE7' }]}>
+                                    <Feather name="check-square" size={24} color="#16A34A" />
+                                </View>
+                                <Text style={styles.actionText}>Audits</Text>
+                            </TouchableOpacity>
+                        )}
 
-                        {/* BULK UPLOAD BUTTON [NEW] */}
-                        <TouchableOpacity style={styles.actionBtn} onPress={() => setBulkModalVisible(true)}>
-                            <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
-                                <MaterialCommunityIcons name="layers-plus" size={24} color="#D97706" />
-                            </View>
-                            <Text style={styles.actionText}>Bulk Upload</Text>
-                        </TouchableOpacity>
+                        {/* UPLOAD TRAINING - requires upload_training privilege */}
+                        {hasPrivilege('upload_training') && (
+                            <TouchableOpacity style={styles.actionBtn} onPress={() => setUploadVisible(true)}>
+                                <View style={[styles.actionIcon, { backgroundColor: '#F3E8FF' }]}>
+                                    <Feather name="upload-cloud" size={24} color="#7C3AED" />
+                                </View>
+                                <Text style={styles.actionText}>Upload Training</Text>
+                            </TouchableOpacity>
+                        )}
 
-                        {/* POST NEWS BUTTON [NEW] */}
-                        <TouchableOpacity style={styles.actionBtn} onPress={() => setNewsModalVisible(true)}>
-                            <View style={[styles.actionIcon, { backgroundColor: '#FEE2E2' }]}>
-                                <MaterialCommunityIcons name="newspaper-variant-outline" size={24} color="#DC2626" />
-                            </View>
-                            <Text style={styles.actionText}>Post News</Text>
-                        </TouchableOpacity>
+                        {/* BULK UPLOAD - requires bulk_upload privilege */}
+                        {hasPrivilege('bulk_upload') && (
+                            <TouchableOpacity style={styles.actionBtn} onPress={() => setBulkModalVisible(true)}>
+                                <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
+                                    <MaterialCommunityIcons name="layers-plus" size={24} color="#D97706" />
+                                </View>
+                                <Text style={styles.actionText}>Bulk Upload</Text>
+                            </TouchableOpacity>
+                        )}
 
-                        {/* POST TOPIC QUIZ BUTTON [NEW] */}
-                        <TouchableOpacity style={styles.actionBtn} onPress={() => setQuizCreationVisible(true)}>
-                            <View style={[styles.actionIcon, { backgroundColor: '#E0E7FF' }]}>
-                                <MaterialCommunityIcons name="head-question-outline" size={24} color="#4F46E5" />
-                            </View>
-                            <Text style={styles.actionText}>Post Quiz</Text>
-                        </TouchableOpacity>
+                        {/* POST NEWS - requires post_news privilege */}
+                        {hasPrivilege('post_news') && (
+                            <TouchableOpacity style={styles.actionBtn} onPress={() => setNewsModalVisible(true)}>
+                                <View style={[styles.actionIcon, { backgroundColor: '#FEE2E2' }]}>
+                                    <MaterialCommunityIcons name="newspaper-variant-outline" size={24} color="#DC2626" />
+                                </View>
+                                <Text style={styles.actionText}>Post News</Text>
+                            </TouchableOpacity>
+                        )}
 
-                        <TouchableOpacity style={styles.actionBtn} onPress={() => setCreateUserVisible(true)}>
-                            <View style={[styles.actionIcon, { backgroundColor: '#ECFEFF' }]}>
-                                <Feather name="user-plus" size={24} color="#0891B2" />
-                            </View>
-                            <Text style={styles.actionText}>Create User</Text>
-                        </TouchableOpacity>
+                        {/* POST QUIZ - requires post_quiz privilege */}
+                        {hasPrivilege('post_quiz') && (
+                            <TouchableOpacity style={styles.actionBtn} onPress={() => setQuizCreationVisible(true)}>
+                                <View style={[styles.actionIcon, { backgroundColor: '#E0E7FF' }]}>
+                                    <MaterialCommunityIcons name="head-question-outline" size={24} color="#4F46E5" />
+                                </View>
+                                <Text style={styles.actionText}>Post Quiz</Text>
+                            </TouchableOpacity>
+                        )}
 
-                        {/* LIVE TRACKING - NEW */}
-                        <TouchableOpacity
-                            style={styles.actionBtn}
-                            onPress={() => navigation.navigate('LiveTracking')}
-                        >
-                            <View style={[styles.actionIcon, { backgroundColor: '#DCFCE7' }]}>
-                                <Feather name="map-pin" size={24} color="#10B981" />
-                            </View>
-                            <Text style={styles.actionText}>Live Tracking</Text>
-                        </TouchableOpacity>
+                        {/* CREATE USER - requires create_user privilege */}
+                        {hasPrivilege('create_user') && (
+                            <TouchableOpacity style={styles.actionBtn} onPress={() => setCreateUserVisible(true)}>
+                                <View style={[styles.actionIcon, { backgroundColor: '#ECFEFF' }]}>
+                                    <Feather name="user-plus" size={24} color="#0891B2" />
+                                </View>
+                                <Text style={styles.actionText}>Create User</Text>
+                            </TouchableOpacity>
+                        )}
 
-                        <TouchableOpacity
-                            style={styles.actionBtn}
-                            onPress={() => navigation.navigate('ProctoredAssessment', { userProfile })}
-                        >
-                            <View style={[styles.actionIcon, { backgroundColor: '#FFF7ED' }]}>
-                                <Feather name="shield" size={24} color="#EA580C" />
-                            </View>
-                            <Text style={styles.actionText}>Proctored Assessment</Text>
-                        </TouchableOpacity>
+                        {/* LIVE TRACKING - requires live_tracking privilege */}
+                        {hasPrivilege('live_tracking') && (
+                            <TouchableOpacity
+                                style={styles.actionBtn}
+                                onPress={() => navigation.navigate('LiveTracking')}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#DCFCE7' }]}>
+                                    <Feather name="map-pin" size={24} color="#10B981" />
+                                </View>
+                                <Text style={styles.actionText}>Live Tracking</Text>
+                            </TouchableOpacity>
+                        )}
 
-                        <TouchableOpacity
-                            style={styles.actionBtn}
-                            onPress={() => navigation.navigate('Analytics', { userProfile })}
-                        >
-                            <View style={[styles.actionIcon, { backgroundColor: '#FFF7ED' }]}>
-                                <Feather name="bar-chart" size={24} color="#EA580C" />
-                            </View>
-                            <Text style={styles.actionText}>View Analytics</Text>
-                        </TouchableOpacity>
+                        {/* PROCTORED ASSESSMENT - requires proctored_assessment privilege */}
+                        {hasPrivilege('proctored_assessment') && (
+                            <TouchableOpacity
+                                style={styles.actionBtn}
+                                onPress={() => navigation.navigate('ProctoredAssessment', { userProfile })}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#FFF7ED' }]}>
+                                    <Feather name="shield" size={24} color="#EA580C" />
+                                </View>
+                                <Text style={styles.actionText}>Proctored Assessment</Text>
+                            </TouchableOpacity>
+                        )}
 
-                        {/* NEW NOTIFICATION BUTTON */}
-                        <TouchableOpacity
-                            style={styles.actionBtn}
-                            onPress={() => setNotifModalVisible(true)}
-                        >
-                            <View style={[styles.actionIcon, { backgroundColor: '#FEE2E2' }]}>
-                                <Feather name="bell" size={24} color="#EF4444" />
-                            </View>
-                            <Text style={styles.actionText}>Send Notif</Text>
-                        </TouchableOpacity>
+                        {/* VIEW ANALYTICS - requires view_analytics privilege */}
+                        {hasPrivilege('view_analytics') && (
+                            <TouchableOpacity
+                                style={styles.actionBtn}
+                                onPress={() => navigation.navigate('Analytics', { userProfile })}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#FFF7ED' }]}>
+                                    <Feather name="bar-chart" size={24} color="#EA580C" />
+                                </View>
+                                <Text style={styles.actionText}>View Analytics</Text>
+                            </TouchableOpacity>
+                        )}
 
-                        {/* ACCESS CONTROL - NEW */}
-                        <TouchableOpacity
-                            style={styles.actionBtn}
-                            onPress={() => setAccessControlVisible(true)}
-                        >
-                            <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
-                                <MaterialCommunityIcons name="shield-lock-outline" size={24} color="#D97706" />
-                            </View>
-                            <Text style={styles.actionText}>Access Control</Text>
-                        </TouchableOpacity>
+                        {/* SEND NOTIFICATION - requires send_notification privilege */}
+                        {hasPrivilege('send_notification') && (
+                            <TouchableOpacity
+                                style={styles.actionBtn}
+                                onPress={() => setNotifModalVisible(true)}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#FEE2E2' }]}>
+                                    <Feather name="bell" size={24} color="#EF4444" />
+                                </View>
+                                <Text style={styles.actionText}>Send Notif</Text>
+                            </TouchableOpacity>
+                        )}
 
-                        {/* [NEW] MANAGE BUCKETS BUTTON */}
-                        <TouchableOpacity
-                            style={styles.actionBtn}
-                            onPress={() => setBucketModalVisible(true)}
-                        >
-                            <View style={[styles.actionIcon, { backgroundColor: '#EEF2FF' }]}>
-                                <MaterialCommunityIcons name="folder-multiple" size={24} color="#6366F1" />
-                            </View>
-                            <Text style={styles.actionText}>Manage Buckets</Text>
-                        </TouchableOpacity>
+                        {/* ACCESS CONTROL - requires access_control privilege */}
+                        {hasPrivilege('access_control') && (
+                            <TouchableOpacity
+                                style={styles.actionBtn}
+                                onPress={() => setAccessControlVisible(true)}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
+                                    <MaterialCommunityIcons name="shield-lock-outline" size={24} color="#D97706" />
+                                </View>
+                                <Text style={styles.actionText}>Access Control</Text>
+                            </TouchableOpacity>
+                        )}
 
-                        {/* [NEW] SCHEDULE MEETING BUTTON */}
-                        <TouchableOpacity
-                            style={styles.actionBtn}
-                            onPress={() => setMeetingModalVisible(true)}
-                        >
-                            <View style={[styles.actionIcon, { backgroundColor: '#DBEAFE' }]}>
-                                <MaterialCommunityIcons name="video-plus" size={24} color="#2563EB" />
-                            </View>
-                            <Text style={styles.actionText}>Schedule Meeting</Text>
-                        </TouchableOpacity>
+                        {/* MANAGE BUCKETS - requires manage_buckets privilege */}
+                        {hasPrivilege('manage_buckets') && (
+                            <TouchableOpacity
+                                style={styles.actionBtn}
+                                onPress={() => setBucketModalVisible(true)}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#EEF2FF' }]}>
+                                    <MaterialCommunityIcons name="folder-multiple" size={24} color="#6366F1" />
+                                </View>
+                                <Text style={styles.actionText}>Manage Buckets</Text>
+                            </TouchableOpacity>
+                        )}
 
-                        <TouchableOpacity
-                            style={styles.actionBtn}
-                            onPress={() => setCrmModalVisible(true)}
-                        >
-                            <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
-                                <MaterialCommunityIcons name="ticket-account" size={24} color="#D97706" />
-                            </View>
-                            <Text style={styles.actionText}>CRM Tickets</Text>
-                        </TouchableOpacity>
+                        {/* SCHEDULE MEETING - requires schedule_meeting privilege */}
+                        {hasPrivilege('schedule_meeting') && (
+                            <TouchableOpacity
+                                style={styles.actionBtn}
+                                onPress={() => setMeetingModalVisible(true)}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#DBEAFE' }]}>
+                                    <MaterialCommunityIcons name="video-plus" size={24} color="#2563EB" />
+                                </View>
+                                <Text style={styles.actionText}>Schedule Meeting</Text>
+                            </TouchableOpacity>
+                        )}
 
-                        {/* [NEW] MANAGE SIMULATIONS BUTTON */}
-                        <TouchableOpacity
-                            style={styles.actionBtn}
-                            onPress={() => setSimulationBuilderVisible(true)}
-                        >
-                            <View style={[styles.actionIcon, { backgroundColor: '#F3E8FF' }]}>
-                                <MaterialCommunityIcons name="movie-filter" size={24} color="#7C3AED" />
-                            </View>
-                            <Text style={styles.actionText}>Manage Simulations</Text>
-                        </TouchableOpacity>
+                        {/* CRM TICKETS - requires crm_tickets privilege */}
+                        {hasPrivilege('crm_tickets') && (
+                            <TouchableOpacity
+                                style={styles.actionBtn}
+                                onPress={() => setCrmModalVisible(true)}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
+                                    <MaterialCommunityIcons name="ticket-account" size={24} color="#D97706" />
+                                </View>
+                                <Text style={styles.actionText}>CRM Tickets</Text>
+                            </TouchableOpacity>
+                        )}
+
+                        {/* MANAGE SIMULATIONS - requires manage_simulations privilege */}
+                        {hasPrivilege('manage_simulations') && (
+                            <TouchableOpacity
+                                style={styles.actionBtn}
+                                onPress={() => setSimulationBuilderVisible(true)}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#F3E8FF' }]}>
+                                    <MaterialCommunityIcons name="movie-filter" size={24} color="#7C3AED" />
+                                </View>
+                                <Text style={styles.actionText}>Manage Simulations</Text>
+                            </TouchableOpacity>
+                        )}
                     </View>
 
                     {/* --- [NEW] MANAGE LEARNING PATH SECTION --- */}
-                    <View style={styles.sectionHeaderRow}>
-                        <Text style={styles.sectionTitle}>Manage Learning Path</Text>
-                        <TouchableOpacity onPress={() => setRefreshPath(prev => prev + 1)}>
-                            <Feather name="refresh-cw" size={18} color="#6B7280" />
-                        </TouchableOpacity>
-                    </View>
+                    {hasPrivilege('manage_learning_path') && (
+                        <>
+                            <View style={styles.sectionHeaderRow}>
+                                <Text style={styles.sectionTitle}>Manage Learning Path</Text>
+                                <TouchableOpacity onPress={() => setRefreshPath(prev => prev + 1)}>
+                                    <Feather name="refresh-cw" size={18} color="#6B7280" />
+                                </TouchableOpacity>
+                            </View>
 
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pathListScroll}>
-                        {pathNodes.map((node, index) => (
-                            <TouchableOpacity key={index} style={styles.pathNodeCard} onPress={() => openEditNode(node)}>
-                                <View style={styles.pathNodeIcon}>
-                                    <MaterialCommunityIcons name="coffee" size={24} color="#FFF" />
-                                </View>
-                                <View style={styles.pathNodeInfo}>
-                                    <Text style={styles.pathNodeTitle} numberOfLines={1}>{node.title}</Text>
-                                    <Text style={styles.pathNodeSub}>{node.skippable ? "Skippable" : "Mandatory"}</Text>
-                                </View>
-                                <Feather name="edit-2" size={16} color="#9CA3AF" />
-                            </TouchableOpacity>
-                        ))}
-                        {pathNodes.length === 0 && (
-                            <Text style={styles.emptyPathText}>No nodes in learning path yet.</Text>
-                        )}
-                    </ScrollView>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pathListScroll}>
+                                {pathNodes.map((node, index) => (
+                                    <TouchableOpacity key={index} style={styles.pathNodeCard} onPress={() => openEditNode(node)}>
+                                        <View style={styles.pathNodeIcon}>
+                                            <MaterialCommunityIcons name="coffee" size={24} color="#FFF" />
+                                        </View>
+                                        <View style={styles.pathNodeInfo}>
+                                            <Text style={styles.pathNodeTitle} numberOfLines={1}>{node.title}</Text>
+                                            <Text style={styles.pathNodeSub}>{node.skippable ? "Skippable" : "Mandatory"}</Text>
+                                        </View>
+                                        <Feather name="edit-2" size={16} color="#9CA3AF" />
+                                    </TouchableOpacity>
+                                ))}
+                                {pathNodes.length === 0 && (
+                                    <Text style={styles.emptyPathText}>No nodes in learning path yet.</Text>
+                                )}
+                            </ScrollView>
+                        </>
+                    )}
 
                 </ScrollView>
             </View>
@@ -1147,6 +1206,7 @@ export default function ManagerDashboard({ route, navigation }) {
                 visible={createUserVisible}
                 onClose={() => setCreateUserVisible(false)}
                 onCreate={handleCreateUser}
+                userProfile={userProfile}
             />
 
             {/* NOTIFICATION MODAL */}

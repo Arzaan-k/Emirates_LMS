@@ -201,9 +201,69 @@ resource_store: List[dict] = [] # {id, title, category, type, url, description, 
 location_store: dict = {}  # {user_id: {user_id, name, latitude, longitude, timestamp, active}}
 
 # USER MANAGEMENT STORE
+# Privileges define what features a user can access in the admin panel
+ALL_PRIVILEGES = [
+    "team_list",           # View team members
+    "reports",             # View reports/analytics
+    "assign_quiz",         # Assign quizzes to users
+    "audits",              # Audit functionality
+    "upload_training",     # Upload training content
+    "bulk_upload",         # Bulk upload content
+    "post_news",           # Post news updates
+    "post_quiz",           # Create quizzes
+    "create_user",         # Create new users
+    "live_tracking",       # Real-time location tracking
+    "proctored_assessment",# Proctored assessments
+    "view_analytics",      # View analytics dashboard
+    "send_notification",   # Send notifications
+    "access_control",      # Manage access control
+    "manage_buckets",      # Manage course buckets
+    "schedule_meeting",    # Schedule virtual meetings
+    "crm_tickets",         # CRM ticket management
+    "manage_simulations",  # Manage interactive simulations
+    "manage_learning_path" # Manage learning path content
+]
+
+# User categories for organizing users
+user_categories: List[dict] = [
+    {"id": "1", "name": "Super Admin", "description": "Full access to everything", "color": "#9333EA"},
+    {"id": "2", "name": "Manager", "description": "Store manager with admin access", "color": "#2563EB"},
+    {"id": "3", "name": "Supervisor", "description": "Team supervisor with limited admin", "color": "#10B981"},
+    {"id": "4", "name": "Employee", "description": "Regular employee access", "color": "#F59E0B"},
+]
+
 users_store: dict = {
-    "user": {"email": "user", "name": "Aditya User", "password": "user@123", "role": "User"},
-    "store.manager": {"email": "store.manager", "name": "Store Manager", "password": "bw_store@2025", "role": "Store Manager"},
+    "superadmin": {
+        "email": "superadmin", 
+        "name": "Super Admin", 
+        "password": "superadmin@2025", 
+        "role": "Super Admin",
+        "category": "Super Admin",
+        "privileges": ALL_PRIVILEGES.copy(),  # Full access
+        "is_superadmin": True
+    },
+    "user": {
+        "email": "user", 
+        "name": "Aditya User", 
+        "password": "user@123", 
+        "role": "User",
+        "category": "Employee",
+        "privileges": [],  # No admin privileges
+        "is_superadmin": False
+    },
+    "store.manager": {
+        "email": "store.manager", 
+        "name": "Store Manager", 
+        "password": "bw_store@2025", 
+        "role": "Store Manager",
+        "category": "Manager",
+        "privileges": [
+            "team_list", "reports", "audits", "upload_training", 
+            "post_news", "create_user", "live_tracking", 
+            "view_analytics", "send_notification", "schedule_meeting"
+        ],  # Manager has limited privileges
+        "is_superadmin": False
+    },
 }
 
 # ATTENDANCE/PUNCH IN-OUT STORE
@@ -3125,12 +3185,14 @@ async def get_all_locations():
 @app.post("/users/create")
 async def create_user(data: dict):
     """
-    Creates a new user account.
+    Creates a new user account with category and privileges.
     """
     name = data.get('name')
     email = data.get('email')
     password = data.get('password')
     role = data.get('role', 'Employee')
+    category = data.get('category', 'Employee')
+    privileges = data.get('privileges', [])
     
     # Validation
     if not name or not email or not password:
@@ -3140,17 +3202,60 @@ async def create_user(data: dict):
     if email in users_store:
         return {"status": "error", "message": "User already exists"}
     
+    # Validate privileges - ensure they are valid
+    valid_privileges = [p for p in privileges if p in ALL_PRIVILEGES]
+    
+    # Determine if user has admin access based on privileges or category
+    has_admin_access = len(valid_privileges) > 0 or category in ['Super Admin', 'Manager', 'Supervisor']
+    
     # Create user
     users_store[email] = {
         "email": email,
         "name": name,
         "password": password,  # In production: hash this!
         "role": role,
+        "category": category,
+        "privileges": valid_privileges,
+        "is_superadmin": category == 'Super Admin',
+        "has_admin_access": has_admin_access,
         "created_at": datetime.now().isoformat()
     }
     
-    logger.info(f"User created: {name} ({email}) - Role: {role}")
-    return {"status": "success", "user_id": email}
+    logger.info(f"User created: {name} ({email}) - Role: {role} - Category: {category} - Privileges: {valid_privileges}")
+    return {"status": "success", "user_id": email, "privileges_count": len(valid_privileges)}
+
+
+@app.post("/users/update")
+async def update_user(data: dict):
+    """
+    Updates an existing user's privileges and role.
+    """
+    email = data.get('email')
+    if not email or email not in users_store:
+        return {"status": "error", "message": "User not found"}
+        
+    user = users_store[email]
+    
+    # Update allowed fields
+    if 'role' in data:
+        user['role'] = data['role']
+    if 'category' in data:
+        user['category'] = data['category']
+    if 'privileges' in data:
+        privileges = data['privileges']
+        valid_privileges = [p for p in privileges if p in ALL_PRIVILEGES]
+        user['privileges'] = valid_privileges
+        user['has_admin_access'] = len(valid_privileges) > 0 or user['category'] in ['Super Admin', 'Manager', 'Supervisor']
+        
+        # Update superadmin status if category changes
+        if user['category'] == 'Super Admin':
+            user['is_superadmin'] = True
+            
+    if 'name' in data:
+        user['name'] = data['name']
+        
+    logger.info(f"User updated: {email} - Privileges: {user.get('privileges')}")
+    return {"status": "success", "message": "User updated successfully"}
 
 
 @app.get("/users/list")
@@ -3163,9 +3268,117 @@ async def list_users():
         users.append({
             "email": user_data["email"],
             "name": user_data["name"],
-            "role": user_data["role"]
+            "role": user_data.get("role", "User"),
+            "category": user_data.get("category", "Employee"),
+            "privileges": user_data.get("privileges", []),
+            "is_superadmin": user_data.get("is_superadmin", False),
+            "has_admin_access": user_data.get("has_admin_access", False)
         })
     return users
+
+
+@app.get("/users/privileges")
+async def get_all_privileges():
+    """
+    Returns list of all available privileges for user creation.
+    """
+    privilege_details = [
+        {"id": "team_list", "name": "Team List", "description": "View and manage team members", "icon": "users"},
+        {"id": "reports", "name": "Reports & Analytics", "description": "Access reports and analytics dashboard", "icon": "bar-chart-2"},
+        {"id": "assign_quiz", "name": "Assign Quiz", "description": "Assign quizzes to team members", "icon": "clipboard"},
+        {"id": "audits", "name": "Audits", "description": "Perform and view audits", "icon": "check-square"},
+        {"id": "upload_training", "name": "Upload Training", "description": "Upload training content", "icon": "upload-cloud"},
+        {"id": "bulk_upload", "name": "Bulk Upload", "description": "Bulk upload content", "icon": "layers"},
+        {"id": "post_news", "name": "Post News", "description": "Post news updates", "icon": "file-text"},
+        {"id": "post_quiz", "name": "Post Quiz", "description": "Create and post quizzes", "icon": "help-circle"},
+        {"id": "create_user", "name": "Create User", "description": "Create new user accounts", "icon": "user-plus"},
+        {"id": "live_tracking", "name": "Live Tracking", "description": "Real-time location tracking", "icon": "map-pin"},
+        {"id": "proctored_assessment", "name": "Proctored Assessment", "description": "Access proctored assessments", "icon": "shield"},
+        {"id": "view_analytics", "name": "View Analytics", "description": "View detailed analytics", "icon": "trending-up"},
+        {"id": "send_notification", "name": "Send Notification", "description": "Send notifications to users", "icon": "bell"},
+        {"id": "access_control", "name": "Access Control", "description": "Manage user access controls", "icon": "lock"},
+        {"id": "manage_buckets", "name": "Manage Buckets", "description": "Manage course buckets", "icon": "folder"},
+        {"id": "schedule_meeting", "name": "Schedule Meeting", "description": "Schedule virtual meetings", "icon": "video"},
+        {"id": "crm_tickets", "name": "CRM Tickets", "description": "Manage CRM tickets", "icon": "tag"},
+        {"id": "manage_simulations", "name": "Manage Simulations", "description": "Manage interactive simulations", "icon": "play-circle"},
+        {"id": "manage_learning_path", "name": "Manage Learning Path", "description": "Manage learning path content", "icon": "book-open"},
+    ]
+    return privilege_details
+
+
+@app.get("/users/categories")
+async def get_user_categories():
+    """
+    Returns list of all user categories.
+    """
+    return user_categories
+
+
+@app.post("/users/categories")
+async def create_user_category(data: dict):
+    """
+    Creates a new user category.
+    """
+    name = data.get('name')
+    description = data.get('description', '')
+    color = data.get('color', '#6B7280')
+    
+    if not name:
+        return {"status": "error", "message": "Category name is required"}
+    
+    # Check if category exists
+    for cat in user_categories:
+        if cat['name'].lower() == name.lower():
+            return {"status": "error", "message": "Category already exists"}
+    
+    new_category = {
+        "id": str(uuid.uuid4())[:8],
+        "name": name,
+        "description": description,
+        "color": color
+    }
+    user_categories.append(new_category)
+    
+    logger.info(f"User category created: {name}")
+    return {"status": "success", "category": new_category}
+
+
+@app.get("/users/{email}")
+async def get_user(email: str):
+    """
+    Returns a specific user by email (without password).
+    """
+    if email not in users_store:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    user_data = users_store[email]
+    return {
+        "email": user_data["email"],
+        "name": user_data["name"],
+        "role": user_data.get("role", "User"),
+        "category": user_data.get("category", "Employee"),
+        "privileges": user_data.get("privileges", []),
+        "is_superadmin": user_data.get("is_superadmin", False),
+        "has_admin_access": user_data.get("has_admin_access", False)
+    }
+
+
+@app.put("/users/{email}/privileges")
+async def update_user_privileges(email: str, data: dict):
+    """
+    Updates a user's privileges (Superadmin only).
+    """
+    if email not in users_store:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    privileges = data.get('privileges', [])
+    valid_privileges = [p for p in privileges if p in ALL_PRIVILEGES]
+    
+    users_store[email]["privileges"] = valid_privileges
+    users_store[email]["has_admin_access"] = len(valid_privileges) > 0
+    
+    logger.info(f"User privileges updated: {email} - Privileges: {valid_privileges}")
+    return {"status": "success", "privileges": valid_privileges}
 
 
 # ==========================================

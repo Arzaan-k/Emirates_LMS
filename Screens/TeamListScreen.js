@@ -14,17 +14,25 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import CreateUser from './CreateUser';
 import API_URL from '../config';
 
 const { width } = Dimensions.get('window');
 
-const TeamListScreen = ({ navigation }) => {
+const TeamListScreen = ({ navigation, route }) => {
+    const { userProfile } = route.params || {};
+    const isSuperAdmin = userProfile?.is_superadmin || userProfile?.role === 'Super Admin';
+
     const [users, setUsers] = useState([]);
     const [filteredUsers, setFilteredUsers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedFilter, setSelectedFilter] = useState('All');
+
+    // Edit State
+    const [editModalVisible, setEditModalVisible] = useState(false);
+    const [editingUser, setEditingUser] = useState(null);
 
     useEffect(() => {
         fetchUsers();
@@ -70,6 +78,34 @@ const TeamListScreen = ({ navigation }) => {
     const onRefresh = () => {
         setRefreshing(true);
         fetchUsers();
+    };
+
+    const handleEditUser = (user) => {
+        setEditingUser(user);
+        setEditModalVisible(true);
+    };
+
+    const handleUpdateUser = async (updatedData) => {
+        try {
+            const response = await fetch(`${API_URL}/users/update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updatedData)
+            });
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                setEditModalVisible(false);
+                setEditingUser(null);
+                fetchUsers(); // Refresh list
+                alert('User updated successfully');
+            } else {
+                alert(result.message || 'Failed to update user');
+            }
+        } catch (error) {
+            console.error('Update error:', error);
+            alert('Error updating user');
+        }
     };
 
     if (loading) {
@@ -185,6 +221,15 @@ const TeamListScreen = ({ navigation }) => {
                                         { backgroundColor: '#9CA3AF' }
                                     ]} />
                                 </View>
+
+                                {isSuperAdmin && (
+                                    <TouchableOpacity
+                                        style={styles.editBtn}
+                                        onPress={() => handleEditUser(user)}
+                                    >
+                                        <Feather name="edit-2" size={16} color="#6B7280" />
+                                    </TouchableOpacity>
+                                )}
                             </View>
                         </Animated.View>
                     ))}
@@ -200,7 +245,19 @@ const TeamListScreen = ({ navigation }) => {
                     )}
                 </View>
             </ScrollView>
-        </SafeAreaView>
+
+            <CreateUser
+                visible={editModalVisible}
+                onClose={() => {
+                    setEditModalVisible(false);
+                    setEditingUser(null);
+                }}
+                userProfile={userProfile}
+                isEditing={true}
+                initialData={editingUser}
+                onUpdate={handleUpdateUser}
+            />
+        </SafeAreaView >
     );
 };
 
@@ -386,6 +443,12 @@ const styles = StyleSheet.create({
         width: 12,
         height: 12,
         borderRadius: 6,
+    },
+    editBtn: {
+        padding: 8,
+        marginLeft: 10,
+        backgroundColor: '#F3F4F6',
+        borderRadius: 8,
     },
 
     // EMPTY STATE

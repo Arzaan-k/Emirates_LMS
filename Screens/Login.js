@@ -130,14 +130,51 @@ export default function Login({ navigation }) {
     const [showPassword, setShowPassword] = useState(false);
 
     const handleLogin = () => {
-        // Simple authentication logic
-        if (username === 'user' && password === 'user@123') {
+        // Simple authentication logic with superadmin support
+        if (username === 'superadmin' && password === 'superadmin@2025') {
+            // Superadmin - full access to everything
+            navigation.replace('ManagerDashboard', {
+                userProfile: {
+                    name: 'Super Admin',
+                    role: 'Super Admin',
+                    email: 'superadmin',
+                    category: 'Super Admin',
+                    is_superadmin: true,
+                    privileges: [
+                        'team_list', 'reports', 'assign_quiz', 'audits',
+                        'upload_training', 'bulk_upload', 'post_news', 'post_quiz',
+                        'create_user', 'live_tracking', 'proctored_assessment',
+                        'view_analytics', 'send_notification', 'access_control',
+                        'manage_buckets', 'schedule_meeting', 'crm_tickets',
+                        'manage_simulations', 'manage_learning_path'
+                    ]
+                }
+            });
+        } else if (username === 'user' && password === 'user@123') {
             navigation.replace('Home', {
-                userProfile: { name: 'Aditya User', role: 'User', email: 'user' }
+                userProfile: {
+                    name: 'Aditya User',
+                    role: 'User',
+                    email: 'user',
+                    category: 'Employee',
+                    is_superadmin: false,
+                    privileges: []
+                }
             });
         } else if (username === 'store.manager' && password === 'bw_store@2025') {
             navigation.replace('ManagerDashboard', {
-                userProfile: { name: 'Store Manager', role: 'Store Manager', email: 'store.manager' }
+                userProfile: {
+                    name: 'Store Manager',
+                    role: 'Store Manager',
+                    email: 'store.manager',
+                    category: 'Manager',
+                    is_superadmin: false,
+                    privileges: [
+                        'team_list', 'reports', 'audits', 'upload_training',
+                        'post_news', 'create_user', 'live_tracking',
+                        'view_analytics', 'send_notification', 'schedule_meeting'
+                    ]
+                }
             });
         } else {
             Alert.alert('Invalid Credentials', 'Please check your username and password');
@@ -147,7 +184,7 @@ export default function Login({ navigation }) {
     const handleForgotPassword = () => {
         Alert.alert(
             'Reset Password',
-            'Please contact your Store Manager or admin to reset your password.\n\nEmail: admin@belgianwaffle.com',
+            'Please contact your Super Admin to reset your password.\n\nEmail: admin@belgianwaffle.com',
             [{ text: 'OK', style: 'default' }]
         );
     };
@@ -240,7 +277,9 @@ export default function Login({ navigation }) {
                     <View style={styles.hintBox}>
                         <Feather name="info" size={14} color="#6B7280" />
                         <Text style={styles.hintText}>
-                            Demo: user / user@123 or store.manager / bw_store@2025
+                            Demo: superadmin / superadmin@2025 (Full Access){'\n'}
+                            store.manager / bw_store@2025 (Limited){'\n'}
+                            user / user@123 (Employee)
                         </Text>
                     </View>
                 </BlurView>
