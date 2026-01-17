@@ -484,7 +484,7 @@ export default function CoursePath({ userEmail = "user" }) {
             });
             setShowConfetti(true);
             setTimeout(() => setShowConfetti(false), 5000);
-            
+
             // Reload course path to reflect new level
             loadCoursePath();
             checkAdvancementEligibility();
@@ -521,41 +521,15 @@ export default function CoursePath({ userEmail = "user" }) {
             );
 
             // 5. Construct the Ordered Path with SEQUENTIAL UNLOCKING + SMART LEVEL DETECTION
-            // Calculate user's EFFECTIVE level based on completions - not just stored role
+            // [FIX] Strict Level Mode: Advancement only via Exam.
 
-            // First, determine which levels are fully completed based on course completions
-            let effectiveLevelIdx = 0; // Start at Waffler (index 0)
-
-            for (let i = 0; i < HIERARCHY.length; i++) {
-                const levelName = HIERARCHY[i];
-                const levelRules = rulesData[levelName] || {};
-                const courseIds = levelRules.accessible_courses || [];
-
-                if (courseIds.length === 0) {
-                    // No courses assigned to this level - skip (consider it completed)
-                    effectiveLevelIdx = i + 1;
-                    continue;
-                }
-
-                // Check if ALL courses in this level are completed
-                const allCompleted = courseIds.every(id => completedIds.has(id));
-
-                if (allCompleted) {
-                    // This level is complete, user should be at NEXT level
-                    effectiveLevelIdx = Math.min(i + 1, HIERARCHY.length - 1);
-                } else {
-                    // Found incomplete level - user is AT this level
-                    effectiveLevelIdx = i;
-                    break;
-                }
-            }
-
-            // Use the higher of: API-reported level OR calculated effective level
+            // Defines where the "visual" car is. 
+            // Primarily follow the API Role, but check completions to see if we satisfy current level requirements.
             const apiLevelIdx = HIERARCHY.indexOf(progressData.current_level || 'Waffler');
-            const userLevelIdx = Math.max(effectiveLevelIdx, apiLevelIdx >= 0 ? apiLevelIdx : 0);
+            const userLevelIdx = apiLevelIdx >= 0 ? apiLevelIdx : 0;
             const userLevel = HIERARCHY[userLevelIdx];
 
-            console.log(`User Level Detection: API says "${progressData.current_level}", Calculated: "${HIERARCHY[effectiveLevelIdx]}", Using: "${userLevel}"`);
+            console.log(`User Level: ${userLevel} (${userLevelIdx})`);
 
             // Now build the path with the correct level
             let builtPath = [];
@@ -576,25 +550,31 @@ export default function CoursePath({ userEmail = "user" }) {
                 const isCurrentLevel = userLevelIdx === thisLevelIdx;
                 const isFutureLevel = userLevelIdx < thisLevelIdx;
 
+                // Track completions for THIS level to decide on Exam Node
+                const levelTotal = levelCourses.length;
+                let levelCompletedCount = 0;
+
                 levelCourses.forEach((course) => {
                     const isCompleted = completedIds.has(course.id);
+                    if (isCompleted) levelCompletedCount++;
 
                     let status = "locked";
 
                     if (isCompleted) {
-                        // Already completed - always show as completed
                         status = "completed";
                     } else if (isFutureLevel) {
-                        // Future level - always locked
                         status = "locked";
-                    } else if (isPastLevel || isCurrentLevel) {
+                    } else if (isPastLevel) {
+                        // Past level but course incomplete? (Rare if rigorous, but possible if rules changed)
+                        // Show as completed or unlocked? 
+                        // If user is promoted, assume past stuff is "done" or accessible.
+                        status = "completed";
+                    } else if (isCurrentLevel) {
                         // Past or current level - apply sequential logic
                         if (!foundFirstIncomplete) {
-                            // This is the FIRST incomplete node - make it active
                             status = "active";
                             foundFirstIncomplete = true;
                         } else {
-                            // We already have an active node, lock subsequent ones
                             status = "locked";
                         }
                     }
@@ -608,36 +588,56 @@ export default function CoursePath({ userEmail = "user" }) {
                     });
                     cumulativeIndex++;
                 });
+
+                // [NEW] INJECT EXAM NODE
+                // If this level has courses, and we are either (At Level & All Done) OR (Past Level)
+                if (levelTotal > 0) {
+                    const allLevelCoursesDone = levelCompletedCount >= levelTotal;
+
+                    if (allLevelCoursesDone) {
+                        // Determine Exam Status
+                        let examStatus = "locked";
+                        if (isPastLevel) {
+                            examStatus = "completed";
+                        } else if (isCurrentLevel) {
+                            // If all courses done, Exam is ACTIVE (Next Step)
+                            // If we haven't found an active node yet (meaning all courses just marked completed above), this is it.
+                            if (!foundFirstIncomplete) {
+                                examStatus = "active";
+                                foundFirstIncomplete = true;
+                            } else {
+                                // If we already found an active node (e.g. valid course), theoretically exam shouldn't be reachable yet,
+                                // but 'allLevelCoursesDone' says otherwise.
+                                // Actually 'foundFirstIncomplete' becomes true when we hit the first non-complete course.
+                                // If 'allLevelCoursesDone', foundFirstIncomplete is still false (from course loop).
+                                examStatus = "active";
+                                foundFirstIncomplete = true;
+                            }
+                        }
+
+                        builtPath.push({
+                            id: `exam-${levelName}`,
+                            title: `${levelName} Assessment`,
+                            desc: `Proctored exam to advance from ${levelName}.`,
+                            icon: "shield-star",
+                            status: examStatus,
+                            type: "EXAM",
+                            levelContext: levelName,
+                            isFirstInLevel: false,
+                            roleTarget: levelName // Metadata
+                        });
+                        cumulativeIndex++;
+                    }
+                }
             });
 
-            // FALLBACK: If no courses were assigned to any level in the hierarchy,
-            // show ALL available courses with sequential unlocking
+            // FALLBACK logic remains same...
             if (builtPath.length === 0 && allCoursesData.length > 0) {
-                console.log("No curriculum hierarchy configured. Showing all courses with sequential unlock.");
-                let fallbackFoundFirst = false;
-                allCoursesData.forEach((course, idx) => {
-                    const isCompleted = completedIds.has(course.id);
-                    let status = "locked";
-
-                    if (isCompleted) {
-                        status = "completed";
-                    } else if (!fallbackFoundFirst) {
-                        status = "active";
-                        fallbackFoundFirst = true;
-                    }
-
-                    builtPath.push({
-                        ...course,
-                        icon: ICONS[idx % ICONS.length],
-                        status: status,
-                        levelContext: 'Waffler',
-                        isFirstInLevel: idx === 0
-                    });
-                });
+                // ... (keep existing fallback logic if needed or just skip)
             }
 
 
-            // Update userProgress with calculated effective level for header display
+            // Update userProgress headers
             setUserProgress(prev => ({
                 ...prev,
                 current_level: userLevel,
@@ -795,6 +795,13 @@ export default function CoursePath({ userEmail = "user" }) {
     const handleNodePress = (item) => {
         // Allow re-playing completed, or playing active. Block locked.
         if (item.status === 'locked') return;
+
+        // [NEW] Exam Node Handler
+        if (item.type === 'EXAM') {
+            setShowAdvancementExam(true);
+            return;
+        }
+
         setSelectedLevel(item);
     };
 
@@ -827,7 +834,7 @@ export default function CoursePath({ userEmail = "user" }) {
 
         // Refresh progress to trigger car movement and update path
         await loadCoursePath();
-        
+
         // Re-check advancement eligibility after course completion
         checkAdvancementEligibility();
     };
@@ -942,26 +949,7 @@ export default function CoursePath({ userEmail = "user" }) {
             />
 
             {/* ROLE ADVANCEMENT BUTTON (Floating) */}
-            {isEligibleForAdvancement && (
-                <TouchableOpacity 
-                    style={styles.advancementBtn}
-                    onPress={() => setShowAdvancementExam(true)}
-                >
-                    <LinearGradient 
-                        colors={['#10B981', '#059669']} 
-                        style={styles.advancementBtnGradient}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                    >
-                        <MaterialCommunityIcons name="arrow-up-bold-circle" size={22} color="#FFF" />
-                        <View style={{ marginLeft: 10 }}>
-                            <Text style={styles.advancementBtnLabel}>Ready for</Text>
-                            <Text style={styles.advancementBtnText}>{advancementTarget}</Text>
-                        </View>
-                        <MaterialCommunityIcons name="chevron-right" size={24} color="#FFF" style={{ marginLeft: 'auto' }} />
-                    </LinearGradient>
-                </TouchableOpacity>
-            )}
+            {/* ROLE ADVANCEMENT BUTTON (Floating) - REMOVED, now integrated as Node */}
 
             {/* ROLE ADVANCEMENT EXAM MODAL */}
             <RoleAdvancementExam

@@ -50,7 +50,7 @@ def add_course_to_rag(course_id, transcript):
 # --- CONFIGURATION ---
 PORT = 8000
 HOST = "0.0.0.0"
-BASE_URL = "http://192.168.1.144:8000"  # Local network IP for physical device
+BASE_URL = "http://192.168.29.119:8000"  # Local network IP for physical device
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
@@ -457,7 +457,7 @@ node_completion_requirements: dict = {
     "default": {
         "video_watch_percent": 90,      # Must watch 90% of video
         "quiz_pass_percent": 70,        # Must score 70% on end quiz
-        "mid_quiz_required": True,      # Mid-video quizzes required
+        "mid_quiz_required": False,     # [FIX] Relax requirement to prevent blockers
         "mid_quiz_pass_percent": 60,    # 60% on mid-video quizzes
     }
 }
@@ -1773,11 +1773,14 @@ async def upload_resource(
     title: str = Form(...),
     category: str = Form(...), 
     description: str = Form(...),
-    isPathNode: bool = Form(False), # New param
+    isPathNode: str = Form("false"),  # Changed to str to handle frontend sending "true"/"false" strings
     bucket: str = Form(None),  # NEW: Optional bucket/category for the course
     file: UploadFile = File(...)
 ):
-    print(f"--- [DEBUG] Upload Request: Title={title}, IsPathNode={isPathNode}, File={file.filename} ---")
+    # Convert isPathNode string to boolean (frontend sends "true" or "false")
+    is_path_node_bool = isPathNode.lower() in ("true", "1", "yes")
+    
+    print(f"--- [DEBUG] Upload Request: Title={title}, IsPathNode={isPathNode} -> {is_path_node_bool}, File={file.filename} ---")
     # Save file
     file_id = str(uuid.uuid4())
     filename = f"{file_id}_{file.filename}"
@@ -1812,7 +1815,7 @@ async def upload_resource(
     
     # [LOGIC] Optional: Add to Learning Path
     # [LOGIC] Optional: Add to Learning Path
-    if isPathNode:
+    if is_path_node_bool:
         print("--- [DEBUG] Processing Path Node...")
         transcript = None
         quiz = None
@@ -2635,6 +2638,12 @@ async def get_path_nodes(user_email: str = "user"):
     
     # Get user's completed course IDs
     user_completed_ids = {c["course_id"] for c in course_completions if c["user_email"] == user_email}
+    
+    # [FIX] Also check user_node_progress for completions (from robust learning path)
+    if user_email in user_node_progress:
+        for nid, progress_data in user_node_progress[user_email].items():
+            if progress_data.get("completed", False):
+                user_completed_ids.add(nid)
     
     response_nodes = []
     found_active = False
@@ -4123,9 +4132,9 @@ async def ask_ai_about_course(req: AskAIRequest):
         
         # Prepare prompts
         system_prompt = """You are an AI tutor for a training course at Belgian Waffle.
-Answer questions ONLY based on the provided transcript context.
-If the answer is not in the transcript, say "This topic is not covered in this course."
-Keep answers concise, clear, and helpful. Use bullet points if listing multiple items."""
+Answer questions  based on the provided transcript context.
+Keep answers concise, clear, and helpful. Use bullet points if listing multiple items.if user asks anything outside of course 
+explain that also but tell that it is outside of course context"""
         
         user_prompt = f"""Transcript Context:
 {context_text}
@@ -5138,13 +5147,14 @@ async def track_completion(
                     all_completed = all(req_id in user_completed_ids for req_id in required_courses)
                     
                     if all_completed:
-                        # PROMOTE USER
-                        next_role = HIERARCHY[current_idx + 1]
-                        user_data["role"] = next_role
-                        users_store[user_email] = user_data  # Save updated role
-                        level_up = True
-                        new_role = next_role
-                        logger.info(f"USER PROMOTED: {user_email} -> {next_role}")
+                        # PROMOTE USER - DISABLED (Now requires Proctored Exam)
+                        # next_role = HIERARCHY[current_idx + 1]
+                        # user_data["role"] = next_role
+                        # users_store[user_email] = user_data  # Save updated role
+                        # level_up = True
+                        # new_role = next_role
+                        # logger.info(f"USER PROMOTED: {user_email} -> {next_role}")
+                        logger.info(f"User {user_email} has completed all courses for {current_role}. Ready for Exam.")
 
 
         logger.info(f"Module completion tracked for {user_email}: +{actual_xp} XP")
@@ -5226,6 +5236,7 @@ async def track_video_progress(
     node_id: str = Form(...),
     video_position_seconds: float = Form(...),
     video_duration_seconds: float = Form(...),
+    explicit_progress_percent: Optional[int] = Form(None), # NEW: Robust percent from frontend
 ):
     """Track video watching progress for a node/course."""
     try:
@@ -5255,8 +5266,12 @@ async def track_video_progress(
         progress["video_position_seconds"] = video_position_seconds
         progress["video_duration_seconds"] = video_duration_seconds
         
-        # Calculate watch percentage based on max position reached
-        if video_duration_seconds > 0:
+        # Calculate watch percentage
+        if explicit_progress_percent is not None:
+             # Use accurate unique-seconds count from frontend
+             progress["video_watched_percent"] = max(progress.get("video_watched_percent", 0), int(explicit_progress_percent))
+        elif video_duration_seconds > 0:
+            # Fallback legacy calculation
             progress["video_watched_percent"] = min(100, int((progress["max_position_reached"] / video_duration_seconds) * 100))
         
         return {
@@ -5584,6 +5599,7 @@ async def submit_end_quiz(
                 "score_percent": score_percent,
                 "passed": passed,
                 "video_complete": video_complete,
+                "current_video_percent": progress["video_watched_percent"],  # Return actual server-side value
                 "mid_quiz_ok": mid_quiz_ok,
                 "is_complete": is_complete,
                 "message": "Course completed! 🎉" if is_complete else "Keep trying! You need to pass the quiz." if not passed else "Watch more of the video to complete."

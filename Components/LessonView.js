@@ -73,7 +73,10 @@ const MidVideoQuizModal = ({ visible, quiz, onSubmit, onClose }) => {
                             <Text style={midQuizStyles.title}>Quick Check! 🎯</Text>
                         </View>
                         <Text style={midQuizStyles.subtitle}>
-                            Answer correctly to continue watching
+                            {quiz.segment
+                                ? `Questions based on video ${quiz.segment}. Answer correctly to continue!`
+                                : 'Answer correctly to continue watching'
+                            }
                         </Text>
 
                         {/* Questions */}
@@ -140,32 +143,54 @@ const MidVideoQuizModal = ({ visible, quiz, onSubmit, onClose }) => {
     );
 };
 
-// Progress Indicator Component
+// GOLDEN THEME Progress Component
 const CompletionProgress = ({ videoPercent, quizPassed, videoRequired = 90, quizRequired = 70 }) => {
     const videoOk = videoPercent >= videoRequired;
+    const displayPercent = videoOk ? 100 : Math.min(100, videoPercent);
 
     return (
         <View style={progressStyles.container}>
+            <LinearGradient
+                colors={['#1F2937', '#111827']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={StyleSheet.absoluteFill}
+            />
+
+            {/* Video Status */}
             <View style={progressStyles.item}>
-                <MaterialCommunityIcons 
-                    name={videoOk ? "check-circle" : "play-circle-outline"} 
-                    size={20} 
-                    color={videoOk ? "#10B981" : "#6B7280"} 
-                />
-                <Text style={[progressStyles.text, videoOk && progressStyles.textDone]}>
-                    Video: {Math.min(100, videoPercent)}%
-                </Text>
+                <View style={[progressStyles.iconBg, videoOk && progressStyles.iconBgDone]}>
+                    <MaterialCommunityIcons
+                        name={videoOk ? "check-decagram" : "play-circle"}
+                        size={20}
+                        color={videoOk ? "#F59E0B" : "#9CA3AF"}
+                    />
+                </View>
+                <View>
+                    <Text style={progressStyles.label}>Video Progress</Text>
+                    <Text style={[progressStyles.value, videoOk && progressStyles.valueDone]}>
+                        {displayPercent}%
+                    </Text>
+                </View>
             </View>
+
             <View style={progressStyles.divider} />
+
+            {/* Quiz Status */}
             <View style={progressStyles.item}>
-                <MaterialCommunityIcons 
-                    name={quizPassed ? "check-circle" : "clipboard-text-outline"} 
-                    size={20} 
-                    color={quizPassed ? "#10B981" : "#6B7280"} 
-                />
-                <Text style={[progressStyles.text, quizPassed && progressStyles.textDone]}>
-                    Quiz: {quizPassed ? "Passed ✓" : `Need ${quizRequired}%`}
-                </Text>
+                <View style={[progressStyles.iconBg, quizPassed && progressStyles.iconBgDone]}>
+                    <MaterialCommunityIcons
+                        name={quizPassed ? "trophy" : "clipboard-text"}
+                        size={20}
+                        color={quizPassed ? "#F59E0B" : "#9CA3AF"}
+                    />
+                </View>
+                <View>
+                    <Text style={progressStyles.label}>Quiz Status</Text>
+                    <Text style={[progressStyles.value, quizPassed && progressStyles.valueDone]}>
+                        {quizPassed ? "Passed" : "Pending"}
+                    </Text>
+                </View>
             </View>
         </View>
     );
@@ -208,6 +233,18 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
     const shownMidQuizTimes = useRef(new Set());
     const lastProgressUpdate = useRef(0);
 
+    // [NEW] Robust Video Tracking & Speed
+    const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
+    const watchedSeconds = useRef(new Set());
+    // [FIX] Track highest server percent to avoid fluctuations
+    const highestServerPercent = useRef(0);
+
+    const toggleSpeed = () => {
+        const rates = [1.0, 1.25, 1.5];
+        const nextIdx = (rates.indexOf(playbackSpeed) + 1) % rates.length;
+        setPlaybackSpeed(rates[nextIdx]);
+    };
+
     // Parse Quiz Data safely
     const parseQuizData = () => {
         if (!lesson.quiz) return [];
@@ -231,7 +268,9 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
             const data = await response.json();
             if (data.progress) {
                 setNodeProgress(data.progress);
-                setVideoProgress(data.progress.video_watched_percent || 0);
+                const serverPercent = data.progress.video_watched_percent || 0;
+                setVideoProgress(serverPercent);
+                highestServerPercent.current = serverPercent;
                 setMaxPositionReached(data.progress.max_position_reached || 0);
                 setEndQuizPassed(data.progress.end_quiz_passed || false);
                 setMidQuizzesPassed(data.progress.mid_quizzes_completed || []);
@@ -259,10 +298,10 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
     };
 
     // Track video progress to backend
-    const trackVideoProgress = useCallback(async (position, duration) => {
-        // Throttle updates to every 5 seconds
+    const trackVideoProgress = useCallback(async (position, duration, force = false, overridePercent = null) => {
+        // Throttle updates to every 5 seconds (unless forced)
         const now = Date.now();
-        if (now - lastProgressUpdate.current < 5000) return;
+        if (!force && now - lastProgressUpdate.current < 5000) return;
         lastProgressUpdate.current = now;
 
         try {
@@ -272,14 +311,37 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
             formData.append("video_position_seconds", position.toString());
             formData.append("video_duration_seconds", duration.toString());
 
-            await fetch(`${API_URL}/learning-path/track-video-progress`, {
+            // [NEW] Send robust percentage if available
+            if (overridePercent !== null) {
+                formData.append("explicit_progress_percent", overridePercent.toString());
+            }
+
+            const response = await fetch(`${API_URL}/learning-path/track-video-progress`, {
                 method: "POST",
                 body: formData,
             });
+            const result = await response.json();
+
+            // Update local state with server's confirmed percentage
+            if (result.progress?.video_watched_percent) {
+                setVideoProgress(result.progress.video_watched_percent);
+            }
+            return result;
         } catch (err) {
             console.log("Error tracking video progress:", err);
+            return null;
         }
     }, [userEmail, lesson.id]);
+
+    // Force sync progress before quiz submission
+    const forceProgressSync = useCallback(async () => {
+        if (videoDuration > 0) {
+            const watchedCount = watchedSeconds.current.size;
+            const robustPercent = Math.min(100, Math.floor((watchedCount / videoDuration) * 100));
+            return await trackVideoProgress(maxPositionReached, videoDuration, true, robustPercent);
+        }
+        return null;
+    }, [trackVideoProgress, maxPositionReached, videoDuration]);
 
     // Generate mid-video quiz at specific intervals
     const generateMidVideoQuiz = async (triggerTime) => {
@@ -332,59 +394,76 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
         setVideoDuration(duration);
         setIsVideoPlaying(status.isPlaying);
 
-        // Update max position (prevent rewind cheating)
+        // Update max position (prevent rewind cheating) - LEGACY CHECK
         const newMaxPosition = Math.max(maxPositionReached, position);
         setMaxPositionReached(newMaxPosition);
 
-        // Calculate and update progress percentage
-        if (duration > 0) {
-            const percent = Math.min(100, Math.floor((newMaxPosition / duration) * 100));
-            setVideoProgress(percent);
-
-            // Track to backend
-            trackVideoProgress(position, duration);
+        // [NEW] Robust Tracking: Count unique seconds watched
+        if (status.isPlaying) {
+            // Add current second to set (floor to integer)
+            watchedSeconds.current.add(Math.floor(position));
         }
 
-        // Check for mid-video quiz triggers (every ~2 minutes / 25% of video)
-        if (status.isPlaying && duration > 60) { // Only for videos > 1 minute
-            const checkpoints = [];
-            const numCheckpoints = Math.floor(duration / 120); // Every 2 minutes
-            for (let i = 1; i <= Math.min(numCheckpoints, 4); i++) { // Max 4 checkpoints
-                checkpoints.push(Math.floor((i * duration) / (numCheckpoints + 1)));
+        // Calculate and update progress percentage
+        if (duration > 0) {
+            // ROBUST CALCULATION: Unique seconds / Total duration
+            const watchedCount = watchedSeconds.current.size;
+            const currentSessionPercent = Math.min(100, Math.floor((watchedCount / duration) * 100));
+
+            // [FIX] Prevent fluctuation: Use maximum of server-recorded or current session
+            let effectivePercent = Math.max(currentSessionPercent, highestServerPercent.current);
+
+            // Update highest if we exceeded it
+            if (effectivePercent > highestServerPercent.current) {
+                highestServerPercent.current = effectivePercent;
             }
 
-            for (const checkpoint of checkpoints) {
-                // Check if we just passed this checkpoint and haven't shown quiz yet
-                if (
-                    position >= checkpoint &&
-                    position < checkpoint + 5 && // Within 5 second window
-                    !shownMidQuizTimes.current.has(checkpoint) &&
-                    !midQuizzesPassed.includes(checkpoint)
-                ) {
-                    shownMidQuizTimes.current.add(checkpoint);
+            setVideoProgress(effectivePercent);
 
-                    // Pause video
-                    if (videoRef.current) {
-                        await videoRef.current.pauseAsync();
-                    }
+            // Let's pass the calculated percent to trackVideoProgress as an override
+            trackVideoProgress(position, duration, false, effectivePercent);
+        }
 
-                    // Check if quiz exists or generate new one
-                    let quiz = midVideoQuizzes.find(q => Math.abs(q.trigger_time_seconds - checkpoint) < 10);
-                    if (!quiz) {
-                        quiz = await generateMidVideoQuiz(checkpoint);
-                    }
+        // Fixed checkpoints at 33% and 66% of video duration
+        const checkpoint33 = Math.floor(duration * 0.33);
+        const checkpoint66 = Math.floor(duration * 0.66);
+        const checkpoints = [checkpoint33, checkpoint66];
 
-                    if (quiz) {
-                        setCurrentMidQuiz({ ...quiz, trigger_time: checkpoint });
-                        setShowMidQuizModal(true);
-                    } else {
-                        // Resume if no quiz generated
-                        if (videoRef.current) {
-                            await videoRef.current.playAsync();
-                        }
-                    }
-                    break;
+        for (const checkpoint of checkpoints) {
+            // Check if we just passed this checkpoint and haven't shown quiz yet
+            if (
+                position >= checkpoint &&
+                position < checkpoint + 3 && // Within 3 second window
+                !shownMidQuizTimes.current.has(checkpoint) &&
+                !midQuizzesPassed.includes(checkpoint)
+            ) {
+                shownMidQuizTimes.current.add(checkpoint);
+
+                // Pause video
+                if (videoRef.current) {
+                    await videoRef.current.pauseAsync();
                 }
+
+                // Determine which segment this checkpoint covers
+                const isFirstCheckpoint = checkpoint === checkpoint33;
+                const segmentLabel = isFirstCheckpoint ? "0-33%" : "33-66%";
+
+                // Check if quiz exists or generate new one
+                let quiz = midVideoQuizzes.find(q => Math.abs(q.trigger_time_seconds - checkpoint) < 10);
+                if (!quiz) {
+                    quiz = await generateMidVideoQuiz(checkpoint);
+                }
+
+                if (quiz) {
+                    setCurrentMidQuiz({ ...quiz, trigger_time: checkpoint, segment: segmentLabel });
+                    setShowMidQuizModal(true);
+                } else {
+                    // Resume if no quiz generated
+                    if (videoRef.current) {
+                        await videoRef.current.playAsync();
+                    }
+                }
+                break;
             }
         }
 
@@ -443,6 +522,10 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
 
     const trackQuizCompletion = async (finalScore, totalQuestions) => {
         try {
+            // IMPORTANT: Force sync video progress before submitting quiz
+            // This ensures the server has the latest watch percentage
+            await forceProgressSync();
+
             // Submit to new endpoint
             const formData = new FormData();
             formData.append("user_email", userEmail);
@@ -470,19 +553,27 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
                     Alert.alert(
                         "Quiz Not Passed",
                         `You scored ${finalScore}/${totalQuestions} (${result.result.score_percent.toFixed(0)}%). You need ${requirements.quiz_pass_percent}% to pass.`,
-                        [{ text: "Try Again", onPress: () => {
-                            setQuizComplete(false);
-                            setCurrentQuizIdx(0);
-                            setQuizScore(0);
-                            setSelectedOption(null);
-                        }}]
+                        [{
+                            text: "Try Again", onPress: () => {
+                                setQuizComplete(false);
+                                setCurrentQuizIdx(0);
+                                setQuizScore(0);
+                                setSelectedOption(null);
+                            }
+                        }]
                     );
                 } else if (!result.result.video_complete) {
+                    // Use server-returned video progress not local state
+                    const serverVideoPercent = result.result.current_video_percent || videoProgress;
                     Alert.alert(
                         "Watch More Video",
-                        `You passed the quiz! But you need to watch at least ${requirements.video_watch_percent}% of the video. Current: ${videoProgress}%`,
+                        `You passed the quiz! But you need to watch at least ${requirements.video_watch_percent}% of the video. Current: ${serverVideoPercent}%`,
                         [{ text: "OK" }]
                     );
+                } else if (result.result.mid_quiz_ok === false) {
+                    Alert.alert("Mid-Video Quizzes", "Please complete all mid-video quizzes to proceed.");
+                } else if (!result.result.is_complete) {
+                    Alert.alert("Course Incomplete", "You have not met all requirements to complete this course.");
                 }
             }
 
@@ -539,6 +630,28 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
             return null;
         }
     };
+
+    // [AUTO RECOVERY] Check if course should be completed
+    useEffect(() => {
+        if (nodeProgress && requirements && !moduleCompleted) {
+            const videoOk = (nodeProgress.video_watched_percent || 0) >= requirements.video_watch_percent;
+            const quizOk = nodeProgress.end_quiz_passed;
+
+            let midOk = true;
+            if (requirements.mid_quiz_required) {
+                const total = nodeProgress.mid_quizzes_total || 0;
+                if (total > 0) {
+                    const passed = nodeProgress.mid_quizzes_passed || 0;
+                    midOk = (passed / total * 100) >= requirements.mid_quiz_pass_percent;
+                }
+            }
+
+            if (videoOk && quizOk && midOk) {
+                console.log("Auto-completing course based on progress...");
+                trackModuleCompletion();
+            }
+        }
+    }, [nodeProgress, requirements, moduleCompleted]);
 
     const handleClose = () => {
         onClose(completionResult);
@@ -605,16 +718,43 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
                             </View>
                         )}
                         {lesson.videoUrl ? (
-                            <Video
-                                ref={videoRef}
-                                style={StyleSheet.absoluteFill}
-                                source={{ uri: lesson.videoUrl }}
-                                useNativeControls
-                                resizeMode={ResizeMode.CONTAIN}
-                                isLooping={false}
-                                shouldPlay={true}
-                                onPlaybackStatusUpdate={handleVideoPlaybackStatus}
-                            />
+                            <>
+                                <Video
+                                    ref={videoRef}
+                                    style={StyleSheet.absoluteFill}
+                                    source={{ uri: lesson.videoUrl }}
+                                    useNativeControls
+                                    resizeMode={ResizeMode.CONTAIN}
+                                    isLooping={false}
+                                    shouldPlay={true}
+                                    rate={playbackSpeed}
+                                    onPlaybackStatusUpdate={handleVideoPlaybackStatus}
+                                />
+
+                                {/* Speed Control Overlay */}
+                                <TouchableOpacity
+                                    onPress={toggleSpeed}
+                                    style={{
+                                        position: 'absolute',
+                                        top: 10,
+                                        right: 10,
+                                        backgroundColor: 'rgba(0,0,0,0.6)',
+                                        paddingHorizontal: 10,
+                                        paddingVertical: 5,
+                                        borderRadius: 15,
+                                        borderWidth: 1,
+                                        borderColor: 'rgba(255,255,255,0.2)',
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        zIndex: 10 // Ensure it's above video
+                                    }}
+                                >
+                                    <Feather name="fast-forward" size={12} color="#FBBF24" style={{ marginRight: 4 }} />
+                                    <Text style={{ color: '#FFF', fontFamily: 'Poppins_600SemiBold', fontSize: 12 }}>
+                                        {playbackSpeed.toFixed(1)}x
+                                    </Text>
+                                </TouchableOpacity>
+                            </>
                         ) : (
                             <LinearGradient
                                 colors={['#374151', '#1F2937']}
@@ -628,21 +768,21 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
 
                     {/* TABS */}
                     <View style={styles.tabBar}>
-                        <TabButton 
-                            title="Transcript" 
-                            active={activeTab === 'transcript'} 
-                            onPress={() => setActiveTab('transcript')} 
+                        <TabButton
+                            title="Transcript"
+                            active={activeTab === 'transcript'}
+                            onPress={() => setActiveTab('transcript')}
                         />
-                        <TabButton 
-                            title="Quiz" 
-                            active={activeTab === 'quiz'} 
+                        <TabButton
+                            title="Quiz"
+                            active={activeTab === 'quiz'}
                             onPress={() => setActiveTab('quiz')}
                             badge={!endQuizPassed && quizData.length > 0 ? "!" : null}
                         />
-                        <TabButton 
-                            title="Resources" 
-                            active={activeTab === 'resources'} 
-                            onPress={() => setActiveTab('resources')} 
+                        <TabButton
+                            title="Resources"
+                            active={activeTab === 'resources'}
+                            onPress={() => setActiveTab('resources')}
                         />
                     </View>
 
@@ -719,16 +859,16 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
                                     </Animated.View>
                                 ) : (
                                     <View style={styles.quizResult}>
-                                        <MaterialCommunityIcons 
-                                            name={endQuizPassed ? "trophy-outline" : "reload"} 
-                                            size={64} 
-                                            color={endQuizPassed ? "#FBBF24" : "#EF4444"} 
+                                        <MaterialCommunityIcons
+                                            name={endQuizPassed ? "trophy-outline" : "reload"}
+                                            size={64}
+                                            color={endQuizPassed ? "#FBBF24" : "#EF4444"}
                                         />
                                         <Text style={styles.resultTitle}>
                                             {endQuizPassed ? "Quiz Passed!" : "Quiz Not Passed"}
                                         </Text>
                                         <Text style={styles.resultScore}>
-                                            You scored {quizScore}/{quizData.length} ({((quizScore/quizData.length)*100).toFixed(0)}%)
+                                            You scored {quizScore}/{quizData.length} ({((quizScore / quizData.length) * 100).toFixed(0)}%)
                                         </Text>
 
                                         {endQuizPassed && moduleCompleted && (
@@ -911,32 +1051,56 @@ const progressStyles = StyleSheet.create({
     container: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 8,
+        justifyContent: 'space-between',
+        paddingVertical: 12,
         paddingHorizontal: 16,
-        backgroundColor: 'rgba(31, 41, 55, 0.8)',
         marginHorizontal: 20,
-        marginBottom: 8,
-        borderRadius: 12,
+        marginBottom: 16,
+        borderRadius: 16,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: 'rgba(245, 158, 11, 0.2)', // Subtle gold border
+        backgroundColor: '#1F2937',
     },
     item: {
         flexDirection: 'row',
         alignItems: 'center',
+        flex: 1,
+        justifyContent: 'center',
     },
-    text: {
-        fontSize: 12,
-        fontFamily: 'Poppins_500Medium',
+    iconBg: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 10,
+    },
+    iconBgDone: {
+        backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    },
+    label: {
+        fontSize: 10,
+        fontFamily: 'Poppins_400Regular',
         color: '#9CA3AF',
-        marginLeft: 6,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+        marginBottom: 2,
     },
-    textDone: {
-        color: '#10B981',
+    value: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#D1D5DB',
+    },
+    valueDone: {
+        color: '#F59E0B', // Gold
     },
     divider: {
         width: 1,
-        height: 16,
-        backgroundColor: '#4B5563',
-        marginHorizontal: 16,
+        height: 30,
+        backgroundColor: 'rgba(75, 85, 99, 0.3)',
+        marginHorizontal: 10,
     },
 });
 
@@ -971,20 +1135,25 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     headerTitle: {
-        fontSize: 14,
+        fontSize: 16,
         fontFamily: 'Poppins_700Bold',
-        letterSpacing: 1,
-        color: '#FBBF24',
+        letterSpacing: 0.5,
+        color: '#F59E0B', // Golden Header
     },
     headerSubtitle: {
-        color: '#FFF',
-        fontSize: 16,
-        fontFamily: 'Poppins_600SemiBold',
+        color: '#E5E7EB',
+        fontSize: 14,
+        fontFamily: 'Poppins_500Medium',
     },
     videoContainer: {
         width: width,
         height: width * 0.5625,
         backgroundColor: '#000',
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4.65,
+        elevation: 8,
     },
     videoPlaceholder: {
         flex: 1,
@@ -995,31 +1164,35 @@ const styles = StyleSheet.create({
         position: 'absolute',
         bottom: 10,
         right: 10,
-        backgroundColor: 'rgba(0,0,0,0.7)',
+        backgroundColor: 'rgba(17, 24, 39, 0.8)',
         paddingHorizontal: 8,
         paddingVertical: 4,
-        borderRadius: 4,
-        color: '#FFF',
+        borderRadius: 6,
+        color: '#FBBF24', // Amber text
         fontSize: 12,
-        fontFamily: 'Poppins_500Medium',
+        fontFamily: 'Poppins_600SemiBold',
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: 'rgba(245, 158, 11, 0.3)'
     },
     loadingOverlay: {
         ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0,0,0,0.8)',
+        backgroundColor: 'rgba(0,0,0,0.85)',
         justifyContent: 'center',
         alignItems: 'center',
         zIndex: 10,
     },
     loadingText: {
-        color: '#FFF',
+        color: '#F59E0B',
         marginTop: 12,
-        fontFamily: 'Poppins_500Medium',
+        fontFamily: 'Poppins_600SemiBold',
     },
     tabBar: {
         flexDirection: 'row',
         paddingHorizontal: 20,
         borderBottomWidth: 1,
-        borderBottomColor: '#374151',
+        borderBottomColor: 'rgba(245, 158, 11, 0.1)', // Gold divider
+        marginTop: 10,
     },
     tabBtn: {
         paddingVertical: 15,
@@ -1029,23 +1202,23 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     tabBtnText: {
-        color: '#9CA3AF',
+        color: '#6B7280',
         fontSize: 14,
         fontFamily: 'Poppins_600SemiBold',
     },
     tabBtnActive: {},
     tabBtnTextActive: {
-        color: '#FFF',
+        color: '#F59E0B', // Active Gold
     },
     tabBadge: {
-        backgroundColor: '#EF4444',
+        backgroundColor: '#F59E0B', // Gold Badge
         borderRadius: 10,
         paddingHorizontal: 6,
         paddingVertical: 2,
         marginLeft: 6,
     },
     tabBadgeText: {
-        color: '#FFF',
+        color: '#111827', // Dark Text on Gold
         fontSize: 10,
         fontFamily: 'Poppins_700Bold',
     },
@@ -1055,9 +1228,13 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         height: 3,
-        backgroundColor: '#FBBF24',
+        backgroundColor: '#F59E0B', // Gold Line
         borderTopLeftRadius: 3,
         borderTopRightRadius: 3,
+        shadowColor: "#F59E0B",
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.5,
+        shadowRadius: 4,
     },
     contentArea: {
         flex: 1,
