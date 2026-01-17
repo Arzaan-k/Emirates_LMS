@@ -45,7 +45,7 @@ def add_course_to_rag(course_id, transcript):
 # --- CONFIGURATION ---
 PORT = 8000
 HOST = "0.0.0.0"
-BASE_URL = "http://192.168.29.119:8000"  # Local network IP for physical device
+BASE_URL = "http://192.168.1.36:8000"  # Local network IP for physical device
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
@@ -441,6 +441,77 @@ recommendation_history: List[dict] = []  # {id, user_email, recommendations, gen
 
 # INTERACTION LOGS - Track all user interactions for analysis
 user_interactions: List[dict] = []  # {id, user_email, interaction_type, content_id, content_type, duration_seconds, timestamp, metadata}
+
+# ==========================================
+# ROBUST LEARNING PATH SYSTEM STORES
+# ==========================================
+
+# NODE COMPLETION REQUIREMENTS - Define passing criteria per node/course
+node_completion_requirements: dict = {
+    "default": {
+        "video_watch_percent": 90,      # Must watch 90% of video
+        "quiz_pass_percent": 70,        # Must score 70% on end quiz
+        "mid_quiz_required": True,      # Mid-video quizzes required
+        "mid_quiz_pass_percent": 60,    # 60% on mid-video quizzes
+    }
+}
+
+# USER NODE PROGRESS - Track detailed progress per user per node
+# {user_email: {node_id: {video_watched_percent, video_duration_seconds, video_position_seconds, 
+#   mid_quizzes_passed, mid_quizzes_total, end_quiz_score, end_quiz_attempts, completed, completed_at}}}
+user_node_progress: dict = {}
+
+# MID-VIDEO QUIZ STORE - Generated quizzes based on video segments
+# {node_id: [{quiz_id, trigger_time_seconds, questions: [...], generated_from_transcript}]}
+mid_video_quizzes: dict = {}
+
+# MID-VIDEO QUIZ ATTEMPTS - User attempts on mid-video quizzes
+# [{id, user_email, node_id, quiz_index, trigger_time, score, total, passed, attempted_at}]
+mid_video_quiz_attempts: List[dict] = []
+
+# ROLE ADVANCEMENT EXAMS - Auto-generated proctored exams for level advancement
+# {user_email: {current_role, target_role, exam_id, questions, status, created_at, expires_at}}
+role_advancement_exams: dict = {}
+
+# ROLE ADVANCEMENT SUBMISSIONS - Track exam results
+# [{id, user_email, from_role, to_role, exam_id, score, passed, violations, breach_log, submitted_at}]
+role_advancement_submissions: List[dict] = []
+
+# LEVEL ADVANCEMENT CONFIG - Requirements for each level transition
+level_advancement_config: dict = {
+    "Waffler": {
+        "target": "Silver Waffler",
+        "exam_questions": 15,           # Number of questions in advancement exam
+        "exam_time_minutes": 20,        # Time limit
+        "pass_percent": 75,             # Must score 75% to pass
+        "proctored": True,              # Proctored exam required
+        "max_violations": 3,            # Max violations before auto-fail
+    },
+    "Silver Waffler": {
+        "target": "Gold Waffler",
+        "exam_questions": 20,
+        "exam_time_minutes": 30,
+        "pass_percent": 80,
+        "proctored": True,
+        "max_violations": 2,
+    },
+    "Gold Waffler": {
+        "target": "Shift Manager",
+        "exam_questions": 25,
+        "exam_time_minutes": 40,
+        "pass_percent": 85,
+        "proctored": True,
+        "max_violations": 2,
+    },
+    "Shift Manager": {
+        "target": "Assistant Store Manager",
+        "exam_questions": 30,
+        "exam_time_minutes": 45,
+        "pass_percent": 90,
+        "proctored": True,
+        "max_violations": 1,
+    },
+}
 
 # ==========================================
 # HIERARCHY & LEVEL-BASED ACCESS CONTROL
@@ -5128,6 +5199,847 @@ async def get_user_level_progress(user_email: str):
     except Exception as e:
         logger.error(f"Level progress error: {e}")
         return {"error": str(e)}
+
+
+# ==========================================
+# ROBUST LEARNING PATH APIs
+# ==========================================
+
+@app.post("/learning-path/track-video-progress")
+async def track_video_progress(
+    user_email: str = Form(...),
+    node_id: str = Form(...),
+    video_position_seconds: float = Form(...),
+    video_duration_seconds: float = Form(...),
+):
+    """Track video watching progress for a node/course."""
+    try:
+        if user_email not in user_node_progress:
+            user_node_progress[user_email] = {}
+        
+        if node_id not in user_node_progress[user_email]:
+            user_node_progress[user_email][node_id] = {
+                "video_watched_percent": 0,
+                "video_duration_seconds": video_duration_seconds,
+                "video_position_seconds": 0,
+                "max_position_reached": 0,
+                "mid_quizzes_passed": 0,
+                "mid_quizzes_total": 0,
+                "mid_quizzes_completed": [],  # List of completed quiz trigger times
+                "end_quiz_score": 0,
+                "end_quiz_passed": False,
+                "end_quiz_attempts": 0,
+                "completed": False,
+                "completed_at": None,
+            }
+        
+        progress = user_node_progress[user_email][node_id]
+        
+        # Update max position (prevent rewind cheating)
+        progress["max_position_reached"] = max(progress["max_position_reached"], video_position_seconds)
+        progress["video_position_seconds"] = video_position_seconds
+        progress["video_duration_seconds"] = video_duration_seconds
+        
+        # Calculate watch percentage based on max position reached
+        if video_duration_seconds > 0:
+            progress["video_watched_percent"] = min(100, int((progress["max_position_reached"] / video_duration_seconds) * 100))
+        
+        return {
+            "status": "success",
+            "progress": progress
+        }
+    except Exception as e:
+        logger.error(f"Track video progress error: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/learning-path/node-progress/{user_email}/{node_id}")
+async def get_node_progress(user_email: str, node_id: str):
+    """Get detailed progress for a specific node."""
+    try:
+        # Get requirements
+        requirements = node_completion_requirements.get(node_id, node_completion_requirements["default"])
+        
+        progress = {}
+        if user_email in user_node_progress and node_id in user_node_progress[user_email]:
+            progress = user_node_progress[user_email][node_id]
+        else:
+            progress = {
+                "video_watched_percent": 0,
+                "video_duration_seconds": 0,
+                "video_position_seconds": 0,
+                "max_position_reached": 0,
+                "mid_quizzes_passed": 0,
+                "mid_quizzes_total": 0,
+                "mid_quizzes_completed": [],
+                "end_quiz_score": 0,
+                "end_quiz_passed": False,
+                "end_quiz_attempts": 0,
+                "completed": False,
+                "completed_at": None,
+            }
+        
+        # Check completion status
+        video_complete = progress["video_watched_percent"] >= requirements["video_watch_percent"]
+        quiz_passed = progress["end_quiz_passed"]
+        
+        # Check mid-quiz requirement
+        mid_quiz_ok = True
+        if requirements.get("mid_quiz_required", False):
+            total_mid = progress.get("mid_quizzes_total", 0)
+            passed_mid = progress.get("mid_quizzes_passed", 0)
+            if total_mid > 0:
+                mid_quiz_ok = passed_mid >= (total_mid * requirements.get("mid_quiz_pass_percent", 60) / 100)
+        
+        is_complete = video_complete and quiz_passed and mid_quiz_ok
+        
+        return {
+            "progress": progress,
+            "requirements": requirements,
+            "video_complete": video_complete,
+            "quiz_passed": quiz_passed,
+            "mid_quiz_ok": mid_quiz_ok,
+            "is_complete": is_complete
+        }
+    except Exception as e:
+        logger.error(f"Get node progress error: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/learning-path/generate-mid-video-quiz")
+async def generate_mid_video_quiz(
+    node_id: str = Form(...),
+    transcript_segment: str = Form(...),
+    trigger_time_seconds: float = Form(...),
+    num_questions: int = Form(3)
+):
+    """Generate a mid-video quiz based on transcript segment using AI."""
+    try:
+        # Check if quiz already exists for this trigger time
+        if node_id in mid_video_quizzes:
+            for existing in mid_video_quizzes[node_id]:
+                if abs(existing["trigger_time_seconds"] - trigger_time_seconds) < 10:
+                    return {"status": "exists", "quiz": existing}
+        
+        # Generate quiz using Groq
+        prompt = f"""Generate exactly {num_questions} multiple-choice quiz questions based on this video transcript segment:
+
+"{transcript_segment}"
+
+IMPORTANT: Return ONLY a valid JSON array with this exact structure:
+[
+    {{
+        "question": "Clear, specific question about the content?",
+        "options": ["Option A", "Option B", "Option C", "Option D"],
+        "correctIndex": 0
+    }}
+]
+
+Requirements:
+- Questions should test comprehension of the transcript segment
+- Each question should have exactly 4 options
+- correctIndex is 0-3 indicating the correct option
+- Return ONLY the JSON array, no markdown or extra text"""
+
+        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "You are a quiz generator. Return only valid JSON arrays."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=2000
+        )
+        
+        response_text = response.choices[0].message.content.strip()
+        
+        # Extract JSON array
+        import re
+        json_match = re.search(r'\[[\s\S]*\]', response_text)
+        if json_match:
+            response_text = json_match.group()
+        
+        questions = json.loads(response_text)
+        
+        # Create quiz entry
+        quiz_entry = {
+            "quiz_id": str(uuid.uuid4()),
+            "trigger_time_seconds": trigger_time_seconds,
+            "questions": questions[:num_questions],
+            "generated_from_transcript": transcript_segment[:200] + "...",
+            "created_at": datetime.now().isoformat()
+        }
+        
+        if node_id not in mid_video_quizzes:
+            mid_video_quizzes[node_id] = []
+        mid_video_quizzes[node_id].append(quiz_entry)
+        
+        # Sort by trigger time
+        mid_video_quizzes[node_id].sort(key=lambda x: x["trigger_time_seconds"])
+        
+        logger.info(f"Mid-video quiz generated for node {node_id} at {trigger_time_seconds}s")
+        
+        return {"status": "success", "quiz": quiz_entry}
+        
+    except Exception as e:
+        logger.error(f"Generate mid-video quiz error: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/learning-path/mid-video-quizzes/{node_id}")
+async def get_mid_video_quizzes(node_id: str, user_email: str = None):
+    """Get all mid-video quizzes for a node, optionally with user completion status."""
+    try:
+        quizzes = mid_video_quizzes.get(node_id, [])
+        
+        if user_email:
+            # Get user's completed quizzes for this node
+            completed_triggers = []
+            if user_email in user_node_progress and node_id in user_node_progress[user_email]:
+                completed_triggers = user_node_progress[user_email][node_id].get("mid_quizzes_completed", [])
+            
+            # Mark each quiz with completion status
+            for quiz in quizzes:
+                quiz["completed"] = quiz["trigger_time_seconds"] in completed_triggers
+        
+        return {"quizzes": quizzes}
+    except Exception as e:
+        logger.error(f"Get mid-video quizzes error: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/learning-path/submit-mid-video-quiz")
+async def submit_mid_video_quiz(
+    user_email: str = Form(...),
+    node_id: str = Form(...),
+    quiz_id: str = Form(...),
+    trigger_time_seconds: float = Form(...),
+    answers: str = Form(...),  # JSON array of answer indices
+):
+    """Submit answers for a mid-video quiz."""
+    try:
+        answers_list = json.loads(answers)
+        
+        # Find the quiz
+        quiz = None
+        if node_id in mid_video_quizzes:
+            for q in mid_video_quizzes[node_id]:
+                if q["quiz_id"] == quiz_id:
+                    quiz = q
+                    break
+        
+        if not quiz:
+            return {"status": "error", "message": "Quiz not found"}
+        
+        # Calculate score
+        questions = quiz["questions"]
+        correct = 0
+        for i, ans in enumerate(answers_list):
+            if i < len(questions) and ans == questions[i].get("correctIndex"):
+                correct += 1
+        
+        total = len(questions)
+        score_percent = (correct / total * 100) if total > 0 else 0
+        
+        # Get requirements
+        requirements = node_completion_requirements.get(node_id, node_completion_requirements["default"])
+        passed = score_percent >= requirements.get("mid_quiz_pass_percent", 60)
+        
+        # Record attempt
+        attempt = {
+            "id": str(uuid.uuid4()),
+            "user_email": user_email,
+            "node_id": node_id,
+            "quiz_id": quiz_id,
+            "trigger_time_seconds": trigger_time_seconds,
+            "score": correct,
+            "total": total,
+            "score_percent": score_percent,
+            "passed": passed,
+            "attempted_at": datetime.now().isoformat()
+        }
+        mid_video_quiz_attempts.append(attempt)
+        
+        # Update user progress
+        if user_email not in user_node_progress:
+            user_node_progress[user_email] = {}
+        if node_id not in user_node_progress[user_email]:
+            user_node_progress[user_email][node_id] = {
+                "video_watched_percent": 0,
+                "video_duration_seconds": 0,
+                "video_position_seconds": 0,
+                "max_position_reached": 0,
+                "mid_quizzes_passed": 0,
+                "mid_quizzes_total": 0,
+                "mid_quizzes_completed": [],
+                "end_quiz_score": 0,
+                "end_quiz_passed": False,
+                "end_quiz_attempts": 0,
+                "completed": False,
+                "completed_at": None,
+            }
+        
+        progress = user_node_progress[user_email][node_id]
+        
+        # Track this quiz (only count once per trigger time)
+        if trigger_time_seconds not in progress["mid_quizzes_completed"]:
+            progress["mid_quizzes_total"] += 1
+            if passed:
+                progress["mid_quizzes_passed"] += 1
+                progress["mid_quizzes_completed"].append(trigger_time_seconds)
+        
+        logger.info(f"Mid-video quiz submitted: {user_email} on {node_id} - {correct}/{total}")
+        
+        return {
+            "status": "success",
+            "result": {
+                "correct": correct,
+                "total": total,
+                "score_percent": score_percent,
+                "passed": passed,
+                "can_continue": passed
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Submit mid-video quiz error: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/learning-path/submit-end-quiz")
+async def submit_end_quiz(
+    user_email: str = Form(...),
+    node_id: str = Form(...),
+    score: int = Form(...),
+    total: int = Form(...),
+):
+    """Submit the end-of-lesson quiz score and check completion."""
+    try:
+        # Get requirements
+        requirements = node_completion_requirements.get(node_id, node_completion_requirements["default"])
+        
+        score_percent = (score / total * 100) if total > 0 else 0
+        passed = score_percent >= requirements.get("quiz_pass_percent", 70)
+        
+        # Update user progress
+        if user_email not in user_node_progress:
+            user_node_progress[user_email] = {}
+        if node_id not in user_node_progress[user_email]:
+            user_node_progress[user_email][node_id] = {
+                "video_watched_percent": 0,
+                "video_duration_seconds": 0,
+                "video_position_seconds": 0,
+                "max_position_reached": 0,
+                "mid_quizzes_passed": 0,
+                "mid_quizzes_total": 0,
+                "mid_quizzes_completed": [],
+                "end_quiz_score": 0,
+                "end_quiz_passed": False,
+                "end_quiz_attempts": 0,
+                "completed": False,
+                "completed_at": None,
+            }
+        
+        progress = user_node_progress[user_email][node_id]
+        progress["end_quiz_attempts"] += 1
+        progress["end_quiz_score"] = max(progress["end_quiz_score"], score_percent)
+        progress["end_quiz_passed"] = progress["end_quiz_passed"] or passed
+        
+        # Check full completion
+        video_complete = progress["video_watched_percent"] >= requirements["video_watch_percent"]
+        mid_quiz_ok = True
+        if requirements.get("mid_quiz_required", False) and progress["mid_quizzes_total"] > 0:
+            mid_pass_rate = progress["mid_quizzes_passed"] / progress["mid_quizzes_total"] * 100
+            mid_quiz_ok = mid_pass_rate >= requirements.get("mid_quiz_pass_percent", 60)
+        
+        is_complete = video_complete and passed and mid_quiz_ok
+        
+        if is_complete and not progress["completed"]:
+            progress["completed"] = True
+            progress["completed_at"] = datetime.now().isoformat()
+        
+        logger.info(f"End quiz submitted: {user_email} on {node_id} - {score}/{total} ({score_percent}%) - Complete: {is_complete}")
+        
+        return {
+            "status": "success",
+            "result": {
+                "score": score,
+                "total": total,
+                "score_percent": score_percent,
+                "passed": passed,
+                "video_complete": video_complete,
+                "mid_quiz_ok": mid_quiz_ok,
+                "is_complete": is_complete,
+                "message": "Course completed! 🎉" if is_complete else "Keep trying! You need to pass the quiz." if not passed else "Watch more of the video to complete."
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Submit end quiz error: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/learning-path/validate-completion")
+async def validate_node_completion(
+    user_email: str = Form(...),
+    node_id: str = Form(...),
+):
+    """Validate if a node is properly completed (video + quiz + mid-quizzes)."""
+    try:
+        requirements = node_completion_requirements.get(node_id, node_completion_requirements["default"])
+        
+        progress = {}
+        if user_email in user_node_progress and node_id in user_node_progress[user_email]:
+            progress = user_node_progress[user_email][node_id]
+        
+        # Check all requirements
+        video_watched = progress.get("video_watched_percent", 0) >= requirements["video_watch_percent"]
+        end_quiz_passed = progress.get("end_quiz_passed", False)
+        
+        mid_quiz_ok = True
+        mid_quiz_details = {"required": False, "passed": 0, "total": 0}
+        
+        if requirements.get("mid_quiz_required", False):
+            mid_quiz_details["required"] = True
+            mid_quiz_details["passed"] = progress.get("mid_quizzes_passed", 0)
+            mid_quiz_details["total"] = progress.get("mid_quizzes_total", 0)
+            if mid_quiz_details["total"] > 0:
+                pass_rate = mid_quiz_details["passed"] / mid_quiz_details["total"] * 100
+                mid_quiz_ok = pass_rate >= requirements.get("mid_quiz_pass_percent", 60)
+        
+        is_valid = video_watched and end_quiz_passed and mid_quiz_ok
+        
+        return {
+            "is_valid": is_valid,
+            "details": {
+                "video_watched_percent": progress.get("video_watched_percent", 0),
+                "video_required_percent": requirements["video_watch_percent"],
+                "video_ok": video_watched,
+                "end_quiz_score": progress.get("end_quiz_score", 0),
+                "end_quiz_required": requirements["quiz_pass_percent"],
+                "end_quiz_passed": end_quiz_passed,
+                "mid_quiz": mid_quiz_details,
+                "mid_quiz_ok": mid_quiz_ok,
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Validate completion error: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+# ==========================================
+# ROLE ADVANCEMENT EXAM APIs
+# ==========================================
+
+@app.get("/role-advancement/eligibility/{user_email}")
+async def check_advancement_eligibility(user_email: str):
+    """Check if user is eligible for role advancement exam."""
+    try:
+        # Get user data
+        user_data = users_store.get(user_email, {"role": "Waffler"})
+        current_role = user_data.get("role", "Waffler")
+        
+        HIERARCHY = ['Waffler', 'Silver Waffler', 'Gold Waffler', 'Shift Manager', 'Assistant Store Manager']
+        
+        if current_role not in HIERARCHY or current_role == HIERARCHY[-1]:
+            return {"eligible": False, "reason": "Already at highest level or invalid role"}
+        
+        # Get advancement config
+        config = level_advancement_config.get(current_role)
+        if not config:
+            return {"eligible": False, "reason": "No advancement path configured"}
+        
+        target_role = config["target"]
+        
+        # Check if all courses for current level are completed WITH VALID COMPLETION
+        role_rules = access_control_store.get(current_role, {})
+        required_courses = role_rules.get("accessible_courses", [])
+        
+        if not required_courses:
+            return {"eligible": False, "reason": "No courses assigned to current level"}
+        
+        # Validate each course completion
+        incomplete_courses = []
+        for course_id in required_courses:
+            if user_email in user_node_progress and course_id in user_node_progress[user_email]:
+                progress = user_node_progress[user_email][course_id]
+                if not progress.get("completed", False):
+                    incomplete_courses.append(course_id)
+            else:
+                # Check legacy completions
+                legacy_complete = any(
+                    c["course_id"] == course_id and c["user_email"] == user_email 
+                    for c in course_completions
+                )
+                if not legacy_complete:
+                    incomplete_courses.append(course_id)
+        
+        if incomplete_courses:
+            return {
+                "eligible": False,
+                "reason": f"Must complete all {len(required_courses)} courses first",
+                "courses_remaining": len(incomplete_courses),
+                "courses_total": len(required_courses)
+            }
+        
+        # Check if exam already exists (pending)
+        if user_email in role_advancement_exams:
+            existing = role_advancement_exams[user_email]
+            if existing.get("status") == "pending":
+                return {
+                    "eligible": True,
+                    "has_pending_exam": True,
+                    "exam_id": existing["exam_id"],
+                    "target_role": target_role,
+                    "config": config
+                }
+        
+        return {
+            "eligible": True,
+            "has_pending_exam": False,
+            "current_role": current_role,
+            "target_role": target_role,
+            "config": config,
+            "message": f"Ready to take advancement exam for {target_role}!"
+        }
+        
+    except Exception as e:
+        logger.error(f"Check advancement eligibility error: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/role-advancement/generate-exam")
+async def generate_advancement_exam(user_email: str = Form(...)):
+    """Generate a proctored advancement exam based on all courses from current level."""
+    try:
+        # Check eligibility first
+        eligibility = await check_advancement_eligibility(user_email)
+        if not eligibility.get("eligible"):
+            return {"status": "error", "message": eligibility.get("reason", "Not eligible")}
+        
+        if eligibility.get("has_pending_exam"):
+            return {"status": "exists", "exam": role_advancement_exams[user_email]}
+        
+        user_data = users_store.get(user_email, {"role": "Waffler"})
+        current_role = user_data.get("role", "Waffler")
+        config = level_advancement_config.get(current_role)
+        target_role = config["target"]
+        
+        # Get all courses for current level
+        role_rules = access_control_store.get(current_role, {})
+        course_ids = role_rules.get("accessible_courses", [])
+        
+        # Gather all transcripts/content from these courses
+        all_content = []
+        for course_id in course_ids:
+            for content in content_store:
+                if content.get("id") == course_id:
+                    transcript = content.get("transcript", "")
+                    title = content.get("title", "")
+                    all_content.append(f"Topic: {title}\n{transcript}")
+                    break
+        
+        combined_content = "\n\n---\n\n".join(all_content)[:8000]  # Limit for API
+        
+        num_questions = config["exam_questions"]
+        
+        # Generate comprehensive exam using AI
+        prompt = f"""Generate exactly {num_questions} challenging multiple-choice questions for a role advancement exam.
+
+This exam tests mastery of ALL the following training content:
+
+{combined_content}
+
+IMPORTANT: Return ONLY a valid JSON array with this exact structure:
+[
+    {{
+        "question": "Challenging question that tests understanding?",
+        "options": ["Option A", "Option B", "Option C", "Option D"],
+        "correctIndex": 0
+    }}
+]
+
+Requirements:
+- Questions should test deep understanding, not just recall
+- Mix question difficulty (some easy, mostly medium, some hard)
+- Cover different topics from the training content
+- Each question should have exactly 4 plausible options
+- correctIndex is 0-3 indicating the correct option
+- Generate exactly {num_questions} questions
+- Return ONLY the JSON array"""
+
+        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "You are an expert assessment creator for employee advancement exams. Create challenging but fair questions."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=6000
+        )
+        
+        response_text = response.choices[0].message.content.strip()
+        
+        # Extract JSON
+        import re
+        json_match = re.search(r'\[[\s\S]*\]', response_text)
+        if json_match:
+            response_text = json_match.group()
+        
+        questions = json.loads(response_text)
+        
+        # Validate questions
+        for q in questions:
+            if "correctIndex" not in q:
+                q["correctIndex"] = 0
+            q["correctIndex"] = max(0, min(3, int(q["correctIndex"])))
+        
+        # Create exam entry
+        exam_id = str(uuid.uuid4())
+        exam = {
+            "exam_id": exam_id,
+            "user_email": user_email,
+            "current_role": current_role,
+            "target_role": target_role,
+            "questions": questions[:num_questions],
+            "time_limit_minutes": config["exam_time_minutes"],
+            "pass_percent": config["pass_percent"],
+            "proctored": config["proctored"],
+            "max_violations": config["max_violations"],
+            "status": "pending",
+            "created_at": datetime.now().isoformat(),
+            "expires_at": (datetime.now() + timedelta(days=7)).isoformat()
+        }
+        
+        role_advancement_exams[user_email] = exam
+        
+        logger.info(f"Advancement exam generated for {user_email}: {current_role} -> {target_role}")
+        
+        return {
+            "status": "success",
+            "exam": {
+                "exam_id": exam_id,
+                "current_role": current_role,
+                "target_role": target_role,
+                "total_questions": len(questions[:num_questions]),
+                "time_limit_minutes": config["exam_time_minutes"],
+                "pass_percent": config["pass_percent"],
+                "proctored": config["proctored"]
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Generate advancement exam error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/role-advancement/exam/{user_email}")
+async def get_advancement_exam(user_email: str):
+    """Get the pending advancement exam for a user."""
+    try:
+        if user_email not in role_advancement_exams:
+            return {"status": "not_found", "message": "No pending exam"}
+        
+        exam = role_advancement_exams[user_email]
+        
+        if exam.get("status") != "pending":
+            return {"status": "completed", "message": "Exam already taken"}
+        
+        # Don't include correctIndex in response (prevent cheating)
+        safe_questions = []
+        for q in exam["questions"]:
+            safe_questions.append({
+                "question": q["question"],
+                "options": q["options"]
+            })
+        
+        return {
+            "status": "success",
+            "exam": {
+                "exam_id": exam["exam_id"],
+                "current_role": exam["current_role"],
+                "target_role": exam["target_role"],
+                "questions": safe_questions,
+                "total_questions": len(safe_questions),
+                "time_limit_minutes": exam["time_limit_minutes"],
+                "pass_percent": exam["pass_percent"],
+                "proctored": exam["proctored"],
+                "max_violations": exam["max_violations"]
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Get advancement exam error: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/role-advancement/submit-exam")
+async def submit_advancement_exam(
+    user_email: str = Form(...),
+    exam_id: str = Form(...),
+    answers: str = Form(...),  # JSON array
+    time_taken_seconds: int = Form(...),
+    violations: int = Form(0),
+    breach_log: str = Form("[]"),
+    critical_breaches: int = Form(0),
+    warning_breaches: int = Form(0)
+):
+    """Submit the advancement exam with proctoring data."""
+    try:
+        if user_email not in role_advancement_exams:
+            return {"status": "error", "message": "No exam found"}
+        
+        exam = role_advancement_exams[user_email]
+        
+        if exam.get("status") != "pending" or exam["exam_id"] != exam_id:
+            return {"status": "error", "message": "Invalid or already completed exam"}
+        
+        answers_list = json.loads(answers)
+        breach_log_list = json.loads(breach_log)
+        
+        # Calculate score
+        questions = exam["questions"]
+        correct = 0
+        for i, ans in enumerate(answers_list):
+            if i < len(questions) and ans == questions[i].get("correctIndex"):
+                correct += 1
+        
+        total = len(questions)
+        score_percent = (correct / total * 100) if total > 0 else 0
+        
+        # Check violations
+        max_violations = exam.get("max_violations", 3)
+        violation_fail = critical_breaches > 0 or violations > max_violations
+        
+        # Determine pass/fail
+        passed = score_percent >= exam["pass_percent"] and not violation_fail
+        
+        # Determine integrity status
+        integrity_status = "clean"
+        if critical_breaches > 0:
+            integrity_status = "flagged"
+        elif warning_breaches > 2:
+            integrity_status = "suspicious"
+        elif violations > 0:
+            integrity_status = "minor_issues"
+        
+        # Record submission
+        submission = {
+            "id": str(uuid.uuid4()),
+            "user_email": user_email,
+            "exam_id": exam_id,
+            "from_role": exam["current_role"],
+            "to_role": exam["target_role"],
+            "answers": answers_list,
+            "correct": correct,
+            "total": total,
+            "score_percent": round(score_percent, 1),
+            "passed": passed,
+            "time_taken_seconds": time_taken_seconds,
+            "violations": violations,
+            "breach_log": breach_log_list,
+            "critical_breaches": critical_breaches,
+            "warning_breaches": warning_breaches,
+            "integrity_status": integrity_status,
+            "violation_fail": violation_fail,
+            "submitted_at": datetime.now().isoformat()
+        }
+        role_advancement_submissions.append(submission)
+        
+        # Update exam status
+        exam["status"] = "completed"
+        exam["result"] = submission
+        
+        # Apply promotion if passed
+        promotion_applied = False
+        if passed:
+            user_data = users_store.get(user_email)
+            if user_data:
+                old_role = user_data.get("role")
+                user_data["role"] = exam["target_role"]
+                users_store[user_email] = user_data
+                promotion_applied = True
+                logger.info(f"ROLE ADVANCEMENT: {user_email} promoted from {old_role} to {exam['target_role']}")
+                
+                # Broadcast notification
+                await manager.broadcast({
+                    "type": "ROLE_ADVANCEMENT",
+                    "data": {
+                        "user_email": user_email,
+                        "from_role": old_role,
+                        "to_role": exam["target_role"],
+                        "score": score_percent
+                    }
+                })
+        
+        logger.info(f"Advancement exam submitted: {user_email} - {correct}/{total} ({score_percent}%) - Passed: {passed}")
+        
+        return {
+            "status": "success",
+            "result": {
+                "score": correct,
+                "total": total,
+                "score_percent": round(score_percent, 1),
+                "passed": passed,
+                "violation_fail": violation_fail,
+                "integrity_status": integrity_status,
+                "promotion_applied": promotion_applied,
+                "new_role": exam["target_role"] if passed else None,
+                "message": f"🎉 Congratulations! You are now a {exam['target_role']}!" if passed else "Keep studying and try again!"
+            },
+            "submission_id": submission["id"]
+        }
+        
+    except Exception as e:
+        logger.error(f"Submit advancement exam error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/role-advancement/submissions/{user_email}")
+async def get_user_advancement_submissions(user_email: str):
+    """Get all advancement exam submissions for a user."""
+    return [s for s in role_advancement_submissions if s["user_email"] == user_email]
+
+
+@app.get("/role-advancement/admin/all-submissions")
+async def get_all_advancement_submissions():
+    """Admin: Get all advancement exam submissions with detailed breach logs."""
+    return role_advancement_submissions
+
+
+@app.get("/learning-path/requirements")
+async def get_node_requirements():
+    """Get all node completion requirements."""
+    return node_completion_requirements
+
+
+@app.post("/learning-path/requirements/{node_id}")
+async def set_node_requirements(
+    node_id: str,
+    video_watch_percent: int = Form(90),
+    quiz_pass_percent: int = Form(70),
+    mid_quiz_required: bool = Form(True),
+    mid_quiz_pass_percent: int = Form(60)
+):
+    """Set completion requirements for a specific node."""
+    node_completion_requirements[node_id] = {
+        "video_watch_percent": video_watch_percent,
+        "quiz_pass_percent": quiz_pass_percent,
+        "mid_quiz_required": mid_quiz_required,
+        "mid_quiz_pass_percent": mid_quiz_pass_percent
+    }
+    return {"status": "success", "requirements": node_completion_requirements[node_id]}
+
+
+# Import timedelta for exam expiry
+from datetime import timedelta
 
 
 # ==========================================

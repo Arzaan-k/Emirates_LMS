@@ -216,6 +216,7 @@ const LevelDetailModal = ({ visible, level, onClose, onStart }) => {
 };
 
 import LessonView from './LessonView';
+import RoleAdvancementExam from './RoleAdvancementExam';
 
 import ConfettiSystem from './ConfettiSystem';
 
@@ -417,6 +418,11 @@ export default function CoursePath({ userEmail = "user" }) {
     // Level Up Celebration State
     const [levelUpInfo, setLevelUpInfo] = useState(null); // { previousLevel, newLevel }
 
+    // Role Advancement Exam State
+    const [showAdvancementExam, setShowAdvancementExam] = useState(false);
+    const [isEligibleForAdvancement, setIsEligibleForAdvancement] = useState(false);
+    const [advancementTarget, setAdvancementTarget] = useState(null);
+
 
     // Animation State
     const carX = useSharedValue(CENTER_X);
@@ -451,7 +457,39 @@ export default function CoursePath({ userEmail = "user" }) {
 
     useEffect(() => {
         loadCoursePath();
+        checkAdvancementEligibility();
     }, []);
+
+    // Check if user is eligible for role advancement exam
+    const checkAdvancementEligibility = async () => {
+        try {
+            const response = await fetch(`${API_URL}/role-advancement/eligibility/${userEmail}`);
+            const data = await response.json();
+            setIsEligibleForAdvancement(data.eligible === true);
+            if (data.eligible) {
+                setAdvancementTarget(data.target_role);
+            }
+        } catch (err) {
+            console.log("Error checking advancement eligibility:", err);
+        }
+    };
+
+    // Handle advancement exam completion
+    const handleAdvancementComplete = (result) => {
+        if (result?.passed) {
+            // Show level up celebration
+            setLevelUpInfo({
+                previousLevel: userProgress?.current_level || 'Waffler',
+                newLevel: result.new_role
+            });
+            setShowConfetti(true);
+            setTimeout(() => setShowConfetti(false), 5000);
+            
+            // Reload course path to reflect new level
+            loadCoursePath();
+            checkAdvancementEligibility();
+        }
+    };
 
     const loadCoursePath = async () => {
         try {
@@ -789,6 +827,9 @@ export default function CoursePath({ userEmail = "user" }) {
 
         // Refresh progress to trigger car movement and update path
         await loadCoursePath();
+        
+        // Re-check advancement eligibility after course completion
+        checkAdvancementEligibility();
     };
 
     const closeLevelUpModal = () => {
@@ -898,6 +939,39 @@ export default function CoursePath({ userEmail = "user" }) {
                 levelColor={LEVEL_COLORS[levelUpInfo?.newLevel] || '#F59E0B'}
                 levelIcon={LEVEL_ICONS[levelUpInfo?.newLevel] || 'medal'}
                 onClose={closeLevelUpModal}
+            />
+
+            {/* ROLE ADVANCEMENT BUTTON (Floating) */}
+            {isEligibleForAdvancement && (
+                <TouchableOpacity 
+                    style={styles.advancementBtn}
+                    onPress={() => setShowAdvancementExam(true)}
+                >
+                    <LinearGradient 
+                        colors={['#10B981', '#059669']} 
+                        style={styles.advancementBtnGradient}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                    >
+                        <MaterialCommunityIcons name="arrow-up-bold-circle" size={22} color="#FFF" />
+                        <View style={{ marginLeft: 10 }}>
+                            <Text style={styles.advancementBtnLabel}>Ready for</Text>
+                            <Text style={styles.advancementBtnText}>{advancementTarget}</Text>
+                        </View>
+                        <MaterialCommunityIcons name="chevron-right" size={24} color="#FFF" style={{ marginLeft: 'auto' }} />
+                    </LinearGradient>
+                </TouchableOpacity>
+            )}
+
+            {/* ROLE ADVANCEMENT EXAM MODAL */}
+            <RoleAdvancementExam
+                visible={showAdvancementExam}
+                userEmail={userEmail}
+                onComplete={handleAdvancementComplete}
+                onClose={() => {
+                    setShowAdvancementExam(false);
+                    checkAdvancementEligibility(); // Re-check in case exam was taken
+                }}
             />
         </>
     );
@@ -1176,5 +1250,38 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_700Bold',
         color: '#FFF',
         marginHorizontal: 8,
+    },
+
+    // ROLE ADVANCEMENT BUTTON
+    advancementBtn: {
+        position: 'absolute',
+        bottom: 30,
+        left: 20,
+        right: 20,
+        borderRadius: 16,
+        overflow: 'hidden',
+        shadowColor: '#10B981',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.4,
+        shadowRadius: 10,
+        elevation: 8,
+    },
+    advancementBtnGradient: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 14,
+        paddingHorizontal: 18,
+    },
+    advancementBtnLabel: {
+        fontSize: 10,
+        fontFamily: 'Poppins_500Medium',
+        color: 'rgba(255,255,255,0.8)',
+        textTransform: 'uppercase',
+        letterSpacing: 1,
+    },
+    advancementBtnText: {
+        fontSize: 15,
+        fontFamily: 'Poppins_700Bold',
+        color: '#FFF',
     },
 });
