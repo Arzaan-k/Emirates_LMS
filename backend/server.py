@@ -1,4 +1,8 @@
 import os
+import sys
+# Add custom library path for PyTorch and AI dependencies
+sys.path.insert(0, r"C:\torch_libs")
+
 import shutil
 import asyncio
 import json
@@ -13,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from groq import Groq
 
+# AI/ML imports - loaded from C:\torch_libs
 from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
@@ -45,7 +50,7 @@ def add_course_to_rag(course_id, transcript):
 # --- CONFIGURATION ---
 PORT = 8000
 HOST = "0.0.0.0"
-BASE_URL = "http://192.168.1.36:8000"  # Local network IP for physical device
+BASE_URL = "http://192.168.1.144:8000"  # Local network IP for physical device
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
@@ -56,7 +61,9 @@ ELEVENLABS_API_KEY = "sk_6ecd572e870639a9cb94b52be1b37f7d093d2857734c5a5a"
 VOICE_ID = "Y6nOpHQlW4lnf9GRRc8f" # Best emotive Hindi voice
 
 # --- GROQ CONFIG ---
-os.environ["GROQ_API_KEY"] = "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"
+# Check if environment variable is already set (e.g. from .env or system), otherwise use this default
+if not os.environ.get("GROQ_API_KEY"):
+    os.environ["GROQ_API_KEY"] = "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"
 
 def generate_elevenlabs_audio(text):
     """Generates audio from text using ElevenLabs API and returns Base64 string."""
@@ -95,7 +102,6 @@ def generate_elevenlabs_audio(text):
 # --- LOAD AI MODELS ---
 import whisper
 logger.info("Loading OpenAI Whisper Model (Small - fast with good accuracy)...")
-# Small model is 2-3x faster than medium while still having good multilingual support
 whisper_model = whisper.load_model("small")
 logger.info("OpenAI Whisper Model Loaded (Small - optimized for speed).")
 
@@ -1673,21 +1679,30 @@ async def process_video_content(file_path: str, filename: str):
         else:
             clip.close()
             
-        # 2. TRANSCRIBE (OpenAI Whisper)
+        # 2. TRANSCRIBE (OpenAI Whisper) - with fallback if model not available
         logger.info("Starting AI Processing...")
         # Use simple path construction to avoid path issues
         audio_path = f"{os.path.dirname(file_path)}/{filename}_audio.mp3"
         print(f"--- [DEBUG] Extracting audio to {audio_path}")
         video = VideoFileClip(file_path)
         
-        if video.audio:
+        # Get event loop for async operations (needed for quiz generation)
+        loop = asyncio.get_event_loop()
+        
+        # Check if Whisper model is available
+        if whisper_model is None:
+            logger.warning("Whisper model not loaded. Skipping transcription (AI features disabled).")
+            print("--- [DEBUG] Whisper model is None - using placeholder transcript")
+            transcript_text = f"Training video content for: {filename}. AI transcription unavailable - please review video manually."
+            video.close()
+            # Continue to quiz generation with fallback
+        elif video.audio:
             video.audio.write_audiofile(audio_path, logger=None)
             video.close()
             
             logger.info("Transcribing with OpenAI Whisper...")
             print("--- [DEBUG] Running Whisper...")
             # Run in thread to avoid blocking event loop
-            loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(None, whisper_model.transcribe, audio_path)
             transcript_text = result["text"]
             logger.info(f"Transcript Generated: {transcript_text[:50]}...")
@@ -1707,7 +1722,7 @@ async def process_video_content(file_path: str, filename: str):
         # 3. GENERATE QUIZ (Groq)
         print("--- [DEBUG] Generating Quiz with Groq...")
         from groq import Groq
-        groq_client = Groq(api_key="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") 
+        groq_client = Groq(api_key=os.getenv("GROQ_API_KEY")) 
         
         prompt = f"""
         Based on this training video transcript, generate 3 multiple-choice quiz questions.
@@ -2400,7 +2415,7 @@ async def generate_quiz_from_content(
         # 2. GENERATE QUIZ WITH GROQ
         logger.info("Generating quiz with Groq...")
         from groq import Groq
-        groq_client = Groq(api_key="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")
+        groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
         
         prompt = f"""Based on the following content, generate exactly {num_questions} multiple choice quiz questions.
 Difficulty level: {difficulty}
@@ -2667,7 +2682,7 @@ async def analyze_hygiene(
         from groq import Groq
         print("sefrg")
         # Fixed Key (Same as before)
-        groq_client = Groq(api_key="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") 
+        groq_client = Groq(api_key=os.environ["GROQ_API_KEY"]) 
         
         prompt = f"""
         Analyze this image of a restaurant {section}. 
@@ -2801,7 +2816,7 @@ class GenerateQuizRequest(BaseModel):
 async def generate_quiz_ondemand(request: GenerateQuizRequest):
     logger.info("Generating Quiz on-demand...")
     from groq import Groq
-    groq_client = Groq(api_key="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") 
+    groq_client = Groq(api_key=os.environ["GROQ_API_KEY"]) 
     
     prompt = f"""
     Based on this training video transcript, generate 3 multiple-choice quiz questions.
@@ -2962,7 +2977,7 @@ async def process_roleplay_logic(user_text: str, history: List[dict]):
     
     # 1. TEXT GENERATION (GROQ)
     try:
-        groq_client = Groq(api_key="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")
+        groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
         
         system_prompt = """
         You are an angry Indian customer at 'The Belgian Waffle Co.'.
@@ -3064,7 +3079,7 @@ async def voice_query(file: UploadFile = File(...)):
              return {"user_text": "", "ai_response": "I couldn't hear you. Please try again."}
 
         from groq import Groq
-        groq_client = Groq(api_key="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")
+        groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
         
         system_prompt = """
         You are the 'Belgian Waffle Co. AI Assistant'. 
@@ -4121,7 +4136,7 @@ Answer:"""
         
         # Call Groq API
         try:
-            client = Groq(api_key="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")
+            client = Groq(api_key=os.environ["GROQ_API_KEY"])
             
             completion = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",

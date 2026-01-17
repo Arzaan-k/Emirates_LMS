@@ -44,3 +44,7 @@ coverage.xml
 # OS
 Thumbs.db
 
+
+# Uploads
+uploads/
+backend/uploads/
