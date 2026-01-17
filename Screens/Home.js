@@ -47,6 +47,7 @@ import QuizTakingModal from "../Components/QuizTakingModal";
 import { useNavigation } from "@react-navigation/native";
 import { useLanguage } from "../context/language.context";
 import API_URL from "../config";
+import SupportTicketModal from "../Components/SupportTicketModal"; // [NEW] LMS Support
 
 const { width, height } = Dimensions.get('window');
 
@@ -925,6 +926,7 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   // [NEW] MEETINGS STATE
   const [upcomingMeetings, setUpcomingMeetings] = useState([]);
   const [crmTasks, setCrmTasks] = useState([]);
+  const [supportModalVisible, setSupportModalVisible] = useState(false);
 
   const handleAcknowledge = async (id) => {
     try {
@@ -1352,6 +1354,38 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
         notification={selectedNotification}
         onClose={() => setSelectedNotification(null)}
       />
+      
+      {/* LMS SUPPORT MODAL */}
+      <SupportTicketModal
+        visible={supportModalVisible}
+        onClose={() => setSupportModalVisible(false)}
+        userEmail="user@example.com"
+        userName="User"
+        userRole="user"
+      />
+
+      {/* FLOATING SUPPORT BUTTON */}
+      <TouchableOpacity
+        style={{
+          position: 'absolute',
+          bottom: 100,
+          right: 20,
+          width: 56,
+          height: 56,
+          borderRadius: 28,
+          backgroundColor: '#DC2626',
+          justifyContent: 'center',
+          alignItems: 'center',
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.3,
+          shadowRadius: 8,
+          elevation: 8,
+        }}
+        onPress={() => setSupportModalVisible(true)}
+      >
+        <MaterialCommunityIcons name="headset" size={26} color="#FFF" />
+      </TouchableOpacity>
     </View>
   )
 }

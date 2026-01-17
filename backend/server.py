@@ -10,6 +10,7 @@ import logging
 from typing import List, Optional
 import uuid
 from datetime import datetime
+from urllib.parse import unquote
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -382,6 +383,21 @@ course_buckets: List[dict] = [
 # PROCTORED ASSESSMENTS STORE
 proctored_assessments: List[dict] = []  # {id, title, description, questions, time_limit_minutes, passing_score, created_at, created_by, is_active}
 assessment_submissions: List[dict] = []  # {id, assessment_id, user_email, user_name, answers, score, passed, time_taken_seconds, submitted_at, violations}
+
+# ==========================================
+# LMS SUPPORT TICKET SYSTEM
+# ==========================================
+# Support tickets for users/admins to contact LMS team
+support_tickets: List[dict] = []  # {id, user_email, user_name, user_role, subject, message, category, priority, status, created_at, responses, resolved_at}
+
+SUPPORT_CATEGORIES = [
+    {"id": "bug", "name": "Bug Report", "icon": "bug", "color": "#EF4444"},
+    {"id": "feature", "name": "Feature Request", "icon": "lightbulb-on", "color": "#F59E0B"},
+    {"id": "help", "name": "Help & Support", "icon": "help-circle", "color": "#3B82F6"},
+    {"id": "complaint", "name": "Complaint", "icon": "alert-circle", "color": "#DC2626"},
+    {"id": "feedback", "name": "General Feedback", "icon": "message-text", "color": "#10B981"},
+]
+
 
 # ==========================================
 # AI COURSE RECOMMENDATION SYSTEM STORES
@@ -6925,6 +6941,902 @@ async def generate_ai_executive_summary():
             "summary": "Executive summary generation unavailable. Please try again.",
             "generated_at": datetime.now().isoformat()
         }
+# ==========================================
+# LMS SUPPORT TICKET ENDPOINTS
+# ==========================================
+
+@app.get("/support/categories")
+async def get_support_categories():
+    """Get available support ticket categories"""
+    return {"categories": SUPPORT_CATEGORIES}
+
+
+@app.post("/support/create-ticket")
+async def create_support_ticket(
+    user_email: str = Form(...),
+    user_name: str = Form("User"),
+    user_role: str = Form("user"),  # user, manager, superadmin
+    subject: str = Form(...),
+    message: str = Form(...),
+    category: str = Form("help"),  # bug, feature, help, complaint, feedback
+    priority: str = Form("medium")  # low, medium, high, critical
+):
+    """Create a new support ticket to LMS team"""
+    ticket_id = str(uuid.uuid4())[:8]
+    
+    ticket = {
+        "id": ticket_id,
+        "user_email": user_email,
+        "user_name": user_name,
+        "user_role": user_role,
+        "subject": subject,
+        "message": message,
+        "category": category,
+        "priority": priority,
+        "status": "open",  # open, in_progress, resolved, closed
+        "created_at": datetime.now().isoformat(),
+        "responses": [],  # List of {responder, message, timestamp}
+        "resolved_at": None
+    }
+    
+    support_tickets.append(ticket)
+    logger.info(f"Support ticket created: {ticket_id} by {user_email} - {subject}")
+    
+    return {
+        "status": "success",
+        "message": "Ticket submitted successfully! Our team will respond soon.",
+        "ticket": ticket
+    }
+
+
+@app.get("/support/my-tickets/{user_email}")
+async def get_user_support_tickets(user_email: str):
+    """Get all support tickets for a specific user"""
+    user_tickets = [t for t in support_tickets if t["user_email"] == user_email]
+    # Sort by created_at descending
+    user_tickets.sort(key=lambda x: x["created_at"], reverse=True)
+    
+    return {
+        "tickets": user_tickets,
+        "count": len(user_tickets),
+        "open_count": len([t for t in user_tickets if t["status"] == "open"]),
+        "resolved_count": len([t for t in user_tickets if t["status"] in ["resolved", "closed"]])
+    }
+
+
+@app.get("/support/all-tickets")
+async def get_all_support_tickets():
+    """Get all support tickets (for LMS team/super admin)"""
+    tickets_sorted = sorted(support_tickets, key=lambda x: x["created_at"], reverse=True)
+    
+    return {
+        "tickets": tickets_sorted,
+        "stats": {
+            "total": len(tickets_sorted),
+            "open": len([t for t in tickets_sorted if t["status"] == "open"]),
+            "in_progress": len([t for t in tickets_sorted if t["status"] == "in_progress"]),
+            "resolved": len([t for t in tickets_sorted if t["status"] == "resolved"]),
+            "by_category": {
+                cat["id"]: len([t for t in tickets_sorted if t["category"] == cat["id"]])
+                for cat in SUPPORT_CATEGORIES
+            },
+            "by_priority": {
+                p: len([t for t in tickets_sorted if t["priority"] == p])
+                for p in ["low", "medium", "high", "critical"]
+            }
+        }
+    }
+
+
+@app.post("/support/respond-ticket")
+async def respond_to_support_ticket(
+    ticket_id: str = Form(...),
+    responder_email: str = Form(...),
+    responder_name: str = Form("LMS Team"),
+    response_message: str = Form(...),
+    new_status: str = Form(None)  # Optional status update
+):
+    """Add a response to a support ticket (LMS team or admin)"""
+    ticket = next((t for t in support_tickets if t["id"] == ticket_id), None)
+    
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    
+    response = {
+        "responder_email": responder_email,
+        "responder_name": responder_name,
+        "message": response_message,
+        "timestamp": datetime.now().isoformat()
+    }
+    
+    ticket["responses"].append(response)
+    
+    if new_status:
+        ticket["status"] = new_status
+        if new_status in ["resolved", "closed"]:
+            ticket["resolved_at"] = datetime.now().isoformat()
+    
+    logger.info(f"Support ticket {ticket_id} responded by {responder_email}")
+    
+    return {
+        "status": "success",
+        "message": "Response added successfully",
+        "ticket": ticket
+    }
+
+
+@app.post("/support/update-status")
+async def update_ticket_status(
+    ticket_id: str = Form(...),
+    new_status: str = Form(...)  # open, in_progress, resolved, closed
+):
+    """Update support ticket status"""
+    ticket = next((t for t in support_tickets if t["id"] == ticket_id), None)
+    
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    
+    ticket["status"] = new_status
+    if new_status in ["resolved", "closed"]:
+        ticket["resolved_at"] = datetime.now().isoformat()
+    
+    return {"status": "success", "ticket": ticket}
+
+
+# ==========================================
+# PHASE 1: LEADERBOARD & GAMIFICATION ENDPOINTS
+# ==========================================
+
+@app.get("/leaderboard/global")
+async def get_global_leaderboard(limit: int = 10):
+    """Get company-wide XP leaderboard"""
+    sorted_users = sorted(user_xp_scores.items(), key=lambda x: x[1], reverse=True)[:limit]
+    
+    leaderboard = []
+    for rank, (email, xp) in enumerate(sorted_users, 1):
+        user = next((u for u in users_store.values() if u["email"] == email), None)
+        user_badge_list = [b for b in user_badges if b["user_email"] == email]
+        
+        leaderboard.append({
+            "rank": rank,
+            "email": email,
+            "name": user["name"] if user else email.split("@")[0].title(),
+            "xp": xp,
+            "badges_count": len(user_badge_list),
+            "avatar": user.get("avatar") if user else None,
+            "store": user.get("store") if user else "Unknown"
+        })
+    
+    return {
+        "leaderboard": leaderboard,
+        "total_users": len(user_xp_scores),
+        "updated_at": datetime.now().isoformat()
+    }
+
+
+@app.get("/leaderboard/store/{store_id}")
+async def get_store_leaderboard(store_id: str, limit: int = 10):
+    """Get store-specific leaderboard"""
+    # Filter users by store
+    store_users = {email: xp for email, xp in user_xp_scores.items() 
+                   if any(u["email"] == email and u.get("store") == store_id for u in users_store.values())}
+    
+    # If no store filtering, return all (demo mode)
+    if not store_users:
+        store_users = user_xp_scores
+    
+    sorted_users = sorted(store_users.items(), key=lambda x: x[1], reverse=True)[:limit]
+    
+    leaderboard = []
+    for rank, (email, xp) in enumerate(sorted_users, 1):
+        leaderboard.append({
+            "rank": rank,
+            "email": email,
+            "name": email.split("@")[0].title(),
+            "xp": xp
+        })
+    
+    return {"store_id": store_id, "leaderboard": leaderboard}
+
+
+@app.get("/badges")
+async def get_all_badges():
+    """Get all badge definitions"""
+    return {"badges": badges}
+
+
+@app.get("/user/{email}/badges")
+async def get_user_badges(email: str):
+    """Get badges earned by a specific user"""
+    earned = [ub for ub in user_badges if ub["user_email"] == email]
+    
+    # Enrich with badge details
+    earned_with_details = []
+    for ub in earned:
+        badge = next((b for b in badges if b["id"] == ub["badge_id"]), None)
+        if badge:
+            earned_with_details.append({
+                **badge,
+                "earned_at": ub["earned_at"]
+            })
+    
+    return {
+        "email": email,
+        "badges": earned_with_details,
+        "total_earned": len(earned),
+        "total_available": len(badges)
+    }
+
+
+@app.post("/user/{email}/award-badge")
+async def award_badge_to_user(email: str, badge_id: str = Form(...)):
+    """Award a badge to a user"""
+    # Check if badge exists
+    badge = next((b for b in badges if b["id"] == badge_id), None)
+    if not badge:
+        raise HTTPException(status_code=404, detail="Badge not found")
+    
+    # Check if already earned
+    already_earned = any(ub["user_email"] == email and ub["badge_id"] == badge_id for ub in user_badges)
+    if already_earned:
+        return {"status": "already_earned", "message": "User already has this badge"}
+    
+    # Award badge
+    user_badges.append({
+        "user_email": email,
+        "badge_id": badge_id,
+        "earned_at": datetime.now().isoformat()
+    })
+    
+    # Add XP reward
+    if email in user_xp_scores:
+        user_xp_scores[email] += badge["xp_reward"]
+    else:
+        user_xp_scores[email] = badge["xp_reward"]
+    
+    return {
+        "status": "success",
+        "message": f"Awarded '{badge['name']}' badge with {badge['xp_reward']} XP",
+        "new_xp": user_xp_scores.get(email, 0)
+    }
+
+
+@app.get("/challenges")
+async def get_active_challenges():
+    """Get all active challenges"""
+    active = [c for c in challenges if c.get("is_active", True)]
+    return {"challenges": active}
+
+
+@app.get("/challenges/{user_email}/progress")
+async def get_user_challenge_progress(user_email: str):
+    """Get challenge progress for a user"""
+    user_progress = [cp for cp in challenge_progress if cp["user_email"] == user_email]
+    
+    enriched = []
+    for cp in user_progress:
+        challenge = next((c for c in challenges if c["id"] == cp["challenge_id"]), None)
+        if challenge:
+            enriched.append({
+                **cp,
+                "challenge": challenge,
+                "progress_percent": (cp["progress"] / challenge["target"]) * 100
+            })
+    
+    return {"email": user_email, "progress": enriched}
+
+
+# ==========================================
+# PHASE 1: COMPETENCY MATRIX ENDPOINTS
+# ==========================================
+
+@app.get("/competency/skills")
+async def get_all_skills():
+    """Get all skill definitions"""
+    return {"skills": skills}
+
+
+@app.get("/competency/matrix")
+async def get_competency_matrix():
+    """Get full competency matrix for all users"""
+    matrix = []
+    
+    for email, skill_levels in user_skills.items():
+        user = next((u for u in users_store.values() if u["email"] == email), None)
+        
+        # Calculate overall competency score
+        total_score = sum(skill_levels.values())
+        max_score = len(skill_levels) * 5
+        overall = round((total_score / max_score) * 100) if max_score > 0 else 0
+        
+        # Find gaps (skills below 3)
+        gaps = [s for s, level in skill_levels.items() if level < 3]
+        
+        matrix.append({
+            "email": email,
+            "name": user["name"] if user else email.split("@")[0].title(),
+            "role": user.get("role", "Crew Member") if user else "Unknown",
+            "store": user.get("store") if user else "Unknown",
+            "skills": skill_levels,
+            "overall_score": overall,
+            "gaps_count": len(gaps),
+            "gaps": gaps
+        })
+    
+    # Sort by overall score descending
+    matrix.sort(key=lambda x: x["overall_score"], reverse=True)
+    
+    return {
+        "matrix": matrix,
+        "skills": skills,
+        "total_users": len(matrix),
+        "avg_score": round(sum(m["overall_score"] for m in matrix) / len(matrix)) if matrix else 0
+    }
+
+
+@app.get("/competency/gaps")
+async def get_skill_gaps_analysis():
+    """Get company-wide skill gap analysis"""
+    skill_averages = {}
+    skill_below_threshold = {}
+    
+    for skill in skills:
+        skill_id = skill["id"]
+        levels = [user_skills.get(email, {}).get(skill_id, 0) for email in user_skills]
+        
+        avg_level = sum(levels) / len(levels) if levels else 0
+        below_3_count = len([l for l in levels if l < 3])
+        
+        skill_averages[skill_id] = round(avg_level, 1)
+        skill_below_threshold[skill_id] = below_3_count
+    
+    # Find top gaps (lowest average skills)
+    gaps_sorted = sorted(skill_averages.items(), key=lambda x: x[1])[:5]
+    
+    top_gaps = []
+    for skill_id, avg in gaps_sorted:
+        skill = next((s for s in skills if s["id"] == skill_id), None)
+        if skill:
+            top_gaps.append({
+                "skill": skill,
+                "average_level": avg,
+                "employees_below_3": skill_below_threshold.get(skill_id, 0)
+            })
+    
+    return {
+        "top_gaps": top_gaps,
+        "skill_averages": skill_averages,
+        "total_employees": len(user_skills)
+    }
+
+
+@app.get("/competency/user/{email}")
+async def get_user_competency(email: str):
+    """Get competency profile for a specific user"""
+    if email not in user_skills:
+        raise HTTPException(status_code=404, detail="User not found in competency system")
+    
+    skill_levels = user_skills[email]
+    user = next((u for u in users if u["email"] == email), None)
+    
+    # Enrich skills with details
+    enriched_skills = []
+    for skill in skills:
+        level = skill_levels.get(skill["id"], 0)
+        enriched_skills.append({
+            **skill,
+            "level": level,
+            "status": "expert" if level >= 4 else ("proficient" if level >= 3 else "needs_training")
+        })
+    
+    # Calculate overall
+    total = sum(skill_levels.values())
+    max_score = len(skill_levels) * 5
+    
+    return {
+        "email": email,
+        "name": user["name"] if user else email,
+        "skills": enriched_skills,
+        "overall_score": round((total / max_score) * 100) if max_score > 0 else 0,
+        "strengths": [s for s in enriched_skills if s["level"] >= 4],
+        "gaps": [s for s in enriched_skills if s["level"] < 3]
+    }
+
+
+@app.put("/competency/user/{email}/skill/{skill_id}")
+async def update_user_skill(email: str, skill_id: str, level: int = Form(...)):
+    """Update a user's skill level"""
+    if level < 1 or level > 5:
+        raise HTTPException(status_code=400, detail="Level must be between 1 and 5")
+    
+    if email not in user_skills:
+        user_skills[email] = {}
+    
+    user_skills[email][skill_id] = level
+    
+    return {"status": "success", "email": email, "skill_id": skill_id, "new_level": level}
+
+
+# ==========================================
+# PHASE 1: COMPLIANCE DASHBOARD ENDPOINTS
+# ==========================================
+
+@app.get("/compliance/requirements")
+async def get_compliance_requirements():
+    """Get all compliance requirements"""
+    return {"requirements": compliance_requirements}
+
+
+@app.get("/compliance/dashboard")
+async def get_compliance_dashboard():
+    """Get compliance overview statistics"""
+    total_certs = len(user_compliance)
+    valid = len([c for c in user_compliance if c["status"] == "valid"])
+    expiring = len([c for c in user_compliance if c["status"] == "expiring_soon"])
+    expired = len([c for c in user_compliance if c["status"] == "expired"])
+    
+    # Calculate overall compliance rate
+    compliance_rate = round((valid / total_certs) * 100) if total_certs > 0 else 0
+    
+    # Store summary
+    stores = list(store_compliance_scores.values())
+    green_stores = len([s for s in stores if s["status"] == "green"])
+    yellow_stores = len([s for s in stores if s["status"] == "yellow"])
+    red_stores = len([s for s in stores if s["status"] == "red"])
+    
+    return {
+        "overview": {
+            "compliance_rate": compliance_rate,
+            "total_certifications": total_certs,
+            "valid": valid,
+            "expiring_soon": expiring,
+            "expired": expired
+        },
+        "stores": {
+            "total": len(stores),
+            "green": green_stores,
+            "yellow": yellow_stores,
+            "red": red_stores
+        },
+        "store_details": stores,
+        "updated_at": datetime.now().isoformat()
+    }
+
+
+@app.get("/compliance/store/{store_id}")
+async def get_store_compliance(store_id: str):
+    """Get compliance status for a specific store"""
+    store = store_compliance_scores.get(store_id)
+    if not store:
+        raise HTTPException(status_code=404, detail="Store not found")
+    
+    return {"store_id": store_id, **store}
+
+
+@app.get("/compliance/expiring")
+async def get_expiring_certifications(days: int = 30):
+    """Get certifications expiring within X days"""
+    from datetime import timedelta
+    
+    today = datetime.now().date()
+    cutoff = today + timedelta(days=days)
+    
+    expiring = []
+    for cert in user_compliance:
+        try:
+            expires = datetime.strptime(cert["expires_at"], "%Y-%m-%d").date()
+            if today <= expires <= cutoff:
+                req = next((r for r in compliance_requirements if r["id"] == cert["requirement_id"]), None)
+                expiring.append({
+                    **cert,
+                    "requirement": req,
+                    "days_remaining": (expires - today).days
+                })
+        except:
+            continue
+    
+    # Sort by days remaining
+    expiring.sort(key=lambda x: x.get("days_remaining", 999))
+    
+    return {
+        "within_days": days,
+        "count": len(expiring),
+        "expiring": expiring
+    }
+
+
+@app.get("/compliance/user/{email}")
+async def get_user_compliance(email: str):
+    """Get compliance status for a specific user"""
+    user_certs = [c for c in user_compliance if c["user_email"] == email]
+    
+    # Enrich with requirement details
+    enriched = []
+    for cert in user_certs:
+        req = next((r for r in compliance_requirements if r["id"] == cert["requirement_id"]), None)
+        if req:
+            enriched.append({
+                **cert,
+                "requirement": req
+            })
+    
+    # Check for missing mandatory requirements
+    user_req_ids = {c["requirement_id"] for c in user_certs}
+    mandatory = [r for r in compliance_requirements if r["is_mandatory"]]
+    missing = [r for r in mandatory if r["id"] not in user_req_ids]
+    
+    return {
+        "email": email,
+        "certifications": enriched,
+        "missing_mandatory": missing,
+        "is_fully_compliant": len(missing) == 0 and all(c["status"] == "valid" for c in user_certs)
+    }
+
+
+@app.post("/compliance/certify")
+async def certify_user(
+    user_email: str = Form(...),
+    requirement_id: str = Form(...),
+    certificate_id: str = Form(None)
+):
+    """Mark a user as certified for a requirement"""
+    req = next((r for r in compliance_requirements if r["id"] == requirement_id), None)
+    if not req:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+    
+    today = datetime.now().date()
+    expires = today + timedelta(days=req["validity_days"])
+    
+    # Remove old cert if exists
+    global user_compliance
+    user_compliance = [c for c in user_compliance if not (c["user_email"] == user_email and c["requirement_id"] == requirement_id)]
+    
+    # Add new cert
+    new_cert = {
+        "user_email": user_email,
+        "requirement_id": requirement_id,
+        "earned_at": today.isoformat(),
+        "expires_at": expires.isoformat(),
+        "status": "valid",
+        "certificate_id": certificate_id or f"{requirement_id.upper()}-{datetime.now().strftime('%Y%m%d%H%M')}"
+    }
+    user_compliance.append(new_cert)
+    
+    return {"status": "success", "certification": new_cert}
+
+
+# ==========================================
+# PHASE 2: TRAINING CAMPAIGNS SYSTEM
+# ==========================================
+
+# Campaign data store
+campaigns: List[dict] = [
+    {
+        "id": "camp1",
+        "title": "Summer Menu Launch",
+        "description": "Training campaign for new summer menu items including chocolate waffles and iced coffee specials",
+        "target_audience": {"roles": ["Crew Member", "Senior Crew"], "stores": ["all"]},
+        "courses": ["summer-menu-101", "iced-coffee-basics"],
+        "xp_reward": 200,
+        "start_date": "2024-01-20",
+        "end_date": "2024-02-15",
+        "is_active": True,
+        "created_by": "admin@example.com",
+        "created_at": "2024-01-15T10:00:00"
+    },
+    {
+        "id": "camp2",
+        "title": "Hygiene Refresh 2024",
+        "description": "Annual hygiene training refresh for all staff",
+        "target_audience": {"roles": ["all"], "stores": ["all"]},
+        "courses": ["hygiene-fundamentals", "food-safety-advanced"],
+        "xp_reward": 150,
+        "start_date": "2024-01-01",
+        "end_date": "2024-01-31",
+        "is_active": True,
+        "created_by": "admin@example.com",
+        "created_at": "2023-12-28T14:00:00"
+    }
+]
+
+# Campaign progress tracking
+campaign_progress: List[dict] = [
+    {"user_email": "user@example.com", "campaign_id": "camp1", "courses_completed": 1, "total_courses": 2, "completed": False},
+    {"user_email": "sarah@store.com", "campaign_id": "camp1", "courses_completed": 2, "total_courses": 2, "completed": True, "completed_at": "2024-01-25"},
+]
+
+
+@app.get("/campaigns")
+async def get_all_campaigns():
+    """Get all training campaigns"""
+    active = [c for c in campaigns if c.get("is_active", True)]
+    past = [c for c in campaigns if not c.get("is_active", True)]
+    
+    return {
+        "active": active,
+        "past": past,
+        "total": len(campaigns)
+    }
+
+
+@app.get("/campaigns/{campaign_id}")
+async def get_campaign_details(campaign_id: str):
+    """Get campaign details with progress"""
+    campaign = next((c for c in campaigns if c["id"] == campaign_id), None)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    
+    progress_list = [p for p in campaign_progress if p["campaign_id"] == campaign_id]
+    completed_count = len([p for p in progress_list if p.get("completed")])
+    
+    return {
+        **campaign,
+        "progress": {
+            "total_enrolled": len(progress_list),
+            "completed": completed_count,
+            "completion_rate": round((completed_count / len(progress_list)) * 100) if progress_list else 0
+        }
+    }
+
+
+@app.post("/campaigns")
+async def create_campaign(
+    title: str = Form(...),
+    description: str = Form(...),
+    target_roles: str = Form("all"),
+    target_stores: str = Form("all"),
+    start_date: str = Form(...),
+    end_date: str = Form(...),
+    xp_reward: int = Form(100)
+):
+    """Create a new training campaign"""
+    new_campaign = {
+        "id": f"camp{len(campaigns) + 1}",
+        "title": title,
+        "description": description,
+        "target_audience": {
+            "roles": target_roles.split(",") if target_roles != "all" else ["all"],
+            "stores": target_stores.split(",") if target_stores != "all" else ["all"]
+        },
+        "courses": [],
+        "xp_reward": xp_reward,
+        "start_date": start_date,
+        "end_date": end_date,
+        "is_active": True,
+        "created_by": "admin",
+        "created_at": datetime.now().isoformat()
+    }
+    campaigns.append(new_campaign)
+    
+    return {"status": "success", "campaign": new_campaign}
+
+
+# ==========================================
+# PHASE 2: AUDIT LOGS SYSTEM
+# ==========================================
+
+# Audit log data store
+audit_logs: List[dict] = [
+    {"id": 1, "timestamp": "2024-01-25T10:30:00", "admin_email": "admin@example.com", "action": "CREATE_USER", "target": "john@store.com", "details": "Created new crew member account", "ip_address": "192.168.1.1"},
+    {"id": 2, "timestamp": "2024-01-25T09:15:00", "admin_email": "admin@example.com", "action": "UPLOAD_CONTENT", "target": "Summer Menu Training", "details": "Uploaded new video course", "ip_address": "192.168.1.1"},
+    {"id": 3, "timestamp": "2024-01-24T16:45:00", "admin_email": "manager@store.com", "action": "ASSIGN_QUIZ", "target": "5 users", "details": "Assigned Hygiene Quiz to team", "ip_address": "192.168.1.2"},
+    {"id": 4, "timestamp": "2024-01-24T14:20:00", "admin_email": "admin@example.com", "action": "UPDATE_COMPLIANCE", "target": "sarah@store.com", "details": "Added FSSAI certification", "ip_address": "192.168.1.1"},
+    {"id": 5, "timestamp": "2024-01-24T11:00:00", "admin_email": "admin@example.com", "action": "CREATE_CAMPAIGN", "target": "Summer Menu Launch", "details": "Created new training campaign", "ip_address": "192.168.1.1"},
+]
+
+ACTION_TYPES = {
+    "CREATE_USER": {"icon": "account-plus", "color": "#10B981"},
+    "DELETE_USER": {"icon": "account-minus", "color": "#EF4444"},
+    "UPLOAD_CONTENT": {"icon": "cloud-upload", "color": "#3B82F6"},
+    "DELETE_CONTENT": {"icon": "delete", "color": "#EF4444"},
+    "ASSIGN_QUIZ": {"icon": "clipboard-check", "color": "#F59E0B"},
+    "UPDATE_COMPLIANCE": {"icon": "shield-check", "color": "#10B981"},
+    "CREATE_CAMPAIGN": {"icon": "bullhorn", "color": "#8B5CF6"},
+    "SEND_NOTIFICATION": {"icon": "bell", "color": "#EC4899"},
+    "UPDATE_ACCESS": {"icon": "lock", "color": "#6366F1"},
+}
+
+
+@app.get("/audit-logs")
+async def get_audit_logs(
+    admin_email: str = None,
+    action_type: str = None,
+    limit: int = 50
+):
+    """Get audit logs with optional filters"""
+    filtered = audit_logs
+    
+    if admin_email:
+        filtered = [log for log in filtered if log["admin_email"] == admin_email]
+    if action_type:
+        filtered = [log for log in filtered if log["action"] == action_type]
+    
+    # Sort by timestamp descending
+    filtered = sorted(filtered, key=lambda x: x["timestamp"], reverse=True)[:limit]
+    
+    return {
+        "logs": filtered,
+        "total": len(filtered),
+        "action_types": list(ACTION_TYPES.keys())
+    }
+
+
+@app.post("/audit-logs")
+async def add_audit_log(
+    admin_email: str = Form(...),
+    action: str = Form(...),
+    target: str = Form(...),
+    details: str = Form("")
+):
+    """Add new audit log entry"""
+    new_log = {
+        "id": len(audit_logs) + 1,
+        "timestamp": datetime.now().isoformat(),
+        "admin_email": admin_email,
+        "action": action,
+        "target": target,
+        "details": details,
+        "ip_address": "0.0.0.0"
+    }
+    audit_logs.insert(0, new_log)
+    
+    return {"status": "success", "log": new_log}
+
+
+# ==========================================
+# PHASE 2: CONTENT LIBRARY ENDPOINTS
+# ==========================================
+
+@app.get("/content/library")
+async def get_content_library(
+    bucket: str = None,
+    content_type: str = None,
+    search: str = None
+):
+    """Get all content with filters"""
+    filtered = content_store
+    
+    if bucket:
+        filtered = [c for c in filtered if c.get("bucket") == bucket]
+    if content_type:
+        # Filter by video, quiz, document, etc.
+        if content_type == "video":
+            filtered = [c for c in filtered if c.get("video_url")]
+        elif content_type == "quiz":
+            filtered = [c for c in filtered if c.get("quiz") or c.get("manual_quiz")]
+    if search:
+        search_lower = search.lower()
+        filtered = [c for c in filtered if search_lower in c.get("title", "").lower() or search_lower in c.get("description", "").lower()]
+    
+    # Add stats to each content
+    enriched = []
+    for content in filtered:
+        views = len([cc for cc in course_completions if cc.get("course_id") == content.get("id")])
+        enriched.append({
+            **content,
+            "stats": {
+                "views": views,
+                "completions": views,
+                "avg_score": 85  # Placeholder
+            }
+        })
+    
+    return {
+        "content": enriched,
+        "total": len(enriched),
+        "buckets": list({c.get("bucket") for c in content_store if c.get("bucket")})
+    }
+
+
+@app.post("/content/{content_id}/duplicate")
+async def duplicate_content(content_id: str):
+    """Duplicate a content item"""
+    original = next((c for c in content_store if c.get("id") == content_id), None)
+    if not original:
+        raise HTTPException(status_code=404, detail="Content not found")
+    
+    duplicate = {
+        **original,
+        "id": f"{content_id}_copy_{datetime.now().strftime('%Y%m%d%H%M')}",
+        "title": f"{original.get('title', 'Content')} (Copy)",
+        "timestamp": datetime.now().isoformat()
+    }
+    content_store.append(duplicate)
+    
+    return {"status": "success", "content": duplicate}
+
+
+@app.delete("/content/{content_id}")
+async def delete_content(content_id: str):
+    """Delete a content item"""
+    original_len = len(content_store)
+    content_store[:] = [c for c in content_store if c.get("id") != content_id]
+    
+    if len(content_store) == original_len:
+        raise HTTPException(status_code=404, detail="Content not found")
+    
+    # Add audit log
+    audit_logs.insert(0, {
+        "id": len(audit_logs) + 1,
+        "timestamp": datetime.now().isoformat(),
+        "admin_email": "admin",
+        "action": "DELETE_CONTENT",
+        "target": content_id,
+        "details": "Content deleted",
+        "ip_address": "0.0.0.0"
+    })
+    
+    return {"status": "success", "message": "Content deleted"}
+
+
+# ==========================================
+# PHASE 2: CERTIFICATION MANAGER ENDPOINTS
+# ==========================================
+
+@app.get("/certifications/types")
+async def get_certification_types():
+    """Get all certification/requirement types with stats"""
+    enriched = []
+    for req in compliance_requirements:
+        # Count users with this cert
+        valid_count = len([c for c in user_compliance if c["requirement_id"] == req["id"] and c["status"] == "valid"])
+        expiring_count = len([c for c in user_compliance if c["requirement_id"] == req["id"] and c["status"] == "expiring_soon"])
+        expired_count = len([c for c in user_compliance if c["requirement_id"] == req["id"] and c["status"] == "expired"])
+        
+        enriched.append({
+            **req,
+            "stats": {
+                "valid": valid_count,
+                "expiring": expiring_count,
+                "expired": expired_count,
+                "total": valid_count + expiring_count + expired_count
+            }
+        })
+    
+    return {"certifications": enriched}
+
+
+@app.post("/certifications")
+async def create_certification_type(
+    name: str = Form(...),
+    cert_type: str = Form("certification"),
+    validity_days: int = Form(365),
+    is_mandatory: bool = Form(False),
+    icon: str = Form("certificate"),
+    color: str = Form("#10B981")
+):
+    """Create a new certification type"""
+    cert_id = name.lower().replace(" ", "_")
+    
+    # Check if already exists
+    if any(r["id"] == cert_id for r in compliance_requirements):
+        raise HTTPException(status_code=400, detail="Certification type already exists")
+    
+    new_cert = {
+        "id": cert_id,
+        "name": name,
+        "type": cert_type,
+        "validity_days": validity_days,
+        "is_mandatory": is_mandatory,
+        "icon": icon,
+        "color": color
+    }
+    compliance_requirements.append(new_cert)
+    
+    return {"status": "success", "certification": new_cert}
+
+
+@app.delete("/certifications/{cert_id}")
+async def delete_certification_type(cert_id: str):
+    """Delete a certification type"""
+    global compliance_requirements
+    original_len = len(compliance_requirements)
+    compliance_requirements = [r for r in compliance_requirements if r["id"] != cert_id]
+    
+    if len(compliance_requirements) == original_len:
+        raise HTTPException(status_code=404, detail="Certification type not found")
+    
+    return {"status": "success", "message": "Certification type deleted"}
 
 
 if __name__ == "__main__":

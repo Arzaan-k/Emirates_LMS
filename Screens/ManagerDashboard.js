@@ -36,6 +36,10 @@ import { CommonActions } from '@react-navigation/native';
 import MeetingSchedulerModal from '../Components/MeetingScheduler'; // [NEW] Virtual meetings
 import SimulationAdminManager from '../Components/SimulationAdminManager'; // [NEW] Interactive Simulations Admin
 import CRMTicketModal from '../Components/CRMTicketModal'; // [NEW] CRM Tickets
+import SupportTicketModal from '../Components/SupportTicketModal'; // [NEW] LMS Support
+
+import AuditLogsModal from '../Components/AuditLogsModal'; // [PHASE 2] Audit Logs
+import ContentLibraryModal from '../Components/ContentLibraryModal'; // [PHASE 2] Content Library
 
 
 
@@ -158,6 +162,13 @@ const FeedItem = ({ item, index }) => {
 export default function ManagerDashboard({ route, navigation }) {
     const [meetingModalVisible, setMeetingModalVisible] = useState(false);
     const [crmModalVisible, setCrmModalVisible] = useState(false); // [NEW]
+    const [supportModalVisible, setSupportModalVisible] = useState(false); // [NEW] LMS Support
+
+    // [PHASE 2] New Feature Modals
+    const [auditLogsVisible, setAuditLogsVisible] = useState(false);
+    const [contentLibraryVisible, setContentLibraryVisible] = useState(false);
+
+
     const { userProfile } = route.params || {};
     const role = userProfile?.role || "Manager";
     const name = userProfile?.name || "User";
@@ -1123,6 +1134,43 @@ export default function ManagerDashboard({ route, navigation }) {
                                 <Text style={styles.actionText}>Manage Simulations</Text>
                             </TouchableOpacity>
                         )}
+
+                        {/* LMS SUPPORT - Always visible for admins */}
+                        <TouchableOpacity
+                            style={styles.actionBtn}
+                            onPress={() => setSupportModalVisible(true)}
+                        >
+                            <View style={[styles.actionIcon, { backgroundColor: '#FEE2E2' }]}>
+                                <MaterialCommunityIcons name="headset" size={24} color="#DC2626" />
+                            </View>
+                            <Text style={styles.actionText}>LMS Support</Text>
+                        </TouchableOpacity>
+
+
+
+                        {/* [PHASE 2] CONTENT LIBRARY */}
+                        <TouchableOpacity
+                            style={styles.actionBtn}
+                            onPress={() => setContentLibraryVisible(true)}
+                        >
+                            <View style={[styles.actionIcon, { backgroundColor: '#DBEAFE' }]}>
+                                <MaterialCommunityIcons name="folder-multiple" size={24} color="#3B82F6" />
+                            </View>
+                            <Text style={styles.actionText}>Library</Text>
+                        </TouchableOpacity>
+
+
+
+                        {/* [PHASE 2] AUDIT LOGS */}
+                        <TouchableOpacity
+                            style={styles.actionBtn}
+                            onPress={() => setAuditLogsVisible(true)}
+                        >
+                            <View style={[styles.actionIcon, { backgroundColor: '#E0E7FF' }]}>
+                                <MaterialCommunityIcons name="history" size={24} color="#6366F1" />
+                            </View>
+                            <Text style={styles.actionText}>Audit Logs</Text>
+                        </TouchableOpacity>
                     </View>
 
                     {/* --- [NEW] MANAGE LEARNING PATH SECTION --- */}
@@ -1757,6 +1805,30 @@ export default function ManagerDashboard({ route, navigation }) {
             <CRMTicketModal
                 visible={crmModalVisible}
                 onClose={() => setCrmModalVisible(false)}
+            />
+            {/* LMS SUPPORT TICKET MODAL */}
+            <SupportTicketModal
+                visible={supportModalVisible}
+                onClose={() => setSupportModalVisible(false)}
+                userEmail={userProfile?.email || "admin@example.com"}
+                userName={name}
+                userRole={isSuperAdmin ? "superadmin" : "manager"}
+            />
+
+
+
+            {/* [PHASE 2] CONTENT LIBRARY MODAL */}
+            <ContentLibraryModal
+                visible={contentLibraryVisible}
+                onClose={() => setContentLibraryVisible(false)}
+            />
+
+
+
+            {/* [PHASE 2] AUDIT LOGS MODAL */}
+            <AuditLogsModal
+                visible={auditLogsVisible}
+                onClose={() => setAuditLogsVisible(false)}
             />
         </View>
     );
