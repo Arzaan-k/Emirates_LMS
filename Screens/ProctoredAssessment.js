@@ -39,7 +39,7 @@ const BREACH_TYPES = {
 };
 
 export default function ProctoredAssessment({ route, navigation }) {
-    const { userProfile, assessmentData } = route.params || {};
+    const { userProfile, assessmentData, isScheduledExam } = route.params || {};
     const role = userProfile?.role || "User";
     const userPrivileges = userProfile?.privileges || [];
 
@@ -628,7 +628,12 @@ export default function ProctoredAssessment({ route, navigation }) {
             formData.append('critical_breaches', criticalBreaches.toString());
             formData.append('warning_breaches', warningBreaches.toString());
 
-            const response = await fetch(`${API_URL}/proctored-assessments/${selectedAssessment.id}/submit`, {
+            // [FIX] Use correct endpoint for scheduled exams
+            const submitUrl = isScheduledExam
+                ? `${API_URL}/scheduled-exams/${selectedAssessment.id}/submit`
+                : `${API_URL}/proctored-assessments/${selectedAssessment.id}/submit`;
+
+            const response = await fetch(submitUrl, {
                 method: 'POST',
                 body: formData
             });

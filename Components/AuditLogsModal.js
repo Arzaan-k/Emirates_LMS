@@ -192,7 +192,7 @@ const styles = StyleSheet.create({
     headerTitle: { fontSize: 20, fontFamily: 'Poppins_700Bold', color: '#FFF', marginLeft: 10 },
     exportBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
     // Filters
-    filterRow: { paddingHorizontal: 16, paddingVertical: 8 },
+    filterRow: { paddingHorizontal: 16, paddingVertical: 8, maxHeight: 60, flexGrow: 0 },
     filterPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.05)', marginRight: 8 },
     filterPillActive: { backgroundColor: '#6366F1' },
     filterDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },

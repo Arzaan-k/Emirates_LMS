@@ -148,6 +148,44 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 # --- DATA MODELS ---
 # --- DATA MODELS ---
+# Audit Logs
+audit_logs = [
+    {
+        "id": "log-initial-1",
+        "action": "CREATE_USER",
+        "timestamp": datetime.now().isoformat(),
+        "target": "John Doe",
+        "details": "Created new store manager account",
+        "admin_email": "admin@bwc.com"
+    },
+    {
+        "id": "log-initial-2",
+        "action": "UPLOAD_CONTENT",
+        "timestamp": datetime.now().isoformat(),
+        "target": "Safety Procedures v2.pdf",
+        "details": "Uploaded to Learning Path",
+        "admin_email": "admin@bwc.com"
+    }
+]
+
+def log_action(action: str, target: str, details: str = "", admin_email: str = "admin@bwc.com"):
+    """
+    Helper to log an audit action.
+    """
+    new_log = {
+        "id": f"log-{uuid.uuid4()}",
+        "action": action,
+        "timestamp": datetime.now().isoformat(),
+        "target": target,
+        "details": details,
+        "admin_email": admin_email
+    }
+    audit_logs.insert(0, new_log)
+    # Keep only last 100 logs
+    if len(audit_logs) > 100:
+        audit_logs.pop()
+
+# --- DATA MODELS ---
 class ContentItem(BaseModel):
     id: str  # Unique ID (UUID)
     title: str
@@ -385,6 +423,15 @@ proctored_assessments: List[dict] = []  # {id, title, description, questions, ti
 assessment_submissions: List[dict] = []  # {id, assessment_id, user_email, user_name, answers, score, passed, time_taken_seconds, submitted_at, violations}
 
 # ==========================================
+# SCHEDULED EXAMS SYSTEM
+# ==========================================
+# Scheduled offline exams with attendance tracking and proctored online component
+scheduled_exams: List[dict] = []  # {id, title, description, exam_date, exam_time, location, shift, supervisor_email, supervisor_name, assigned_users, questions, time_limit_minutes, passing_score, created_by, created_at, status}
+scheduled_exam_attendance: List[dict] = []  # {id, exam_id, user_email, user_name, marked_present, marked_by, marked_at, started_exam, start_time, completed, submission_id}
+scheduled_exam_submissions: List[dict] = []  # {id, exam_id, user_email, user_name, answers, score, passed, time_taken_seconds, violations, breach_log, submitted_at}
+
+
+# ==========================================
 # LMS SUPPORT TICKET SYSTEM
 # ==========================================
 # Support tickets for users/admins to contact LMS team
@@ -560,6 +607,7 @@ level_config_store: dict = {
     "Waffler": {
         "min_nodes": 0,
         "description": "Starting level for new team members",
+
         "icon": "account",
         "color": "#6B7280",
         "next_level": "Silver Waffler"
@@ -621,6 +669,19 @@ access_control_store: dict = {
     # Higher roles have full access by default (not listed = full access)
 }
 
+
+# --- AUDIT LOG ENDPOINTS ---
+
+@app.get("/audit-logs")
+async def get_audit_logs(action_type: Optional[str] = None):
+    # Collect unique action types
+    unique_types = list(set([log["action"] for log in audit_logs]))
+    
+    if action_type:
+        filtered = [log for log in audit_logs if log["action"] == action_type]
+        return {"logs": filtered, "action_types": unique_types}
+    
+    return {"logs": audit_logs, "action_types": unique_types}
 
 # ==========================================
 # MEETINGS/VIDEO CALL ENDPOINTS
@@ -1678,29 +1739,40 @@ async def process_video_content(file_path: str, filename: str):
         
         # 1. TRIM VIDEO (Max 30s)
         print(f"--- [DEBUG] Loading video clip... {file_path}")
-        clip = VideoFileClip(file_path)
-        print(f"--- [DEBUG] Clip duration: {clip.duration}")
-        if clip.duration > 30:
-            logger.info(f"Video is too long ({clip.duration}s). Trimming to 30s...")
-            trimmed_path = f"{os.path.dirname(file_path)}/trimmed_{filename}"
-            trimmed_clip = clip.subclip(0, 30)
-            trimmed_clip.write_videofile(trimmed_path, codec="libx264", audio_codec="aac", logger=None)
-            clip.close()
-            trimmed_clip.close()
+        # Define blocking trim function
+        def trim_video_task():
+            clip = VideoFileClip(file_path)
+            print(f"--- [DEBUG] Clip duration: {clip.duration}")
+            if clip.duration > 30:
+                logger.info(f"Video is too long ({clip.duration}s). Trimming to 30s...")
+                trimmed_path = f"{os.path.dirname(file_path)}/trimmed_{filename}"
+                trimmed_clip = clip.subclip(0, 30)
+                trimmed_clip.write_videofile(trimmed_path, codec="libx264", audio_codec="aac", logger=None)
+                clip.close()
+                trimmed_clip.close()
+                return trimmed_path
+            else:
+                 clip.close()
+                 return None
+
+        loop = asyncio.get_event_loop()
+        trimmed_path = await loop.run_in_executor(None, trim_video_task)
+
+        if trimmed_path:
+
             
-            # Replace original with trimmed
-            os.remove(file_path)
-            os.rename(trimmed_path, file_path)
-            logger.info("Video trimmed successfully.")
-        else:
-            clip.close()
+                # Replace original with trimmed
+                os.remove(file_path)
+                os.rename(trimmed_path, file_path)
+                logger.info("Video trimmed successfully.")
+
             
         # 2. TRANSCRIBE (OpenAI Whisper) - with fallback if model not available
         logger.info("Starting AI Processing...")
         # Use simple path construction to avoid path issues
         audio_path = f"{os.path.dirname(file_path)}/{filename}_audio.mp3"
         print(f"--- [DEBUG] Extracting audio to {audio_path}")
-        video = VideoFileClip(file_path)
+
         
         # Get event loop for async operations (needed for quiz generation)
         loop = asyncio.get_event_loop()
@@ -1710,30 +1782,38 @@ async def process_video_content(file_path: str, filename: str):
             logger.warning("Whisper model not loaded. Skipping transcription (AI features disabled).")
             print("--- [DEBUG] Whisper model is None - using placeholder transcript")
             transcript_text = f"Training video content for: {filename}. AI transcription unavailable - please review video manually."
-            video.close()
             # Continue to quiz generation with fallback
-        elif video.audio:
-            video.audio.write_audiofile(audio_path, logger=None)
-            video.close()
-            
-            logger.info("Transcribing with OpenAI Whisper...")
-            print("--- [DEBUG] Running Whisper...")
-            # Run in thread to avoid blocking event loop
-            result = await loop.run_in_executor(None, whisper_model.transcribe, audio_path)
-            transcript_text = result["text"]
-            logger.info(f"Transcript Generated: {transcript_text[:50]}...")
-            print(f"--- [DEBUG] Transcript: {transcript_text[:50]}...")
-            
-            if os.path.exists(audio_path):
-                try:
-                    os.remove(audio_path)
-                except:
-                    pass
         else:
-            logger.warning("Video has no audio track. Skipping transcription.")
-            print("--- [DEBUG] No audio track found.")
-            video.close()
-            return {"transcript": transcript_text, "quiz": quiz_data} # Exit early if no audio
+            # Check for audio track (blocking)
+            def check_and_extract_audio():
+                v = VideoFileClip(file_path)
+                has_audio = False
+                if v.audio:
+                    v.audio.write_audiofile(audio_path, logger=None)
+                    has_audio = True
+                v.close()
+                return has_audio
+
+            has_audio = await loop.run_in_executor(None, check_and_extract_audio)
+            
+            if has_audio:
+                logger.info("Transcribing with OpenAI Whisper...")
+                print("--- [DEBUG] Running Whisper...")
+                # Run in thread to avoid blocking event loop
+                result = await loop.run_in_executor(None, whisper_model.transcribe, audio_path)
+                transcript_text = result["text"]
+                logger.info(f"Transcript Generated: {transcript_text[:50]}...")
+                print(f"--- [DEBUG] Transcript: {transcript_text[:50]}...")
+                
+                if os.path.exists(audio_path):
+                    try:
+                        os.remove(audio_path)
+                    except:
+                        pass
+            else:
+                logger.warning("Video has no audio track. Skipping transcription.")
+                print("--- [DEBUG] No audio track found.")
+                return {"transcript": transcript_text, "quiz": quiz_data} # Exit early if no audio
 
         # 3. GENERATE QUIZ (Groq)
         print("--- [DEBUG] Generating Quiz with Groq...")
@@ -1874,6 +1954,9 @@ async def upload_resource(
     else:
         print("--- [DEBUG] isPathNode is FALSE")
     
+    # [AUDIT] Log upload
+    log_action("UPLOAD_CONTENT", title, f"Uploaded {res_type} to {'Learning Path' if is_path_node_bool else 'Knowledge Base'}")
+    
     return {"status": "success", "resource": new_resource}
 
 class NotificationRequest(BaseModel):
@@ -1943,6 +2026,9 @@ async def create_meeting(
         "created_at": datetime.now().isoformat(),
         "participants": []  # List of {user_email, user_name, joined_at}
     }
+    
+    # [AUDIT] Log meeting creation
+    log_action("CREATE_MEETING", title, f"Scheduled for {scheduled_at} by {host_name}")
     
     meetings_store.insert(0, new_meeting)
     logger.info(f"Meeting Created: {title} scheduled for {scheduled_at} by {host_name}")
@@ -2197,7 +2283,11 @@ async def create_news(
     }
     
     news_feed.append(news_item)
+    news_feed.append(news_item)
     logger.info(f"News Created: {title}")
+
+    # [AUDIT] Log news
+    log_action("CREATE_CAMPAIGN", title, "Posted news/announcement to all users")
     
     # Broadcast to all connected clients
     await manager.broadcast({
@@ -2265,7 +2355,11 @@ async def create_live_quiz(
     }
     
     live_quizzes.append(quiz_item)
+    live_quizzes.append(quiz_item)
     logger.info(f"Live Quiz Created: {title}")
+
+    # [AUDIT] Log quiz assignment
+    log_action("ASSIGN_QUIZ", title, f"Assigned quiz ({difficulty}, {time})")
     
     # Broadcast to all connected clients
     await manager.broadcast({
@@ -3479,6 +3573,10 @@ async def create_user(data: dict):
     }
     
     logger.info(f"User created: {name} ({email}) - Role: {role} - Store: {store} - Privileges: {valid_privileges}")
+    
+    # [AUDIT] Log user creation
+    log_action("CREATE_USER", name, f"Created new {role} account for {email} ({store})")
+
     return {"status": "success", "user_id": email, "privileges_count": len(valid_privileges)}
 
 
@@ -7649,13 +7747,7 @@ async def create_campaign(
 # ==========================================
 
 # Audit log data store
-audit_logs: List[dict] = [
-    {"id": 1, "timestamp": "2024-01-25T10:30:00", "admin_email": "admin@example.com", "action": "CREATE_USER", "target": "john@store.com", "details": "Created new crew member account", "ip_address": "192.168.1.1"},
-    {"id": 2, "timestamp": "2024-01-25T09:15:00", "admin_email": "admin@example.com", "action": "UPLOAD_CONTENT", "target": "Summer Menu Training", "details": "Uploaded new video course", "ip_address": "192.168.1.1"},
-    {"id": 3, "timestamp": "2024-01-24T16:45:00", "admin_email": "manager@store.com", "action": "ASSIGN_QUIZ", "target": "5 users", "details": "Assigned Hygiene Quiz to team", "ip_address": "192.168.1.2"},
-    {"id": 4, "timestamp": "2024-01-24T14:20:00", "admin_email": "admin@example.com", "action": "UPDATE_COMPLIANCE", "target": "sarah@store.com", "details": "Added FSSAI certification", "ip_address": "192.168.1.1"},
-    {"id": 5, "timestamp": "2024-01-24T11:00:00", "admin_email": "admin@example.com", "action": "CREATE_CAMPAIGN", "target": "Summer Menu Launch", "details": "Created new training campaign", "ip_address": "192.168.1.1"},
-]
+audit_logs: List[dict] = []
 
 ACTION_TYPES = {
     "CREATE_USER": {"icon": "account-plus", "color": "#10B981"},
@@ -7870,6 +7962,540 @@ async def delete_certification_type(cert_id: str):
         raise HTTPException(status_code=404, detail="Certification type not found")
     
     return {"status": "success", "message": "Certification type deleted"}
+
+
+# ==========================================
+# SCHEDULED EXAMS SYSTEM ENDPOINTS
+# ==========================================
+
+@app.get("/scheduled-exams")
+async def get_scheduled_exams():
+    """Get all scheduled exams (admin view)"""
+    return scheduled_exams
+
+@app.get("/scheduled-exams/user/{user_email}")
+async def get_user_scheduled_exams(user_email: str):
+    """Get scheduled exams assigned to a specific user"""
+    user_exams = []
+    user_email_lower = user_email.lower().strip()
+    
+    logger.info(f"[ScheduledExams] Fetching exams for user: {user_email}")
+    logger.info(f"[ScheduledExams] Total scheduled exams: {len(scheduled_exams)}")
+    
+    for exam in scheduled_exams:
+        assigned_users = exam.get("assigned_users", [])
+        # Case-insensitive email matching
+        assigned_users_lower = [u.lower().strip() if isinstance(u, str) else "" for u in assigned_users]
+        
+        if user_email_lower in assigned_users_lower:
+            # Find the original email for attendance lookup
+            original_email = user_email
+            for i, lower_email in enumerate(assigned_users_lower):
+                if lower_email == user_email_lower:
+                    original_email = assigned_users[i]
+                    break
+            
+            # Check if user's attendance record exists (case-insensitive)
+            attendance = next((a for a in scheduled_exam_attendance 
+                              if a["exam_id"] == exam["id"] and 
+                              a["user_email"].lower().strip() == user_email_lower), None)
+            exam_copy = exam.copy()
+            exam_copy["attendance"] = attendance
+            exam_copy["can_start"] = attendance.get("marked_present", False) if attendance else False
+            exam_copy["has_completed"] = attendance.get("completed", False) if attendance else False
+            user_exams.append(exam_copy)
+            logger.info(f"[ScheduledExams] Found exam '{exam.get('title')}' for user {user_email}")
+    
+    logger.info(f"[ScheduledExams] Returning {len(user_exams)} exams for {user_email}")
+    return user_exams
+
+@app.get("/scheduled-exams/{exam_id}")
+async def get_scheduled_exam(exam_id: str):
+    """Get a specific scheduled exam"""
+    for exam in scheduled_exams:
+        if exam.get("id") == exam_id:
+            return exam
+    raise HTTPException(status_code=404, detail="Scheduled exam not found")
+
+@app.post("/scheduled-exams")
+async def create_scheduled_exam(
+    title: str = Form(...),
+    description: str = Form(""),
+    exam_date: str = Form(...),  # YYYY-MM-DD
+    exam_time: str = Form(...),  # HH:MM
+    location: str = Form(...),
+    shift: str = Form("Morning"),
+    supervisor_email: str = Form(...),
+    supervisor_name: str = Form(...),
+    assigned_users: str = Form(...),  # JSON array of user emails
+    questions: str = Form(...),  # JSON array of questions
+    time_limit_minutes: int = Form(30),
+    passing_score: int = Form(70),
+    created_by: str = Form("Admin")
+):
+    """Create a new scheduled exam"""
+    import json
+    
+    try:
+        assigned_list = json.loads(assigned_users)
+        questions_list = json.loads(questions)
+    except:
+        raise HTTPException(status_code=400, detail="Invalid JSON format for users or questions")
+    
+    exam_id = str(uuid.uuid4())
+    
+    new_exam = {
+        "id": exam_id,
+        "title": title,
+        "description": description,
+        "exam_date": exam_date,
+        "exam_time": exam_time,
+        "location": location,
+        "shift": shift,
+        "supervisor_email": supervisor_email,
+        "supervisor_name": supervisor_name,
+        "assigned_users": assigned_list,
+        "questions": questions_list,
+        "time_limit_minutes": time_limit_minutes,
+        "passing_score": passing_score,
+        "created_by": created_by,
+        "created_at": datetime.now().isoformat(),
+        "status": "scheduled"  # scheduled, ongoing, completed, cancelled
+    }
+    
+    scheduled_exams.insert(0, new_exam)
+    
+    # Create attendance records for all assigned users
+    for user_email in assigned_list:
+        user_data = users_store.get(user_email, {})
+        attendance_record = {
+            "id": str(uuid.uuid4()),
+            "exam_id": exam_id,
+            "user_email": user_email,
+            "user_name": user_data.get("name", user_email),
+            "marked_present": False,
+            "marked_by": None,
+            "marked_at": None,
+            "started_exam": False,
+            "start_time": None,
+            "completed": False,
+            "submission_id": None
+        }
+        scheduled_exam_attendance.append(attendance_record)
+    
+    # Send notification to all assigned users
+    notification = {
+        "id": str(uuid.uuid4()),
+        "title": f"📝 Scheduled Exam: {title}",
+        "message": f"You have been assigned to an exam on {exam_date} at {exam_time}. Location: {location}, Shift: {shift}. Supervisor: {supervisor_name}. Please report on time.",
+        "type": "exam_scheduled",
+        "exam_id": exam_id,
+        "exam_date": exam_date,
+        "exam_time": exam_time,
+        "location": location,
+        "shift": shift,
+        "created_at": datetime.now().isoformat(),
+        "target_users": assigned_list,
+        "is_persistent": True
+    }
+    notification_store.insert(0, notification)
+    
+    # Broadcast via WebSocket
+    await manager.broadcast({
+        "type": "EXAM_SCHEDULED",
+        "data": new_exam,
+        "notification": notification
+    })
+    
+    # Audit log
+    log_action("SCHEDULE_EXAM", title, f"Scheduled exam for {len(assigned_list)} users on {exam_date}")
+    
+    logger.info(f"Scheduled Exam Created: {title} on {exam_date} for {len(assigned_list)} users")
+    
+    return {"status": "success", "exam": new_exam}
+
+@app.get("/scheduled-exams/{exam_id}/attendance")
+async def get_exam_attendance(exam_id: str):
+    """Get attendance list for a scheduled exam"""
+    attendance = [a for a in scheduled_exam_attendance if a["exam_id"] == exam_id]
+    return attendance
+
+@app.post("/scheduled-exams/{exam_id}/mark-present")
+async def mark_user_present(
+    exam_id: str,
+    user_email: str = Form(...),
+    marked_by: str = Form(...)
+):
+    """Mark a user as present for the exam (supervisor action)"""
+    # Find attendance record
+    for attendance in scheduled_exam_attendance:
+        if attendance["exam_id"] == exam_id and attendance["user_email"] == user_email:
+            attendance["marked_present"] = True
+            attendance["marked_by"] = marked_by
+            attendance["marked_at"] = datetime.now().isoformat()
+            
+            # Notify the user that they can start the exam
+            await manager.broadcast({
+                "type": "EXAM_START_ENABLED",
+                "exam_id": exam_id,
+                "user_email": user_email
+            })
+            
+            logger.info(f"User {user_email} marked present for exam {exam_id} by {marked_by}")
+            return {"status": "success", "attendance": attendance}
+    
+    raise HTTPException(status_code=404, detail="Attendance record not found")
+
+@app.post("/scheduled-exams/{exam_id}/mark-absent")
+async def mark_user_absent(
+    exam_id: str,
+    user_email: str = Form(...),
+    marked_by: str = Form(...)
+):
+    """Mark a user as absent for the exam"""
+    for attendance in scheduled_exam_attendance:
+        if attendance["exam_id"] == exam_id and attendance["user_email"] == user_email:
+            attendance["marked_present"] = False
+            attendance["marked_by"] = marked_by
+            attendance["marked_at"] = datetime.now().isoformat()
+            
+            logger.info(f"User {user_email} marked absent for exam {exam_id} by {marked_by}")
+            return {"status": "success", "attendance": attendance}
+    
+    raise HTTPException(status_code=404, detail="Attendance record not found")
+
+@app.post("/scheduled-exams/{exam_id}/start")
+async def start_scheduled_exam(
+    exam_id: str,
+    user_email: str = Form(...)
+):
+    """User starts the scheduled exam (after being marked present)"""
+    # Check attendance
+    attendance = next((a for a in scheduled_exam_attendance 
+                      if a["exam_id"] == exam_id and a["user_email"] == user_email), None)
+    
+    if not attendance:
+        raise HTTPException(status_code=404, detail="You are not assigned to this exam")
+    
+    if not attendance["marked_present"]:
+        raise HTTPException(status_code=403, detail="You must be marked present by supervisor to start the exam")
+    
+    if attendance["completed"]:
+        raise HTTPException(status_code=400, detail="You have already completed this exam")
+    
+    # Get exam details
+    exam = next((e for e in scheduled_exams if e["id"] == exam_id), None)
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    
+    # Mark as started
+    attendance["started_exam"] = True
+    attendance["start_time"] = datetime.now().isoformat()
+    
+    logger.info(f"User {user_email} started exam {exam_id}")
+    
+    return {
+        "status": "success",
+        "exam": {
+            "id": exam["id"],
+            "title": exam["title"],
+            "description": exam["description"],
+            "questions": exam["questions"],
+            "time_limit_minutes": exam["time_limit_minutes"],
+            "passing_score": exam["passing_score"]
+        },
+        "start_time": attendance["start_time"]
+    }
+
+@app.post("/scheduled-exams/{exam_id}/submit")
+async def submit_scheduled_exam(
+    exam_id: str,
+    user_email: str = Form(...),
+    user_name: str = Form(...),
+    answers: str = Form(...),  # JSON array
+    time_taken_seconds: int = Form(...),
+    violations: int = Form(0),
+    breach_log: str = Form("[]")
+):
+    """Submit a scheduled exam"""
+    import json
+    
+    # Get exam
+    exam = next((e for e in scheduled_exams if e["id"] == exam_id), None)
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    
+    # Parse answers
+    try:
+        answers_list = json.loads(answers)
+        breach_log_list = json.loads(breach_log)
+    except:
+        raise HTTPException(status_code=400, detail="Invalid JSON format")
+    
+    # Calculate score
+    correct_count = 0
+    total = len(exam["questions"])
+    
+    for i, ans in enumerate(answers_list):
+        if i < total and ans == exam["questions"][i].get("correctIndex"):
+            correct_count += 1
+    
+    score_percent = (correct_count / total * 100) if total > 0 else 0
+    passed = score_percent >= exam.get("passing_score", 70)
+    
+    # Create submission
+    submission = {
+        "id": str(uuid.uuid4()),
+        "exam_id": exam_id,
+        "exam_title": exam["title"],
+        "user_email": user_email,
+        "user_name": user_name,
+        "answers": answers_list,
+        "correct_count": correct_count,
+        "total_questions": total,
+        "score_percent": round(score_percent, 1),
+        "passed": passed,
+        "time_taken_seconds": time_taken_seconds,
+        "violations": violations,
+        "breach_log": breach_log_list,
+        "submitted_at": datetime.now().isoformat()
+    }
+    
+    scheduled_exam_submissions.insert(0, submission)
+    
+    # Update attendance record
+    for attendance in scheduled_exam_attendance:
+        if attendance["exam_id"] == exam_id and attendance["user_email"] == user_email:
+            attendance["completed"] = True
+            attendance["submission_id"] = submission["id"]
+            break
+    
+    logger.info(f"Scheduled Exam Submitted: {user_name} scored {score_percent}% on {exam['title']}")
+    
+    return {
+        "status": "success",
+        "submission": submission,
+        "result": {
+            "score": round(score_percent, 1),
+            "correct": correct_count,
+            "total": total,
+            "passed": passed,
+            "passing_score": exam.get("passing_score", 70)
+        }
+    }
+
+@app.get("/scheduled-exams/{exam_id}/submissions")
+async def get_exam_submissions(exam_id: str):
+    """Get all submissions for a scheduled exam"""
+    return [s for s in scheduled_exam_submissions if s["exam_id"] == exam_id]
+
+@app.post("/scheduled-exams/{exam_id}/generate-questions")
+async def generate_exam_questions(
+    exam_id: str,
+    topic: str = Form(...),
+    num_questions: int = Form(10),
+    difficulty: str = Form("Medium")
+):
+    """Generate questions for a scheduled exam using AI"""
+    from groq import Groq
+    
+    try:
+        prompt = f"""Generate exactly {num_questions} multiple-choice quiz questions about: {topic}
+        Difficulty level: {difficulty}
+        
+IMPORTANT: Return ONLY a valid JSON array with this exact structure:
+[
+    {{
+        "question": "Clear question text?",
+        "options": ["Option A", "Option B", "Option C", "Option D"],
+        "correctIndex": 0
+    }}
+]
+
+Requirements:
+- Each question should test understanding
+- Options should be plausible but only one correct
+- correctIndex is 0-3 indicating the correct option
+- Return ONLY the JSON array, no markdown"""
+
+        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "You are an expert exam creator. Return only valid JSON arrays."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=4000
+        )
+        
+        response_text = response.choices[0].message.content.strip()
+        
+        # Extract JSON array
+        import re
+        json_match = re.search(r'\[[\s\S]*\]', response_text)
+        if json_match:
+            response_text = json_match.group()
+        
+        questions_list = json.loads(response_text)
+        
+        logger.info(f"Generated {len(questions_list)} questions for topic: {topic}")
+        
+        return {"status": "success", "questions": questions_list}
+        
+    except Exception as e:
+        logger.error(f"AI question generation error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate questions: {str(e)}")
+
+@app.delete("/scheduled-exams/{exam_id}")
+async def delete_scheduled_exam(exam_id: str):
+    """Delete a scheduled exam"""
+    global scheduled_exams, scheduled_exam_attendance
+    
+    original_len = len(scheduled_exams)
+    scheduled_exams = [e for e in scheduled_exams if e["id"] != exam_id]
+    
+    if len(scheduled_exams) == original_len:
+        raise HTTPException(status_code=404, detail="Scheduled exam not found")
+    
+    # Remove attendance records
+    scheduled_exam_attendance = [a for a in scheduled_exam_attendance if a["exam_id"] != exam_id]
+    
+    logger.info(f"Scheduled Exam Deleted: {exam_id}")
+    return {"status": "success", "message": "Scheduled exam deleted"}
+
+
+@app.get("/scheduled-exams/{exam_id}/report")
+async def get_exam_report(exam_id: str):
+    """Get detailed report for a scheduled exam (admin view)"""
+    # Get exam
+    exam = next((e for e in scheduled_exams if e["id"] == exam_id), None)
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    
+    # Get all attendance records for this exam
+    attendance_list = [a for a in scheduled_exam_attendance if a["exam_id"] == exam_id]
+    
+    # Get all submissions for this exam
+    submissions = [s for s in scheduled_exam_submissions if s["exam_id"] == exam_id]
+    
+    # Calculate statistics
+    total_assigned = len(attendance_list)
+    marked_present = len([a for a in attendance_list if a.get("marked_present")])
+    marked_absent = len([a for a in attendance_list if a.get("marked_by") and not a.get("marked_present")])
+    pending_marking = total_assigned - marked_present - marked_absent
+    
+    completed = len([a for a in attendance_list if a.get("completed")])
+    started_not_finished = len([a for a in attendance_list if a.get("started_exam") and not a.get("completed")])
+    
+    # Score statistics
+    scores = [s["score_percent"] for s in submissions]
+    avg_score = sum(scores) / len(scores) if scores else 0
+    max_score = max(scores) if scores else 0
+    min_score = min(scores) if scores else 0
+    passed_count = len([s for s in submissions if s.get("passed")])
+    failed_count = len(submissions) - passed_count
+    
+    # Determine exam status
+    all_marked = pending_marking == 0
+    all_present_completed = all(
+        a.get("completed") for a in attendance_list if a.get("marked_present")
+    ) if marked_present > 0 else False
+    
+    exam_status = exam.get("status", "scheduled")
+    if all_marked and all_present_completed and marked_present > 0:
+        exam_status = "completed"
+        # Update exam status in the list
+        for e in scheduled_exams:
+            if e["id"] == exam_id:
+                e["status"] = "completed"
+                break
+    elif completed > 0 or started_not_finished > 0:
+        exam_status = "ongoing"
+    
+    # Build detailed attendee report
+    attendee_reports = []
+    for att in attendance_list:
+        submission = next((s for s in submissions if s["user_email"] == att["user_email"]), None)
+        attendee_reports.append({
+            "user_email": att["user_email"],
+            "user_name": att.get("user_name", att["user_email"]),
+            "marked_present": att.get("marked_present", False),
+            "marked_by": att.get("marked_by"),
+            "marked_at": att.get("marked_at"),
+            "started_exam": att.get("started_exam", False),
+            "start_time": att.get("start_time"),
+            "completed": att.get("completed", False),
+            "submission": submission
+        })
+    
+    return {
+        "exam": exam,
+        "status": exam_status,
+        "statistics": {
+            "total_assigned": total_assigned,
+            "marked_present": marked_present,
+            "marked_absent": marked_absent,
+            "pending_marking": pending_marking,
+            "started": completed + started_not_finished,
+            "completed": completed,
+            "in_progress": started_not_finished,
+            "avg_score": round(avg_score, 1),
+            "max_score": max_score,
+            "min_score": min_score,
+            "passed": passed_count,
+            "failed": failed_count,
+            "pass_rate": round((passed_count / len(submissions) * 100) if submissions else 0, 1)
+        },
+        "attendees": attendee_reports,
+        "submissions": submissions
+    }
+
+
+@app.get("/scheduled-exams/all/with-stats")
+async def get_all_exams_with_stats():
+    """Get all scheduled exams with basic stats for admin list view"""
+    result = []
+    for exam in scheduled_exams:
+        exam_id = exam["id"]
+        attendance_list = [a for a in scheduled_exam_attendance if a["exam_id"] == exam_id]
+        submissions = [s for s in scheduled_exam_submissions if s["exam_id"] == exam_id]
+        
+        total_assigned = len(attendance_list)
+        marked_present = len([a for a in attendance_list if a.get("marked_present")])
+        completed = len([a for a in attendance_list if a.get("completed")])
+        
+        # Determine status
+        all_marked = all(a.get("marked_by") for a in attendance_list) if attendance_list else False
+        all_present_completed = all(
+            a.get("completed") for a in attendance_list if a.get("marked_present")
+        ) if marked_present > 0 else False
+        
+        status = exam.get("status", "scheduled")
+        if all_marked and all_present_completed and marked_present > 0:
+            status = "completed"
+        elif completed > 0:
+            status = "ongoing"
+        
+        avg_score = sum(s["score_percent"] for s in submissions) / len(submissions) if submissions else 0
+        
+        result.append({
+            "id": exam["id"],
+            "title": exam["title"],
+            "exam_date": exam["exam_date"],
+            "exam_time": exam["exam_time"],
+            "location": exam["location"],
+            "status": status,
+            "created_at": exam.get("created_at"),
+            "stats": {
+                "total_assigned": total_assigned,
+                "marked_present": marked_present,
+                "completed": completed,
+                "avg_score": round(avg_score, 1)
+            }
+        })
+    
+    return result
 
 
 if __name__ == "__main__":

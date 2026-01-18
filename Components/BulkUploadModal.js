@@ -95,6 +95,7 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                 formData.append('authorRole', "Store Manager");
                 formData.append('timestamp', new Date().toISOString());
                 formData.append('isPathNode', String(isPathNode));
+                formData.append('category', selectedBucket || "General"); // Required field
                 if (selectedBucket) {
                     formData.append('bucket', selectedBucket); // [NEW] Add bucket if selected
                 }
@@ -104,9 +105,8 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                     type: file.mimeType || 'video/mp4'
                 });
 
-                await fetch(`${API_URL}/upload`, {
+                await fetch(`${API_URL}/resources/upload`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'multipart/form-data' },
                     body: formData
                 });
 

@@ -17,6 +17,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Video, ResizeMode } from 'expo-av';
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import { useFocusEffect } from "@react-navigation/native";
 import { BlurView } from "expo-blur";
 import { Feather, Octicons, Ionicons, MaterialIcons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -46,6 +47,7 @@ import AIFlashcards from "../Components/AIFlashcards";
 import AIChatBot from "../Components/AIChatBot";
 import AIDigitalTwin from "../Components/AIDigitalTwin";
 import QuizTakingModal from "../Components/QuizTakingModal";
+import UpcomingExamsCard from "../Components/UpcomingExamsCard"; // [NEW] Scheduled Exams
 import { useNavigation } from "@react-navigation/native";
 import { useLanguage } from "../context/language.context";
 import API_URL from "../config";
@@ -1052,6 +1054,61 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   const [upcomingMeetings, setUpcomingMeetings] = useState([]);
   const [crmTasks, setCrmTasks] = useState([]);
 
+  // [NEW] User email for scheduled exams
+  const [userEmail, setUserEmail] = useState(null);
+  const [examRefreshKey, setExamRefreshKey] = useState(0);
+
+  // Get user profile from navigation params OR fallback to fetching from context
+  useEffect(() => {
+    const getUserEmail = async () => {
+      try {
+        // Try multiple sources for user email
+        // 1. Try route params (from Login navigation)
+        // Since we're inside Tab.Navigator, we need to get parent route
+        const parentRoute = navigation.getParent()?.getState()?.routes?.[0]?.params?.userProfile;
+        if (parentRoute?.email) {
+          console.log('[Home] Got email from parent route:', parentRoute.email);
+          setUserEmail(parentRoute.email);
+          return;
+        }
+
+        // 2. Try AsyncStorage
+        const stored = await AsyncStorage.getItem('userProfile');
+        if (stored) {
+          const profile = JSON.parse(stored);
+          console.log('[Home] User profile from AsyncStorage:', profile.email);
+          setUserEmail(profile.email);
+          return;
+        }
+
+        // 3. Fallback: Fetch current user from login API session or use default
+        // Since user is on Home, they must be logged in - get from /users API
+        const loginEmail = await AsyncStorage.getItem('userEmail');
+        if (loginEmail) {
+          console.log('[Home] User email from userEmail key:', loginEmail);
+          setUserEmail(loginEmail);
+          return;
+        }
+
+        // 4. Last resort: default user for testing
+        console.log('[Home] No user email found in any source, using default');
+        setUserEmail('user'); // Default test user
+
+      } catch (e) {
+        console.error('Error getting user email:', e);
+        setUserEmail('user'); // Fallback to default
+      }
+    };
+    getUserEmail();
+  }, [navigation]);
+
+  // [NEW] Refresh exams when screen is focused (after returning from exam)
+  useFocusEffect(
+    React.useCallback(() => {
+      // Increment refresh key to trigger UpcomingExamsCard to reload
+      setExamRefreshKey(prev => prev + 1);
+    }, [])
+  );
 
   const handleAcknowledge = async (id) => {
     try {
@@ -1130,12 +1187,20 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   };
 
   // FETCH NOTIFICATIONS
+  // FETCH NOTIFICATIONS
   const fetchNotifications = async () => {
+    if (!userEmail) return;
     try {
       const res = await fetch(`${API_URL}/notifications`);
       const data = await res.json();
       if (Array.isArray(data)) {
-        setAllNotifications(data);
+        // Filter notifications relevant to this user
+        const filtered = data.filter(n => {
+          if (!n.target_users || n.target_users.length === 0) return true; // Global? Or maybe restrict? Assuming global if empty.
+          // Better to assume if target_users exists, check it.
+          return n.target_users.includes(userEmail);
+        });
+        setAllNotifications(filtered);
       }
     } catch (e) {
       console.log("Error fetching notifications", e);
@@ -1211,13 +1276,18 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
     // CRITICAL: Fetch crucial notifications FIRST to block app if needed
     fetchCrucialNotifications();
     fetchPathNodes();
-    fetchNotifications();
     fetchNews();
     fetchLiveQuizzes();
     fetchProctoredAssessments();
     fetchMeetings();
-    fetchCrmTasks(); // [NEW]
+    fetchCrmTasks();
   }, []);
+
+  useEffect(() => {
+    if (userEmail) {
+      fetchNotifications();
+    }
+  }, [userEmail]);
 
   useEffect(() => {
     // CONNECT TO WEBSOCKET
@@ -1234,8 +1304,13 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
         if (message.type === "NEW_CONTENT") {
           setLiveUpdates(prev => [message.data, ...prev]);
         } else if (message.type === "NOTIFICATION") {
-          setNotification(message.data);
-          setAllNotifications(prev => [message.data, ...prev]);
+          const notif = message.data;
+          // [NEW] Filter by target_users
+          if (notif.target_users && notif.target_users.length > 0 && userEmail && !notif.target_users.includes(userEmail)) {
+            return;
+          }
+          setNotification(notif);
+          setAllNotifications(prev => [notif, ...prev]);
           setTimeout(() => setNotification(null), 5000);
         } else if (message.type === "QUIZ_ASSIGNED") {
           setAssignedQuizzes(prev => [message.data, ...prev]);
@@ -1294,6 +1369,19 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
           setAllNotifications(prev => [notif, ...prev]);
           setTimeout(() => setNotification(null), 5000);
         }
+        else if (message.type === "EXAM_SCHEDULED" || message.type === "EXAM_START_ENABLED") {
+          // Show notification if present and applicable
+          if (message.notification) {
+            const notif = message.notification;
+            if (!notif.target_users || (userEmail && notif.target_users.includes(userEmail))) {
+              setNotification(notif);
+              setAllNotifications(prev => [notif, ...prev]);
+              setTimeout(() => setNotification(null), 5000);
+            }
+          }
+          // Refresh exams list
+          setExamRefreshKey(prev => prev + 1);
+        }
       } catch (err) {
         console.log("WS Error", err);
       }
@@ -1326,6 +1414,17 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
         <Header onNotificationPress={() => setShowNotifications(true)} />
         <SearchBar />
 
+        {/* [NEW] SCHEDULED EXAMS - High Priority */}
+        <UpcomingExamsCard
+          refreshKey={examRefreshKey}
+          userEmail={userEmail}
+          onStartExam={(examData) => navigation.navigate('ProctoredAssessment', {
+            assessmentData: examData,
+            userProfile: { role: 'User', email: userEmail },
+            isScheduledExam: true
+          })}
+        />
+
         <LiveFeedSection
           data={liveUpdates}
           onPlay={(item) => setSelectedVideo(item)}
@@ -1343,6 +1442,8 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
           data={assignedQuizzes}
           onStart={(quiz) => startQuiz(quiz)}
         />
+
+
 
         {/* [NEW] MEETINGS FEED */}
         <MeetingsFeedSection

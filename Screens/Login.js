@@ -149,6 +149,13 @@ export default function Login({ navigation }) {
 
             if (data.status === 'success') {
                 const user = data.user;
+
+                // [NEW] Save user profile to AsyncStorage for other components
+                const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+                await AsyncStorage.setItem('userProfile', JSON.stringify(user));
+                await AsyncStorage.setItem('userEmail', user.email);
+                console.log('[Login] Saved user profile to AsyncStorage:', user.email);
+
                 // Determine destination based on role/access
                 if (user.has_admin_access || user.is_superadmin || user.role === 'Store Manager') {
                     navigation.replace('ManagerDashboard', { userProfile: user });

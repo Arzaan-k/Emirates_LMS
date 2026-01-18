@@ -40,6 +40,10 @@ import SupportTicketModal from '../Components/SupportTicketModal'; // [NEW] LMS 
 
 import AuditLogsModal from '../Components/AuditLogsModal'; // [PHASE 2] Audit Logs
 import ContentLibraryModal from '../Components/ContentLibraryModal'; // [PHASE 2] Content Library
+import ScheduleExamModal from '../Components/ScheduleExamModal'; // [NEW] Schedule Exam
+import ExamAttendanceModal from '../Components/ExamAttendanceModal'; // [NEW] Exam Attendance
+import ScheduledExamsListModal from '../Components/ScheduledExamsListModal'; // [NEW] Scheduled Exams List
+import ExamHistoryModal from '../Components/ExamHistoryModal'; // [NEW] Exam History
 
 
 
@@ -240,6 +244,14 @@ export default function ManagerDashboard({ route, navigation }) {
     // [NEW] Simulation Flow Builder State
     const [simulationBuilderVisible, setSimulationBuilderVisible] = useState(false);
     const [editingSimulation, setEditingSimulation] = useState(null);
+
+    // [NEW] Schedule Exam State
+    const [scheduleExamVisible, setScheduleExamVisible] = useState(false);
+    const [scheduledExamsListVisible, setScheduledExamsListVisible] = useState(false); // [NEW] List Modal
+    const [examAttendanceVisible, setExamAttendanceVisible] = useState(false);
+    const [selectedExamForAttendance, setSelectedExamForAttendance] = useState(null);
+    const [scheduledExams, setScheduledExams] = useState([]);
+    const [examHistoryVisible, setExamHistoryVisible] = useState(false); // [NEW] Exam History Modal
 
     useEffect(() => {
         if (uploadVisible) {
@@ -1135,6 +1147,39 @@ export default function ManagerDashboard({ route, navigation }) {
                             </TouchableOpacity>
                         )}
 
+                        {/* SCHEDULED EXAMS - Unified Entry Point */}
+                        {(hasPrivilege('proctored_create_manage') ||
+                            userProfile?.category === 'Supervisor' ||
+                            userProfile?.role === 'Supervisor' ||
+                            userProfile?.category === 'Manager') && (
+                                <TouchableOpacity
+                                    style={styles.actionBtn}
+                                    onPress={() => setScheduledExamsListVisible(true)}
+                                >
+                                    <View style={[styles.actionIcon, { backgroundColor: '#ECFDF5' }]}>
+                                        <MaterialCommunityIcons name="calendar-clock" size={24} color="#059669" />
+                                    </View>
+                                    <Text style={styles.actionText}>Scheduled Exams</Text>
+                                </TouchableOpacity>
+                            )}
+
+                        {/* EXAM HISTORY - View all completed exams with reports */}
+                        {(hasPrivilege('proctored_view_results') ||
+                            userProfile?.category === 'Supervisor' ||
+                            userProfile?.role === 'Supervisor' ||
+                            userProfile?.category === 'Manager' ||
+                            isSuperAdmin) && (
+                                <TouchableOpacity
+                                    style={styles.actionBtn}
+                                    onPress={() => setExamHistoryVisible(true)}
+                                >
+                                    <View style={[styles.actionIcon, { backgroundColor: '#EEF2FF' }]}>
+                                        <MaterialCommunityIcons name="clipboard-text-clock" size={24} color="#6366F1" />
+                                    </View>
+                                    <Text style={styles.actionText}>Exam Reports</Text>
+                                </TouchableOpacity>
+                            )}
+
                         {/* LMS SUPPORT - Always visible for admins */}
                         <TouchableOpacity
                             style={styles.actionBtn}
@@ -1829,6 +1874,43 @@ export default function ManagerDashboard({ route, navigation }) {
             <AuditLogsModal
                 visible={auditLogsVisible}
                 onClose={() => setAuditLogsVisible(false)}
+            />
+
+            {/* [NEW] SCHEDULE EXAM MODAL */}
+            <ScheduleExamModal
+                visible={scheduleExamVisible}
+                onClose={() => setScheduleExamVisible(false)}
+                userProfile={userProfile}
+            />
+
+            {/* [NEW] EXAM ATTENDANCE MODAL */}
+            <ExamAttendanceModal
+                visible={examAttendanceVisible}
+                onClose={() => setExamAttendanceVisible(false)}
+                exam={selectedExamForAttendance}
+                userProfile={userProfile}
+            />
+
+            {/* [NEW] SCHEDULED EXAMS LIST MODAL */}
+            <ScheduledExamsListModal
+                visible={scheduledExamsListVisible}
+                onClose={() => setScheduledExamsListVisible(false)}
+                userProfile={userProfile}
+                onSelectExam={(exam) => {
+                    setScheduledExamsListVisible(false);
+                    setSelectedExamForAttendance(exam);
+                    setTimeout(() => setExamAttendanceVisible(true), 500);
+                }}
+                onCreateNew={() => {
+                    setScheduledExamsListVisible(false);
+                    setTimeout(() => setScheduleExamVisible(true), 500);
+                }}
+            />
+
+            {/* [NEW] EXAM HISTORY MODAL */}
+            <ExamHistoryModal
+                visible={examHistoryVisible}
+                onClose={() => setExamHistoryVisible(false)}
             />
         </View>
     );
