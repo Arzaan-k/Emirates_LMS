@@ -10,7 +10,8 @@ import {
     SafeAreaView,
     Alert,
     Modal as RNModal,
-    ActivityIndicator
+    ActivityIndicator,
+    TextInput
 } from 'react-native';
 import { MaterialCommunityIcons, Feather, Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -245,6 +246,59 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
         setPlaybackSpeed(rates[nextIdx]);
     };
 
+    const transcriptText = lesson.transcript || lesson.desc || "No transcript available for this lesson.";
+
+    // Translation State
+    const [translationLang, setTranslationLang] = useState('English');
+    const [translatedText, setTranslatedText] = useState('');
+    const [isTranslating, setIsTranslating] = useState(false);
+    const [showLangPicker, setShowLangPicker] = useState(false);
+    const [searchLang, setSearchLang] = useState('');
+
+    const LANGUAGES = [
+        "English",
+        // Indian Languages
+        "Hindi", "Bengali", "Telugu", "Marathi", "Tamil", "Urdu", "Gujarati",
+        "Kannada", "Malayalam", "Odia", "Punjabi", "Assamese", "Maithili",
+        "Santali", "Kashmiri", "Nepali", "Konkani", "Sindhi", "Dogri",
+        "Manipuri", "Bodo", "Sanskrit",
+        // International Languages
+        "Spanish", "French", "German", "Chinese", "Japanese", "Arabic", "Portuguese", "Russian"
+    ];
+
+    const handleTranslate = async (targetLang) => {
+        setTranslationLang(targetLang);
+        setShowLangPicker(false);
+
+        if (targetLang === 'English') {
+            setTranslatedText(''); // Reset to original
+            return;
+        }
+
+        setIsTranslating(true);
+        try {
+            const response = await fetch(`${API_URL}/ai/translate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    text: transcriptText,
+                    target_language: targetLang
+                })
+            });
+            const data = await response.json();
+            if (data.translated_text) {
+                setTranslatedText(data.translated_text);
+            }
+        } catch (error) {
+            console.error("Translation error:", error);
+        } finally {
+            setIsTranslating(false);
+        }
+    };
+
+    const displayTranscript = translatedText || transcriptText;
+    const filteredLanguages = LANGUAGES.filter(l => l.toLowerCase().includes(searchLang.toLowerCase()));
+
     // Parse Quiz Data safely
     const parseQuizData = () => {
         if (!lesson.quiz) return [];
@@ -254,7 +308,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
     };
 
     const quizData = parseQuizData();
-    const transcriptText = lesson.transcript || lesson.desc || "No transcript available for this lesson.";
+
 
     // Fetch node progress and requirements on mount
     useEffect(() => {
@@ -789,12 +843,86 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
                     {/* CONTENT AREA */}
                     <View style={styles.contentArea}>
                         {/* TRANSCRIPT VIEW */}
+                        {/* TRANSCRIPT VIEW with Translation */}
                         {activeTab === 'transcript' && (
-                            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20 }}>
-                                <Animated.Text entering={FadeInDown.delay(100)} style={styles.transcriptText}>
-                                    {transcriptText}
-                                </Animated.Text>
-                            </ScrollView>
+                            <View style={{ flex: 1 }}>
+                                {/* Language Selector Bar */}
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 16, marginBottom: 8 }}>
+                                    <Text style={{ color: '#9CA3AF', fontSize: 13, fontFamily: 'Poppins_500Medium' }}>Language</Text>
+                                    <TouchableOpacity
+                                        style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#374151', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 }}
+                                        onPress={() => { setSearchLang(''); setShowLangPicker(true); }}
+                                    >
+                                        <MaterialCommunityIcons name="translate" size={16} color="#A5B4FC" style={{ marginRight: 6 }} />
+                                        <Text style={{ color: '#E5E7EB', fontSize: 13, fontFamily: 'Poppins_500Medium' }}>{translationLang}</Text>
+                                        <Feather name="chevron-down" size={14} color="#9CA3AF" style={{ marginLeft: 4 }} />
+                                    </TouchableOpacity>
+                                </View>
+
+                                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20 }}>
+                                    {isTranslating ? (
+                                        <View style={{ padding: 40, alignItems: 'center' }}>
+                                            <ActivityIndicator size="small" color="#F59E0B" />
+                                            <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 10, fontFamily: 'Poppins_400Regular' }}>Translating transcript...</Text>
+                                        </View>
+                                    ) : (
+                                        <Animated.Text entering={FadeInDown.delay(100)} style={[styles.transcriptText, { color: '#E5E7EB', minHeight: 100 }]}>
+                                            {displayTranscript && displayTranscript.length > 0 ? displayTranscript : "No transcript content available."}
+                                        </Animated.Text>
+                                    )}
+                                </ScrollView>
+
+                                {/* LANGUAGE PICKER MODAL */}
+                                <RNModal visible={showLangPicker} transparent animationType="fade">
+                                    <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 20 }}>
+                                        <View style={{ backgroundColor: '#1F2937', borderRadius: 20, maxHeight: '70%', overflow: 'hidden' }}>
+                                            <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: '#374151', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                <Text style={{ color: '#FFF', fontSize: 16, fontFamily: 'Poppins_600SemiBold' }}>Select Language</Text>
+                                                <TouchableOpacity onPress={() => setShowLangPicker(false)}>
+                                                    <Feather name="x" size={20} color="#9CA3AF" />
+                                                </TouchableOpacity>
+                                            </View>
+
+                                            <View style={{ padding: 12 }}>
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#374151', borderRadius: 10, paddingHorizontal: 10 }}>
+                                                    <Feather name="search" size={16} color="#9CA3AF" />
+                                                    <TextInput
+                                                        style={{ flex: 1, padding: 10, color: '#FFF', fontFamily: 'Poppins_400Regular' }}
+                                                        placeholder="Search language..."
+                                                        placeholderTextColor="#6B7280"
+                                                        value={searchLang}
+                                                        onChangeText={setSearchLang}
+                                                    />
+                                                </View>
+                                            </View>
+
+                                            <ScrollView contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 12 }}>
+                                                {filteredLanguages.map(lang => (
+                                                    <TouchableOpacity
+                                                        key={lang}
+                                                        style={{
+                                                            paddingVertical: 14,
+                                                            paddingHorizontal: 16,
+                                                            borderBottomWidth: 1,
+                                                            borderBottomColor: '#374151',
+                                                            flexDirection: 'row',
+                                                            justifyContent: 'space-between',
+                                                            alignItems: 'center'
+                                                        }}
+                                                        onPress={() => handleTranslate(lang)}
+                                                    >
+                                                        <Text style={{ color: lang === translationLang ? '#A5B4FC' : '#D1D5DB', fontFamily: 'Poppins_400Regular', fontSize: 15 }}>{lang}</Text>
+                                                        {lang === translationLang && <Feather name="check" size={16} color="#A5B4FC" />}
+                                                    </TouchableOpacity>
+                                                ))}
+                                                {filteredLanguages.length === 0 && (
+                                                    <Text style={{ color: '#6B7280', textAlign: 'center', marginTop: 20, paddingBottom: 20 }}>No languages found</Text>
+                                                )}
+                                            </ScrollView>
+                                        </View>
+                                    </View>
+                                </RNModal>
+                            </View>
                         )}
 
                         {/* QUIZ VIEW */}

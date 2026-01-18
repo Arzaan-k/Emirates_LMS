@@ -292,9 +292,8 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
             setIsVideoPlaying(true);
 
             // Play video
-            if (videoRef.current && currentNode.videoUrl) {
-                await videoRef.current.playAsync();
-            } else {
+            // Video plays automatically via isVideoPlaying state
+            if (!currentNode.videoUrl) {
                 // No video - proceed to next step after short delay
                 setTimeout(() => {
                     handleVideoEnd({ didJustFinish: true });
@@ -428,7 +427,7 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
     const handleReplayVideo = async () => {
         if (videoRef.current) {
             await videoRef.current.setPositionAsync(0);
-            await videoRef.current.playAsync();
+
             setIsVideoPlaying(true);
             setShowOptions(false);
         }
@@ -476,7 +475,7 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
                             source={{ uri: currentNode.videoUrl }}
                             style={styles.fullscreenVideo}
                             resizeMode={ResizeMode.COVER}
-                            shouldPlay={false}
+                            shouldPlay={isVideoPlaying}
                             isLooping={false}
                             onPlaybackStatusUpdate={handleVideoEnd}
                         />

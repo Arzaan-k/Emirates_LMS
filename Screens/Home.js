@@ -12,7 +12,9 @@ import {
   Platform,
   ImageBackground,
   Modal,
+  ActivityIndicator,
 } from "react-native";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Video, ResizeMode } from 'expo-av';
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { BlurView } from "expo-blur";
@@ -47,7 +49,6 @@ import QuizTakingModal from "../Components/QuizTakingModal";
 import { useNavigation } from "@react-navigation/native";
 import { useLanguage } from "../context/language.context";
 import API_URL from "../config";
-import SupportTicketModal from "../Components/SupportTicketModal"; // [NEW] LMS Support
 
 const { width, height } = Dimensions.get('window');
 
@@ -185,6 +186,24 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
   const [score, setScore] = useState(0);
   const [showResult, setShowResult] = useState(false);
 
+  // Translation State
+  const [translationLang, setTranslationLang] = useState('English');
+  const [translatedText, setTranslatedText] = useState('');
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [showLangPicker, setShowLangPicker] = useState(false);
+  const [searchLang, setSearchLang] = useState('');
+
+  const LANGUAGES = [
+    "English",
+    // Indian Languages
+    "Hindi", "Bengali", "Telugu", "Marathi", "Tamil", "Urdu", "Gujarati",
+    "Kannada", "Malayalam", "Odia", "Punjabi", "Assamese", "Maithili",
+    "Santali", "Kashmiri", "Nepali", "Konkani", "Sindhi", "Dogri",
+    "Manipuri", "Bodo", "Sanskrit",
+    // International Languages
+    "Spanish", "French", "German", "Chinese", "Japanese", "Arabic", "Portuguese", "Russian"
+  ];
+
   if (!visible || !videoData) return null;
 
   const handleAnswer = (optionIndex) => {
@@ -199,6 +218,39 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
       setShowResult(true);
     }
   };
+
+  const handleTranslate = async (targetLang) => {
+    setTranslationLang(targetLang);
+    setShowLangPicker(false);
+
+    if (targetLang === 'English') {
+      setTranslatedText(''); // Reset to original
+      return;
+    }
+
+    setIsTranslating(true);
+    try {
+      const response = await fetch(`${API_URL}/ai/translate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: videoData.transcript || "No transcript available.",
+          target_language: targetLang
+        })
+      });
+      const data = await response.json();
+      if (data.translated_text) {
+        setTranslatedText(data.translated_text);
+      }
+    } catch (error) {
+      console.error("Translation error:", error);
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
+  const filteredLanguages = LANGUAGES.filter(l => l.toLowerCase().includes(searchLang.toLowerCase()));
+  const displayTranscript = translatedText || videoData.transcript || "No transcript available for this video.";
 
   const hasQuiz = videoData.quiz && videoData.quiz.length > 0;
 
@@ -249,11 +301,33 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
           </View>
 
           {/* CONTENT */}
-          <ScrollView style={styles.contentArea}>
+          <ScrollView style={styles.contentArea} contentContainerStyle={{ paddingBottom: 40 }}>
             {activeTab === 'transcript' ? (
-              <Text style={styles.transcriptText}>
-                {videoData.transcript || "No transcript available for this video."}
-              </Text>
+              <View>
+                {/* Language Selector Bar */}
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <Text style={{ color: '#9CA3AF', fontSize: 13, fontFamily: 'Poppins_500Medium' }}>Language</Text>
+                  <TouchableOpacity
+                    style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#334155', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 }}
+                    onPress={() => { setSearchLang(''); setShowLangPicker(true); }}
+                  >
+                    <MaterialCommunityIcons name="translate" size={16} color="#A5B4FC" style={{ marginRight: 6 }} />
+                    <Text style={{ color: '#E5E7EB', fontSize: 13, fontFamily: 'Poppins_500Medium' }}>{translationLang}</Text>
+                    <Feather name="chevron-down" size={14} color="#9CA3AF" style={{ marginLeft: 4 }} />
+                  </TouchableOpacity>
+                </View>
+
+                {isTranslating ? (
+                  <View style={{ padding: 40, alignItems: 'center' }}>
+                    <ActivityIndicator size="small" color="#F59E0B" />
+                    <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 10, fontFamily: 'Poppins_400Regular' }}>Translating transcript...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.transcriptText}>
+                    {displayTranscript}
+                  </Text>
+                )}
+              </View>
             ) : (
               <View style={styles.quizContainer}>
                 {!showResult ? (
@@ -295,6 +369,57 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
           </ScrollView>
         </View>
       </View>
+      {/* LANGUAGE PICKER MODAL */}
+      <Modal visible={showLangPicker} transparent animationType="fade">
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 20 }}>
+          <View style={{ backgroundColor: '#1F2937', borderRadius: 20, maxHeight: '70%', overflow: 'hidden' }}>
+            <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: '#374151', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={{ color: '#FFF', fontSize: 16, fontFamily: 'Poppins_600SemiBold' }}>Select Language</Text>
+              <TouchableOpacity onPress={() => setShowLangPicker(false)}>
+                <Feather name="x" size={20} color="#9CA3AF" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ padding: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#374151', borderRadius: 10, paddingHorizontal: 10 }}>
+                <Feather name="search" size={16} color="#9CA3AF" />
+                <TextInput
+                  style={{ flex: 1, padding: 10, color: '#FFF', fontFamily: 'Poppins_400Regular' }}
+                  placeholder="Search language..."
+                  placeholderTextColor="#6B7280"
+                  value={searchLang}
+                  onChangeText={setSearchLang}
+                />
+              </View>
+            </View>
+
+            <ScrollView contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 12 }}>
+              {filteredLanguages.map(lang => (
+                <TouchableOpacity
+                  key={lang}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    padding: 12,
+                    backgroundColor: translationLang === lang ? '#374151' : 'transparent',
+                    borderRadius: 10,
+                    marginBottom: 4
+                  }}
+                  onPress={() => handleTranslate(lang)}
+                >
+                  <Text style={{ color: translationLang === lang ? '#F59E0B' : '#E5E7EB', flex: 1, fontFamily: translationLang === lang ? 'Poppins_600SemiBold' : 'Poppins_400Regular' }}>
+                    {lang}
+                  </Text>
+                  {translationLang === lang && <Feather name="check" size={16} color="#F59E0B" />}
+                </TouchableOpacity>
+              ))}
+              {filteredLanguages.length === 0 && (
+                <Text style={{ color: '#6B7280', textAlign: 'center', padding: 20 }}>No languages found</Text>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 }
@@ -615,10 +740,10 @@ function CrucialNotificationModal({ notification, onAcknowledge }) {
               </View>
 
               {/* Content */}
-              {notification.mediaUrl && (
+              {(notification.mediaUrl || notification.image || notification.imageUrl || notification.url) && (
                 <View style={{ marginBottom: 16, borderRadius: 12, overflow: 'hidden' }}>
                   <Image
-                    source={{ uri: notification.mediaUrl }}
+                    source={{ uri: notification.mediaUrl || notification.image || notification.imageUrl || notification.url }}
                     style={{ width: '100%', height: 200, borderRadius: 12 }}
                     resizeMode="cover"
                   />
@@ -926,14 +1051,18 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   // [NEW] MEETINGS STATE
   const [upcomingMeetings, setUpcomingMeetings] = useState([]);
   const [crmTasks, setCrmTasks] = useState([]);
-  const [supportModalVisible, setSupportModalVisible] = useState(false);
+
 
   const handleAcknowledge = async (id) => {
     try {
       // Add to local tracking FIRST to prevent re-display
       acknowledgedNotifIds.current.add(id);
-      await fetch(`${API_URL}/notifications/${id}/read`, { method: 'POST' });
+
+      // PERSIST to AsyncStorage
+      await AsyncStorage.setItem('acknowledged_notifications', JSON.stringify(Array.from(acknowledgedNotifIds.current)));
+
       setCrucialNotif(null);
+      await fetch(`${API_URL}/notifications/${id}/read`, { method: 'POST' });
     } catch (e) {
       console.error("Ack Error", e);
       setCrucialNotif(null);
@@ -1029,6 +1158,15 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   // FETCH CRUCIAL NOTIFICATIONS - Runs on load to block app if needed
   const fetchCrucialNotifications = async () => {
     try {
+      // LOAD ACKNOWLEDGED IDs FROM STORAGE FIRST
+      try {
+        const storedAck = await AsyncStorage.getItem('acknowledged_notifications');
+        if (storedAck) {
+          const ids = JSON.parse(storedAck);
+          ids.forEach(id => acknowledgedNotifIds.current.add(id));
+        }
+      } catch (err) { console.log("Error loading acks", err); }
+
       const res = await fetch(`${API_URL}/notifications/crucial`);
       const data = await res.json();
       // If there's an unread crucial notification AND not already acknowledged locally
@@ -1354,38 +1492,7 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
         notification={selectedNotification}
         onClose={() => setSelectedNotification(null)}
       />
-      
-      {/* LMS SUPPORT MODAL */}
-      <SupportTicketModal
-        visible={supportModalVisible}
-        onClose={() => setSupportModalVisible(false)}
-        userEmail="user@example.com"
-        userName="User"
-        userRole="user"
-      />
 
-      {/* FLOATING SUPPORT BUTTON */}
-      <TouchableOpacity
-        style={{
-          position: 'absolute',
-          bottom: 100,
-          right: 20,
-          width: 56,
-          height: 56,
-          borderRadius: 28,
-          backgroundColor: '#DC2626',
-          justifyContent: 'center',
-          alignItems: 'center',
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.3,
-          shadowRadius: 8,
-          elevation: 8,
-        }}
-        onPress={() => setSupportModalVisible(true)}
-      >
-        <MaterialCommunityIcons name="headset" size={26} color="#FFF" />
-      </TouchableOpacity>
     </View>
   )
 }

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
@@ -6,10 +6,12 @@ import { LANGUAGES, useLanguage } from '../context/language.context';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CommonActions } from '@react-navigation/native';
+import SupportTicketModal from '../Components/SupportTicketModal';
 
 export default function Settings({ navigation }) {
     const insets = useSafeAreaInsets();
     const { language, changeLanguage, t } = useLanguage();
+    const [showSupport, setShowSupport] = useState(false);
 
     const handleLogout = async () => {
         Alert.alert(
@@ -98,13 +100,33 @@ export default function Settings({ navigation }) {
                     </View>
                 </View>
 
+                {/* Support Section */}
+                <View style={styles.section}>
+                    <View style={styles.card}>
+                        <TouchableOpacity style={styles.optionRow} onPress={() => setShowSupport(true)}>
+                            <View style={styles.optionLeft}>
+                                <Feather name="help-circle" size={20} color="#4B5563" />
+                                <Text style={styles.optionText}>{t('support') || "Support"}</Text>
+                            </View>
+                            <Feather name="chevron-right" size={20} color="#9CA3AF" />
+                        </TouchableOpacity>
+                    </View>
+                </View>
+
                 <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
                     <Feather name="log-out" size={20} color="#EF4444" style={{ marginRight: 8 }} />
                     <Text style={styles.logoutText}>{t('logout')}</Text>
                 </TouchableOpacity>
 
             </ScrollView>
-        </View>
+
+            <SupportTicketModal
+                visible={showSupport}
+                onClose={() => setShowSupport(false)}
+                userEmail={"demo@example.com"} // Replace with actual user email from context/store
+                userName={"Demo User"} // Replace with actual name
+            />
+        </View >
     );
 }
 
@@ -120,7 +142,7 @@ const styles = StyleSheet.create({
     },
     backBtn: { padding: 8, borderRadius: 8, backgroundColor: '#F3F4F6' },
     headerTitle: { fontSize: 18, fontFamily: 'Poppins_600SemiBold', color: '#111827' },
-    content: { padding: 20 },
+    content: { padding: 20, paddingBottom: 100 },
     section: { marginBottom: 24 },
     sectionTitle: { fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: '#6B7280', marginBottom: 8, marginLeft: 4 },
     card: { backgroundColor: '#FFF', borderRadius: 16, overflow: 'hidden', elevation: 2, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2 },

@@ -22,8 +22,65 @@ import { Modal } from 'react-native';
 const { width, height } = Dimensions.get("window");
 
 // --- VIDEO PLAYER MODAL ---
+// --- VIDEO PLAYER MODAL WITH TRANSCRIPT & AI TRANSLATION ---
 function VideoPlayerModal({ visible, videoData, onClose }) {
+    const [transcript, setTranscript] = useState('');
+    const [language, setLanguage] = useState('English');
+    const [isTranslating, setIsTranslating] = useState(false);
+    const [showLangPicker, setShowLangPicker] = useState(false);
+    const [searchLang, setSearchLang] = useState('');
+
+    const LANGUAGES = [
+        "English",
+        // Indian Languages
+        "Hindi", "Bengali", "Telugu", "Marathi", "Tamil", "Urdu", "Gujarati",
+        "Kannada", "Malayalam", "Odia", "Punjabi", "Assamese", "Maithili",
+        "Santali", "Kashmiri", "Nepali", "Konkani", "Sindhi", "Dogri",
+        "Manipuri", "Bodo", "Sanskrit",
+        // International Languages
+        "Spanish", "French", "German", "Chinese", "Japanese", "Arabic", "Portuguese", "Russian"
+    ];
+
+    React.useEffect(() => {
+        if (videoData) {
+            setTranscript(videoData.transcript || "No transcript available.");
+            setLanguage('English'); // Default to English or original
+        }
+    }, [videoData]);
+
+    const handleTranslate = async (targetLang) => {
+        setLanguage(targetLang);
+        setShowLangPicker(false);
+
+        // If switching back to English (assuming original is English for now), we could cache original. 
+        // But for simplicity/robustness with AI, we just translate. 
+        // NOTE: In a production app, we'd cache the original text to avoid re-translating to source.
+
+        setIsTranslating(true);
+        try {
+            const response = await fetch(`${API_URL}/ai/translate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    text: videoData.transcript || "No transcript available.", // Always translate from source
+                    target_language: targetLang
+                })
+            });
+            const data = await response.json();
+            if (data.translated_text) {
+                setTranscript(data.translated_text);
+            }
+        } catch (error) {
+            console.error("Translation error:", error);
+            // Fallback or alert (silent fail to keep UI smooth)
+        } finally {
+            setIsTranslating(false);
+        }
+    };
+
     if (!visible || !videoData) return null;
+
+    const filteredLanguages = LANGUAGES.filter(l => l.toLowerCase().includes(searchLang.toLowerCase()));
 
     return (
         <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
@@ -34,19 +91,104 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
                 </TouchableOpacity>
 
                 {/* VIDEO PLAYER */}
-                <Video
-                    source={{ uri: videoData.videoUrl }}
-                    style={{ width: '100%', height: 300, marginTop: 100 }}
-                    useNativeControls
-                    resizeMode={ResizeMode.CONTAIN}
-                    shouldPlay
-                    onError={(e) => console.log("Video Error:", e)}
-                />
-
-                <View style={{ padding: 20 }}>
-                    <Text style={{ color: '#FFF', fontSize: 18, fontFamily: 'Poppins_600SemiBold', marginBottom: 10 }}>{videoData.title}</Text>
-                    <Text style={{ color: '#9CA3AF', fontSize: 14, fontFamily: 'Poppins_400Regular' }}>{videoData.category} • {videoData.duration}</Text>
+                <View style={{ width: '100%', height: 300, backgroundColor: '#000', justifyContent: 'center' }}>
+                    <Video
+                        source={{ uri: videoData.videoUrl }}
+                        style={{ width: '100%', height: '100%' }}
+                        useNativeControls
+                        resizeMode={ResizeMode.CONTAIN}
+                        shouldPlay
+                        onError={(e) => console.log("Video Error:", e)}
+                    />
                 </View>
+
+                {/* CONTENT CONTAINER */}
+                <View style={{ flex: 1, backgroundColor: '#111827', borderTopLeftRadius: 24, borderTopRightRadius: 24, marginTop: -20, overflow: 'hidden' }}>
+                    <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 50 }}>
+                        {/* HEADER INFO */}
+                        <Text style={{ color: '#FFF', fontSize: 20, fontFamily: 'Poppins_600SemiBold', marginBottom: 4 }}>{videoData.title}</Text>
+                        <Text style={{ color: '#9CA3AF', fontSize: 14, fontFamily: 'Poppins_400Regular', marginBottom: 24 }}>{videoData.category} • {videoData.duration}</Text>
+
+                        {/* TRANSCRIPT HEADER & LANG SELECTOR */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                            <Text style={{ color: '#E5E7EB', fontSize: 16, fontFamily: 'Poppins_600SemiBold' }}>Transcript</Text>
+
+                            <TouchableOpacity
+                                style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#374151', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 }}
+                                onPress={() => { setSearchLang(''); setShowLangPicker(true); }}
+                            >
+                                <MaterialCommunityIcons name="translate" size={16} color="#A5B4FC" style={{ marginRight: 6 }} />
+                                <Text style={{ color: '#E5E7EB', fontSize: 13, fontFamily: 'Poppins_500Medium' }}>{language}</Text>
+                                <Feather name="chevron-down" size={14} color="#9CA3AF" style={{ marginLeft: 4 }} />
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* TRANSCRIPT TEXT */}
+                        {isTranslating ? (
+                            <View style={{ padding: 40, alignItems: 'center' }}>
+                                <ActivityIndicator size="small" color="#A5B4FC" />
+                                <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 10, fontFamily: 'Poppins_400Regular' }}>Translating with AI...</Text>
+                            </View>
+                        ) : (
+                            <View style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 16, padding: 16 }}>
+                                <Text style={{ color: '#D1D5DB', fontSize: 14, fontFamily: 'Poppins_400Regular', lineHeight: 24 }}>
+                                    {transcript}
+                                </Text>
+                            </View>
+                        )}
+                    </ScrollView>
+                </View>
+
+                {/* LANGUAGE PICKER MODAL */}
+                <Modal visible={showLangPicker} transparent animationType="fade">
+                    <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 20 }}>
+                        <View style={{ backgroundColor: '#1F2937', borderRadius: 20, maxHeight: '70%', overflow: 'hidden' }}>
+                            <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: '#374151', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <Text style={{ color: '#FFF', fontSize: 16, fontFamily: 'Poppins_600SemiBold' }}>Select Language</Text>
+                                <TouchableOpacity onPress={() => setShowLangPicker(false)}>
+                                    <Feather name="x" size={20} color="#9CA3AF" />
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={{ padding: 12 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#374151', borderRadius: 10, paddingHorizontal: 10 }}>
+                                    <Feather name="search" size={16} color="#9CA3AF" />
+                                    <TextInput
+                                        style={{ flex: 1, padding: 10, color: '#FFF', fontFamily: 'Poppins_400Regular' }}
+                                        placeholder="Search language..."
+                                        placeholderTextColor="#6B7280"
+                                        value={searchLang}
+                                        onChangeText={setSearchLang}
+                                    />
+                                </View>
+                            </View>
+
+                            <ScrollView contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 12 }}>
+                                {filteredLanguages.map(lang => (
+                                    <TouchableOpacity
+                                        key={lang}
+                                        style={{
+                                            paddingVertical: 14,
+                                            paddingHorizontal: 16,
+                                            borderBottomWidth: 1,
+                                            borderBottomColor: '#374151',
+                                            flexDirection: 'row',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center'
+                                        }}
+                                        onPress={() => handleTranslate(lang)}
+                                    >
+                                        <Text style={{ color: lang === language ? '#A5B4FC' : '#D1D5DB', fontFamily: 'Poppins_400Regular', fontSize: 15 }}>{lang}</Text>
+                                        {lang === language && <Feather name="check" size={16} color="#A5B4FC" />}
+                                    </TouchableOpacity>
+                                ))}
+                                {filteredLanguages.length === 0 && (
+                                    <Text style={{ color: '#6B7280', textAlign: 'center', marginTop: 20, paddingBottom: 20 }}>No languages found</Text>
+                                )}
+                            </ScrollView>
+                        </View>
+                    </View>
+                </Modal>
             </View>
         </Modal>
     );
@@ -226,7 +368,8 @@ const AllCourses = () => {
                     bg: bucket?.color ? `${bucket.color}15` : "#FFF7ED", // Light version of bucket color
                     videoUrl: item.videoUrl,
                     description: item.description,
-                    bucket: item.bucket
+                    bucket: item.bucket,
+                    transcript: item.transcript || "No transcript available for this video."
                 };
             });
             setCourses(mappedCourses);
