@@ -407,7 +407,7 @@ const levelUpStyles = StyleSheet.create({
 
 const CAR_IMAGE = require('../assets/images/path_car.png');
 
-export default function CoursePath({ userEmail = "user" }) {
+export default function CoursePath({ userEmail = "user", learningPathType = "self_learning", onComplete }) {
     const [selectedLevel, setSelectedLevel] = useState(null);
     const [activeLesson, setActiveLesson] = useState(null);
     const [levels, setLevels] = useState([]);
@@ -455,10 +455,13 @@ export default function CoursePath({ userEmail = "user" }) {
         'Assistant Store Manager': 'store'
     };
 
+    // Reload when learningPathType changes
     useEffect(() => {
         loadCoursePath();
-        checkAdvancementEligibility();
-    }, []);
+        if (learningPathType === 'career_progression') {
+            checkAdvancementEligibility();
+        }
+    }, [learningPathType]);
 
     // Check if user is eligible for role advancement exam
     const checkAdvancementEligibility = async () => {
@@ -502,27 +505,102 @@ export default function CoursePath({ userEmail = "user" }) {
             const rulesRes = await fetch(`${API_URL}/admin/access-rules`);
             const rulesData = await rulesRes.json();
 
-            // 3. Fetch All Courses (for details)
-            const coursesRes = await fetch(`${API_URL}/content`);
-            const allCoursesData = await coursesRes.json();
+            // 3. Fetch Courses for the specific learning path type
+            const learningPathRes = await fetch(`${API_URL}/learning-paths/content/${learningPathType}?user_email=${userEmail}`);
+            const learningPathData = await learningPathRes.json();
 
-            // 4. Fetch User Completions 
-            // (We can get this from an endpoint or imply it. Let's assume we fetch it to know individual course status)
-            // Ideally /path/nodes gives status, but we are constructing custom order.
-            // Let's use /path/nodes just to get completion status efficiently if possible, or fetch completions separately.
-            // For now, let's look at what we have. 
-            // We'll rely on a new fetch to get completions if needed, or re-use logic.
-            // Actually, let's use the existing /path/nodes endpoint to get the "status" (completed/active) 
-            // but ignore its ordering.
+            // If the path is locked, show empty state or handle accordingly
+            if (learningPathData.is_locked) {
+                setLevels([]);
+                return;
+            }
+
+            // 4. Get courses from the learning path endpoint (already has status)
+            const pathCourses = learningPathData.courses || [];
+
+            // Get completed IDs from the response
+            const completedIds = new Set(
+                pathCourses.filter(c => c.status === 'completed').map(c => c.id)
+            );
+
+            // Also fetch from general path/nodes for backward compatibility
             const statusRes = await fetch(`${API_URL}/path/nodes?user_email=${userEmail}&t=${Date.now()}`);
             const statusData = await statusRes.json();
-            const completedIds = new Set(
-                statusData.filter(c => c.status === 'completed').map(c => c.id || c.videoUrl)
-            );
+            statusData.filter(c => c.status === 'completed').forEach(c => {
+                completedIds.add(c.id || c.videoUrl);
+            });
 
             // 5. Construct the Ordered Path with SEQUENTIAL UNLOCKING + SMART LEVEL DETECTION
             // [FIX] Strict Level Mode: Advancement only via Exam.
 
+            // For SELF-LEARNING path: Use simple sequential structure with SEQUENTIAL UNLOCKING
+            if (learningPathType === 'self_learning') {
+                // Build a simple sequential path from the courses
+                // Sort by timestamp ascending (oldest first = start of path, newest = end)
+                const sortedCourses = [...pathCourses].sort((a, b) =>
+                    new Date(a.timestamp || 0) - new Date(b.timestamp || 0)
+                );
+
+                let foundFirstIncomplete = false; // Track sequential unlocking
+
+                let builtPath = sortedCourses.map((course, index) => {
+                    const isCompleted = course.status === 'completed';
+
+                    // SEQUENTIAL UNLOCKING LOGIC:
+                    // - First node is always unlocked (active)
+                    // - Subsequent nodes are locked until prior node is completed
+                    let status = 'locked';
+
+                    if (isCompleted) {
+                        status = 'completed';
+                    } else if (index === 0) {
+                        // First node: always active if not completed
+                        status = 'active';
+                        foundFirstIncomplete = true;
+                    } else {
+                        // Check if previous node is completed
+                        const previousCourse = sortedCourses[index - 1];
+                        const isPreviousCompleted = previousCourse?.status === 'completed';
+
+                        if (isPreviousCompleted && !foundFirstIncomplete) {
+                            // Previous node completed, this is the next active node
+                            status = 'active';
+                            foundFirstIncomplete = true;
+                        } else {
+                            // Previous not completed OR we already found first incomplete
+                            status = 'locked';
+                        }
+                    }
+
+                    return {
+                        ...course,
+                        status: status,
+                        icon: ICONS[index % ICONS.length],
+                        levelContext: 'Self Learning',
+                        isFirstInLevel: index === 0
+                    };
+                });
+
+                // If all self-learning courses are completed, notify parent
+                const allCompleted = builtPath.length > 0 && builtPath.every(c => c.status === 'completed');
+                if (allCompleted && onComplete) {
+                    // Mark self-learning as complete on the backend
+                    try {
+                        await fetch(`${API_URL}/learning-paths/complete-self-learning/${userEmail}`, {
+                            method: 'POST'
+                        });
+                        onComplete(); // Refresh parent status
+                    } catch (e) {
+                        console.log("Error completing self-learning:", e);
+                    }
+                }
+
+                setLevels(builtPath);
+                updateCarPosition(builtPath);
+                return;
+            }
+
+            // For CAREER PROGRESSION path: Use existing hierarchy-based logic
             // Defines where the "visual" car is. 
             // Primarily follow the API Role, but check completions to see if we satisfy current level requirements.
             const apiLevelIdx = HIERARCHY.indexOf(progressData.current_level || 'Waffler');
@@ -540,8 +618,8 @@ export default function CoursePath({ userEmail = "user" }) {
                 const levelRules = rulesData[levelName] || {};
                 const courseIds = levelRules.accessible_courses || [];
 
-                // Find course objects
-                const levelCourses = courseIds.map(id => allCoursesData.find(c => c.id === id)).filter(Boolean);
+                // Find course objects from pathCourses (career progression courses)
+                const levelCourses = courseIds.map(id => pathCourses.find(c => c.id === id)).filter(Boolean);
 
                 // Determine Level Status relative to User
                 const thisLevelIdx = HIERARCHY.indexOf(levelName);
@@ -631,9 +709,15 @@ export default function CoursePath({ userEmail = "user" }) {
                 }
             });
 
-            // FALLBACK logic remains same...
-            if (builtPath.length === 0 && allCoursesData.length > 0) {
-                // ... (keep existing fallback logic if needed or just skip)
+            // FALLBACK logic - use pathCourses if builtPath is empty
+            if (builtPath.length === 0 && pathCourses.length > 0) {
+                // Use pathCourses directly as fallback
+                builtPath = pathCourses.map((course, index) => ({
+                    ...course,
+                    icon: ICONS[index % ICONS.length],
+                    levelContext: 'General',
+                    isFirstInLevel: index === 0
+                }));
             }
 
 

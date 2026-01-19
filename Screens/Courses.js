@@ -563,9 +563,44 @@ const AllCourses = () => {
     );
 };
 
-export default function Courses() {
+export default function Courses({ userEmail = "user" }) {
     const insets = useSafeAreaInsets();
     const [activeTab, setActiveTab] = useState('path'); // 'path' or 'quizzes'
+    const [learningPathTab, setLearningPathTab] = useState('self_learning'); // 'self_learning' or 'career_progression'
+    const [selfLearningStatus, setSelfLearningStatus] = useState({
+        self_learning_completed: true,
+        career_path_unlocked: true,
+        self_learning_progress: 100,
+        completed_courses: 0,
+        total_courses: 0
+    });
+    const [loadingStatus, setLoadingStatus] = useState(true);
+
+    // Fetch self-learning status on mount
+    React.useEffect(() => {
+        fetchSelfLearningStatus();
+    }, []);
+
+    const fetchSelfLearningStatus = async () => {
+        try {
+            setLoadingStatus(true);
+            const response = await fetch(`${API_URL}/learning-paths/self-learning-status/${userEmail}`);
+            const data = await response.json();
+            setSelfLearningStatus(data);
+        } catch (error) {
+            console.error("Failed to fetch self-learning status:", error);
+        } finally {
+            setLoadingStatus(false);
+        }
+    };
+
+    const handlePathTabChange = (tab) => {
+        // If career progression is locked, show message
+        if (tab === 'career_progression' && !selfLearningStatus.career_path_unlocked) {
+            return; // Can't switch to locked tab
+        }
+        setLearningPathTab(tab);
+    };
 
     return (
         <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -575,7 +610,9 @@ export default function Courses() {
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                     <View>
                         <Text style={styles.pageTitle}>My Learning Path</Text>
-                        <Text style={styles.subTitle}>Unit 2: Espresso Mastery</Text>
+                        <Text style={styles.subTitle}>
+                            {learningPathTab === 'self_learning' ? '📚 Self Learning Journey' : '🚀 Career Progression'}
+                        </Text>
                     </View>
                     <View style={styles.xpContainer}>
                         <MaterialCommunityIcons name="lightning-bolt" size={20} color="#F59E0B" />
@@ -610,9 +647,101 @@ export default function Courses() {
                 </View>
             </View>
 
+            {/* LEARNING PATH SUB-TABS (Only visible when Path tab is active) */}
+            {activeTab === 'path' && (
+                <View style={styles.learningPathTabsContainer}>
+                    {/* Self Learning Tab */}
+                    <TouchableOpacity
+                        style={[
+                            styles.learningPathTab,
+                            learningPathTab === 'self_learning' && styles.learningPathTabActive,
+                            { borderColor: '#10B981' }
+                        ]}
+                        onPress={() => handlePathTabChange('self_learning')}
+                    >
+                        <MaterialCommunityIcons
+                            name="school"
+                            size={18}
+                            color={learningPathTab === 'self_learning' ? '#FFF' : '#10B981'}
+                        />
+                        <Text style={[
+                            styles.learningPathTabText,
+                            learningPathTab === 'self_learning' && styles.learningPathTabTextActive
+                        ]}>Self Learning</Text>
+                        {/* Progress Badge */}
+                        {selfLearningStatus.total_courses > 0 && (
+                            <View style={[styles.progressBadge, { backgroundColor: learningPathTab === 'self_learning' ? 'rgba(255,255,255,0.3)' : '#D1FAE5' }]}>
+                                <Text style={[styles.progressBadgeText, { color: learningPathTab === 'self_learning' ? '#FFF' : '#059669' }]}>
+                                    {selfLearningStatus.completed_courses}/{selfLearningStatus.total_courses}
+                                </Text>
+                            </View>
+                        )}
+                    </TouchableOpacity>
+
+                    {/* Career Progression Tab */}
+                    <TouchableOpacity
+                        style={[
+                            styles.learningPathTab,
+                            learningPathTab === 'career_progression' && styles.learningPathTabActiveCareer,
+                            !selfLearningStatus.career_path_unlocked && styles.learningPathTabLocked
+                        ]}
+                        onPress={() => handlePathTabChange('career_progression')}
+                        disabled={!selfLearningStatus.career_path_unlocked}
+                    >
+                        {/* Lock Icon if locked */}
+                        {!selfLearningStatus.career_path_unlocked ? (
+                            <MaterialCommunityIcons name="lock" size={18} color="#9CA3AF" />
+                        ) : (
+                            <MaterialCommunityIcons
+                                name="trending-up"
+                                size={18}
+                                color={learningPathTab === 'career_progression' ? '#FFF' : '#F59E0B'}
+                            />
+                        )}
+                        <Text style={[
+                            styles.learningPathTabText,
+                            learningPathTab === 'career_progression' && selfLearningStatus.career_path_unlocked && styles.learningPathTabTextActive,
+                            !selfLearningStatus.career_path_unlocked && styles.learningPathTabTextLocked
+                        ]}>Career Progression</Text>
+                    </TouchableOpacity>
+                </View>
+            )}
+
+            {/* LOCKED OVERLAY MESSAGE (when trying to access locked career path) */}
+            {activeTab === 'path' && learningPathTab === 'career_progression' && !selfLearningStatus.career_path_unlocked && (
+                <View style={styles.lockedOverlay}>
+                    <View style={styles.lockedCard}>
+                        <MaterialCommunityIcons name="lock-outline" size={60} color="#9CA3AF" />
+                        <Text style={styles.lockedTitle}>Career Progression Locked</Text>
+                        <Text style={styles.lockedMessage}>
+                            Complete Self Learning to unlock Career Progression
+                        </Text>
+                        <View style={styles.progressContainer}>
+                            <View style={styles.progressBar}>
+                                <View style={[styles.progressFill, { width: `${selfLearningStatus.self_learning_progress || 0}%` }]} />
+                            </View>
+                            <Text style={styles.progressText}>{Math.round(selfLearningStatus.self_learning_progress || 0)}% Complete</Text>
+                        </View>
+                        <TouchableOpacity
+                            style={styles.goToSelfLearningBtn}
+                            onPress={() => setLearningPathTab('self_learning')}
+                        >
+                            <MaterialCommunityIcons name="school" size={18} color="#FFF" />
+                            <Text style={styles.goToSelfLearningBtnText}>Go to Self Learning</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            )}
+
             {/* MAIN CONTENT */}
             <View style={{ flex: 1 }}>
-                {activeTab === 'path' && <CoursePath />}
+                {activeTab === 'path' && (
+                    <CoursePath
+                        userEmail={userEmail}
+                        learningPathType={learningPathTab}
+                        onComplete={fetchSelfLearningStatus}
+                    />
+                )}
                 {activeTab === 'quizzes' && <QuizSection />}
                 {activeTab === 'courses' && <AllCourses />}
             </View>
@@ -789,5 +918,134 @@ const styles = StyleSheet.create({
         padding: 10,
         backgroundColor: 'rgba(0,0,0,0.5)',
         borderRadius: 20,
+    },
+
+    // DUAL LEARNING PATHS STYLES
+    learningPathTabsContainer: {
+        flexDirection: 'row',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        backgroundColor: '#FFF',
+        borderBottomWidth: 1,
+        borderBottomColor: '#F3F4F6',
+        gap: 10,
+    },
+    learningPathTab: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 12,
+        paddingHorizontal: 8,
+        borderRadius: 12,
+        backgroundColor: '#F9FAFB',
+        borderWidth: 1.5,
+        borderColor: '#E5E7EB',
+        gap: 6,
+    },
+    learningPathTabActive: {
+        backgroundColor: '#10B981',
+        borderColor: '#10B981',
+    },
+    learningPathTabActiveCareer: {
+        backgroundColor: '#F59E0B',
+        borderColor: '#F59E0B',
+    },
+    learningPathTabLocked: {
+        backgroundColor: '#F3F4F6',
+        borderColor: '#E5E7EB',
+        opacity: 0.7,
+    },
+    learningPathTabText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#374151',
+    },
+    learningPathTabTextActive: {
+        color: '#FFF',
+    },
+    learningPathTabTextLocked: {
+        color: '#9CA3AF',
+    },
+    progressBadge: {
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 10,
+    },
+    progressBadgeText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_700Bold',
+    },
+
+    // Locked Overlay
+    lockedOverlay: {
+        flex: 1,
+        backgroundColor: '#F9FAFB',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20,
+    },
+    lockedCard: {
+        backgroundColor: '#FFF',
+        borderRadius: 24,
+        padding: 32,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 20,
+        elevation: 5,
+        width: '100%',
+        maxWidth: 340,
+    },
+    lockedTitle: {
+        fontSize: 20,
+        fontFamily: 'Poppins_700Bold',
+        color: '#111827',
+        marginTop: 16,
+        marginBottom: 8,
+    },
+    lockedMessage: {
+        fontSize: 14,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        textAlign: 'center',
+        marginBottom: 24,
+    },
+    progressContainer: {
+        width: '100%',
+        marginBottom: 24,
+    },
+    progressBar: {
+        height: 8,
+        backgroundColor: '#E5E7EB',
+        borderRadius: 4,
+        overflow: 'hidden',
+    },
+    progressFill: {
+        height: '100%',
+        backgroundColor: '#10B981',
+        borderRadius: 4,
+    },
+    progressText: {
+        fontSize: 12,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#059669',
+        textAlign: 'center',
+        marginTop: 8,
+    },
+    goToSelfLearningBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#10B981',
+        paddingVertical: 14,
+        paddingHorizontal: 24,
+        borderRadius: 12,
+        gap: 8,
+    },
+    goToSelfLearningBtnText: {
+        fontSize: 15,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF',
     },
 });

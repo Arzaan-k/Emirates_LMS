@@ -48,10 +48,15 @@ export default function AccessControlModal({ visible, onClose }) {
             const bucketData = await bucketRes.json();
             setBuckets(bucketData || []);
 
-            // 3. Fetch All Courses
+            // 3. Fetch All Courses - ONLY Career Progression courses for curriculum assignment
+            // Self Learning courses are managed separately and should NOT appear in curriculum hierarchy
             const courseRes = await fetch(`${API_URL}/content`);
             const courseData = await courseRes.json();
-            setAllCourses(courseData || []);
+            // Filter to only include Career Progression courses (exclude self_learning)
+            const careerProgressionCourses = (courseData || []).filter(c =>
+                c.learning_path_type !== 'self_learning' && c.isPathNode === true
+            );
+            setAllCourses(careerProgressionCourses);
 
             // 4. Fetch Access Rules
             const rulesRes = await fetch(`${API_URL}/admin/access-rules`);

@@ -198,6 +198,7 @@ export default function ManagerDashboard({ route, navigation }) {
     const [resFile, setResFile] = useState(null);
     const [uploading, setUploading] = useState(false);
     const [isPathNode, setIsPathNode] = useState(false); // RESTORED
+    const [isSelfLearning, setIsSelfLearning] = useState(false); // NEW: Self Learning toggle
     const [createUserVisible, setCreateUserVisible] = useState(false); // NEW
     const [bulkModalVisible, setBulkModalVisible] = useState(false); // [NEW]
 
@@ -332,13 +333,17 @@ export default function ManagerDashboard({ route, navigation }) {
 
         setUploading(true);
         try {
+            // Determine learning path type based on toggle
+            const learningPathType = isSelfLearning ? 'self_learning' : 'career_progression';
+
             const formData = new FormData();
             formData.append('title', resTitle);
             formData.append('category', resCategory);
             formData.append('description', resDesc);
             formData.append('isPathNode', String(isPathNode)); // RESTORED
+            formData.append('learning_path_type', learningPathType); // NEW: Add learning path type
             if (selectedBucket) {
-                formData.append('bucket', selectedBucket); // [NEW] Add bucket if selected
+                formData.append('bucket', selectedBucket); // Add bucket if selected
             }
             formData.append('file', {
                 uri: resFile.uri,
@@ -346,28 +351,29 @@ export default function ManagerDashboard({ route, navigation }) {
                 type: resFile.mimeType || 'application/octet-stream'
             });
 
-            // Use the NEW universal resource upload endpoint
+            // Use the universal resource upload endpoint
             // It will handle adding to Knowledge Base AND optionally to Learning Path
             const response = await fetch(`${API_URL}/resources/upload`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'multipart/form-data' },
                 body: formData
             });
 
             const result = await response.json();
             if (result.status === 'success') {
-                Alert.alert("Success", "Resource uploaded to Knowledge Base!");
-                if (isPathNode) Alert.alert("Note", "Also added to Learning Path.");
+                const pathName = isSelfLearning ? 'Self Learning' : 'Career Progression';
+                Alert.alert("Success", `Resource uploaded!${isPathNode ? ` Added to ${pathName} path.` : ''}`);
                 setUploadVisible(false);
                 setResTitle('');
                 setResDesc('');
                 setResFile(null);
                 setIsPathNode(false);
-                setSelectedBucket(null); // [NEW] Reset bucket selection
+                setIsSelfLearning(false); // NEW: Reset self learning toggle
+                setSelectedBucket(null); // Reset bucket selection
             } else {
                 Alert.alert("Error", "Upload failed.");
             }
         } catch (error) {
+            console.error("Upload error:", error);
             Alert.alert("Error", "Network error.");
         } finally {
             setUploading(false);
@@ -1513,15 +1519,85 @@ export default function ManagerDashboard({ route, navigation }) {
                                 <Text style={styles.toggleLabel}>Add to Learning Path (Mandatory Training)</Text>
                             </TouchableOpacity>
 
+                            {/* Self Learning Path Toggle - only visible when isPathNode is true */}
+                            {isPathNode && (
+                                <View style={{ marginTop: 12 }}>
+                                    <TouchableOpacity
+                                        style={[styles.toggleRow, {
+                                            backgroundColor: isSelfLearning ? '#F0FDF4' : '#FFF',
+                                            borderWidth: 1,
+                                            borderColor: isSelfLearning ? '#10B981' : '#E5E7EB',
+                                            borderRadius: 12,
+                                            padding: 12
+                                        }]}
+                                        onPress={() => setIsSelfLearning(!isSelfLearning)}
+                                    >
+                                        <View style={[styles.checkbox, isSelfLearning && { backgroundColor: '#10B981', borderColor: '#10B981' }]}>
+                                            {isSelfLearning && <Feather name="check" size={14} color="#FFF" />}
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                                <MaterialCommunityIcons
+                                                    name="school"
+                                                    size={16}
+                                                    color={isSelfLearning ? '#10B981' : '#6B7280'}
+                                                    style={{ marginRight: 6 }}
+                                                />
+                                                <Text style={[styles.toggleLabel, { color: isSelfLearning ? '#047857' : '#374151' }]}>
+                                                    Self Learning Path
+                                                </Text>
+                                            </View>
+                                            <Text style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>
+                                                {isSelfLearning
+                                                    ? "For mandatory onboarding (Basics, SOPs, Compliance)"
+                                                    : "Enable for self-learning, disable for career progression"}
+                                            </Text>
+                                        </View>
+                                    </TouchableOpacity>
+
+                                    {/* Path Type Indicator */}
+                                    <View style={{
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        padding: 10,
+                                        borderRadius: 10,
+                                        marginTop: 10,
+                                        backgroundColor: isSelfLearning ? '#ECFDF5' : '#FFF7ED',
+                                        borderWidth: 1,
+                                        borderColor: isSelfLearning ? '#A7F3D0' : '#FED7AA'
+                                    }}>
+                                        <MaterialCommunityIcons
+                                            name={isSelfLearning ? "book-education" : "trending-up"}
+                                            size={18}
+                                            color={isSelfLearning ? '#10B981' : '#F59E0B'}
+                                        />
+                                        <Text style={{
+                                            marginLeft: 8,
+                                            fontSize: 13,
+                                            fontFamily: 'Poppins_600SemiBold',
+                                            color: isSelfLearning ? '#047857' : '#D97706'
+                                        }}>
+                                            {isSelfLearning ? '📚 Self Learning Path' : '🚀 Career Progression Path'}
+                                        </Text>
+                                    </View>
+                                </View>
+                            )}
+
                             <TouchableOpacity
-                                style={[styles.uploadBtn, { marginTop: 10 }, uploading && styles.disabledBtn]}
+                                style={[styles.uploadBtn, { marginTop: 15 }, uploading && styles.disabledBtn, isSelfLearning && isPathNode && { backgroundColor: '#10B981' }]}
                                 onPress={handleUploadResource}
                                 disabled={uploading}
                             >
                                 {uploading ? <ActivityIndicator color="#FFF" /> : (
                                     <>
                                         <Feather name="upload" size={18} color="#FFF" style={{ marginRight: 8 }} />
-                                        <Text style={styles.uploadBtnText}>Upload & Publish</Text>
+                                        <Text style={styles.uploadBtnText}>
+                                            {isPathNode
+                                                ? (isSelfLearning ? '📚 Upload to Self Learning' : '🚀 Upload to Career Path')
+                                                : 'Upload & Publish'
+                                            }
+                                        </Text>
                                     </>
                                 )}
                             </TouchableOpacity>

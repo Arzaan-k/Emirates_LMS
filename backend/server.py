@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime
 from urllib.parse import unquote
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -198,6 +198,7 @@ class ContentItem(BaseModel):
     xp: int = 50
     transcript: Optional[str] = None
     quiz: Optional[dict] = None
+    learning_path_type: str = "career_progression"  # "self_learning" or "career_progression"
 
 class QuizQuestion(BaseModel):
     question: str
@@ -288,7 +289,8 @@ users_store: dict = {
         "category": "Super Admin",
         "privileges": ALL_PRIVILEGES.copy(),  # Full access
         "is_superadmin": True,
-        "store": "HQ"
+        "store": "HQ",
+        "self_learning_completed": True  # Existing users have self-learning completed
     },
     "user": {
         "email": "user", 
@@ -298,7 +300,8 @@ users_store: dict = {
         "category": "Employee",
         "privileges": [],  # No admin privileges
         "is_superadmin": False,
-        "store": "Mumbai Central"
+        "store": "Mumbai Central",
+        "self_learning_completed": True  # Existing users have self-learning completed
     },
     "store.manager": {
         "email": "store.manager", 
@@ -312,7 +315,8 @@ users_store: dict = {
             "send_notification", "schedule_meeting"
         ],  # Manager has limited privileges (no analytics access)
         "is_superadmin": False,
-        "store": "Delhi CP"
+        "store": "Delhi CP",
+        "self_learning_completed": True  # Existing users have self-learning completed
     },
     # Sample employees for analytics
     "emp1@bw.com": {
@@ -323,7 +327,8 @@ users_store: dict = {
         "category": "Employee",
         "privileges": [],
         "is_superadmin": False,
-        "store": "Mumbai Central"
+        "store": "Mumbai Central",
+        "self_learning_completed": True  # Existing users have self-learning completed
     },
     "emp2@bw.com": {
         "email": "emp2@bw.com",
@@ -333,7 +338,8 @@ users_store: dict = {
         "category": "Employee",
         "privileges": [],
         "is_superadmin": False,
-        "store": "Mumbai Central"
+        "store": "Mumbai Central",
+        "self_learning_completed": True  # Existing users have self-learning completed
     },
     "emp3@bw.com": {
         "email": "emp3@bw.com",
@@ -343,7 +349,8 @@ users_store: dict = {
         "category": "Employee",
         "privileges": [],
         "is_superadmin": False,
-        "store": "Delhi CP"
+        "store": "Delhi CP",
+        "self_learning_completed": True  # Existing users have self-learning completed
     },
     "emp4@bw.com": {
         "email": "emp4@bw.com",
@@ -353,7 +360,8 @@ users_store: dict = {
         "category": "Employee",
         "privileges": [],
         "is_superadmin": False,
-        "store": "Delhi CP"
+        "store": "Delhi CP",
+        "self_learning_completed": True  # Existing users have self-learning completed
     },
     "emp5@bw.com": {
         "email": "emp5@bw.com",
@@ -363,7 +371,8 @@ users_store: dict = {
         "category": "Employee",
         "privileges": [],
         "is_superadmin": False,
-        "store": "Bangalore Indiranagar"
+        "store": "Bangalore Indiranagar",
+        "self_learning_completed": True  # Existing users have self-learning completed
     },
     "emp6@bw.com": {
         "email": "emp6@bw.com",
@@ -373,7 +382,8 @@ users_store: dict = {
         "category": "Employee",
         "privileges": [],
         "is_superadmin": False,
-        "store": "Bangalore Indiranagar"
+        "store": "Bangalore Indiranagar",
+        "self_learning_completed": True  # Existing users have self-learning completed
     },
 }
 
@@ -1800,11 +1810,35 @@ async def process_video_content(file_path: str, filename: str):
                 logger.info("Transcribing with OpenAI Whisper...")
                 print("--- [DEBUG] Running Whisper...")
                 # Run in thread to avoid blocking event loop
-                result = await loop.run_in_executor(None, whisper_model.transcribe, audio_path)
-                transcript_text = result["text"]
-                logger.info(f"Transcript Generated: {transcript_text[:50]}...")
-                print(f"--- [DEBUG] Transcript: {transcript_text[:50]}...")
-                
+                # Add error handling for Whisper tensor size mismatch issues
+                try:
+                    result = await loop.run_in_executor(None, lambda: whisper_model.transcribe(
+                        audio_path,
+                        fp16=False,
+                        language='en',  # Specify language to improve stability
+                        condition_on_previous_text=False  # Prevent tensor size mismatches
+                    ))
+                    transcript_text = result["text"]
+                    logger.info(f"Transcript Generated: {transcript_text[:50]}...")
+                    print(f"--- [DEBUG] Transcript: {transcript_text[:50]}...")
+                except Exception as whisper_error:
+                    logger.warning(f"Whisper transcription failed: {whisper_error}")
+                    logger.warning("Attempting fallback transcription with minimal settings...")
+                    try:
+                        # Fallback: Try with minimal settings
+                        result = await loop.run_in_executor(None, lambda: whisper_model.transcribe(
+                            audio_path,
+                            fp16=False,
+                            temperature=0.0,
+                            no_speech_threshold=0.6,
+                            condition_on_previous_text=False
+                        ))
+                        transcript_text = result["text"]
+                        logger.info(f"Fallback transcription succeeded: {transcript_text[:50]}...")
+                    except Exception as fallback_error:
+                        logger.error(f"Fallback transcription also failed: {fallback_error}")
+                        transcript_text = "Transcription failed due to audio processing error. Please try re-uploading the video or use a different audio format."
+
                 if os.path.exists(audio_path):
                     try:
                         os.remove(audio_path)
@@ -1859,31 +1893,92 @@ async def process_video_content(file_path: str, filename: str):
         import traceback
         logger.error(f"AI Processing Error: {e}")
         logger.error(traceback.format_exc())
-        print(f"--- [DEBUG] AI Error: {e}")
-        print(traceback.format_exc())
-        
+         
+        # FALLBACK: If transcription failed, try to providing a usable placeholder so UI doesn't break
+        if transcript_text == "Transcription Unavailable":
+             transcript_text = f"Transcription failed for {filename}. Please contact support. Error: {str(e)}"
+             
+             # Attempt to generate dummy quiz so flow doesn't break
+             quiz_data = [
+                 {"question": "What is covered in this video?", "options": ["Topic A", "Topic B", "Topic C", "Topic D"], "correctIndex": 0}
+             ]
+
     return {"transcript": transcript_text, "quiz": quiz_data}
+
+
+# --- BACKGROUND PROCESSING ---
+async def process_path_node_background(file_path: str, filename: str, content_id: str, res_type: str):
+    logger.info(f"Starting background processing for {filename} (Content ID: {content_id})")
+    transcript = None
+    quiz = None
+    
+    try:
+        # AI Processing for Videos
+        if res_type == "Video":
+            print(f"--- [DEBUG] BACKGORUND: Processing video {filename}...")
+            ai_result = await process_video_content(file_path, filename)
+            transcript = ai_result["transcript"]
+            quiz = ai_result["quiz"]
+            print(f"--- [DEBUG] BACKGROUND AI Result: Transcript Len={len(transcript) if transcript else 0}")
+            
+            # Update Content Store
+            found = False
+            for item in content_store:
+                if item["id"] == content_id:
+                    item["transcript"] = transcript
+                    item["quiz"] = quiz
+                    # If quiz generated, ensure it's saved
+                    found = True
+                    
+                    # Notify frontend of update
+                    await manager.broadcast({
+                        "type": "CONTENT_UPDATE",
+                        "data": item
+                    })
+                    print(f"--- [DEBUG] Broadcasted update for {content_id}")
+                    
+                    # Add to RAG system
+                    if transcript:
+                        add_course_to_rag(content_id, transcript)
+                    break
+            
+            if not found:
+                print(f"--- [DEBUG] Content ID {content_id} not found in store!")
+                
+    except Exception as e:
+        logger.error(f"Background Process Error: {e}")
+        import traceback
+        traceback.print_exc()
 
 @app.post("/resources/upload")
 async def upload_resource(
+    background_tasks: BackgroundTasks,  # Injected dependency
     title: str = Form(...),
     category: str = Form(...), 
     description: str = Form(...),
     isPathNode: str = Form("false"),  # Changed to str to handle frontend sending "true"/"false" strings
-    bucket: str = Form(None),  # NEW: Optional bucket/category for the course
+    bucket: str = Form(None),  # Optional bucket/category for the course
+    learning_path_type: str = Form("career_progression"),  # NEW: "self_learning" or "career_progression"
     file: UploadFile = File(...)
 ):
     # Convert isPathNode string to boolean (frontend sends "true" or "false")
-    is_path_node_bool = isPathNode.lower() in ("true", "1", "yes")
+    # Handle various truthy values just in case
+    is_path_node_bool = str(isPathNode).lower() in ("true", "1", "yes", "on")
     
-    print(f"--- [DEBUG] Upload Request: Title={title}, IsPathNode={isPathNode} -> {is_path_node_bool}, File={file.filename} ---")
+    # Validate learning_path_type
+    if learning_path_type not in ["self_learning", "career_progression"]:
+        learning_path_type = "career_progression"
+    
+    print(f"--- [DEBUG] Upload Request: Title={title}, IsPathNode={isPathNode} -> {is_path_node_bool}, LearningPathType={learning_path_type}, File={file.filename} ---")
     # Save file
     file_id = str(uuid.uuid4())
     filename = f"{file_id}_{file.filename}"
     file_path = os.path.join(UPLOAD_DIR, filename)
     
+    # Use chunked copying to avoid loading large files entirely into memory
     with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        while content := await file.read(1024 * 1024):  # Read 1MB chunks
+            buffer.write(content)
         
     file_url = f"{BASE_URL}/uploads/{filename}"
     
@@ -1895,8 +1990,7 @@ async def upload_resource(
     elif "image" in content_type: res_type = "Image"
     elif "sheet" in content_type or "excel" in content_type: res_type = "Excel"
     
-    print(f"--- [DEBUG] File saved to {file_path}, Type={res_type}")
-    
+    # Create Resource Object
     new_resource = {
         "id": file_id,
         "title": title,
@@ -1910,52 +2004,53 @@ async def upload_resource(
     resource_store.append(new_resource)
     
     # [LOGIC] Optional: Add to Learning Path
-    # [LOGIC] Optional: Add to Learning Path
     if is_path_node_bool:
-        print("--- [DEBUG] Processing Path Node...")
-        transcript = None
-        quiz = None
+        print("--- [DEBUG] Adding to Path immediately (Processing in background)...")
         
-        # AI Processing for Videos
-        if res_type == "Video":
-            print("--- [DEBUG] Video detected, calling process_video_content...")
-            ai_result = await process_video_content(file_path, filename)
-            transcript = ai_result["transcript"]
-            quiz = ai_result["quiz"]
-            print(f"--- [DEBUG] AI Result: Transcript Len={len(transcript) if transcript else 0}, Quiz Len={len(quiz) if quiz else 0}")
-        else:
-            print(f"--- [DEBUG] Not a video (Type: {res_type}), skipping AI.")
-
-        # Create ContentItem for Path
+        # Create ContentItem for Path immediately (so it shows up in UI)
         path_item = {
             "id": file_id,
             "title": title,
             "description": description,
-            "videoUrl": file_url, # Using file_url as videoUrl
+            "videoUrl": file_url,
             "authorRole": "Store Manager",
             "timestamp": datetime.now().isoformat(),
             "isPathNode": True,
             "skippable": False,
             "xp": 50,
-            "transcript": transcript,
-            "quiz": quiz,
-            "bucket": bucket  # NEW: Store bucket/category
+            "transcript": "Processing...", # Placeholder
+            "quiz": None,
+            "bucket": bucket,
+            "learning_path_type": learning_path_type,
+            "status": "processing" # Optional flag for UI
         }
-        # Add to top of store
-        content_store.insert(0, path_item)
-        print(f"--- [DEBUG] Added to content_store. New Len: {len(content_store)}")
         
-        # Broadcast update
+        
+        # Add to store based on learning path type:
+        # - Self Learning: Append to END (new courses become last node in path)
+        # - Career Progression: Insert at TOP (for admin curriculum ordering)
+        if learning_path_type == "self_learning":
+            content_store.append(path_item)  # Append to end for sequential path
+            print(f"--- [DEBUG] Self Learning: Appended to END of path")
+        else:
+            content_store.insert(0, path_item)  # Insert at top for career progression
+            print(f"--- [DEBUG] Career Progression: Inserted at TOP")
+        
+        # Trigger Background Processing for Video
+        if res_type == "Video":
+            background_tasks.add_task(process_path_node_background, file_path, filename, file_id, res_type)
+        
+        # Broadcast immediately (shows as 'Processing...')
         await manager.broadcast({
-            "type": "NEW_CONTENT", # Use consistent type for listeners
+            "type": "NEW_CONTENT", 
             "data": path_item
         })
-        print("--- [DEBUG] Broadcast sent.")
+
     else:
-        print("--- [DEBUG] isPathNode is FALSE")
+        print("--- [DEBUG] isPathNode is FALSE - Not adding to path")
     
     # [AUDIT] Log upload
-    log_action("UPLOAD_CONTENT", title, f"Uploaded {res_type} to {'Learning Path' if is_path_node_bool else 'Knowledge Base'}")
+    log_action("UPLOAD_CONTENT", title, f"Uploaded {res_type} to {'Self Learning' if is_path_node_bool and learning_path_type == 'self_learning' else 'Library'}")
     
     return {"status": "success", "resource": new_resource}
 
@@ -2149,6 +2244,44 @@ async def delete_meeting(meeting_id: str):
         return {"status": "success"}
     
     raise HTTPException(status_code=404, detail="Meeting not found")
+
+# --- LEARNING PATH ENDPOINTS ---
+
+@app.get("/learning-paths/content/{path_type}")
+async def get_learning_path_content_endpoint(path_type: str, user_email: str = None):
+    # Filter content based on path type
+    filtered_content = []
+    
+    # 1. Self Learning
+    if path_type == "self_learning":
+        filtered_content = [
+            c for c in content_store 
+            if c.get("learning_path_type") == "self_learning"
+            or (c.get("isPathNode") and c.get("learning_path_type") == "self_learning")
+        ]
+        
+    # 2. Career Progression (Default)
+    elif path_type == "career_progression":
+        filtered_content = [
+            c for c in content_store 
+            if c.get("learning_path_type") == "career_progression"
+            # Support legacy content: isPathNode=True but no specific type set (defaults to career)
+            or (c.get("isPathNode") and c.get("learning_path_type") in [None, "career_progression", ""])
+        ]
+    
+    # Sort by timestamp
+    filtered_content.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+    
+    # Enrich with status if user_email provided
+    if user_email:
+        user_completions = [c for c in course_completions if c.get("user_email") == user_email]
+        completed_ids = set(c.get("course_id") for c in user_completions)
+        
+        for c in filtered_content:
+            c["status"] = "completed" if c.get("id") in completed_ids else "pending"
+            
+    return {"courses": filtered_content, "is_locked": False}
+
 
 # --- ENDPOINTS ---
 
@@ -2776,6 +2909,117 @@ async def get_path_nodes(user_email: str = "user"):
         response_nodes.append(node_resp)
         
     return response_nodes
+
+# ==========================================
+# DUAL LEARNING PATHS ENDPOINTS
+# ==========================================
+
+@app.get("/learning-paths/self-learning-status/{user_email}")
+async def get_self_learning_status(user_email: str):
+    """Get user's self-learning completion status"""
+    user = users_store.get(user_email, {})
+    self_learning_completed = user.get("self_learning_completed", False)
+    
+    # Calculate self-learning progress
+    self_learning_courses = [c for c in content_store if c.get("isPathNode", False) and c.get("learning_path_type") == "self_learning"]
+    total_self_learning = len(self_learning_courses)
+    
+    # Get user's completed self-learning courses
+    user_completed_ids = {c["course_id"] for c in course_completions if c["user_email"] == user_email}
+    completed_self_learning = sum(1 for c in self_learning_courses if c.get("id") in user_completed_ids)
+    
+    progress_percent = (completed_self_learning / total_self_learning * 100) if total_self_learning > 0 else 100
+    
+    return {
+        "user_email": user_email,
+        "self_learning_completed": self_learning_completed,
+        "self_learning_progress": round(progress_percent, 1),
+        "completed_courses": completed_self_learning,
+        "total_courses": total_self_learning,
+        "career_path_unlocked": self_learning_completed or progress_percent >= 100
+    }
+
+@app.post("/learning-paths/complete-self-learning/{user_email}")
+async def complete_self_learning(user_email: str):
+    """Mark user's self-learning as completed (called when all self-learning courses are done)"""
+    if user_email in users_store:
+        users_store[user_email]["self_learning_completed"] = True
+        logger.info(f"User {user_email} completed self-learning path")
+        
+        # Broadcast event
+        await manager.broadcast({
+            "type": "SELF_LEARNING_COMPLETED",
+            "data": {"user_email": user_email}
+        })
+        
+        return {"status": "success", "message": "Self-learning completed, career progression unlocked!"}
+    
+    return {"status": "error", "message": "User not found"}
+
+@app.get("/learning-paths/content/{path_type}")
+async def get_learning_path_content(path_type: str, user_email: str = "user"):
+    """
+    Get courses for a specific learning path type.
+    path_type: 'self_learning' or 'career_progression'
+    """
+    # Validate path type
+    if path_type not in ["self_learning", "career_progression"]:
+        raise HTTPException(status_code=400, detail="Invalid path type. Use 'self_learning' or 'career_progression'")
+    
+    # Get user info
+    user = users_store.get(user_email, {})
+    self_learning_completed = user.get("self_learning_completed", False)
+    
+    # Filter courses by path type and isPathNode
+    filtered_courses = [
+        c for c in content_store 
+        if c.get("isPathNode", False) and c.get("learning_path_type", "career_progression") == path_type
+    ]
+    
+    # Sort by timestamp (oldest first = linear order)
+    filtered_courses.sort(key=lambda x: x.get("timestamp", ""))
+    
+    # Get user's completed course IDs
+    user_completed_ids = {c["course_id"] for c in course_completions if c["user_email"] == user_email}
+    
+    # Check user_node_progress for completions too
+    if user_email in user_node_progress:
+        for nid, progress_data in user_node_progress[user_email].items():
+            if progress_data.get("completed", False):
+                user_completed_ids.add(nid)
+    
+    # Build response with status
+    response_nodes = []
+    found_active = False
+    
+    for node in filtered_courses:
+        node_resp = node.copy()
+        node_id = node_resp.get("id")
+        
+        if node_id in user_completed_ids:
+            node_resp["status"] = "completed"
+        elif not found_active:
+            node_resp["status"] = "active"
+            found_active = True
+        else:
+            node_resp["status"] = "locked"
+        
+        response_nodes.append(node_resp)
+    
+    # Calculate path completion
+    completed_count = sum(1 for n in response_nodes if n.get("status") == "completed")
+    total_count = len(response_nodes)
+    
+    return {
+        "path_type": path_type,
+        "courses": response_nodes,
+        "total_courses": total_count,
+        "completed_courses": completed_count,
+        "progress_percent": round((completed_count / total_count * 100) if total_count > 0 else 0, 1),
+        # For career path, check if it should be locked
+        "is_locked": path_type == "career_progression" and not self_learning_completed,
+        "lock_message": "Complete Self-Learning to unlock Career Progression" if (path_type == "career_progression" and not self_learning_completed) else None
+    }
 
 # --- HYGIENE CHECK ENDPOINTS ---
 
@@ -3569,7 +3813,8 @@ async def create_user(data: dict):
         "is_superadmin": category == 'Super Admin',
         "has_admin_access": has_admin_access,
         "store": store,
-        "created_at": datetime.now().isoformat()
+        "created_at": datetime.now().isoformat(),
+        "self_learning_completed": False  # NEW: New users must complete self-learning first
     }
     
     logger.info(f"User created: {name} ({email}) - Role: {role} - Store: {store} - Privileges: {valid_privileges}")
@@ -5113,8 +5358,11 @@ def ensure_user_profile(user_email: str):
 
 def find_skill_key_from_content(bucket: str, title: str = ""):
     """Find the best matching skill category key from bucket name or content title."""
-    text = (bucket + " " + (title or "")).lower()
-    
+    # Handle None values for bucket and title
+    bucket = bucket or ""
+    title = title or ""
+    text = (bucket + " " + title).lower()
+
     # Explicit bucket name mappings (handles common variations)
     bucket_mappings = {
         "product training": "product_knowledge",
@@ -5131,12 +5379,12 @@ def find_skill_key_from_content(bucket: str, title: str = ""):
         "onboarding essentials": "onboarding",
         "general": "onboarding",  # Default general content to onboarding
     }
-    
+
     # First try explicit bucket mapping
     bucket_lower = bucket.lower().strip()
     if bucket_lower in bucket_mappings:
         return bucket_mappings[bucket_lower]
-    
+
     # Then try direct bucket match to skill key
     if bucket_lower in skill_categories:
         return bucket_lower

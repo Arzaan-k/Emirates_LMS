@@ -21,16 +21,17 @@ const { width } = Dimensions.get('window');
 
 export default function BulkUploadModal({ visible, onClose, onUploadComplete }) {
     const [files, setFiles] = useState([]);
-    const [isPathNode, setIsPathNode] = useState(false);
+    const [isPathNode, setIsPathNode] = useState(true); // Default to true for bulk uploads to learning path
+    const [isSelfLearning, setIsSelfLearning] = useState(false); // NEW: Self Learning toggle
     const [uploading, setUploading] = useState(false);
     const [progress, setProgress] = useState(0);
 
-    // [NEW] Bucket state
+    // Bucket state
     const [courseBuckets, setCourseBuckets] = useState([]);
     const [selectedBucket, setSelectedBucket] = useState(null);
     const [loadingBuckets, setLoadingBuckets] = useState(false);
 
-    // [NEW] Fetch buckets when modal opens
+    // Fetch buckets when modal opens
     useEffect(() => {
         if (visible) {
             fetchBuckets();
@@ -87,6 +88,9 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
         setUploading(true);
         let completed = 0;
 
+        // Determine learning path type based on toggle
+        const learningPathType = isSelfLearning ? 'self_learning' : 'career_progression';
+
         for (const file of files) {
             try {
                 const formData = new FormData();
@@ -96,8 +100,9 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                 formData.append('timestamp', new Date().toISOString());
                 formData.append('isPathNode', String(isPathNode));
                 formData.append('category', selectedBucket || "General"); // Required field
+                formData.append('learning_path_type', learningPathType); // NEW: Add learning path type
                 if (selectedBucket) {
-                    formData.append('bucket', selectedBucket); // [NEW] Add bucket if selected
+                    formData.append('bucket', selectedBucket);
                 }
                 formData.append('file', {
                     uri: file.uri,
@@ -119,12 +124,17 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
             }
         }
 
+        // Show success message before resetting state
+        const uploadedPathName = isSelfLearning ? 'Self Learning' : 'Career Progression';
+
         setUploading(false);
         setFiles([]);
         setProgress(0);
-        setSelectedBucket(null); // [NEW] Reset bucket selection
+        setSelectedBucket(null);
+        setIsSelfLearning(false); // Reset self learning toggle
+        setIsPathNode(true); // Reset to default true for next upload
         onUploadComplete();
-        Alert.alert("Success", "All files uploaded!");
+        Alert.alert("Success", `All files uploaded to ${uploadedPathName} path!`);
         onClose();
     };
 
@@ -205,6 +215,48 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                         />
                     </View>
 
+                    {/* SELF LEARNING TOGGLE - NEW - Only visible if Path is enabled */}
+                    {isPathNode && (
+                        <View style={[styles.optionRow, { borderColor: isSelfLearning ? '#10B981' : '#E5E7EB', backgroundColor: isSelfLearning ? '#F0FDF4' : '#FFF' }]}>
+                            <View style={{ flex: 1 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                    <MaterialCommunityIcons
+                                        name="school"
+                                        size={18}
+                                        color={isSelfLearning ? '#10B981' : '#6B7280'}
+                                        style={{ marginRight: 6 }}
+                                    />
+                                    <Text style={[styles.optionTitle, isSelfLearning && { color: '#047857' }]}>Self Learning Path</Text>
+                                </View>
+                                <Text style={styles.optionDesc}>
+                                    {isSelfLearning
+                                        ? "Courses for mandatory onboarding (Basics, SOPs, Compliance)"
+                                        : "Enable to add to Self Learning path instead of Career Progression"}
+                                </Text>
+                            </View>
+                            <Switch
+                                value={isSelfLearning}
+                                onValueChange={setIsSelfLearning}
+                                trackColor={{ false: "#E5E7EB", true: "#10B981" }}
+                                thumbColor={isSelfLearning ? "#059669" : "#f4f3f4"}
+                            />
+                        </View>
+                    )}
+
+                    {/* PATH TYPE INDICATOR */}
+                    {isPathNode && (
+                        <View style={[styles.pathIndicator, { backgroundColor: isSelfLearning ? '#ECFDF5' : '#FFF7ED', borderColor: isSelfLearning ? '#A7F3D0' : '#FED7AA' }]}>
+                            <MaterialCommunityIcons
+                                name={isSelfLearning ? "book-education" : "trending-up"}
+                                size={20}
+                                color={isSelfLearning ? '#10B981' : '#F59E0B'}
+                            />
+                            <Text style={[styles.pathIndicatorText, { color: isSelfLearning ? '#047857' : '#D97706' }]}>
+                                {isSelfLearning ? '📚 Self Learning Path' : '🚀 Career Progression Path'}
+                            </Text>
+                        </View>
+                    )}
+
                     {/* LIST */}
                     <FlatList
                         data={files}
@@ -212,8 +264,8 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                         contentContainerStyle={{ paddingBottom: 100 }}
                         renderItem={({ item, index }) => (
                             <View style={styles.fileCard}>
-                                <View style={styles.orderBadge}>
-                                    <Text style={styles.orderText}>{index + 1}</Text>
+                                <View style={[styles.orderBadge, isSelfLearning && { backgroundColor: '#D1FAE5' }]}>
+                                    <Text style={[styles.orderText, isSelfLearning && { color: '#059669' }]}>{index + 1}</Text>
                                 </View>
                                 <View style={{ flex: 1, paddingHorizontal: 12 }}>
                                     <Text style={styles.fileName} numberOfLines={1}>{item.name}</Text>
@@ -247,16 +299,18 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                 <View style={styles.footer}>
                     {uploading ? (
                         <View style={styles.uploadingBox}>
-                            <ActivityIndicator color="#F59E0B" />
+                            <ActivityIndicator color={isSelfLearning ? "#10B981" : "#F59E0B"} />
                             <Text style={styles.uploadingText}>Uploading... {(progress * 100).toFixed(0)}%</Text>
                         </View>
                     ) : (
                         <TouchableOpacity
-                            style={[styles.uploadBtn, files.length === 0 && styles.disabledBtn]}
+                            style={[styles.uploadBtn, files.length === 0 && styles.disabledBtn, isSelfLearning && { backgroundColor: '#10B981' }]}
                             onPress={handleUpload}
                             disabled={files.length === 0}
                         >
-                            <Text style={styles.uploadBtnText}>Start Bulk Upload ({files.length})</Text>
+                            <Text style={styles.uploadBtnText}>
+                                {isSelfLearning ? '📚 Upload to Self Learning' : '🚀 Upload to Career Path'} ({files.length})
+                            </Text>
                         </TouchableOpacity>
                     )}
                 </View>
@@ -276,9 +330,25 @@ const styles = StyleSheet.create({
     addBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF7ED', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#FED7AA', borderStyle: 'dashed', marginBottom: 20 },
     addBtnText: { marginLeft: 10, fontSize: 16, fontFamily: 'Poppins_600SemiBold', color: '#F59E0B' },
 
-    optionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#FFF', padding: 16, borderRadius: 16, marginBottom: 20, borderWidth: 1, borderColor: '#E5E7EB' },
+    optionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#FFF', padding: 16, borderRadius: 16, marginBottom: 12, borderWidth: 1, borderColor: '#E5E7EB' },
     optionTitle: { fontSize: 15, fontFamily: 'Poppins_600SemiBold', color: '#374151' },
     optionDesc: { fontSize: 11, fontFamily: 'Poppins_400Regular', color: '#9CA3AF', marginTop: 2 },
+
+    // Path Indicator
+    pathIndicator: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 10,
+        borderRadius: 12,
+        marginBottom: 16,
+        borderWidth: 1,
+    },
+    pathIndicatorText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        marginLeft: 8,
+    },
 
     fileCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 12, borderRadius: 12, marginBottom: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
     orderBadge: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
@@ -298,7 +368,7 @@ const styles = StyleSheet.create({
     uploadingBox: { flexDirection: 'row', alignItems: 'center', justifyContent: "center" },
     uploadingText: { marginLeft: 10, fontFamily: 'Poppins_600SemiBold', color: '#374151' },
 
-    // [NEW] Bucket styles
+    // Bucket styles
     sectionLabel: { fontSize: 13, fontFamily: 'Poppins_600SemiBold', color: '#374151', marginBottom: 8 },
     bucketScroll: { flexDirection: 'row', marginBottom: 16 },
     bucketChip: {
