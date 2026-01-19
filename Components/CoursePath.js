@@ -407,7 +407,10 @@ const levelUpStyles = StyleSheet.create({
 
 const CAR_IMAGE = require('../assets/images/path_car.png');
 
-export default function CoursePath({ userEmail = "user", learningPathType = "self_learning", onComplete }) {
+export default function CoursePath(props) {
+    // Handle usage as both a Screen (route.params) and a Component (direct props)
+    const params = props.route?.params || props;
+    const { userEmail = "user", learningPathType = "self_learning", onComplete } = params;
     const [selectedLevel, setSelectedLevel] = useState(null);
     const [activeLesson, setActiveLesson] = useState(null);
     const [levels, setLevels] = useState([]);

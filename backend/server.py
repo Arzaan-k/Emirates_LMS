@@ -718,11 +718,20 @@ async def create_meeting(
     scheduled_at: str = Form(...),  # ISO format datetime string
     duration_minutes: int = Form(30),
     host_name: str = Form(...),
-    host_email: str = Form(...)
+    host_email: str = Form(...),
+    invited_users: str = Form("[]")  # JSON array of user emails OR "all" for everyone
 ):
-    """Create a new virtual meeting and notify all users"""
+    """Create a new virtual meeting and notify invited users"""
     meeting_id = str(uuid.uuid4())
     room_id = f"bw-meeting-{meeting_id[:8]}"  # Short room ID for joining
+    
+    # Parse invited users list
+    try:
+        invited_users_list = json.loads(invited_users) if invited_users and invited_users != "all" else []
+    except:
+        invited_users_list = []
+    
+    invite_all = len(invited_users_list) == 0  # If no specific users, invite all
     
     new_meeting = {
         "id": meeting_id,
@@ -735,11 +744,13 @@ async def create_meeting(
         "room_id": room_id,
         "status": "scheduled",  # scheduled, ongoing, ended
         "created_at": datetime.now().isoformat(),
-        "participants": []  # List of {user_email, user_name, joined_at}
+        "participants": [],  # List of {user_email, user_name, joined_at}
+        "invited_users": invited_users_list,  # List of invited user emails
+        "invite_all": invite_all  # True if everyone is invited
     }
     
     meetings_store.insert(0, new_meeting)
-    logger.info(f"Meeting Created: {title} scheduled for {scheduled_at} by {host_name}")
+    logger.info(f"Meeting Created: {title} scheduled for {scheduled_at} by {host_name} (invite_all={invite_all}, invited={len(invited_users_list)} users)")
     
     # Broadcast meeting notification to all connected clients
     await manager.broadcast({
@@ -747,7 +758,7 @@ async def create_meeting(
         "data": new_meeting
     })
     
-    # Also create a notification entry
+    # Create notification entry
     meeting_notif = {
         "id": str(uuid.uuid4()),
         "title": f"📅 Meeting: {title}",
@@ -755,10 +766,13 @@ async def create_meeting(
         "type": "meeting",
         "meeting_id": meeting_id,
         "created_at": datetime.now().isoformat(),
-        "read_by": []
+        "read_by": [],
+        "invited_users": invited_users_list,  # Store who was invited
+        "invite_all": invite_all  # Store if it's a broadcast to all
     }
     notification_store.append(meeting_notif)
     
+    # Broadcast notification (frontend will filter based on invited_users)
     await manager.broadcast({
         "type": "NOTIFICATION",
         "data": meeting_notif
@@ -857,6 +871,7 @@ async def delete_meeting(meeting_id: str):
         return {"status": "success"}
     
     raise HTTPException(status_code=404, detail="Meeting not found")
+
 
 @app.get("/crm/tickets")
 async def get_crm_tickets():
@@ -3687,6 +3702,87 @@ async def mark_notification_read(notif_id: str, user_id: str = "user"):
             return {"status": "success"}
     raise HTTPException(status_code=404, detail="Notification not found")
 
+
+# ==========================================
+# EMPLOYEE ACTIVITY LOGGING
+# ==========================================
+
+employee_activity_log = []  # Stores all user actions
+
+def log_user_activity(user_email: str, action: str, details: str = "", metadata: dict = None):
+    """
+    Log a user action for reporting.
+    """
+    try:
+        user_name = users_store.get(user_email, {}).get('name', user_email)
+        
+        log_entry = {
+            "id": str(uuid.uuid4()),
+            "user_email": user_email,
+            "user_name": user_name,
+            "action": action, # e.g., "LOGIN", "COURSE_START", "COURSE_COMPLETE", "QUIZ", "ATTENDANCE"
+            "details": details,
+            "metadata": metadata or {},
+            "timestamp": datetime.now().isoformat(),
+            "date": datetime.now().strftime("%Y-%m-%d")
+        }
+        
+        employee_activity_log.append(log_entry)
+        logger.info(f"ACTIVITY LOG [{user_email}]: {action} - {details}")
+        return log_entry
+    except Exception as e:
+        logger.error(f"Failed to log activity: {e}")
+        return None
+
+@app.get("/analytics/activity-log/{user_email}")
+async def get_user_activity_log(user_email: str):
+    """Get chronological activity history for a specific user"""
+    logs = [log for log in employee_activity_log if log["user_email"] == user_email]
+    return sorted(logs, key=lambda x: x["timestamp"], reverse=True)
+
+@app.get("/analytics/detailed-report/{user_email}")
+async def get_user_detailed_report(user_email: str):
+    """Get aggregated data for detailed employee report"""
+    # 1. Profile
+    user = users_store.get(user_email)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    # 2. Activity Log
+    logs = [log for log in employee_activity_log if log["user_email"] == user_email]
+    logs.sort(key=lambda x: x["timestamp"], reverse=True)
+    
+    # 3. Completions
+    completions = [c for c in course_completions if c["user_email"] == user_email]
+    
+    # 4. Quizzes
+    quizzes = [s for s in quiz_submissions if s.get("user_name") == user.get("name")]
+    
+    # 5. Attendance
+    attendance = [r for r in attendance_records if r['user_id'] == user_email]
+    
+    return {
+        "user_profile": {
+            "name": user["name"],
+            "email": user["email"],
+            "role": user["role"],
+            "store": user["store"],
+            "joined": user.get("created_at")
+        },
+        "stats": {
+            "total_logins": len([l for l in logs if l["action"] == "LOGIN"]),
+            "courses_completed": len(completions),
+            "quizzes_taken": len(quizzes),
+            "days_present": len(set([a.get("punch_in", "").split("T")[0] for a in attendance])),
+            "last_active": logs[0]["timestamp"] if logs else None
+        },
+        "recent_activity": logs[:50], # Recent 50 actions
+        "performance_metrics": {
+            "avg_quiz_score": sum([q.get("score", 0) for q in quizzes]) / max(len(quizzes), 1),
+            "total_xp": user_learning_profiles.get(user_email, {}).get("total_xp", 0)
+        }
+    }
+
 # ==========================================
 # LOCATION TRACKING APIs
 # ==========================================
@@ -3755,6 +3851,7 @@ async def login_user(data: dict):
         user = users_store[email]
         if user["password"] == password:
             # Login successful
+            log_user_activity(email, "LOGIN", "User logged in")
             return {
                 "status": "success",
                 "user": {
@@ -4191,6 +4288,7 @@ async def punch_in(data: dict):
     
     attendance_records.append(record)
     logger.info(f"Punch in: {user_id} at {timestamp}")
+    log_user_activity(user_id, "PUNCH_IN", f"Punched in at {timestamp}")
     return {"status": "success"}
 
 
@@ -4213,7 +4311,10 @@ async def punch_out(data: dict):
             duration = (punch_out_dt - punch_in_dt).total_seconds() / 60
             record['duration_minutes'] = int(duration)
             
+            record['duration_minutes'] = int(duration)
+            
             logger.info(f"Punch out: {user_id} at {timestamp}, duration: {duration}min")
+            log_user_activity(user_id, "PUNCH_OUT", f"Punched out after {int(duration)} mins")
             return {"status": "success", "duration_minutes": int(duration)}
     
     return {"status": "error", "message": "No active punch-in found"}
@@ -4821,7 +4922,13 @@ async def track_course_completion(
         for skill_key in matched_skills:
             update_skill_score(user_email, skill_key, score, max_score, "course_completion", course_id)
         
+        # Update skill scores for matched skills
+        for skill_key in matched_skills:
+            update_skill_score(user_email, skill_key, score, max_score, "course_completion", course_id)
+        
         logger.info(f"Course completion tracked: {user_email} completed '{course_title}' with score {score}/{max_score}")
+        log_user_activity(user_email, "COURSE_COMPLETE", f"Completed course: {course_title}", {"score": score, "xp": 50 + (score * 2)})
+
         
         # Check for level up after completion
         level_up_result = None
@@ -4882,6 +4989,8 @@ async def track_quiz_submission(
         user_interactions.append(interaction)
         
         logger.info(f"Quiz tracked: {user_email} scored {correct}/{total} on '{quiz_title}'")
+        log_user_activity(user_email, "QUIZ_SUBMIT", f"Submitted quiz: {quiz_title}", {"score": f"{correct}/{total}"})
+
         
         return {
             "status": "success",

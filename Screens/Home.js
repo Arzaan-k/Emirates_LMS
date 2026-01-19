@@ -1020,7 +1020,7 @@ const crucialStyles = StyleSheet.create({
   },
 });
 
-function HomeContent({ onOpenTool, onOpenTwin }) {
+function HomeContent({ onOpenTool, onOpenTwin, userEmail }) {
   const navigation = useNavigation();
   const { t } = useLanguage();
   const [liveUpdates, setLiveUpdates] = useState([]);
@@ -1054,58 +1054,11 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   const [upcomingMeetings, setUpcomingMeetings] = useState([]);
   const [crmTasks, setCrmTasks] = useState([]);
 
-  // [NEW] User email for scheduled exams
-  const [userEmail, setUserEmail] = useState(null);
+  // [RESTORED] Exam refresh key
   const [examRefreshKey, setExamRefreshKey] = useState(0);
 
-  // Get user profile from navigation params OR fallback to fetching from context
-  useEffect(() => {
-    const getUserEmail = async () => {
-      try {
-        // Try multiple sources for user email
-        // 1. Try route params (from Login navigation)
-        // Since we're inside Tab.Navigator, we need to get parent route
-        const parentRoute = navigation.getParent()?.getState()?.routes?.[0]?.params?.userProfile;
-        if (parentRoute?.email) {
-          console.log('[Home] Got email from parent route:', parentRoute.email);
-          setUserEmail(parentRoute.email);
-          return;
-        }
-
-        // 2. Try AsyncStorage
-        const stored = await AsyncStorage.getItem('userProfile');
-        if (stored) {
-          const profile = JSON.parse(stored);
-          console.log('[Home] User profile from AsyncStorage:', profile.email);
-          setUserEmail(profile.email);
-          return;
-        }
-
-        // 3. Fallback: Fetch current user from login API session or use default
-        // Since user is on Home, they must be logged in - get from /users API
-        const loginEmail = await AsyncStorage.getItem('userEmail');
-        if (loginEmail) {
-          console.log('[Home] User email from userEmail key:', loginEmail);
-          setUserEmail(loginEmail);
-          return;
-        }
-
-        // 4. Last resort: default user for testing
-        console.log('[Home] No user email found in any source, using default');
-        setUserEmail('user'); // Default test user
-
-      } catch (e) {
-        console.error('Error getting user email:', e);
-        setUserEmail('user'); // Fallback to default
-      }
-    };
-    getUserEmail();
-  }, [navigation]);
-
-  // [NEW] Refresh exams when screen is focused (after returning from exam)
   useFocusEffect(
     React.useCallback(() => {
-      // Increment refresh key to trigger UpcomingExamsCard to reload
       setExamRefreshKey(prev => prev + 1);
     }, [])
   );
@@ -1260,8 +1213,8 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
 
   const fetchCrmTasks = async () => {
     try {
-      // Use placeholder email - in real app this would come from auth context
-      const userEmail = 'user@example.com';
+      // Use actual user email from props
+      if (!userEmail) return; // Skip if userEmail not loaded yet
       const response = await fetch(`${API_URL}/crm/my-tasks?user_email=${encodeURIComponent(userEmail)}`);
       const data = await response.json();
       if (Array.isArray(data)) {
@@ -1450,7 +1403,7 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
           data={upcomingMeetings}
           onJoin={(meeting) => navigation.navigate('MeetingRoom', {
             meeting,
-            userEmail: 'user@company.com',
+            userEmail: userEmail,
             userName: 'User'
           })}
         />
@@ -1460,7 +1413,7 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
           data={crmTasks}
           onOpenTask={(task) => navigation.navigate('CRMTask', {
             task,
-            userEmail: 'user@example.com'
+            userEmail: userEmail
           })}
         />
 
@@ -2183,9 +2136,61 @@ function NotificationToast({ message, type, visible, navigation, targetScreen, o
 
 // MAIN LAYOUT
 export default function Home() {
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const [activeTool, setActiveTool] = useState(null);
   const [showTwin, setShowTwin] = useState(false); // New Twin State
+
+  // User email and profile for user-specific features
+  const [userEmail, setUserEmail] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
+
+  // Get user profile from navigation params OR fallback to fetching from context
+  useEffect(() => {
+    const getUserEmail = async () => {
+      try {
+        // Try multiple sources for user email
+        // 1. Try route params (from Login navigation)
+        const parentRoute = navigation.getParent()?.getState()?.routes?.[0]?.params?.userProfile;
+        if (parentRoute?.email) {
+          console.log('[Home] Got email from parent route:', parentRoute.email);
+          setUserEmail(parentRoute.email);
+          setUserProfile(parentRoute);
+          return;
+        }
+
+        // 2. Try AsyncStorage
+        const stored = await AsyncStorage.getItem('userProfile');
+        if (stored) {
+          const profile = JSON.parse(stored);
+          console.log('[Home] User profile from AsyncStorage:', profile.email);
+          setUserEmail(profile.email);
+          setUserProfile(profile);
+          return;
+        }
+
+        // 3. Fallback: Fetch current user from login API session or use default
+        const loginEmail = await AsyncStorage.getItem('userEmail');
+        if (loginEmail) {
+          console.log('[Home] User email from userEmail key:', loginEmail);
+          setUserEmail(loginEmail);
+          setUserProfile({ email: loginEmail, name: 'User' });
+          return;
+        }
+
+        // 4. Last resort: default user for testing
+        console.log('[Home] No user email found in any source, using default');
+        setUserEmail('user'); // Default test user
+        setUserProfile({ email: 'user', name: 'Test User' });
+
+      } catch (e) {
+        console.error('Error getting user email:', e);
+        setUserEmail('user'); // Fallback to default
+        setUserProfile({ email: 'user', name: 'Test User' });
+      }
+    };
+    getUserEmail();
+  }, [navigation]);
 
   return (
     <View style={{ flex: 1 }}>
@@ -2259,10 +2264,10 @@ export default function Home() {
             ),
           })}
         >
-          <Tab.Screen name="HomeTab" children={() => <HomeContent onOpenTool={setActiveTool} onOpenTwin={() => setActiveTool('videosim')} />} />
-          <Tab.Screen name="CoursesTab" component={Courses} />
+          <Tab.Screen name="HomeTab" children={() => <HomeContent onOpenTool={setActiveTool} onOpenTwin={() => setActiveTool('videosim')} userEmail={userEmail} />} />
+          <Tab.Screen name="CoursesTab" children={() => <Courses userEmail={userEmail} />} />
           <Tab.Screen name="ResourcesTab" component={Resources} />
-          <Tab.Screen name="ProfileTab" component={Profile} />
+          <Tab.Screen name="ProfileTab" children={() => <Profile navigation={navigation} route={{ params: { userProfile: userProfile } }} />} />
         </Tab.Navigator>
       )}
 

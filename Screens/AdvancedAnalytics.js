@@ -238,6 +238,102 @@ const RiskCard = ({ label, value, color, icon }) => (
     </View>
 );
 
+// Employee Detail Report Component
+const EmployeeDetailReport = ({ email, onBack }) => {
+    const [report, setReport] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchReport = async () => {
+            try {
+                const res = await fetch(`${API_URL}/analytics/detailed-report/${email}`);
+                const data = await res.json();
+                setReport(data);
+            } catch (e) {
+                Alert.alert("Error", "Could not load employee report");
+            } finally {
+                setLoading(false);
+            }
+        };
+        if (email) fetchReport();
+    }, [email]);
+
+    const downloadLog = async () => {
+        if (!report) return;
+        try {
+            const header = "Timestamp,Action,Details\n";
+            const rows = report.recent_activity.map(l => `${l.timestamp},${l.action},"${l.details}"`).join("\n");
+            const csv = header + rows;
+
+            const fileUri = FileSystem.documentDirectory + `Activity_Log_${report.user_profile.name.replace(' ', '_')}.csv`;
+            await FileSystem.writeAsStringAsync(fileUri, csv, { encoding: FileSystem.EncodingType.UTF8 });
+
+            if (await Sharing.isAvailableAsync()) {
+                await Sharing.shareAsync(fileUri);
+            } else {
+                Alert.alert("Saved", "Report saved to documents");
+            }
+        } catch (e) {
+            Alert.alert("Error", "Export failed");
+        }
+    };
+
+    if (loading) return <View style={styles.loadingContainer}><ActivityIndicator size="large" color="#F59E0B" /></View>;
+    if (!report) return <View style={styles.loadingContainer}><Text>No data found</Text></View>;
+
+    return (
+        <ScrollView style={styles.contentContainer} contentContainerStyle={{ paddingBottom: 30 }}>
+            {/* Header / Profile */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20 }}>
+                <TouchableOpacity onPress={onBack} style={{ marginRight: 15, padding: 8, backgroundColor: '#FFF', borderRadius: 12 }}>
+                    <Feather name="arrow-left" size={24} color="#451A03" />
+                </TouchableOpacity>
+                <View>
+                    <Text style={{ fontSize: 20, fontWeight: '700', color: '#451A03' }}>{report.user_profile.name}</Text>
+                    <Text style={{ fontSize: 13, color: '#92400E' }}>{report.user_profile.role} • {report.user_profile.store}</Text>
+                </View>
+            </View>
+
+            {/* Stats Grid */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 20 }}>
+                <StatCard label="Logins" value={report.stats.total_logins} icon="login" color="#F59E0B" />
+                <StatCard label="Courses" value={report.stats.courses_completed} icon="book-open" color="#10B981" />
+                <StatCard label="Quizzes" value={report.stats.quizzes_taken} icon="help-circle" color="#EF4444" />
+                <StatCard label="Avg Score" value={`${Math.round(report.performance_metrics.avg_quiz_score)}%`} icon="chart-bar" color="#8B5CF6" />
+            </View>
+
+            {/* Activity Log */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+                <Text style={styles.sectionTitle}>Recent Activity Log</Text>
+                <TouchableOpacity onPress={downloadLog} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#FDE68A' }}>
+                    <Feather name="download" size={14} color="#F59E0B" />
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#F59E0B', marginLeft: 6 }}>Export CSV</Text>
+                </TouchableOpacity>
+            </View>
+
+            <View style={{ backgroundColor: '#FFF', borderRadius: 16, padding: 10, borderWidth: 1, borderColor: '#FEF3C7' }}>
+                {report.recent_activity.length === 0 ? (
+                    <Text style={{ padding: 20, textAlign: 'center', color: '#9CA3AF' }}>No recent activity recorded.</Text>
+                ) : (
+                    report.recent_activity.map((log, index) => (
+                        <View key={index} style={{ flexDirection: 'row', paddingVertical: 12, borderBottomWidth: index < report.recent_activity.length - 1 ? 1 : 0, borderBottomColor: '#F3F4F6' }}>
+                            <View style={{ width: 80, marginRight: 10 }}>
+                                <Text style={{ fontSize: 11, color: '#6B7280', fontWeight: '500' }}>{new Date(log.timestamp).toLocaleDateString()}</Text>
+                                <Text style={{ fontSize: 10, color: '#9CA3AF' }}>{new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 13, fontWeight: '600', color: '#374151' }}>{log.action}</Text>
+                                <Text style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>{log.details}</Text>
+                            </View>
+                        </View>
+                    ))
+                )}
+            </View>
+        </ScrollView>
+    );
+};
+
+
 // Store Performance with REAL DATA + THEME
 const StorePerformance = () => {
     const [stores, setStores] = useState([]);
@@ -309,8 +405,7 @@ const StorePerformance = () => {
     );
 };
 
-// Employee Performance
-const EmployeePerformance = () => {
+const EmployeePerformance = ({ onSelect }) => {
     const [employees, setEmployees] = useState([]);
     const [loading, setLoading] = useState(true);
 
@@ -328,9 +423,14 @@ const EmployeePerformance = () => {
     return (
         <ScrollView style={styles.contentContainer} contentContainerStyle={{ paddingBottom: 20 }}>
             <Text style={styles.sectionTitle}>Member Performance</Text>
+            <Text style={{ fontSize: 13, color: '#92400E', marginBottom: 15 }}>Tap on a member to view detailed activity report.</Text>
             {employees.slice(0, 20).map((emp, index) => (
                 <Animated.View key={emp.email} entering={FadeInDown.delay(index * 40)}>
-                    <View style={styles.employeeCard}>
+                    <TouchableOpacity
+                        style={styles.employeeCard}
+                        onPress={() => onSelect && onSelect(emp.email)}
+                        activeOpacity={0.7}
+                    >
                         <View style={[styles.empAvatar, { backgroundColor: '#F59E0B' }]}>
                             <Text style={styles.empAvatarText}>
                                 {emp.name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
@@ -341,14 +441,15 @@ const EmployeePerformance = () => {
                             <Text style={styles.empStore}>{emp.store || 'Unassigned'} • {emp.role}</Text>
                         </View>
                         <View style={styles.empMetrics}>
-                            <Text style={styles.empMetricValue}>Active</Text>
+                            <Text style={styles.empMetricValue}>View Report ›</Text>
                         </View>
-                    </View>
+                    </TouchableOpacity>
                 </Animated.View>
             ))}
         </ScrollView>
     );
 };
+
 
 // Training
 const TrainingEffectiveness = () => {
@@ -544,13 +645,27 @@ const MetricBadge = ({ label, value }) => (
 // MAIN SCREEN
 export default function AdvancedAnalytics({ navigation, route }) {
     const [currentView, setCurrentView] = useState('menu');
+    const [selectedEmployeeEmail, setSelectedEmployeeEmail] = useState(null);
 
     const renderContent = () => {
         switch (currentView) {
             case 'menu': return <AnalyticsMenu onSelect={setCurrentView} />;
             case 'dashboard': return <AnalyticsDashboard onNavigate={setCurrentView} />;
             case 'stores': return <StorePerformance />;
-            case 'employees': return <EmployeePerformance />;
+            case 'employees': return (
+                <EmployeePerformance
+                    onSelect={(email) => {
+                        setSelectedEmployeeEmail(email);
+                        setCurrentView('employee-detail');
+                    }}
+                />
+            );
+            case 'employee-detail': return (
+                <EmployeeDetailReport
+                    email={selectedEmployeeEmail}
+                    onBack={() => setCurrentView('employees')}
+                />
+            );
             case 'training': return <TrainingEffectiveness />;
             case 'hygiene': return <HygieneCompliance />;
             case 'customer': return <CustomerImpact />;
