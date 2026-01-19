@@ -16,6 +16,23 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import API_URL from '../config';
 
+const STORE_LOCATIONS = [
+    { name: "Chowpatty Seaface", lat: 18.9557, lng: 72.8131, address: "Plot 25B, Fulchand Niwas" },
+    { name: "Vile Parle West", lat: 19.1038, lng: 72.8431, address: "Shop 1, Shanti Niketan" },
+    { name: "Carter Road", lat: 19.0449, lng: 72.8177, address: "Shop 9/10, Gagangiri Apts" },
+    { name: "Kandivali West", lat: 19.2215, lng: 72.8540, address: "Shop 30, Bhoomi Saraswati CHS" },
+    { name: "Mumbai Central", lat: 18.9716, lng: 72.8224, address: "Kothari Heights, Lamington Rd" },
+    { name: "Dadar West", lat: 19.0208, lng: 72.8407, address: "280, Veer Savarkar Marg" },
+    { name: "Juhu", lat: 19.0984, lng: 72.8265, address: "Shop 4, Sagarika Apt" },
+    { name: "Kalina", lat: 19.0591, lng: 72.8684, address: "Sumit Artista, Shop 5" },
+    { name: "Versova", lat: 19.1293, lng: 72.8157, address: "Fantasy Society" },
+    { name: "Malad East", lat: 19.2015, lng: 72.8492, address: "Dhruv Heights, Upper Govind Nagar" },
+    { name: "Sion", lat: 19.0297, lng: 72.8540, address: "Basant Court CHS" },
+    { name: "Borivali West (Viv)", lat: 19.2318, lng: 72.8573, address: "Mangal Arambh, RM Bhattad Rd" },
+    { name: "Borivali West (Sod)", lat: 19.2305, lng: 72.8560, address: "Natraj CHS, Sodawala Ln" },
+    { name: "Mazgaon", lat: 18.9812, lng: 72.8314, address: "Shop C-3A, 173 Dr Mascarenhas Rd" }
+];
+
 const { width, height } = Dimensions.get('window');
 
 export default function LiveTrackingScreen({ navigation }) {
@@ -114,6 +131,12 @@ export default function LiveTrackingScreen({ navigation }) {
             }
             .marker-active { background-color: #10B981; }
             .marker-inactive { background-color: #9CA3AF; }
+            .marker-store { 
+                background-color: #F59E0B; 
+                border-radius: 8px; /* Square with rounded corners */
+                width: 32px;
+                height: 32px;
+            }
             .marker-selected { 
                 transform: scale(1.3); 
                 border-color: #F59E0B !important;
@@ -160,8 +183,29 @@ export default function LiveTrackingScreen({ navigation }) {
             // Store markers
             var markers = {};
             var currentHighlight = null;
+            
+            // HARDCODED STORES DATA
+            var STORES = ${JSON.stringify(STORE_LOCATIONS)};
 
-            // Custom icon creation
+            // Function to add stores
+            function addStoreMarkers() {
+                STORES.forEach(function(store) {
+                   var icon = L.divIcon({
+                        className: 'custom-marker-wrapper',
+                        html: '<div class="custom-marker marker-store"><span style="color:#FFF; font-size:16px;">🏠</span></div>',
+                        iconSize: [32, 32],
+                        iconAnchor: [16, 16],
+                        popupAnchor: [0, -16]
+                   });
+                   L.marker([store.lat, store.lng], { icon: icon })
+                    .bindPopup('<div class="popup-name">' + store.name + '</div><div class="popup-status">' + store.address + '</div>')
+                    .addTo(map);
+                });
+            }
+            // Add stores immediately
+            addStoreMarkers();
+
+            // Custom icon creation for employees
             function createIcon(initials, isActive) {
                 return L.divIcon({
                     className: 'custom-marker-wrapper',
@@ -177,9 +221,9 @@ export default function LiveTrackingScreen({ navigation }) {
                 return name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
             }
 
-            // Update all markers
+            // Update all markers (Employees)
             function updateMarkers(locations) {
-                // Clear existing markers
+                // Clear existing employee markers
                 Object.values(markers).forEach(m => map.removeLayer(m));
                 markers = {};
 
@@ -202,11 +246,10 @@ export default function LiveTrackingScreen({ navigation }) {
                     }
                 });
 
-                // Fit bounds if multiple markers
-                if (Object.keys(markers).length > 1) {
-                    var group = new L.featureGroup(Object.values(markers));
-                    map.fitBounds(group.getBounds().pad(0.1));
-                }
+                // Do NOT autofit bounds if only stores are present to avoid zooming out too much or jumping
+                // Only fit bounds if we have specific employee locations to show, otherwise default view is fine
+                // But user might want to see everything. 
+                // Let's stick to default view unless specific employee is selected or updated.
             }
 
             // Center map on coordinates
@@ -288,24 +331,11 @@ export default function LiveTrackingScreen({ navigation }) {
                 </TouchableOpacity>
             </Animated.View>
 
-            {/* MAP */}
+            {/* MAP - ALWAYS VISIBLE FOR STORE VIEW */}
             {loading ? (
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color="#F59E0B" />
                     <Text style={styles.loadingText}>Loading locations...</Text>
-                </View>
-            ) : locations.length === 0 ? (
-                <View style={styles.emptyContainer}>
-                    <View style={styles.emptyIcon}>
-                        <MaterialCommunityIcons name="map-marker-off" size={64} color="#D1D5DB" />
-                    </View>
-                    <Text style={styles.emptyTitle}>No Active Tracking</Text>
-                    <Text style={styles.emptyText}>
-                        No employees have enabled location sharing yet.
-                    </Text>
-                    <Text style={styles.emptyHint}>
-                        Employees can enable location sharing from their profile settings.
-                    </Text>
                 </View>
             ) : (
                 <View style={styles.mapContainer}>
@@ -332,12 +362,12 @@ export default function LiveTrackingScreen({ navigation }) {
                     {/* FLOATING LEGEND */}
                     <View style={styles.legend}>
                         <View style={styles.legendItem}>
-                            <View style={[styles.legendDot, { backgroundColor: '#10B981' }]} />
-                            <Text style={styles.legendText}>Active Tracking</Text>
+                            <View style={[styles.legendDot, { backgroundColor: '#F59E0B' }]} />
+                            <Text style={styles.legendText}>Stores</Text>
                         </View>
                         <View style={styles.legendItem}>
-                            <View style={[styles.legendDot, { backgroundColor: '#9CA3AF' }]} />
-                            <Text style={styles.legendText}>Inactive</Text>
+                            <View style={[styles.legendDot, { backgroundColor: '#10B981' }]} />
+                            <Text style={styles.legendText}>Emp. Active</Text>
                         </View>
                     </View>
 

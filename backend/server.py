@@ -59,7 +59,7 @@ logger = logging.getLogger("BW_LMS_Backend")
 
 # --- ELEVENLABS CONFIG ---
 ELEVENLABS_API_KEY = "sk_6ecd572e870639a9cb94b52be1b37f7d093d2857734c5a5a"
-VOICE_ID = "Y6nOpHQlW4lnf9GRRc8f" # Best emotive Hindi voice
+VOICE_ID = "3AMU7jXQuQa3oRvRqUmb" # Updated voice ID from user request
 
 # --- GROQ CONFIG ---
 # Check if environment variable is already set (e.g. from .env or system), otherwise use this default
