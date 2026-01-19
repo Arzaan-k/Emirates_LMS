@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime
 from urllib.parse import unquote
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -269,8 +269,49 @@ ALL_PRIVILEGES = [
     "schedule_meeting",    # Schedule virtual meetings
     "crm_tickets",         # CRM ticket management
     "manage_simulations",  # Manage interactive simulations
-    "manage_learning_path" # Manage learning path content
+    "manage_learning_path", # Manage learning path content
+    "scheduled_exams",     # Scheduled Exams
+    "exam_reports",        # Exam Reports
+    "support_library",     # LMS Support Library
+    "view_audit_logs",     # Audit Logs
 ]
+
+# PRIVILEGE ICON MAPPING
+PRIVILEGE_ICONS = {
+    "team_list": "users",
+    "reports": "bar-chart-2",
+    "assign_quiz": "check-square",
+    "audits": "shield",
+    "upload_training": "upload-cloud",
+    "bulk_upload": "database",
+    "post_news": "bell",
+    "post_quiz": "edit-3",
+    "create_user": "user-plus",
+    "live_tracking": "map-pin",
+    "proctored_assessment": "eye",
+    "proctored_create_manage": "settings",
+    "proctored_view_results": "file-text",
+    "view_analytics": "pie-chart",
+    "send_notification": "send",
+    "access_control": "lock",
+    "manage_buckets": "grid",
+    "schedule_meeting": "video",
+    "crm_tickets": "tag",
+    "manage_simulations": "play-circle",
+    "manage_learning_path": "git-merge",
+    "scheduled_exams": "calendar",
+    "exam_reports": "file-text",
+    "support_library": "book-open",
+    "view_audit_logs": "clipboard",
+}
+
+@app.get("/users/privileges")
+async def get_privileges():
+    """Get all available privileges for creating users"""
+    return [
+       {"id": p, "name": p.replace("_", " ").title(), "icon": PRIVILEGE_ICONS.get(p, "box")}
+       for p in ALL_PRIVILEGES
+    ]
 
 # User categories for organizing users
 user_categories: List[dict] = [
@@ -1426,37 +1467,9 @@ async def get_proctored_assessment(assessment_id: str):
             return assessment
     raise HTTPException(status_code=404, detail="Assessment not found")
 
-@app.post("/proctored-assessments")
-async def create_proctored_assessment(
-    title: str = Form(...),
-    description: str = Form(""),
-    time_limit_minutes: int = Form(30),
-    passing_score: int = Form(70),
-    questions: str = Form(...),  # JSON string of questions array
-    created_by: str = Form("Admin")
-):
-    """Create a new proctored assessment"""
-    import json
-    try:
-        questions_list = json.loads(questions)
-    except:
-        raise HTTPException(status_code=400, detail="Invalid questions format")
-    
-    new_assessment = {
-        "id": str(uuid.uuid4()),
-        "title": title,
-        "description": description,
-        "questions": questions_list,
-        "time_limit_minutes": time_limit_minutes,
-        "passing_score": passing_score,
-        "created_at": datetime.now().isoformat(),
-        "created_by": created_by,
-        "is_active": True,
-        "total_questions": len(questions_list)
-    }
-    proctored_assessments.insert(0, new_assessment)
-    logger.info(f"Proctored Assessment Created: {title} with {len(questions_list)} questions")
-    return {"status": "success", "assessment": new_assessment}
+# REMOVED: Duplicate endpoint - now handled by unified endpoint at line 4522
+# @app.post("/proctored-assessments")
+# async def create_proctored_assessment(...):
 
 @app.post("/proctored-assessments/bulk-upload")
 async def bulk_upload_assessment_questions(
@@ -2337,7 +2350,8 @@ async def upload_content(
     video_url = f"{BASE_URL}/uploads/{file.filename}"
     
     logger.info(f"New Content Uploaded: {title} by {authorRole} (File: {file.filename}, Bucket: {bucket})")
-    
+    logger.info(f"UPLOAD DEBUG: Bucket received: '{bucket}' (Type: {type(bucket)})")
+
     # 3. Store Metadata
     item_id = str(uuid.uuid4())
     item_data = {
@@ -2352,7 +2366,8 @@ async def upload_content(
         "xp": 50,
         "transcript": transcript_text,
         "quiz": quiz_data,
-        "bucket": bucket  # NEW: Store bucket/category
+        "bucket": bucket,  # NEW: Store bucket/category
+        "bucket_id": bucket  # COMPATIBILITY: Required for get_content_library
     }
     
     content_store.insert(0, item_data) # Add to top
@@ -2593,17 +2608,33 @@ async def generate_quiz_from_content(
             # Transcribe with Whisper (optimized for speed)
             whisper_start = time.time()
             print(f"🎤 Starting Whisper transcription...")
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None, 
-                lambda: whisper_model.transcribe(
-                    audio_path, 
-                    language="en",  # English-only for speed
-                    fp16=False,     # CPU optimization
-                    condition_on_previous_text=False  # Faster, prevents loops
+            try:
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    None, 
+                    lambda: whisper_model.transcribe(
+                        audio_path, 
+                        language="en",  # English-only for speed
+                        fp16=False,     # CPU optimization
+                        condition_on_previous_text=False  # Faster, prevents loops
+                    )
                 )
-            )
-            extracted_text = result.get("text", "")
+                extracted_text = result.get("text", "")
+            except Exception as e:
+                logger.warning(f"Whisper transcription failed: {e}")
+                logger.info("Attempting fallback transcription with minimal settings...")
+                try:
+                    # Fallback with defaults
+                    loop = asyncio.get_event_loop()
+                    result = await loop.run_in_executor(
+                        None, 
+                        lambda: whisper_model.transcribe(audio_path, fp16=False)
+                    )
+                    extracted_text = result.get("text", "")
+                except Exception as e2:
+                    logger.error(f"Fallback transcription also failed: {e2}")
+                    extracted_text = "Audio content could not be transcribed. Please assess based on the video title."
+            
             print(f"🎤 Whisper transcription done: {time.time() - whisper_start:.2f}s ({len(extracted_text)} chars)")
             
         # PDF: Use PyMuPDF (fitz)
@@ -2688,20 +2719,15 @@ Generate a JSON array with this exact structure:
 [
   {{
     "question": "Question text here?",
-    "options": [
-      {{"id": "a", "text": "Option A"}},
-      {{"id": "b", "text": "Option B"}},
-      {{"id": "c", "text": "Option C"}},
-      {{"id": "d", "text": "Option D"}}
-    ],
-    "correct": "a"
+    "options": ["Option A", "Option B", "Option C", "Option D"],
+    "correctIndex": 0
   }}
 ]
 
 IMPORTANT:
 - Generate exactly {num_questions} questions
-- Each question must have exactly 4 options (a, b, c, d)
-- Include "correct" field with the correct answer letter
+- Each question must have exactly 4 options as strings in the 'options' array
+- Include "correctIndex" field with the 0-based index of the correct answer (0, 1, 2, or 3)
 - Make questions appropriate for the difficulty level
 - Return ONLY the JSON array, no other text"""
 
@@ -2711,7 +2737,7 @@ IMPORTANT:
         completion = await loop.run_in_executor(None, lambda: groq_client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
+            temperature=0.3, # Lower temperature for stable JSON
             max_tokens=2000
         ))
         
@@ -2720,13 +2746,41 @@ IMPORTANT:
         print(f"✅ TOTAL TIME: {time.time() - start_time:.2f}s")
         print(f"{'='*50}\n")
         
-        # Parse JSON from response
+        # Parse JSON from response with robust handling
         import re
-        json_match = re.search(r'\[[\s\S]*\]', response_content)
-        if json_match:
-            questions_list = json.loads(json_match.group())
-        else:
-            raise ValueError("Could not find JSON array in response")
+        import json
+        try:
+            questions_list = []
+            # Try to find JSON array
+            json_match = re.search(r'\[[\s\S]*\]', response_content)
+            if json_match:
+                json_str = json_match.group()
+                # Remove Markdown code blocks if present inside the match (rare but possible)
+                json_str = json_str.replace("```json", "").replace("```", "")
+                
+                try:
+                    questions_list = json.loads(json_str)
+                except json.JSONDecodeError:
+                    # Attempt to fix trailing commas
+                    json_str = re.sub(r',\s*([\]}])', r'\1', json_str)
+                    questions_list = json.loads(json_str) 
+            else:
+                 # Fallback: Check for JSON Object
+                 json_obj_match = re.search(r'\{[\s\S]*\}', response_content)
+                 if json_obj_match:
+                     data = json.loads(json_obj_match.group())
+                     questions_list = data.get("questions", [])
+                     if not questions_list and "question" in data:
+                         questions_list = [data]
+                 else:
+                     raise ValueError("No JSON structure found")
+            
+            if not questions_list:
+                raise ValueError("Parsed JSON is empty or invalid")
+                
+        except Exception as e:
+            logger.error(f"JSON Parse Error: {e}")
+            raise HTTPException(status_code=500, detail="Failed to generate valid quiz format. Please try again.")
         
         # 3. CREATE QUIZ OBJECT
         quiz_item = {
@@ -4440,14 +4494,146 @@ class AssessmentSubmission(BaseModel):
     violations: int = 0
 
 @app.post("/proctored-assessments")
-async def create_assessment(data: AssessmentModel):
+async def create_assessment(
+    request: Request
+):
+    """
+    Create a new proctored assessment.
+    Accepts both JSON (AssessmentModel) and Form data for compatibility.
+    """
+    import json
+
+    # Try to get JSON body first
+    try:
+        content_type = request.headers.get("content-type", "")
+        logger.info(f"[CreateAssessment] Content-Type: {content_type}")
+
+        if "application/json" in content_type:
+            body = await request.json()
+            logger.info(f"[CreateAssessment] Received JSON body")
+            title = body.get("title")
+            description = body.get("description", "")
+            time_limit_minutes = body.get("time_limit_minutes", 30)
+            passing_score = body.get("passing_score", 70)
+            questions_list = body.get("questions", [])
+            created_by = body.get("created_by", "Admin")
+        else:
+            # Form data - parse questions from JSON string
+            form_data = await request.form()
+            title = form_data.get("title")
+            questions = form_data.get("questions")
+            description = form_data.get("description", "")
+            time_limit_minutes = int(form_data.get("time_limit_minutes", 30))
+            passing_score = int(form_data.get("passing_score", 70))
+            created_by = form_data.get("created_by", "Admin")
+
+            logger.info(f"[CreateAssessment] Received Form data - title: {title}, questions length: {len(questions) if questions else 0}")
+            if not title or not questions:
+                logger.error(f"[CreateAssessment] Missing fields - title: {title}, questions: {questions}")
+                raise HTTPException(status_code=422, detail="Missing required fields: title and questions")
+            try:
+                questions_list = json.loads(questions)
+                logger.info(f"[CreateAssessment] Parsed {len(questions_list)} questions from JSON")
+            except Exception as parse_error:
+                logger.error(f"[CreateAssessment] JSON parse error: {parse_error}")
+                raise HTTPException(status_code=400, detail="Invalid questions format - must be valid JSON")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error parsing request: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid request format: {str(e)}")
+
+    # Validate questions list
+    if not isinstance(questions_list, list) or len(questions_list) == 0:
+        raise HTTPException(status_code=400, detail="Questions must be a non-empty array")
+
+    # Create assessment
     new_id = str(uuid.uuid4())
-    assessment = data.dict()
-    assessment["id"] = new_id
-    assessment["created_at"] = datetime.now().isoformat()
-    assessment["active"] = True
-    proctored_assessments.append(assessment)
-    return {"status": "success", "id": new_id}
+    assessment = {
+        "id": new_id,
+        "title": title,
+        "description": description,
+        "questions": questions_list,
+        "time_limit_minutes": time_limit_minutes,
+        "passing_score": passing_score,
+        "created_at": datetime.now().isoformat(),
+        "created_by": created_by,
+        "active": True,
+        "total_questions": len(questions_list)
+    }
+
+    proctored_assessments.insert(0, assessment)
+    logger.info(f"Proctored Assessment Created: {title} with {len(questions_list)} questions")
+
+    return {"status": "success", "id": new_id, "assessment": assessment}
+
+@app.put("/proctored-assessments/{assessment_id}")
+async def update_assessment(
+    assessment_id: str,
+    request: Request
+):
+    """
+    Update an existing proctored assessment.
+    """
+    import json
+    
+    # Check if assessment exists
+    matching = [a for a in proctored_assessments if a["id"] == assessment_id]
+    if not matching:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+        
+    assessment = matching[0]
+
+    # Try to get JSON body first
+    try:
+        content_type = request.headers.get("content-type", "")
+        
+        if "application/json" in content_type:
+            body = await request.json()
+            title = body.get("title")
+            description = body.get("description", "")
+            time_limit_minutes = body.get("time_limit_minutes")
+            passing_score = body.get("passing_score")
+            questions_list = body.get("questions")
+            created_by = body.get("created_by")
+        else:
+            # Form data
+            form_data = await request.form()
+            title = form_data.get("title")
+            questions_str = form_data.get("questions")
+            description = form_data.get("description", "")
+            time_limit_minutes = int(form_data.get("time_limit_minutes", 30)) if form_data.get("time_limit_minutes") else None
+            passing_score = int(form_data.get("passing_score", 70)) if form_data.get("passing_score") else None
+            created_by = form_data.get("created_by")
+            
+            if questions_str:
+                try:
+                    questions_list = json.loads(questions_str)
+                except:
+                    raise HTTPException(status_code=400, detail="Invalid questions format")
+            else:
+                questions_list = None
+
+        # Update fields if provided
+        if title: assessment["title"] = title
+        if description is not None: assessment["description"] = description
+        if time_limit_minutes: assessment["time_limit_minutes"] = time_limit_minutes
+        if passing_score: assessment["passing_score"] = passing_score
+        if questions_list: 
+            if not isinstance(questions_list, list) or len(questions_list) == 0:
+                 raise HTTPException(status_code=400, detail="Questions must be a non-empty array")
+            assessment["questions"] = questions_list
+            assessment["total_questions"] = len(questions_list)
+        if created_by: assessment["created_by"] = created_by
+        
+        return {"status": "success", "message": "Assessment updated", "assessment": assessment}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating assessment: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid request: {str(e)}")
 
 @app.get("/proctored-assessments")
 async def get_assessments():
@@ -4466,37 +4652,10 @@ async def delete_assessment(assessment_id: str):
         return {"status": "success", "message": "Assessment deleted"}
     return {"status": "error", "message": "Assessment not found"}
 
-@app.post("/proctored-assessments/{assessment_id}/submit")
-async def submit_assessment(assessment_id: str, submission: AssessmentSubmission):
-    assessment = next((a for a in proctored_assessments if a["id"] == assessment_id), None)
-    if not assessment:
-        raise HTTPException(status_code=404, detail="Assessment not found")
-
-    score = 0
-    total = len(assessment["questions"])
-    for i, ans in enumerate(submission.answers):
-        if i < total and ans == assessment["questions"][i]["correctIndex"]:
-            score += 1
-    
-    passed_cutoff = assessment.get("passing_score", 70)
-    percentage = (score / total) * 100 if total > 0 else 0
-    passed = percentage >= passed_cutoff
-
-    result = {
-        "id": str(uuid.uuid4()),
-        "assessment_id": assessment_id,
-        "user_name": submission.user_name,
-        "score": round(percentage, 1),
-        "correct": score,
-        "total": total,
-        "passed": passed,
-        "passing_score": passed_cutoff,
-        "violations": submission.violations,
-        "submitted_at": datetime.now().isoformat(),
-        "answers": submission.answers
-    }
-    assessment_submissions.append(result)
-    return {"status": "success", "result": result}
+# REMOVED: Duplicate endpoint - now handled by more complete endpoint at line 1654
+# @app.post("/proctored-assessments/{assessment_id}/submit")
+# async def submit_assessment(assessment_id: str, submission: AssessmentSubmission):
+#     ...
 
 @app.get("/proctored-assessments/{assessment_id}/submissions")
 async def get_assessment_submissions(assessment_id: str):
@@ -8854,6 +9013,318 @@ async def get_all_exams_with_stats():
     
     return result
 
+# ==========================================
+# CONTENT LIBRARY MANAGEMENT ENDPOINTS
+# ==========================================
+
+@app.get("/api/content-library")
+async def get_content_library():
+    """Get all content organized by category/bucket"""
+    # Build category map
+    categories = {b["id"]: {"id": b["id"], "name": b["name"], "color": b["color"], "icon": b["icon"], "items": []} for b in course_buckets}
+    categories["uncategorized"] = {"id": "uncategorized", "name": "Uncategorized", "color": "#6B7280", "icon": "folder", "items": []}
+    
+    # Organize content by bucket
+    for content in content_store:
+        bucket_id = content.get("bucket_id", "uncategorized")
+        if bucket_id in categories:
+            categories[bucket_id]["items"].append({
+                "id": content.get("id"),
+                "title": content.get("title", "Untitled"),
+                "description": content.get("description", ""),
+                "type": "Video" if content.get("videoUrl") else "Document",
+                "videoUrl": content.get("videoUrl", ""),
+                "category": categories[bucket_id]["name"],
+                "bucket_id": bucket_id,
+                "date": content.get("timestamp", datetime.now().isoformat())[:10],
+                "authorRole": content.get("authorRole", "Admin"),
+                "xp": content.get("xp", 50),
+                "transcript": content.get("transcript"),
+                "quiz": content.get("quiz"),
+            })
+        else:
+            categories["uncategorized"]["items"].append({
+                "id": content.get("id"),
+                "title": content.get("title", "Untitled"),
+                "description": content.get("description", ""),
+                "type": "Video" if content.get("videoUrl") else "Document",
+                "videoUrl": content.get("videoUrl", ""),
+                "category": "Uncategorized",
+                "bucket_id": "uncategorized",
+                "date": content.get("timestamp", datetime.now().isoformat())[:10],
+                "authorRole": content.get("authorRole", "Admin"),
+                "xp": content.get("xp", 50),
+                "transcript": content.get("transcript"),
+                "quiz": content.get("quiz"),
+            })
+    
+    # Return only categories that have items or are default buckets
+    result = [cat for cat in categories.values() if cat["items"] or cat["id"] != "uncategorized"]
+    return {"categories": result, "total_items": len(content_store)}
+
+
+@app.delete("/api/content/{content_id}")
+async def delete_content(content_id: str):
+    """Delete a specific content item"""
+    global content_store
+    
+    # Find the content
+    content_to_delete = None
+    for i, content in enumerate(content_store):
+        if content.get("id") == content_id:
+            content_to_delete = content
+            content_store.pop(i)
+            break
+    
+    if not content_to_delete:
+        raise HTTPException(status_code=404, detail="Content not found")
+    
+    # Log the action
+    log_action("DELETE_CONTENT", content_to_delete.get("title", content_id), f"Content deleted from library")
+    
+    logger.info(f"Content Deleted: {content_to_delete.get('title', content_id)}")
+    return {"status": "success", "message": "Content deleted successfully", "deleted_id": content_id}
+
+
+@app.put("/api/content/{content_id}")
+async def update_content(
+    content_id: str,
+    title: str = Form(None),
+    description: str = Form(None),
+    xp: int = Form(None),
+    bucket_id: str = Form(None)
+):
+    """Update content details (title, description, xp, bucket)"""
+    # Find the content
+    content_to_update = None
+    for content in content_store:
+        if content.get("id") == content_id:
+            content_to_update = content
+            break
+    
+    if not content_to_update:
+        raise HTTPException(status_code=404, detail="Content not found")
+    
+    # Update fields if provided
+    updated_fields = []
+    if title is not None:
+        content_to_update["title"] = title
+        updated_fields.append("title")
+    if description is not None:
+        content_to_update["description"] = description
+        updated_fields.append("description")
+    if xp is not None:
+        content_to_update["xp"] = xp
+        updated_fields.append("xp")
+    if bucket_id is not None:
+        content_to_update["bucket_id"] = bucket_id
+        updated_fields.append("bucket_id")
+    
+    # Log the action
+    log_action("EDIT_CONTENT", content_to_update.get("title", content_id), f"Updated fields: {', '.join(updated_fields)}")
+    
+    logger.info(f"Content Updated: {content_to_update.get('title', content_id)} - Fields: {updated_fields}")
+    return {"status": "success", "message": "Content updated successfully", "content": content_to_update}
+
+
+@app.put("/api/content/{content_id}/category")
+async def change_content_category(
+    content_id: str,
+    bucket_id: str = Form(...)
+):
+    """Change the category/bucket of a content item"""
+    # Validate bucket exists
+    valid_bucket = any(b["id"] == bucket_id for b in course_buckets)
+    if not valid_bucket and bucket_id != "uncategorized":
+        raise HTTPException(status_code=400, detail="Invalid bucket ID")
+    
+    # Find the content
+    content_to_update = None
+    for content in content_store:
+        if content.get("id") == content_id:
+            content_to_update = content
+            break
+    
+    if not content_to_update:
+        raise HTTPException(status_code=404, detail="Content not found")
+    
+    old_bucket = content_to_update.get("bucket_id", "uncategorized")
+    content_to_update["bucket_id"] = bucket_id
+    
+    # Get bucket names for logging
+    old_bucket_name = next((b["name"] for b in course_buckets if b["id"] == old_bucket), "Uncategorized")
+    new_bucket_name = next((b["name"] for b in course_buckets if b["id"] == bucket_id), "Uncategorized")
+    
+    # Log the action
+    log_action("CHANGE_CATEGORY", content_to_update.get("title", content_id), f"Moved from '{old_bucket_name}' to '{new_bucket_name}'")
+    
+    logger.info(f"Content Category Changed: {content_to_update.get('title', content_id)} - {old_bucket_name} -> {new_bucket_name}")
+    return {"status": "success", "message": "Category changed successfully", "content": content_to_update}
+
+
+@app.get("/api/buckets")
+async def get_buckets():
+    """Get all available course buckets/categories"""
+    return {"buckets": course_buckets}
+
+
+# --- ADMIN ANALYST AI ENDPOINT ---
+class AdminChatRequest(BaseModel):
+    query: str
+
+@app.post("/admin/ask-ai")
+async def admin_ask_ai(request: AdminChatRequest):
+    query = request.query
+    
+    # 1. Aggregate Data Summary (Fast and lightweight)
+    
+    # Users
+    user_count = len(users_store)
+    role_counts = {}
+    for user in users_store.values():
+        role = user.get('role', 'Unknown')
+        role_counts[role] = role_counts.get(role, 0) + 1
+        
+    # Content & Quizzes
+    content_count = len(content_store)
+    quiz_count = len(quiz_store)
+    
+    # Proctored
+    proc_count = len(proctored_assessments)
+    proc_subs = len(assessment_submissions)
+    avg_proc_score = 0
+    if proc_subs > 0:
+        avg_proc_score = sum(s.get('score', 0) for s in assessment_submissions) / proc_subs
+        
+    # CRM
+    crm_open = len([t for t in crm_tickets if t.get('status') != 'Closed'])
+    crm_total = len(crm_tickets)
+    
+    # Scheduled Exams
+    sched_exams = len(scheduled_exams)
+    
+    # Recent Alerts/Logs (last 5)
+    recent_logs = []
+    # Ensure audit_logs is accessed safely if defined earlier
+    logs_to_show = audit_logs[:5] if 'audit_logs' in globals() else []
+    for log in logs_to_show:
+        recent_logs.append(f"{log.get('action', 'ACTION')} by {log.get('admin_email', 'unknown')}: {log.get('details', '')}")
+
+    # Construct Context
+    context_str = f"""
+    SYSTEM OVERVIEW:
+    - Total Users: {user_count}
+    - User/Role Breakdown: {json.dumps(role_counts)}
+    - Content Modules: {content_count}
+    - Quizzes Created: {quiz_count}
+    - Proctored Assessments: {proc_count} (Submissions: {proc_subs}, Avg Score: {avg_proc_score:.1f}%)
+    - CRM Tickets: {crm_open} Open / {crm_total} Total
+    - Scheduled Exams: {sched_exams}
+    
+    RECENT AUDIT LOGS (Latest Activity):
+    {chr(10).join(recent_logs)}
+    
+    SAMPLE CONTENT TITLES:
+    {json.dumps([c.get('title') for c in content_store[:5]])}
+
+    SAMPLE QUIZ TITLES:
+    {json.dumps([q.get('title') for q in quiz_store[:5]])}
+    
+    This is the live administrative data of the LMS. Use this to answer the admin's query.
+    """
+    
+    # 2. Call Groq
+    try:
+        client = Groq()
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {
+                    "role": "system",
+                    "content": f"You are the Intelligent Admin Analyst for the BW LMS. Your goal is to help the Super Admin understand the system status, analyze trends, and get insights. Use the following real-time system data to answer the user's question accurately and helpfully.\\n\\nDATA CONTEXT:\\n{context_str}\\n\\nIf the answer to the specific question is not in the summary data provided, make a reasonable inference or state that you need more specific data, but try to be as helpful as possible with general LMS knowledge. Be concise, professional, and insightful."
+                },
+                {
+                    "role": "user",
+                    "content": query
+                }
+            ],
+            model="llama-3.1-8b-instant",
+            temperature=0.5,
+            max_tokens=400
+        )
+        answer = chat_completion.choices[0].message.content
+        return {"answer": answer}
+    except Exception as e:
+        print(f"AI Error: {e}")
+        # Fallback response if API fails
+        return {"answer": "I apologize, but I'm strictly analyzing local data and cannot connect to the inference engine right now. Please check your internet connection or API keys."}
+
+# --- QUIZ GENERATION ENDPOINT ---
+class QuizGenerationRequest(BaseModel):
+    topic: str
+    num_questions: int
+    difficulty: str
+
+@app.post("/generate-quiz-from-topic")
+async def generate_quiz_from_topic(request: QuizGenerationRequest):
+    topic = request.topic
+    num_questions = request.num_questions
+    difficulty = request.difficulty
+
+    try:
+        client = Groq()
+        prompt = f"""
+        Generate a {difficulty} difficulty quiz about "{topic}" with {num_questions} multiple-choice questions.
+        Return ONLY valid JSON in the following format:
+        
+        {{
+            "questions": [
+                {{
+                    "question": "Question text here?",
+                    "options": ["Option A", "Option B", "Option C", "Option D"],
+                    "correctIndex": 0
+                }}
+            ]
+        }}
+        
+        Ensure "correctIndex" is an integer (0-3) corresponding to the correct option in the "options" array.
+        Do not include any markdown formatting (like ```json), just the raw JSON string.
+        """
+        
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a quiz generator that outputs strict JSON."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            model="llama-3.1-8b-instant",
+            temperature=0.7,
+            max_tokens=2048
+        )
+        
+        response_content = chat_completion.choices[0].message.content
+        
+        # Clean response if it contains markdown code blocks
+        if "```json" in response_content:
+            response_content = response_content.split("```json")[1].split("```")[0].strip()
+        elif "```" in response_content:
+            response_content = response_content.split("```")[1].split("```")[0].strip()
+             
+        try:
+             quiz_data = json.loads(response_content)
+             return quiz_data
+        except json.JSONDecodeError:
+             # Fallback if JSON is malformed
+             logger.error(f"Failed to parse JSON from AI: {response_content}")
+             raise HTTPException(status_code=500, detail="AI returned invalid JSON format")
+
+    except Exception as e:
+        print(f"Quiz Gen Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

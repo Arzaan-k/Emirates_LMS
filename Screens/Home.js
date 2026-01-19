@@ -1409,13 +1409,13 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail }) {
         />
 
         {/* [NEW] CRM TASKS FEED - Live Assessments */}
-        <CRMTasksFeedSection
+        {/* <CRMTasksFeedSection
           data={crmTasks}
           onOpenTask={(task) => navigation.navigate('CRMTask', {
             task,
             userEmail: userEmail
           })}
-        />
+        /> */}
 
         <DigitalTwinCard onOpen={onOpenTwin} />
 

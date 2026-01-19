@@ -254,6 +254,40 @@ export default function ManagerDashboard({ route, navigation }) {
     const [scheduledExams, setScheduledExams] = useState([]);
     const [examHistoryVisible, setExamHistoryVisible] = useState(false); // [NEW] Exam History Modal
 
+    // [NEW] Admin AI Analyst State
+    const [adminChatVisible, setAdminChatVisible] = useState(false);
+    const [chatMessages, setChatMessages] = useState([{ role: 'ai', content: "Hello! I'm your AI Analyst. Ask me anything about users, quizzes, or system performance." }]);
+    const [chatInput, setChatInput] = useState('');
+    const [isChatLoading, setIsChatLoading] = useState(false);
+
+    const handleAdminAskAI = async () => {
+        if (!chatInput.trim()) return;
+        const query = chatInput;
+        setChatInput('');
+
+        // Add user message
+        const newMsgs = [...chatMessages, { role: 'user', content: query }];
+        setChatMessages(newMsgs);
+        setIsChatLoading(true);
+
+        try {
+            const res = await fetch(`${API_URL}/admin/ask-ai`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query })
+            });
+            const data = await res.json();
+
+            // Add AI response
+            setChatMessages(prev => [...prev, { role: 'ai', content: data.answer }]);
+        } catch (error) {
+            console.error(error);
+            setChatMessages(prev => [...prev, { role: 'ai', content: "Error connecting to AI Analyst." }]);
+        } finally {
+            setIsChatLoading(false);
+        }
+    };
+
     useEffect(() => {
         if (uploadVisible) {
             fetchCategories();
@@ -326,8 +360,8 @@ export default function ManagerDashboard({ route, navigation }) {
     };
 
     const handleUploadResource = async () => {
-        if (!resTitle || !resFile || !resCategory) {
-            Alert.alert("Missing Fields", "Please provide title, category, and file.");
+        if (!resTitle || !resFile || !resCategory || !selectedBucket) {
+            Alert.alert("Missing Fields", "Please provide title, resource type, category, and file.");
             return;
         }
 
@@ -342,6 +376,11 @@ export default function ManagerDashboard({ route, navigation }) {
             formData.append('description', resDesc);
             formData.append('isPathNode', String(isPathNode)); // RESTORED
             formData.append('learning_path_type', learningPathType); // NEW: Add learning path type
+
+            // REQUIRED FIELDS fix for 422 Error
+            formData.append('authorRole', role || 'Manager');
+            formData.append('timestamp', new Date().toISOString());
+
             if (selectedBucket) {
                 formData.append('bucket', selectedBucket); // Add bucket if selected
             }
@@ -353,9 +392,13 @@ export default function ManagerDashboard({ route, navigation }) {
 
             // Use the universal resource upload endpoint
             // It will handle adding to Knowledge Base AND optionally to Learning Path
-            const response = await fetch(`${API_URL}/resources/upload`, {
+            const response = await fetch(`${API_URL}/upload`, {
                 method: 'POST',
-                body: formData
+                body: formData,
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'multipart/form-data',
+                },
             });
 
             const result = await response.json();
@@ -1063,7 +1106,8 @@ export default function ManagerDashboard({ route, navigation }) {
                         )}
 
                         {/* VIEW ANALYTICS - requires view_analytics privilege */}
-                        {hasPrivilege('view_analytics') && (
+                        {/* VIEW ANALYTICS - requires view_analytics privilege */}
+                        {/* {hasPrivilege('view_analytics') && (
                             <TouchableOpacity
                                 style={styles.actionBtn}
                                 onPress={() => navigation.navigate('Analytics', { userProfile })}
@@ -1073,7 +1117,7 @@ export default function ManagerDashboard({ route, navigation }) {
                                 </View>
                                 <Text style={styles.actionText}>View Analytics</Text>
                             </TouchableOpacity>
-                        )}
+                        )} */}
 
                         {/* SEND NOTIFICATION - requires send_notification privilege */}
                         {hasPrivilege('send_notification') && (
@@ -1128,7 +1172,7 @@ export default function ManagerDashboard({ route, navigation }) {
                         )}
 
                         {/* CRM TICKETS - requires crm_tickets privilege */}
-                        {hasPrivilege('crm_tickets') && (
+                        {/* {hasPrivilege('crm_tickets') && (
                             <TouchableOpacity
                                 style={styles.actionBtn}
                                 onPress={() => setCrmModalVisible(true)}
@@ -1138,7 +1182,7 @@ export default function ManagerDashboard({ route, navigation }) {
                                 </View>
                                 <Text style={styles.actionText}>CRM Tickets</Text>
                             </TouchableOpacity>
-                        )}
+                        )} */}
 
                         {/* MANAGE SIMULATIONS - requires manage_simulations privilege */}
                         {hasPrivilege('manage_simulations') && (
@@ -1154,74 +1198,71 @@ export default function ManagerDashboard({ route, navigation }) {
                         )}
 
                         {/* SCHEDULED EXAMS - Unified Entry Point */}
-                        {(hasPrivilege('proctored_create_manage') ||
-                            userProfile?.category === 'Supervisor' ||
-                            userProfile?.role === 'Supervisor' ||
-                            userProfile?.category === 'Manager') && (
-                                <TouchableOpacity
-                                    style={styles.actionBtn}
-                                    onPress={() => setScheduledExamsListVisible(true)}
-                                >
-                                    <View style={[styles.actionIcon, { backgroundColor: '#ECFDF5' }]}>
-                                        <MaterialCommunityIcons name="calendar-clock" size={24} color="#059669" />
-                                    </View>
-                                    <Text style={styles.actionText}>Scheduled Exams</Text>
-                                </TouchableOpacity>
-                            )}
+                        {hasPrivilege('proctored_create_manage') && (
+                            <TouchableOpacity
+                                style={styles.actionBtn}
+                                onPress={() => setScheduledExamsListVisible(true)}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#ECFDF5' }]}>
+                                    <MaterialCommunityIcons name="calendar-clock" size={24} color="#059669" />
+                                </View>
+                                <Text style={styles.actionText}>Scheduled Exams</Text>
+                            </TouchableOpacity>
+                        )}
 
                         {/* EXAM HISTORY - View all completed exams with reports */}
-                        {(hasPrivilege('proctored_view_results') ||
-                            userProfile?.category === 'Supervisor' ||
-                            userProfile?.role === 'Supervisor' ||
-                            userProfile?.category === 'Manager' ||
-                            isSuperAdmin) && (
-                                <TouchableOpacity
-                                    style={styles.actionBtn}
-                                    onPress={() => setExamHistoryVisible(true)}
-                                >
-                                    <View style={[styles.actionIcon, { backgroundColor: '#EEF2FF' }]}>
-                                        <MaterialCommunityIcons name="clipboard-text-clock" size={24} color="#6366F1" />
-                                    </View>
-                                    <Text style={styles.actionText}>Exam Reports</Text>
-                                </TouchableOpacity>
-                            )}
+                        {hasPrivilege('proctored_view_results') && (
+                            <TouchableOpacity
+                                style={styles.actionBtn}
+                                onPress={() => setExamHistoryVisible(true)}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#EEF2FF' }]}>
+                                    <MaterialCommunityIcons name="clipboard-text-clock" size={24} color="#6366F1" />
+                                </View>
+                                <Text style={styles.actionText}>Exam Reports</Text>
+                            </TouchableOpacity>
+                        )}
 
-                        {/* LMS SUPPORT - Always visible for admins */}
-                        <TouchableOpacity
-                            style={styles.actionBtn}
-                            onPress={() => setSupportModalVisible(true)}
-                        >
-                            <View style={[styles.actionIcon, { backgroundColor: '#FEE2E2' }]}>
-                                <MaterialCommunityIcons name="headset" size={24} color="#DC2626" />
-                            </View>
-                            <Text style={styles.actionText}>LMS Support</Text>
-                        </TouchableOpacity>
+                        {/* LMS SUPPORT - requires lms_support privilege */}
+                        {hasPrivilege('lms_support') && (
+                            <TouchableOpacity
+                                style={styles.actionBtn}
+                                onPress={() => setSupportModalVisible(true)}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#FEE2E2' }]}>
+                                    <MaterialCommunityIcons name="headset" size={24} color="#DC2626" />
+                                </View>
+                                <Text style={styles.actionText}>LMS Support</Text>
+                            </TouchableOpacity>
+                        )}
 
 
+                        {/* [PHASE 2] CONTENT LIBRARY - requires content_library privilege */}
+                        {hasPrivilege('content_library') && (
+                            <TouchableOpacity
+                                style={styles.actionBtn}
+                                onPress={() => setContentLibraryVisible(true)}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#DBEAFE' }]}>
+                                    <MaterialCommunityIcons name="folder-multiple" size={24} color="#3B82F6" />
+                                </View>
+                                <Text style={styles.actionText}>Library</Text>
+                            </TouchableOpacity>
+                        )}
 
-                        {/* [PHASE 2] CONTENT LIBRARY */}
-                        <TouchableOpacity
-                            style={styles.actionBtn}
-                            onPress={() => setContentLibraryVisible(true)}
-                        >
-                            <View style={[styles.actionIcon, { backgroundColor: '#DBEAFE' }]}>
-                                <MaterialCommunityIcons name="folder-multiple" size={24} color="#3B82F6" />
-                            </View>
-                            <Text style={styles.actionText}>Library</Text>
-                        </TouchableOpacity>
 
-
-
-                        {/* [PHASE 2] AUDIT LOGS */}
-                        <TouchableOpacity
-                            style={styles.actionBtn}
-                            onPress={() => setAuditLogsVisible(true)}
-                        >
-                            <View style={[styles.actionIcon, { backgroundColor: '#E0E7FF' }]}>
-                                <MaterialCommunityIcons name="history" size={24} color="#6366F1" />
-                            </View>
-                            <Text style={styles.actionText}>Audit Logs</Text>
-                        </TouchableOpacity>
+                        {/* [PHASE 2] AUDIT LOGS - requires audit_logs privilege */}
+                        {hasPrivilege('audit_logs') && (
+                            <TouchableOpacity
+                                style={styles.actionBtn}
+                                onPress={() => setAuditLogsVisible(true)}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#E0E7FF' }]}>
+                                    <MaterialCommunityIcons name="history" size={24} color="#6366F1" />
+                                </View>
+                                <Text style={styles.actionText}>Audit Logs</Text>
+                            </TouchableOpacity>
+                        )}
                     </View>
 
                     {/* --- [NEW] MANAGE LEARNING PATH SECTION --- */}
@@ -1404,7 +1445,7 @@ export default function ManagerDashboard({ route, navigation }) {
                                 onChangeText={setResTitle}
                             />
 
-                            <Text style={styles.inputLabel}>Category</Text>
+                            <Text style={styles.inputLabel}>Resource Type</Text>
                             {!newCatMode ? (
                                 <View style={{ marginBottom: 15 }}>
                                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
@@ -1470,7 +1511,7 @@ export default function ManagerDashboard({ route, navigation }) {
                             />
 
                             {/* [NEW] Course Bucket Selector */}
-                            <Text style={styles.inputLabel}>Course Bucket (Optional)</Text>
+                            <Text style={styles.inputLabel}>Category (Required)</Text>
                             <View style={{ marginBottom: 15 }}>
                                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
                                     <TouchableOpacity
@@ -1488,21 +1529,21 @@ export default function ManagerDashboard({ route, navigation }) {
                                     {courseBuckets.map((bucket, i) => (
                                         <TouchableOpacity
                                             key={bucket.id}
-                                            onPress={() => setSelectedBucket(bucket.name)}
+                                            onPress={() => setSelectedBucket(selectedBucket === bucket.id ? null : bucket.id)}
                                             style={{
                                                 paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginRight: 8,
-                                                backgroundColor: selectedBucket === bucket.name ? bucket.color : '#F3F4F6',
-                                                borderWidth: 1, borderColor: selectedBucket === bucket.name ? bucket.color : '#E5E7EB',
+                                                backgroundColor: selectedBucket === bucket.id ? bucket.color : '#F3F4F6',
+                                                borderWidth: 1, borderColor: selectedBucket === bucket.id ? bucket.color : '#E5E7EB',
                                                 flexDirection: 'row', alignItems: 'center'
                                             }}
                                         >
                                             <MaterialCommunityIcons
                                                 name={bucket.icon || 'folder'}
                                                 size={14}
-                                                color={selectedBucket === bucket.name ? '#FFF' : bucket.color}
+                                                color={selectedBucket === bucket.id ? '#FFF' : bucket.color}
                                                 style={{ marginRight: 4 }}
                                             />
-                                            <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: selectedBucket === bucket.name ? '#FFF' : '#4B5563' }}>{bucket.name}</Text>
+                                            <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: selectedBucket === bucket.id ? '#FFF' : '#4B5563' }}>{bucket.name}</Text>
                                         </TouchableOpacity>
                                     ))}
                                 </ScrollView>
@@ -1988,6 +2029,98 @@ export default function ManagerDashboard({ route, navigation }) {
                 visible={examHistoryVisible}
                 onClose={() => setExamHistoryVisible(false)}
             />
+
+            {/* ADMIN AI ANALYST FLOATING BUTTON */}
+            {isSuperAdmin && (
+                <TouchableOpacity
+                    style={{
+                        position: 'absolute', bottom: 30, right: 30,
+                        backgroundColor: '#7C3AED', width: 60, height: 60,
+                        borderRadius: 30, justifyContent: 'center', alignItems: 'center',
+                        shadowColor: '#7C3AED', shadowOffset: { width: 0, height: 4 },
+                        shadowOpacity: 0.4, shadowRadius: 10, elevation: 8
+                    }}
+                    onPress={() => setAdminChatVisible(true)}
+                >
+                    <MaterialCommunityIcons name="robot" size={32} color="#FFF" />
+                </TouchableOpacity>
+            )}
+
+            {/* ADMIN AI ANALYST MODAL */}
+            <Modal visible={adminChatVisible} animationType="slide" transparent>
+                <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+                    <View style={styles.modalOverlay}>
+                        <View style={[styles.modalContent, { height: '80%', padding: 0, overflow: 'hidden' }]}>
+                            {/* Chat Header */}
+                            <LinearGradient
+                                colors={['#7C3AED', '#4F46E5']}
+                                style={{ padding: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
+                            >
+                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                    <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
+                                        <MaterialCommunityIcons name="robot" size={20} color="#FFF" />
+                                    </View>
+                                    <Text style={{ fontSize: 18, fontFamily: 'Poppins_700Bold', color: '#FFF' }}>Admin Analyst AI</Text>
+                                </View>
+                                <TouchableOpacity onPress={() => setAdminChatVisible(false)}>
+                                    <Feather name="x" size={24} color="#FFF" />
+                                </TouchableOpacity>
+                            </LinearGradient>
+
+                            {/* Chat Messages */}
+                            <ScrollView
+                                style={{ flex: 1, backgroundColor: '#F3F4F6', padding: 15 }}
+                                contentContainerStyle={{ paddingBottom: 20 }}
+                                ref={ref => ref?.scrollToEnd({ animated: true })}
+                            >
+                                {chatMessages.map((msg, i) => (
+                                    <View
+                                        key={i}
+                                        style={{
+                                            alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                                            backgroundColor: msg.role === 'user' ? '#7C3AED' : '#FFF',
+                                            padding: 12,
+                                            borderRadius: 16,
+                                            borderBottomRightRadius: msg.role === 'user' ? 4 : 16,
+                                            borderTopLeftRadius: msg.role === 'ai' ? 4 : 16,
+                                            maxWidth: '80%',
+                                            marginBottom: 10,
+                                            shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, elevation: 1
+                                        }}
+                                    >
+                                        <Text style={{ fontSize: 14, fontFamily: 'Poppins_400Regular', color: msg.role === 'user' ? '#FFF' : '#374151' }}>
+                                            {msg.content}
+                                        </Text>
+                                    </View>
+                                ))}
+                                {isChatLoading && (
+                                    <View style={{ alignSelf: 'flex-start', backgroundColor: '#FFF', padding: 12, borderRadius: 16, borderTopLeftRadius: 4, marginBottom: 10 }}>
+                                        <ActivityIndicator size="small" color="#7C3AED" />
+                                    </View>
+                                )}
+                            </ScrollView>
+
+                            {/* Chat Input */}
+                            <View style={{ padding: 15, backgroundColor: '#FFF', borderTopWidth: 1, borderColor: '#E5E7EB', flexDirection: 'row', alignItems: 'center' }}>
+                                <TextInput
+                                    style={{ flex: 1, backgroundColor: '#F9FAFB', borderRadius: 24, paddingHorizontal: 20, paddingVertical: 12, fontSize: 14, fontFamily: 'Poppins_400Regular', borderWidth: 1, borderColor: '#E5E7EB', marginRight: 10 }}
+                                    placeholder="Ask about system stats, user trends, or quizzes..."
+                                    value={chatInput}
+                                    onChangeText={setChatInput}
+                                    onSubmitEditing={handleAdminAskAI}
+                                />
+                                <TouchableOpacity
+                                    onPress={handleAdminAskAI}
+                                    disabled={!chatInput.trim() || isChatLoading}
+                                    style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: chatInput.trim() ? '#7C3AED' : '#D1D5DB', justifyContent: 'center', alignItems: 'center' }}
+                                >
+                                    <MaterialCommunityIcons name="send" size={20} color="#FFF" />
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                </KeyboardAvoidingView>
+            </Modal>
         </View>
     );
 }

@@ -38,6 +38,20 @@ const BREACH_TYPES = {
     COPY_PASTE: { type: 'copy_paste', label: 'Copy/Paste Attempted', severity: 'warning', icon: 'clipboard' },
 };
 
+// Helper to safely format error messages (handles strings, arrays, objects)
+const getSafeErrorMsg = (detail, defaultMsg) => {
+    if (!detail) return defaultMsg;
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) {
+        return detail.map(d => d.msg || JSON.stringify(d)).join('\n');
+    }
+    try {
+        return JSON.stringify(detail);
+    } catch (e) {
+        return defaultMsg;
+    }
+};
+
 export default function ProctoredAssessment({ route, navigation }) {
     const { userProfile, assessmentData, isScheduledExam } = route.params || {};
     const role = userProfile?.role || "User";
@@ -78,6 +92,8 @@ export default function ProctoredAssessment({ route, navigation }) {
     const [options, setOptions] = useState(['', '', '', '']);
     const [correctIdx, setCorrectIdx] = useState(0);
     const [creating, setCreating] = useState(false);
+    const [editingId, setEditingId] = useState(null);
+    const [editingQIndex, setEditingQIndex] = useState(-1);
 
     // AI GENERATION STATE
     const [aiModalVisible, setAiModalVisible] = useState(false);
@@ -285,14 +301,35 @@ export default function ProctoredAssessment({ route, navigation }) {
             Alert.alert("Incomplete", "Please fill question and all 4 options.");
             return;
         }
-        setQuestions([...questions, {
+
+        const newQuestionObj = {
             question: currentQ,
             options: [...options],
             correctIndex: correctIdx
-        }]);
+        };
+
+        if (editingQIndex >= 0) {
+            // Update existing question
+            const updatedQuestions = [...questions];
+            updatedQuestions[editingQIndex] = newQuestionObj;
+            setQuestions(updatedQuestions);
+            setEditingQIndex(-1);
+        } else {
+            // Add new question
+            setQuestions([...questions, newQuestionObj]);
+        }
+
         setCurrentQ('');
         setOptions(['', '', '', '']);
         setCorrectIdx(0);
+    };
+
+    const editQuestion = (index) => {
+        const q = questions[index];
+        setCurrentQ(q.question);
+        setOptions([...q.options]);
+        setCorrectIdx(q.correctIndex);
+        setEditingQIndex(index);
     };
 
     const removeQuestion = (index) => {
@@ -320,26 +357,41 @@ export default function ProctoredAssessment({ route, navigation }) {
                 created_by: userProfile?.name || 'Admin'
             };
 
-            const response = await fetch(`${API_URL}/proctored-assessments`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
+            let response;
+            if (editingId) {
+                // UPDATE EXISTING
+                response = await fetch(`${API_URL}/proctored-assessments/${editingId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            } else {
+                // CREATE NEW
+                response = await fetch(`${API_URL}/proctored-assessments`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            }
 
             const result = await response.json();
             if (result.status === 'success') {
-                Alert.alert("Success", "Assessment created successfully!");
+                const action = editingId ? "updated" : "created";
+                Alert.alert("Success", `Assessment ${action} successfully!`);
                 setTitle('');
                 setDesc('');
                 setQuestions([]);
                 setTimeLimit('30');
                 setPassingScore('70');
+                setEditingId(null); // Reset editing state
+                setEditingQIndex(-1);
                 fetchAssessments();
                 setViewMode('list');
             } else {
-                Alert.alert("Error", result.detail || "Failed to create assessment.");
+                Alert.alert("Error", getSafeErrorMsg(result.detail, "Failed to save assessment."));
             }
         } catch (err) {
+            console.error(err);
             Alert.alert("Error", "Failed to publish assessment.");
         } finally {
             setCreating(false);
@@ -396,7 +448,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                 fetchAssessments();
                 setViewMode('list');
             } else {
-                Alert.alert("Error", result.detail || "Failed to upload.");
+                Alert.alert("Error", getSafeErrorMsg(result.detail, "Failed to upload."));
             }
         } catch (err) {
             Alert.alert("Error", "Failed to process bulk upload.");
@@ -480,7 +532,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                         questions: questions.map(q => ({
                             question: q.question,
                             options: q.options,
-                            correctIndex: q.correct_answer || "a" // Fallback default
+                            correctIndex: (q.correctIndex !== undefined) ? parseInt(q.correctIndex) : 0
                         })),
                         created_by: userProfile?.name || 'Admin',
                         ai_generated: true
@@ -499,10 +551,10 @@ export default function ProctoredAssessment({ route, navigation }) {
                         fetchAssessments();
                         setViewMode('list');
                     } else {
-                        Alert.alert("Error", createResult.detail || "Failed to create assessment.");
+                        Alert.alert("Error", getSafeErrorMsg(createResult.detail, "Failed to create assessment."));
                     }
                 } else {
-                    Alert.alert("Error", quizResult.detail || "Could not generate questions from the document.");
+                    Alert.alert("Error", getSafeErrorMsg(quizResult.detail, "Could not generate questions from the document."));
                 }
             } else {
                 // Use the existing topic/content based generation
@@ -528,7 +580,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                     fetchAssessments();
                     setViewMode('list');
                 } else {
-                    Alert.alert("Error", result.detail || "AI generation failed.");
+                    Alert.alert("Error", getSafeErrorMsg(result.detail, "AI generation failed."));
                 }
             }
         } catch (err) {
@@ -736,6 +788,28 @@ export default function ProctoredAssessment({ route, navigation }) {
         );
     };
 
+    const handleEditAssessment = (assessment) => {
+        setTitle(assessment.title);
+        setDesc(assessment.description || '');
+        setTimeLimit((assessment.time_limit_minutes || 30).toString());
+        setPassingScore((assessment.passing_score || 70).toString());
+        setQuestions(assessment.questions || []);
+
+        setEditingId(assessment.id);
+        setViewMode('admin'); // 'admin' mode renders the creator form
+    };
+
+    const handleCreateNew = () => {
+        setTitle('');
+        setDesc('');
+        setTimeLimit('30');
+        setPassingScore('70');
+        setQuestions([]);
+        setEditingId(null);
+        setEditingQIndex(-1);
+        setViewMode('admin');
+    };
+
     const handleViewResults = async (assessment) => {
         setSelectedAssessment(assessment);
         setViewMode('results');
@@ -885,7 +959,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                         {isAdmin ? 'All Assessments' : 'Available Assessments'}
                     </Text>
                     {canCreateManage && (
-                        <TouchableOpacity style={styles.createBtnHeader} onPress={() => setViewMode('admin')}>
+                        <TouchableOpacity style={styles.createBtnHeader} onPress={handleCreateNew}>
                             <Feather name="plus-circle" size={24} color="#F59E0B" />
                             <Text style={styles.createBtnHeaderText}>Create New</Text>
                         </TouchableOpacity>
@@ -901,7 +975,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                         {canCreateManage && (
                             <TouchableOpacity
                                 style={styles.createFirstBtn}
-                                onPress={() => setViewMode('admin')}
+                                onPress={handleCreateNew}
                             >
                                 <Text style={styles.createFirstBtnText}>Create First Assessment</Text>
                             </TouchableOpacity>
@@ -945,9 +1019,14 @@ export default function ProctoredAssessment({ route, navigation }) {
                                         </TouchableOpacity>
                                     )}
                                     {canCreateManage && (
-                                        <TouchableOpacity onPress={() => handleDeleteAssessment(assessment.id)}>
-                                            <Feather name="trash-2" size={20} color="#EF4444" />
-                                        </TouchableOpacity>
+                                        <>
+                                            <TouchableOpacity onPress={() => handleEditAssessment(assessment)}>
+                                                <Feather name="edit-2" size={20} color="#3B82F6" />
+                                            </TouchableOpacity>
+                                            <TouchableOpacity onPress={() => handleDeleteAssessment(assessment.id)}>
+                                                <Feather name="trash-2" size={20} color="#EF4444" />
+                                            </TouchableOpacity>
+                                        </>
                                     )}
                                 </View>
                             ) : (
@@ -1081,8 +1160,10 @@ export default function ProctoredAssessment({ route, navigation }) {
                         ))}
 
                         <TouchableOpacity style={styles.addBtn} onPress={addQuestion}>
-                            <Feather name="plus" size={20} color="#F59E0B" />
-                            <Text style={styles.addBtnText}>Add to Assessment</Text>
+                            <Feather name={editingQIndex >= 0 ? "save" : "plus"} size={20} color="#F59E0B" />
+                            <Text style={styles.addBtnText}>
+                                {editingQIndex >= 0 ? 'Update Question' : 'Add to Assessment'}
+                            </Text>
                         </TouchableOpacity>
 
                         {/* QUESTIONS LIST */}
@@ -1094,9 +1175,14 @@ export default function ProctoredAssessment({ route, navigation }) {
                                         <Text style={styles.questionItemText} numberOfLines={2}>
                                             {idx + 1}. {q.question}
                                         </Text>
-                                        <TouchableOpacity onPress={() => removeQuestion(idx)}>
-                                            <Feather name="trash-2" size={16} color="#EF4444" />
-                                        </TouchableOpacity>
+                                        <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+                                            <TouchableOpacity onPress={() => editQuestion(idx)}>
+                                                <Feather name="edit-2" size={16} color="#3B82F6" />
+                                            </TouchableOpacity>
+                                            <TouchableOpacity onPress={() => removeQuestion(idx)}>
+                                                <Feather name="trash-2" size={16} color="#EF4444" />
+                                            </TouchableOpacity>
+                                        </View>
                                     </View>
                                 ))}
                             </View>
@@ -1112,7 +1198,9 @@ export default function ProctoredAssessment({ route, navigation }) {
                             {creating ? (
                                 <ActivityIndicator color="#FFF" />
                             ) : (
-                                <Text style={styles.publishBtnText}>Publish Assessment</Text>
+                                <Text style={styles.publishBtnText}>
+                                    {editingId ? "Update Assessment" : "Publish Assessment"}
+                                </Text>
                             )}
                         </LinearGradient>
                     </TouchableOpacity>

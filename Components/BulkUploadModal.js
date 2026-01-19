@@ -84,6 +84,10 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
 
     const handleUpload = async () => {
         if (files.length === 0) return;
+        if (!selectedBucket) {
+            Alert.alert("Required", "Please select a Course Bucket (Category).");
+            return;
+        }
 
         setUploading(true);
         let completed = 0;
@@ -110,9 +114,13 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                     type: file.mimeType || 'video/mp4'
                 });
 
-                await fetch(`${API_URL}/resources/upload`, {
+                await fetch(`${API_URL}/upload`, {
                     method: 'POST',
-                    body: formData
+                    body: formData,
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'multipart/form-data',
+                    },
                 });
 
                 completed++;
@@ -182,20 +190,20 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                             {courseBuckets.map((bucket) => (
                                 <TouchableOpacity
                                     key={bucket.id}
-                                    onPress={() => setSelectedBucket(bucket.name)}
+                                    onPress={() => setSelectedBucket(selectedBucket === bucket.id ? null : bucket.id)}
                                     style={[
                                         styles.bucketChip,
-                                        selectedBucket === bucket.name && { backgroundColor: bucket.color, borderColor: bucket.color }
+                                        selectedBucket === bucket.id && { backgroundColor: bucket.color, borderColor: bucket.color }
                                     ]}
                                 >
                                     <MaterialCommunityIcons
                                         name={bucket.icon || 'folder'}
                                         size={16}
-                                        color={selectedBucket === bucket.name ? '#FFF' : bucket.color}
+                                        color={selectedBucket === bucket.id ? '#FFF' : bucket.color}
                                     />
                                     <Text style={[
                                         styles.bucketChipText,
-                                        selectedBucket === bucket.name && { color: '#FFF' }
+                                        selectedBucket === bucket.id && { color: '#FFF' }
                                     ]}>{bucket.name}</Text>
                                 </TouchableOpacity>
                             ))}
