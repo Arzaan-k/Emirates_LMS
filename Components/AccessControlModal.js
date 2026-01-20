@@ -48,15 +48,19 @@ export default function AccessControlModal({ visible, onClose }) {
             const bucketData = await bucketRes.json();
             setBuckets(bucketData || []);
 
-            // 3. Fetch All Courses - ONLY Career Progression courses for curriculum assignment
-            // Self Learning courses are managed separately and should NOT appear in curriculum hierarchy
+            // 3. Fetch All Courses - Career Progression courses for curriculum assignment
             const courseRes = await fetch(`${API_URL}/content`);
             const courseData = await courseRes.json();
             // Filter to only include Career Progression courses (exclude self_learning)
-            const careerProgressionCourses = (courseData || []).filter(c =>
-                c.learning_path_type !== 'self_learning' && c.isPathNode === true
-            );
+            // Handle isPathNode as both boolean and string ("true"/"false")
+            const careerProgressionCourses = (courseData || []).filter(c => {
+                const pathType = c.learning_path_type || 'career_progression';
+                const isPath = c.isPathNode === true || c.isPathNode === 'true';
+                // Include: Career Progression courses that are path nodes, OR any course without explicit self_learning type
+                return pathType !== 'self_learning' && isPath;
+            });
             setAllCourses(careerProgressionCourses);
+            console.log(`[AccessControlModal] Loaded ${careerProgressionCourses.length} courses for curriculum`);
 
             // 4. Fetch Access Rules
             const rulesRes = await fetch(`${API_URL}/admin/access-rules`);
@@ -127,8 +131,13 @@ export default function AccessControlModal({ visible, onClose }) {
     };
 
     // Helper to group courses by bucket
-    const getCoursesInBucket = (bucketName) => {
-        return allCourses.filter(c => (c.bucket || "General") === bucketName);
+    const getCoursesInBucket = (bucketId, bucketName) => {
+        return allCourses.filter(c => {
+            const courseBucket = c.bucket || c.bucket_id;
+            // Match by bucket ID, bucket name, or show uncategorized in the first bucket
+            return courseBucket === bucketId || courseBucket === bucketName ||
+                (courseBucket === null && bucketName === 'General');
+        });
     };
 
     const countSelectedCourses = (role) => {
@@ -191,7 +200,7 @@ export default function AccessControlModal({ visible, onClose }) {
 
                                             {/* Buckets List */}
                                             {buckets.map(bucket => {
-                                                const bucketCourses = getCoursesInBucket(bucket.name);
+                                                const bucketCourses = getCoursesInBucket(bucket.id, bucket.name);
                                                 if (bucketCourses.length === 0) return null;
 
                                                 const bucketKey = `${level}-${bucket.name}`;
@@ -267,6 +276,85 @@ export default function AccessControlModal({ visible, onClose }) {
                                                     </View>
                                                 );
                                             })}
+
+                                            {/* Uncategorized Courses Section */}
+                                            {(() => {
+                                                const uncategorizedCourses = allCourses.filter(c =>
+                                                    !c.bucket && !c.bucket_id
+                                                );
+                                                if (uncategorizedCourses.length === 0) return null;
+
+                                                const bucketKey = `${level}-Uncategorized`;
+                                                const isBucketExpanded = expandedBucket === bucketKey;
+                                                const assignedInBucket = uncategorizedCourses.filter(c =>
+                                                    (stagedAssignments[level] || []).includes(c.id)
+                                                ).length;
+
+                                                return (
+                                                    <View key="uncategorized" style={styles.bucketContainer}>
+                                                        <TouchableOpacity
+                                                            style={styles.bucketHeader}
+                                                            onPress={() => setExpandedBucket(isBucketExpanded ? null : bucketKey)}
+                                                        >
+                                                            <View style={[styles.bucketIcon, { backgroundColor: '#6B728020' }]}>
+                                                                <MaterialCommunityIcons name="folder-outline" size={16} color="#6B7280" />
+                                                            </View>
+                                                            <Text style={styles.bucketName}>Uncategorized</Text>
+                                                            <View style={styles.badge}>
+                                                                <Text style={styles.badgeText}>{assignedInBucket}/{uncategorizedCourses.length}</Text>
+                                                            </View>
+                                                        </TouchableOpacity>
+
+                                                        {isBucketExpanded && (
+                                                            <View style={styles.courseList}>
+                                                                {uncategorizedCourses.map(course => {
+                                                                    const isSelected = (stagedAssignments[level] || []).includes(course.id);
+
+                                                                    // Check if assigned to another level
+                                                                    let assignedToOther = null;
+                                                                    for (const otherRole of ORDERED_LEVELS) {
+                                                                        if (otherRole !== level) {
+                                                                            if ((stagedAssignments[otherRole] || []).includes(course.id)) {
+                                                                                assignedToOther = otherRole;
+                                                                                break;
+                                                                            }
+                                                                        }
+                                                                    }
+
+                                                                    const isDisabled = !!assignedToOther;
+
+                                                                    return (
+                                                                        <TouchableOpacity
+                                                                            key={course.id}
+                                                                            style={[styles.courseItem, isDisabled && { opacity: 0.5 }]}
+                                                                            onPress={() => !isDisabled && toggleCourse(level, course.id)}
+                                                                            disabled={isDisabled}
+                                                                        >
+                                                                            <View style={[
+                                                                                styles.checkbox,
+                                                                                isSelected && styles.checkboxSelected,
+                                                                                isDisabled && { borderColor: '#E5E7EB', backgroundColor: '#F3F4F6' }
+                                                                            ]}>
+                                                                                {isSelected && <Feather name="check" size={12} color="#FFF" />}
+                                                                            </View>
+                                                                            <View style={{ flex: 1 }}>
+                                                                                <Text style={[styles.courseTitle, isDisabled && { color: '#9CA3AF' }]}>
+                                                                                    {course.title}
+                                                                                </Text>
+                                                                                {isDisabled && (
+                                                                                    <Text style={{ fontSize: 10, color: '#EF4444' }}>
+                                                                                        (Assigned to {assignedToOther})
+                                                                                    </Text>
+                                                                                )}
+                                                                            </View>
+                                                                        </TouchableOpacity>
+                                                                    );
+                                                                })}
+                                                            </View>
+                                                        )}
+                                                    </View>
+                                                );
+                                            })()}
 
                                             <TouchableOpacity
                                                 style={styles.saveBtn}

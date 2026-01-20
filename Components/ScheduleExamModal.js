@@ -634,17 +634,39 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
             </View>
 
             {/* Import Options */}
-            <View style={[styles.row, { marginBottom: 16 }]}>
+            <View style={[styles.row, { marginBottom: 16, flexWrap: 'wrap' }]}>
                 <TouchableOpacity
-                    style={[styles.actionBtn, { flex: 1, marginRight: 8, backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }]}
+                    style={[styles.actionBtn, { flex: 1, minWidth: '30%', marginRight: 4, backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }]}
                     onPress={loadSampleQuestions}
                 >
-                    <MaterialCommunityIcons name="file-document-outline" size={20} color="#059669" />
-                    <Text style={[styles.actionBtnText, { color: '#059669' }]}>Load Sample</Text>
+                    <MaterialCommunityIcons name="playlist-plus" size={18} color="#059669" />
+                    <Text style={[styles.actionBtnText, { color: '#059669', fontSize: 12 }]}>Load Sample</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                    style={[styles.actionBtn, { flex: 1, marginLeft: 8, backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}
+                    style={[styles.actionBtn, { flex: 1, minWidth: '30%', marginHorizontal: 4, backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' }]}
+                    onPress={() => {
+                        Alert.alert(
+                            "Excel Format Guide",
+                            "Your Excel file should have no headers and follow this column order:\n\n" +
+                            "Col 1: Question Text\n" +
+                            "Col 2: Option 1\n" +
+                            "Col 3: Option 2\n" +
+                            "Col 4: Option 3\n" +
+                            "Col 5: Option 4\n" +
+                            "Col 6: Correct Option Index (0-3)\n\n" +
+                            "Example:\n" +
+                            "What is 2+2? | 3 | 4 | 5 | 6 | 1",
+                            [{ text: "Got it" }]
+                        );
+                    }}
+                >
+                    <MaterialCommunityIcons name="information-outline" size={18} color="#2563EB" />
+                    <Text style={[styles.actionBtnText, { color: '#2563EB', fontSize: 12 }]}>View Format</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={[styles.actionBtn, { flex: 1, minWidth: '30%', marginLeft: 4, backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}
                     onPress={importExcel}
                     disabled={importingQuestions}
                 >
@@ -652,8 +674,8 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
                         <ActivityIndicator color="#D97706" size="small" />
                     ) : (
                         <>
-                            <MaterialCommunityIcons name="file-excel-outline" size={20} color="#D97706" />
-                            <Text style={[styles.actionBtnText, { color: '#D97706' }]}>Import Excel</Text>
+                            <MaterialCommunityIcons name="file-excel-box" size={18} color="#D97706" />
+                            <Text style={[styles.actionBtnText, { color: '#D97706', fontSize: 12 }]}>Import Excel</Text>
                         </>
                     )}
                 </TouchableOpacity>

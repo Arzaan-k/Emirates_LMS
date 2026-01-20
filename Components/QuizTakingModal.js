@@ -34,22 +34,56 @@ export default function QuizTakingModal({ visible, quiz, onClose, userName = "Us
 
     const submitQuiz = async () => {
         try {
+            // Build FormData for the request
+            const formData = new FormData();
+            formData.append('quiz_id', quiz.id || quiz.quiz_id || '');
+            formData.append('user_name', userName);
+            formData.append('answers', JSON.stringify(answers));
+
             const response = await fetch(`${API_URL}/quiz/submit`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    quiz_id: quiz.quiz_id,
-                    user_name: userName,
-                    answers: answers
-                })
+                body: formData
             });
+
+            if (!response.ok) {
+                // If endpoint fails (quiz not found, etc), calculate locally
+                throw new Error(`HTTP ${response.status}`);
+            }
 
             const result = await response.json();
             setScore(result);
             setShowResult(true);
         } catch (error) {
             console.error("Error submitting quiz:", error);
-            alert("Failed to submit quiz");
+
+            // Fallback: Calculate score locally if backend fails
+            const questions = quiz.questions || [];
+            let correctCount = 0;
+
+            questions.forEach((q, idx) => {
+                const userAnswerIdx = answers[idx];
+                if (userAnswerIdx !== undefined) {
+                    const options = q.options || [];
+                    const selectedOption = options[userAnswerIdx];
+
+                    // Check if option is correct (handle both formats)
+                    if (typeof selectedOption === 'object' && selectedOption.correct) {
+                        correctCount++;
+                    } else if (q.correct_answer === userAnswerIdx || q.correctAnswer === userAnswerIdx) {
+                        correctCount++;
+                    }
+                }
+            });
+
+            const total = questions.length;
+            const percentage = total > 0 ? Math.round((correctCount / total) * 100) : 0;
+
+            setScore({
+                score: correctCount,
+                total: total,
+                percentage: percentage
+            });
+            setShowResult(true);
         }
     };
 

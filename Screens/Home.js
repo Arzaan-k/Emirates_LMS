@@ -680,8 +680,12 @@ function CrucialNotificationModal({ notification, onAcknowledge }) {
   const [isChecked, setIsChecked] = useState(false);
   const [scrollProgress, setScrollProgress] = useState(0);
   const insets = useSafeAreaInsets();
+  const { width } = Dimensions.get('window');
 
   if (!notification) return null;
+
+  // DEBUG: Log the notification object to see if mediaUrl is present
+  console.log('[CrucialNotification] Notification object:', JSON.stringify(notification, null, 2));
 
   const handlePressOutside = () => {
     setShake(prev => prev + 1);
@@ -731,7 +735,7 @@ function CrucialNotificationModal({ notification, onAcknowledge }) {
               {/* Alert Icon with Glow */}
               <View style={crucialStyles.iconGlow}>
                 <View style={crucialStyles.iconBg}>
-                  <MaterialCommunityIcons name="alert-decagram" size={44} color="#EF4444" />
+                  <MaterialCommunityIcons name="alert-decagram" size={28} color="#EF4444" />
                 </View>
               </View>
 
@@ -741,14 +745,28 @@ function CrucialNotificationModal({ notification, onAcknowledge }) {
                 <Text style={crucialStyles.priorityText}>CRITICAL UPDATE</Text>
               </View>
 
-              {/* Content */}
-              {(notification.mediaUrl || notification.image || notification.imageUrl || notification.url) && (
-                <View style={{ marginBottom: 16, borderRadius: 12, overflow: 'hidden' }}>
-                  <Image
-                    source={{ uri: notification.mediaUrl || notification.image || notification.imageUrl || notification.url }}
-                    style={{ width: '100%', height: 200, borderRadius: 12 }}
-                    resizeMode="cover"
-                  />
+              {/* Content - Media Display (Image/Video) */}
+              {notification.mediaUrl && (
+                <View style={{ marginBottom: 12, borderRadius: 12, overflow: 'hidden', width: '100%' }}>
+                  {notification.mediaUrl.toLowerCase().includes('.mp4') ||
+                    notification.mediaUrl.toLowerCase().includes('.mov') ||
+                    notification.mediaUrl.toLowerCase().includes('.webm') ? (
+                    <Video
+                      source={{ uri: notification.mediaUrl }}
+                      style={{ width: '100%', height: 220, borderRadius: 12 }}
+                      resizeMode={ResizeMode.COVER}
+                      useNativeControls
+                      shouldPlay={false}
+                    />
+                  ) : (
+                    <Image
+                      source={{ uri: notification.mediaUrl }}
+                      style={{ width: '100%', height: 220, borderRadius: 12 }}
+                      resizeMode="cover"
+                      onError={(e) => console.log('[CrucialNotification] Image load error:', e.nativeEvent.error)}
+                      onLoad={() => console.log('[CrucialNotification] Image loaded successfully:', notification.mediaUrl)}
+                    />
+                  )}
                 </View>
               )}
 
@@ -846,44 +864,45 @@ const crucialStyles = StyleSheet.create({
   },
   ghostWaffle: {
     position: 'absolute',
-    fontSize: 48,
-    opacity: 0.08,
+    fontSize: 40,
+    opacity: 0.05,
   },
   clickLayer: {
     flex: 1,
     width: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
+    paddingHorizontal: 12,
+    paddingVertical: 24,
   },
   card: {
     width: '100%',
-    maxWidth: 380,
-    borderRadius: 32,
+    maxHeight: '95%',
+    borderRadius: 20,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(239, 68, 68, 0.3)',
     shadowColor: '#EF4444',
-    shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.4,
-    shadowRadius: 32,
-    elevation: 24,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.35,
+    shadowRadius: 20,
+    elevation: 18,
   },
   cardBlur: {
-    padding: 28,
+    padding: 16,
     alignItems: 'center',
-    backgroundColor: 'rgba(30, 27, 75, 0.8)',
+    backgroundColor: 'rgba(30, 27, 75, 0.92)',
   },
   iconGlow: {
-    padding: 8,
+    padding: 4,
     borderRadius: 999,
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    marginBottom: 16,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    marginBottom: 8,
   },
   iconBg: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: 'rgba(239, 68, 68, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
@@ -894,51 +913,51 @@ const crucialStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    marginBottom: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 14,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: 'rgba(239, 68, 68, 0.3)',
   },
   priorityDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: '#EF4444',
-    marginRight: 8,
+    marginRight: 6,
   },
   priorityText: {
     color: '#EF4444',
-    fontSize: 11,
+    fontSize: 10,
     fontFamily: 'Poppins_700Bold',
-    letterSpacing: 2,
+    letterSpacing: 1.5,
   },
   title: {
     color: '#FFF',
-    fontSize: 22,
+    fontSize: 18,
     fontFamily: 'Poppins_700Bold',
     textAlign: 'center',
-    marginBottom: 12,
-    lineHeight: 30,
+    marginBottom: 8,
+    lineHeight: 24,
   },
   scrollArea: {
-    maxHeight: 180,
+    maxHeight: 100,
     width: '100%',
-    marginBottom: 16,
+    marginBottom: 8,
   },
   message: {
     color: '#CBD5E1',
-    fontSize: 15,
+    fontSize: 14,
     fontFamily: 'Poppins_400Regular',
     textAlign: 'center',
-    lineHeight: 24,
+    lineHeight: 22,
   },
   dividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     width: '100%',
-    marginVertical: 20,
+    marginVertical: 10,
   },
   dividerLine: {
     flex: 1,
@@ -946,18 +965,18 @@ const crucialStyles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
   },
   dividerEmoji: {
-    fontSize: 20,
-    marginHorizontal: 12,
-    opacity: 0.6,
+    fontSize: 16,
+    marginHorizontal: 10,
+    opacity: 0.5,
   },
   checkboxRow: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderRadius: 16,
-    marginBottom: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginBottom: 12,
     width: '100%',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
@@ -966,9 +985,9 @@ const crucialStyles = StyleSheet.create({
     opacity: 0.5,
   },
   checkbox: {
-    width: 26,
-    height: 26,
-    borderRadius: 8,
+    width: 24,
+    height: 24,
+    borderRadius: 6,
     borderWidth: 2,
     borderColor: 'rgba(255, 255, 255, 0.3)',
     marginRight: 12,
@@ -982,18 +1001,18 @@ const crucialStyles = StyleSheet.create({
   checkboxText: {
     flex: 1,
     color: '#E5E7EB',
-    fontSize: 14,
+    fontSize: 13,
     fontFamily: 'Poppins_500Medium',
   },
   ackBtn: {
     width: '100%',
-    borderRadius: 18,
+    borderRadius: 14,
     overflow: 'hidden',
     shadowColor: '#EF4444',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 6,
   },
   ackBtnDisabled: {
     shadowOpacity: 0,
@@ -1003,19 +1022,19 @@ const crucialStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 18,
-    paddingHorizontal: 24,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
   },
   ackBtnText: {
     color: '#FFF',
-    fontSize: 16,
+    fontSize: 15,
     fontFamily: 'Poppins_600SemiBold',
   },
   warnText: {
     color: '#F87171',
-    fontSize: 13,
+    fontSize: 11,
     fontFamily: 'Poppins_500Medium',
-    marginTop: 16,
+    marginTop: 10,
     textAlign: 'center',
   },
 });
@@ -1187,8 +1206,13 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail }) {
 
       const res = await fetch(`${API_URL}/notifications/crucial`);
       const data = await res.json();
+
+      // DEBUG: Log the response from the API
+      console.log('[CrucialNotification] API Response:', JSON.stringify(data, null, 2));
+
       // If there's an unread crucial notification AND not already acknowledged locally
       if (data && data.id && !data.read && !acknowledgedNotifIds.current.has(data.id)) {
+        console.log('[CrucialNotification] Setting notification with mediaUrl:', data.mediaUrl);
         setCrucialNotif(data);
       }
     } catch (e) {

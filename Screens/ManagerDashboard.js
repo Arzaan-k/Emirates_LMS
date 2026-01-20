@@ -1006,21 +1006,21 @@ export default function ManagerDashboard({ route, navigation }) {
                             </TouchableOpacity>
                         )}
 
-                        {/* ASSIGN QUIZ - requires assign_quiz privilege */}
-                        {hasPrivilege('assign_quiz') && (
+                        {/* ASSIGN QUIZ - HIDDEN as per request */}
+                        {/* {hasPrivilege('assign_quiz') && (
                             <TouchableOpacity style={styles.actionBtn} onPress={() => setQuizModalVisible(true)}>
                                 <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
                                     <MaterialCommunityIcons name="clipboard-check" size={24} color="#F59E0B" />
                                 </View>
                                 <Text style={styles.actionText}>Assign Quiz</Text>
                             </TouchableOpacity>
-                        )}
+                        )} */}
 
                         {/* AUDITS - requires audits privilege */}
                         {hasPrivilege('audits') && (
                             <TouchableOpacity
                                 style={styles.actionBtn}
-                                onPress={() => navigation.navigate('Audits')}
+                                onPress={() => navigation.navigate('Audits', { userProfile })}
                             >
                                 <View style={[styles.actionIcon, { backgroundColor: '#DCFCE7' }]}>
                                     <Feather name="check-square" size={24} color="#16A34A" />
@@ -1789,37 +1789,39 @@ export default function ManagerDashboard({ route, navigation }) {
                                 onChangeText={setTopicQuizTitle}
                             />
 
-                            <View style={{ flexDirection: 'row', gap: 12 }}>
-                                <View style={{ flex: 1 }}>
-                                    <Text style={styles.inputLabel}>Difficulty</Text>
-                                    <View style={{ flexDirection: 'row', gap: 8 }}>
-                                        {['Easy', 'Medium', 'Hard'].map(d => (
-                                            <TouchableOpacity
-                                                key={d}
-                                                onPress={() => setTopicQuizDifficulty(d)}
-                                                style={{
-                                                    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
-                                                    backgroundColor: topicQuizDifficulty === d ?
-                                                        (d === 'Easy' ? '#10B981' : d === 'Medium' ? '#F59E0B' : '#EF4444') : '#F3F4F6'
-                                                }}
-                                            >
-                                                <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: topicQuizDifficulty === d ? '#FFF' : '#4B5563' }}>{d}</Text>
-                                            </TouchableOpacity>
-                                        ))}
-                                    </View>
+                            {/* Difficulty and Time (Stacked for better UI) */}
+                            <View style={{ marginTop: 10 }}>
+                                <Text style={styles.inputLabel}>Difficulty</Text>
+                                <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                                    {['Easy', 'Medium', 'Hard'].map(d => (
+                                        <TouchableOpacity
+                                            key={d}
+                                            onPress={() => setTopicQuizDifficulty(d)}
+                                            style={{
+                                                paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8,
+                                                backgroundColor: topicQuizDifficulty === d ?
+                                                    (d === 'Easy' ? '#10B981' : d === 'Medium' ? '#F59E0B' : '#EF4444') : '#F3F4F6',
+                                                minWidth: 80, alignItems: 'center'
+                                            }}
+                                        >
+                                            <Text style={{ fontSize: 13, fontFamily: 'Poppins_600SemiBold', color: topicQuizDifficulty === d ? '#FFF' : '#4B5563' }}>{d}</Text>
+                                        </TouchableOpacity>
+                                    ))}
                                 </View>
-                                {quizMode === 'manual' && (
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={styles.inputLabel}>Time</Text>
-                                        <TextInput
-                                            style={styles.input}
-                                            placeholder="e.g. 10 min"
-                                            value={topicQuizTime}
-                                            onChangeText={setTopicQuizTime}
-                                        />
-                                    </View>
-                                )}
                             </View>
+
+                            {quizMode === 'manual' && (
+                                <View style={{ marginTop: 15 }}>
+                                    <Text style={styles.inputLabel}>Time (minutes)</Text>
+                                    <TextInput
+                                        style={styles.input}
+                                        placeholder="e.g. 10"
+                                        keyboardType="numeric"
+                                        value={topicQuizTime}
+                                        onChangeText={setTopicQuizTime}
+                                    />
+                                </View>
+                            )}
 
                             {/* AI MODE CONTENT */}
                             {quizMode === 'ai' && (

@@ -16,8 +16,8 @@ import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import { LineChart } from 'react-native-chart-kit';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
 import API_URL from '../config';
-import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system/legacy';
 
 const { width } = Dimensions.get('window');
 

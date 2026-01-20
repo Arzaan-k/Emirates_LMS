@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInUp, FadeInRight, Layout } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 import { Audio } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 // TODO: Move this to .env in production
 import API_URL from '../config';

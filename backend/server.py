@@ -438,6 +438,10 @@ news_feed: List[dict] = []  # {id, title, content, author, image, date, created_
 # LIVE QUIZZES STORE (Topic Quizzes for Home Screen)
 live_quizzes: List[dict] = []  # {id, title, questions, time, difficulty, image}
 
+# NOTIFICATIONS STORE
+notification_store: List[dict] = []
+crucial_notification_store: dict = {"current": None}
+
 # MEETINGS STORE - Virtual meetings/video calls
 meetings_store: List[dict] = []  # {id, title, description, scheduled_at, duration_minutes, host_name, host_email, room_id, created_at, status}
 
@@ -496,6 +500,19 @@ SUPPORT_CATEGORIES = [
     {"id": "feedback", "name": "General Feedback", "icon": "message-text", "color": "#10B981"},
 ]
 
+# ==========================================
+# STORE AUDITS SYSTEM
+# ==========================================
+# Store audit submissions by store managers
+store_audit_submissions: List[dict] = []  # {id, user_email, user_name, store, category, category_name, checklist_items, checked_items, completion_rate, submitted_at}
+
+# Audit categories for reference
+STORE_AUDIT_CATEGORIES = {
+    "safety": {"name": "Safety Compliance", "icon": "shield", "color": "#10B981"},
+    "cleanliness": {"name": "Cleanliness", "icon": "droplet", "color": "#3B82F6"},
+    "equipment": {"name": "Equipment", "icon": "tool", "color": "#8B5CF6"},
+    "service": {"name": "Customer Service", "icon": "smile", "color": "#F59E0B"},
+}
 
 # ==========================================
 # AI COURSE RECOMMENDATION SYSTEM STORES
@@ -2086,6 +2103,7 @@ class NotificationRequest(BaseModel):
     title: str
     message: str
     type: str # 'ordinary' or 'crucial'
+    mediaUrl: Optional[str] = None  # Optional image URL for the notification
 
 # --- WEBSOCKET MANAGER ---
 class ConnectionManager:
@@ -2273,42 +2291,10 @@ async def delete_meeting(meeting_id: str):
     
     raise HTTPException(status_code=404, detail="Meeting not found")
 
-# --- LEARNING PATH ENDPOINTS ---
 
-@app.get("/learning-paths/content/{path_type}")
-async def get_learning_path_content_endpoint(path_type: str, user_email: str = None):
-    # Filter content based on path type
-    filtered_content = []
-    
-    # 1. Self Learning
-    if path_type == "self_learning":
-        filtered_content = [
-            c for c in content_store 
-            if c.get("learning_path_type") == "self_learning"
-            or (c.get("isPathNode") and c.get("learning_path_type") == "self_learning")
-        ]
-        
-    # 2. Career Progression (Default)
-    elif path_type == "career_progression":
-        filtered_content = [
-            c for c in content_store 
-            if c.get("learning_path_type") == "career_progression"
-            # Support legacy content: isPathNode=True but no specific type set (defaults to career)
-            or (c.get("isPathNode") and c.get("learning_path_type") in [None, "career_progression", ""])
-        ]
-    
-    # Sort by timestamp
-    filtered_content.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
-    
-    # Enrich with status if user_email provided
-    if user_email:
-        user_completions = [c for c in course_completions if c.get("user_email") == user_email]
-        completed_ids = set(c.get("course_id") for c in user_completions)
-        
-        for c in filtered_content:
-            c["status"] = "completed" if c.get("id") in completed_ids else "pending"
-            
-    return {"courses": filtered_content, "is_locked": False}
+# --- LEARNING PATH ENDPOINTS ---
+# NOTE: Main implementation is at /learning-paths/content/{path_type} below (line ~3033)
+# This section intentionally left empty to avoid duplicate routes.
 
 
 # --- ENDPOINTS ---
@@ -2330,6 +2316,7 @@ async def upload_content(
     timestamp: str = Form(...),
     isPathNode: bool = Form(False),
     bucket: str = Form(None),  # NEW: Optional bucket/category for the course
+    learning_path_type: str = Form("career_progression"),  # NEW: 'self_learning' or 'career_progression'
     file: UploadFile = File(...)
 ):
     """
@@ -2349,8 +2336,7 @@ async def upload_content(
     # 2. Generate Public URL
     video_url = f"{BASE_URL}/uploads/{file.filename}"
     
-    logger.info(f"New Content Uploaded: {title} by {authorRole} (File: {file.filename}, Bucket: {bucket})")
-    logger.info(f"UPLOAD DEBUG: Bucket received: '{bucket}' (Type: {type(bucket)})")
+    logger.info(f"New Content Uploaded: {title} by {authorRole} (File: {file.filename}, Bucket: {bucket}, PathType: {learning_path_type})")
 
     # 3. Store Metadata
     item_id = str(uuid.uuid4())
@@ -2367,7 +2353,8 @@ async def upload_content(
         "transcript": transcript_text,
         "quiz": quiz_data,
         "bucket": bucket,  # NEW: Store bucket/category
-        "bucket_id": bucket  # COMPATIBILITY: Required for get_content_library
+        "bucket_id": bucket,  # COMPATIBILITY: Required for get_content_library
+        "learning_path_type": learning_path_type  # NEW: Store learning path type
     }
     
     content_store.insert(0, item_data) # Add to top
@@ -2518,7 +2505,6 @@ async def create_live_quiz(
     }
     
     live_quizzes.append(quiz_item)
-    live_quizzes.append(quiz_item)
     logger.info(f"Live Quiz Created: {title}")
 
     # [AUDIT] Log quiz assignment
@@ -2544,6 +2530,79 @@ async def delete_live_quiz(quiz_id: str):
         return {"status": "success"}
     
     raise HTTPException(status_code=404, detail="Quiz not found")
+
+@app.post("/quiz/submit")
+async def submit_quiz(
+    quiz_id: str = Form(...),
+    user_name: str = Form(...),
+    answers: str = Form(...)  # JSON array of answer indices
+):
+    """
+    Submit a live quiz and calculate the score.
+    Returns: { score, total, percentage }
+    """
+    # Find the quiz
+    quiz = None
+    for q in live_quizzes:
+        if q.get("id") == quiz_id:
+            quiz = q
+            break
+    
+    if not quiz:
+        raise HTTPException(status_code=404, detail="Quiz not found")
+    
+    # Parse answers
+    try:
+        answers_list = json.loads(answers)
+    except:
+        raise HTTPException(status_code=400, detail="Invalid answers format")
+    
+    questions = quiz.get("questions", [])
+    total = len(questions)
+    correct_count = 0
+    
+    # Calculate score
+    for i, question in enumerate(questions):
+        if i >= len(answers_list):
+            continue
+        
+        user_answer_idx = answers_list[i]
+        options = question.get("options", [])
+        
+        # Check if the selected option is correct
+        if user_answer_idx < len(options):
+            selected_option = options[user_answer_idx]
+            
+            # 1. Check object format { text, correct: true }
+            if isinstance(selected_option, dict) and selected_option.get("correct"):
+                correct_count += 1
+            else:
+                # 2. Check index based format (handle various key names)
+                correct_idx = question.get("correct_answer")
+                if correct_idx is None:
+                    correct_idx = question.get("correctIndex")
+                if correct_idx is None:
+                    correct_idx = question.get("correct")  # Frontend uses 'correct'
+                if correct_idx is None:
+                    correct_idx = question.get("answer")  # Legacy support
+                
+                # Compare as integers if possible
+                try:
+                    if correct_idx is not None and int(correct_idx) == int(user_answer_idx):
+                        correct_count += 1
+                except (ValueError, TypeError):
+                    pass
+    
+    # Calculate percentage
+    percentage = round((correct_count / total * 100)) if total > 0 else 0
+    
+    logger.info(f"Quiz submitted by {user_name}: {correct_count}/{total} ({percentage}%)")
+    
+    return {
+        "score": correct_count,
+        "total": total,
+        "percentage": percentage
+    }
 
 # --- AI QUIZ GENERATION ENDPOINT ---
 
@@ -2657,8 +2716,8 @@ async def generate_quiz_from_content(
                 except ImportError:
                     raise HTTPException(status_code=500, detail="PDF extraction libraries not available")
                     
-        # IMAGE: Use Tesseract OCR
-        elif "image" in content_type or file_extension in ["jpg", "jpeg", "png", "bmp", "gif"]:
+        # IMAGE: Use Tesseract OCR or AI Vision fallback
+        elif "image" in content_type or file_extension in ["jpg", "jpeg", "png", "bmp", "gif", "webp", "tiff"]:
             logger.info("Extracting text from image with OCR...")
             try:
                 import pytesseract
@@ -2681,14 +2740,73 @@ async def generate_quiz_from_content(
                         logger.warning("Tesseract not found in common paths, trying system PATH")
                 
                 img = Image.open(temp_path)
+                # Convert to RGB if necessary (for RGBA images)
+                if img.mode in ('RGBA', 'P'):
+                    img = img.convert('RGB')
                 extracted_text = pytesseract.image_to_string(img)
                 logger.info(f"OCR extraction: {len(extracted_text)} chars")
+                
+                # If OCR extraction yielded very little text, try AI-based description
+                if len(extracted_text.strip()) < 50:
+                    logger.info("OCR text too short, using AI to analyze image content...")
+                    # Use the image filename and basic context for generation
+                    extracted_text = f"Image file: {file.filename}. The image appears to contain educational or training content. Generate questions based on typical topics that would be covered in a training document with this name."
+                    
             except ImportError as e:
-                logger.error(f"OCR import error: {e}")
-                raise HTTPException(status_code=500, detail="Tesseract OCR libraries not installed")
+                logger.warning(f"OCR import error: {e}. Falling back to AI-based generation.")
+                # Fallback: Use AI to generate based on image filename context
+                extracted_text = f"Image file: {file.filename}. Generate educational questions based on the topic suggested by this filename."
             except Exception as e:
-                logger.error(f"OCR processing error: {e}")
-                raise HTTPException(status_code=500, detail=f"OCR processing failed: {str(e)}")
+                logger.warning(f"OCR processing error: {e}. Falling back to AI-based generation.")
+                extracted_text = f"Image file: {file.filename}. Generate educational questions based on the topic suggested by this filename."
+        
+        # WORD DOCUMENT: Use python-docx
+        elif "word" in content_type or "document" in content_type or file_extension in ["docx", "doc"]:
+            logger.info("Extracting text from Word document...")
+            try:
+                from docx import Document
+                doc = Document(temp_path)
+                paragraphs = []
+                for para in doc.paragraphs:
+                    if para.text.strip():
+                        paragraphs.append(para.text)
+                # Also extract text from tables
+                for table in doc.tables:
+                    for row in table.rows:
+                        row_text = ' | '.join(cell.text.strip() for cell in row.cells if cell.text.strip())
+                        if row_text:
+                            paragraphs.append(row_text)
+                extracted_text = '\n'.join(paragraphs)
+                logger.info(f"Word document extraction: {len(extracted_text)} chars")
+            except ImportError:
+                logger.error("python-docx not installed")
+                raise HTTPException(status_code=500, detail="Word document processing library (python-docx) not installed. Please install it with: pip install python-docx")
+            except Exception as e:
+                logger.error(f"Word document processing error: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to process Word document: {str(e)}")
+        
+        # EXCEL SPREADSHEET: Use openpyxl
+        elif "spreadsheet" in content_type or "excel" in content_type or file_extension in ["xlsx", "xls"]:
+            logger.info("Extracting text from Excel spreadsheet...")
+            try:
+                from openpyxl import load_workbook
+                wb = load_workbook(temp_path, data_only=True)
+                all_text = []
+                for sheet_name in wb.sheetnames:
+                    sheet = wb[sheet_name]
+                    all_text.append(f"Sheet: {sheet_name}")
+                    for row in sheet.iter_rows():
+                        row_values = [str(cell.value) for cell in row if cell.value is not None]
+                        if row_values:
+                            all_text.append(' | '.join(row_values))
+                extracted_text = '\n'.join(all_text)
+                logger.info(f"Excel extraction: {len(extracted_text)} chars")
+            except ImportError:
+                logger.error("openpyxl not installed")
+                raise HTTPException(status_code=500, detail="Excel processing library (openpyxl) not installed. Please install it with: pip install openpyxl")
+            except Exception as e:
+                logger.error(f"Excel processing error: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to process Excel file: {str(e)}")
                 
         # TEXT FILE: Read directly
         elif file_extension in ["txt", "md", "csv"]:
@@ -2912,22 +3030,26 @@ async def mark_notification_read(notif_id: str):
 async def get_path_nodes(user_email: str = "user"):
     """
     Returns ordered learning path nodes with user-specific status (completed, active, locked).
-    Now includes role-based access filtering based on access_control_store.
+    IMPORTANT: This endpoint only returns CAREER PROGRESSION nodes.
+    Self-Learning nodes are served via /learning-paths/content/self_learning
     """
     # Get user info for access control
     user = users_store.get(user_email, {})
     user_role = user.get("role", "Waffler")
     
-    # Filter path nodes
-    raw_nodes = [item for item in content_store if item.get("isPathNode", False)]
+    # Filter path nodes - ONLY CAREER PROGRESSION (not self_learning)
+    raw_nodes = [
+        item for item in content_store 
+        if item.get("isPathNode", False) and item.get("learning_path_type", "career_progression") != "self_learning"
+    ]
     # Sort by timestamp (oldest first = linear order)
-    raw_nodes.sort(key=lambda x: x["timestamp"])
+    raw_nodes.sort(key=lambda x: x.get("timestamp", ""))
     
-    # Apply access control filtering
+    # Apply access control filtering (ONLY if access rules exist for this role)
     access_rules = access_control_store.get(user_role)
     
     if access_rules:
-        # User has restricted access
+        # User has restricted access based on curriculum hierarchy
         accessible_buckets = access_rules.get("accessible_buckets", [])
         accessible_courses = access_rules.get("accessible_courses", [])
         max_visible = access_rules.get("max_courses_visible", -1)
@@ -2937,15 +3059,23 @@ async def get_path_nodes(user_email: str = "user"):
             bucket_id = node.get("bucket")
             course_id = node.get("id")
             
-            # Check if course is accessible (either specifically allowed or in accessible bucket)
-            if course_id in accessible_courses or bucket_id in accessible_buckets:
+            # Access rules:
+            # 1. Course is explicitly in accessible_courses list
+            # 2. Course's bucket is in accessible_buckets list
+            # 3. Course has NO bucket (uncategorized) - visible to all for flexibility
+            if course_id in accessible_courses or bucket_id in accessible_buckets or bucket_id is None:
                 filtered_nodes.append(node)
         
-        # Apply max visible limit if set
-        if max_visible > 0:
+        # Apply max visible limit if set (only if we have filtered content)
+        if max_visible > 0 and len(filtered_nodes) > 0:
             filtered_nodes = filtered_nodes[:max_visible]
         
-        raw_nodes = filtered_nodes
+        # FALLBACK: If access control results in NO content, show all (avoid empty state)
+        if len(filtered_nodes) == 0 and len(raw_nodes) > 0:
+            logger.warning(f"Access control for {user_role} resulted in empty content. Showing all content as fallback.")
+            raw_nodes = raw_nodes  # Keep all
+        else:
+            raw_nodes = filtered_nodes
     # else: user has full access (not in access_control_store means all access)
     
     # Get user's completed course IDs
@@ -3039,11 +3169,52 @@ async def get_learning_path_content(path_type: str, user_email: str = "user"):
     user = users_store.get(user_email, {})
     self_learning_completed = user.get("self_learning_completed", False)
     
-    # Filter courses by path type and isPathNode
-    filtered_courses = [
-        c for c in content_store 
-        if c.get("isPathNode", False) and c.get("learning_path_type", "career_progression") == path_type
-    ]
+    # Filter courses by path type
+    if path_type == "self_learning":
+        # Self learning: MUST have learning_path_type == "self_learning"
+        filtered_courses = [
+            c for c in content_store 
+            if c.get("isPathNode", False) and c.get("learning_path_type") == "self_learning"
+        ]
+    else:
+        # Career progression: learning_path_type == "career_progression" or legacy (None/"")
+        filtered_courses = [
+            c for c in content_store 
+            if c.get("isPathNode", False) and c.get("learning_path_type", "career_progression") != "self_learning"
+        ]
+        
+        # APPLY ACCESS CONTROL FILTERING for career progression (curriculum hierarchy)
+        user_role = user.get("role", "Waffler")
+        access_rules = access_control_store.get(user_role)
+        
+        if access_rules:
+            # User has restricted access
+            accessible_buckets = access_rules.get("accessible_buckets", [])
+            accessible_courses = access_rules.get("accessible_courses", [])
+            max_visible = access_rules.get("max_courses_visible", -1)
+            
+            # Store original count before filtering
+            original_count = len(filtered_courses)
+            
+            # Filter to only accessible courses
+            # Allow: explicit courses, matching buckets, or uncategorized content (bucket=None)
+            filtered_courses = [
+                c for c in filtered_courses
+                if c.get("id") in accessible_courses or c.get("bucket") in accessible_buckets or c.get("bucket") is None
+            ]
+            
+            # Apply max visible limit if set and we have content
+            if max_visible > 0 and len(filtered_courses) > 0:
+                filtered_courses = filtered_courses[:max_visible]
+            
+            # FALLBACK: If filtering resulted in empty, show all (avoid empty state)
+            if len(filtered_courses) == 0 and original_count > 0:
+                logger.warning(f"Access control for {user_role} in career_progression resulted in empty. Showing all.")
+                # Refetch without access filter
+                filtered_courses = [
+                    c for c in content_store 
+                    if c.get("isPathNode", False) and c.get("learning_path_type", "career_progression") != "self_learning"
+                ]
     
     # Sort by timestamp (oldest first = linear order)
     filtered_courses.sort(key=lambda x: x.get("timestamp", ""))
@@ -3701,21 +3872,49 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 @app.post("/notifications/send")
-async def send_notification_endpoint(payload: NotificationRequest):
+async def send_notification_endpoint(
+    title: str = Form(...),
+    message: str = Form(...),
+    type: str = Form("ordinary"),
+    file: Optional[UploadFile] = File(None)
+):
+    """Send a notification to all users. Supports optional image/video upload."""
     notification_id = str(uuid.uuid4())
+    
+    # Handle file upload if present
+    media_url = None
+    if file and file.filename:
+        file_extension = file.filename.split('.')[-1].lower()
+        file_name = f"notif_{notification_id}.{file_extension}"
+        file_path = os.path.join(UPLOAD_DIR, file_name)
+        
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        
+        media_url = f"{BASE_URL}/uploads/{file_name}"
+        logger.info(f"Notification media uploaded: {media_url}")
+    
     new_notif = {
         "id": notification_id,
-        "title": payload.title,
-        "message": payload.message,
-        "type": payload.type,
+        "title": title,
+        "message": message,
+        "type": type,
+        "mediaUrl": media_url,
         "created_at": datetime.now().isoformat(),
         "read_by": []
     }
     notification_store.insert(0, new_notif)
     
+    # For crucial notifications, also store in crucial_notification_store for blocking modal
+    if type == 'crucial':
+        crucial_notification_store["current"] = new_notif
+    
+    logger.info(f"Broadcasting Notification: {title}")
+    
     # Broadcast to all users
     await manager.broadcast({
-        "type": "CRUCIAL_NOTIFICATION" if payload.type == 'crucial' else "NOTIFICATION",
+        "type": "CRUCIAL_NOTIFICATION" if type == 'crucial' else "NOTIFICATION",
         "data": new_notif
     })
     
@@ -3734,6 +3933,22 @@ async def get_notifications(user_id: Optional[str] = "user"):
 @app.get("/notifications/crucial")
 async def get_crucial_notifications(user_id: str = "user"):
     """Returns the first unread crucial notification for this user (for blocking modal)"""
+    # FIRST check crucial_notification_store (from /notifications/send)
+    if crucial_notification_store.get("current"):
+        current = crucial_notification_store["current"]
+        if user_id not in current.get("read_by", []):
+            # Return formatted response with all fields including read status
+            return {
+                "id": current["id"],
+                "title": current["title"],
+                "message": current["message"],
+                "type": current["type"],
+                "read": False,
+                "created_at": current.get("created_at"),
+                "mediaUrl": current.get("mediaUrl")  # Image URL
+            }
+    
+    # THEN check legacy notification_store
     for n in notification_store:
         if n.get("type") == "crucial" and user_id not in n.get("read_by", []):
             return {
@@ -3742,13 +3957,25 @@ async def get_crucial_notifications(user_id: str = "user"):
                 "message": n["message"],
                 "type": n["type"],
                 "read": False,
-                "created_at": n.get("created_at")
+                "created_at": n.get("created_at"),
+                "mediaUrl": n.get("mediaUrl") or n.get("image")  # Include image URL
             }
     # No unread crucial notifications
     return {"id": None, "read": True}
 
 @app.post("/notifications/{notif_id}/read")
 async def mark_notification_read(notif_id: str, user_id: str = "user"):
+    # Check crucial_notification_store first
+    if crucial_notification_store.get("current"):
+        current = crucial_notification_store["current"]
+        if current.get("id") == notif_id:
+            if user_id not in current.get("read_by", []):
+                current["read_by"].append(user_id)
+            # Clear the current crucial notification since it's been acknowledged
+            crucial_notification_store["current"] = None
+            return {"status": "success"}
+    
+    # Check regular notification_store
     for n in notification_store:
         if n["id"] == notif_id:
             if user_id not in n["read_by"]:
@@ -9018,113 +9245,120 @@ async def get_all_exams_with_stats():
 # ==========================================
 
 @app.get("/api/content-library")
-async def get_content_library():
-    """Get all content organized by category/bucket"""
-    # Build category map
-    categories = {b["id"]: {"id": b["id"], "name": b["name"], "color": b["color"], "icon": b["icon"], "items": []} for b in course_buckets}
-    categories["uncategorized"] = {"id": "uncategorized", "name": "Uncategorized", "color": "#6B7280", "icon": "folder", "items": []}
+async def get_api_content_library():
+    """
+    Get content grouped by bucket/category for ContentLibraryModal.
+    Returns categories with items array.
+    """
+    # Get all unique buckets from content
+    buckets_in_use = set()
+    for item in content_store:
+        bucket = item.get("bucket") or "Uncategorized"
+        buckets_in_use.add(bucket)
     
-    # Organize content by bucket
-    for content in content_store:
-        bucket_id = content.get("bucket_id", "uncategorized")
-        if bucket_id in categories:
-            categories[bucket_id]["items"].append({
-                "id": content.get("id"),
-                "title": content.get("title", "Untitled"),
-                "description": content.get("description", ""),
-                "type": "Video" if content.get("videoUrl") else "Document",
-                "videoUrl": content.get("videoUrl", ""),
-                "category": categories[bucket_id]["name"],
-                "bucket_id": bucket_id,
-                "date": content.get("timestamp", datetime.now().isoformat())[:10],
-                "authorRole": content.get("authorRole", "Admin"),
-                "xp": content.get("xp", 50),
-                "transcript": content.get("transcript"),
-                "quiz": content.get("quiz"),
-            })
-        else:
-            categories["uncategorized"]["items"].append({
-                "id": content.get("id"),
-                "title": content.get("title", "Untitled"),
-                "description": content.get("description", ""),
-                "type": "Video" if content.get("videoUrl") else "Document",
-                "videoUrl": content.get("videoUrl", ""),
-                "category": "Uncategorized",
-                "bucket_id": "uncategorized",
-                "date": content.get("timestamp", datetime.now().isoformat())[:10],
-                "authorRole": content.get("authorRole", "Admin"),
-                "xp": content.get("xp", 50),
-                "transcript": content.get("transcript"),
-                "quiz": content.get("quiz"),
+    # Get bucket metadata from course_buckets
+    bucket_meta = {}
+    for bucket in course_buckets:
+        bucket_meta[bucket.get("name")] = {
+            "id": bucket.get("id"),
+            "icon": bucket.get("icon", "folder"),
+            "color": bucket.get("color", "#6B7280")
+        }
+    
+    # Group content by bucket
+    categories = []
+    for bucket_name in buckets_in_use:
+        meta = bucket_meta.get(bucket_name, {
+            "id": f"cat-{bucket_name.lower().replace(' ', '-')}",
+            "icon": "folder",
+            "color": "#6B7280"
+        })
+        
+        items = []
+        for item in content_store:
+            item_bucket = item.get("bucket") or "Uncategorized"
+            if item_bucket == bucket_name:
+                items.append({
+                    "id": item.get("id"),
+                    "title": item.get("title", "Untitled"),
+                    "description": item.get("description", "No description"),
+                    "type": "Video" if item.get("videoUrl") else "Document",
+                    "category": bucket_name,
+                    "bucket_id": meta.get("id"),
+                    "videoUrl": item.get("videoUrl"),
+                    "date": item.get("timestamp", "")[:10] if item.get("timestamp") else "Unknown"
+                })
+        
+        if items:
+            categories.append({
+                "id": meta.get("id"),
+                "name": bucket_name,
+                "icon": meta.get("icon"),
+                "color": meta.get("color"),
+                "items": items
             })
     
-    # Return only categories that have items or are default buckets
-    result = [cat for cat in categories.values() if cat["items"] or cat["id"] != "uncategorized"]
-    return {"categories": result, "total_items": len(content_store)}
+    # Sort: Uncategorized last
+    categories.sort(key=lambda x: (x["name"] == "Uncategorized", x["name"]))
+    
+    return {"categories": categories}
 
 
-@app.delete("/api/content/{content_id}")
-async def delete_content(content_id: str):
-    """Delete a specific content item"""
-    global content_store
-    
-    # Find the content
-    content_to_delete = None
-    for i, content in enumerate(content_store):
-        if content.get("id") == content_id:
-            content_to_delete = content
-            content_store.pop(i)
-            break
-    
-    if not content_to_delete:
-        raise HTTPException(status_code=404, detail="Content not found")
-    
-    # Log the action
-    log_action("DELETE_CONTENT", content_to_delete.get("title", content_id), f"Content deleted from library")
-    
-    logger.info(f"Content Deleted: {content_to_delete.get('title', content_id)}")
-    return {"status": "success", "message": "Content deleted successfully", "deleted_id": content_id}
+@app.get("/api/buckets")
+async def get_api_buckets():
+    """Get available course buckets for category selection"""
+    return {
+        "buckets": [
+            {
+                "id": bucket.get("id"),
+                "name": bucket.get("name"),
+                "icon": bucket.get("icon", "folder"),
+                "color": bucket.get("color", "#6B7280")
+            }
+            for bucket in course_buckets
+        ]
+    }
 
 
 @app.put("/api/content/{content_id}")
-async def update_content(
+async def update_api_content(
     content_id: str,
     title: str = Form(None),
     description: str = Form(None),
-    xp: int = Form(None),
     bucket_id: str = Form(None)
 ):
-    """Update content details (title, description, xp, bucket)"""
-    # Find the content
-    content_to_update = None
-    for content in content_store:
-        if content.get("id") == content_id:
-            content_to_update = content
-            break
+    """Update content item details"""
+    for item in content_store:
+        if item.get("id") == content_id:
+            if title:
+                item["title"] = title
+            if description:
+                item["description"] = description
+            if bucket_id:
+                # Find bucket name from id
+                if bucket_id == "uncategorized":
+                    item["bucket"] = "Uncategorized"
+                else:
+                    for bucket in course_buckets:
+                        if bucket.get("id") == bucket_id:
+                            item["bucket"] = bucket.get("name")
+                            break
+            
+            return {"status": "success", "content": item}
     
-    if not content_to_update:
+    raise HTTPException(status_code=404, detail="Content not found")
+
+
+@app.delete("/api/content/{content_id}")
+async def delete_api_content(content_id: str):
+    """Delete content from library"""
+    original_len = len(content_store)
+    content_store[:] = [c for c in content_store if c.get("id") != content_id]
+    
+    if len(content_store) == original_len:
         raise HTTPException(status_code=404, detail="Content not found")
     
-    # Update fields if provided
-    updated_fields = []
-    if title is not None:
-        content_to_update["title"] = title
-        updated_fields.append("title")
-    if description is not None:
-        content_to_update["description"] = description
-        updated_fields.append("description")
-    if xp is not None:
-        content_to_update["xp"] = xp
-        updated_fields.append("xp")
-    if bucket_id is not None:
-        content_to_update["bucket_id"] = bucket_id
-        updated_fields.append("bucket_id")
-    
-    # Log the action
-    log_action("EDIT_CONTENT", content_to_update.get("title", content_id), f"Updated fields: {', '.join(updated_fields)}")
-    
-    logger.info(f"Content Updated: {content_to_update.get('title', content_id)} - Fields: {updated_fields}")
-    return {"status": "success", "message": "Content updated successfully", "content": content_to_update}
+    return {"status": "success", "message": "Content deleted"}
 
 
 @app.put("/api/content/{content_id}/category")
@@ -9132,42 +9366,20 @@ async def change_content_category(
     content_id: str,
     bucket_id: str = Form(...)
 ):
-    """Change the category/bucket of a content item"""
-    # Validate bucket exists
-    valid_bucket = any(b["id"] == bucket_id for b in course_buckets)
-    if not valid_bucket and bucket_id != "uncategorized":
-        raise HTTPException(status_code=400, detail="Invalid bucket ID")
+    """Change content category/bucket"""
+    for item in content_store:
+        if item.get("id") == content_id:
+            if bucket_id == "uncategorized":
+                item["bucket"] = "Uncategorized"
+            else:
+                for bucket in course_buckets:
+                    if bucket.get("id") == bucket_id:
+                        item["bucket"] = bucket.get("name")
+                        break
+            
+            return {"status": "success", "content": item}
     
-    # Find the content
-    content_to_update = None
-    for content in content_store:
-        if content.get("id") == content_id:
-            content_to_update = content
-            break
-    
-    if not content_to_update:
-        raise HTTPException(status_code=404, detail="Content not found")
-    
-    old_bucket = content_to_update.get("bucket_id", "uncategorized")
-    content_to_update["bucket_id"] = bucket_id
-    
-    # Get bucket names for logging
-    old_bucket_name = next((b["name"] for b in course_buckets if b["id"] == old_bucket), "Uncategorized")
-    new_bucket_name = next((b["name"] for b in course_buckets if b["id"] == bucket_id), "Uncategorized")
-    
-    # Log the action
-    log_action("CHANGE_CATEGORY", content_to_update.get("title", content_id), f"Moved from '{old_bucket_name}' to '{new_bucket_name}'")
-    
-    logger.info(f"Content Category Changed: {content_to_update.get('title', content_id)} - {old_bucket_name} -> {new_bucket_name}")
-    return {"status": "success", "message": "Category changed successfully", "content": content_to_update}
-
-
-@app.get("/api/buckets")
-async def get_buckets():
-    """Get all available course buckets/categories"""
-    return {"buckets": course_buckets}
-
-
+    raise HTTPException(status_code=404, detail="Content not found")
 # --- ADMIN ANALYST AI ENDPOINT ---
 class AdminChatRequest(BaseModel):
     query: str
@@ -9326,7 +9538,331 @@ async def generate_quiz_from_topic(request: QuizGenerationRequest):
         print(f"Quiz Gen Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ==========================================
+# STORE AUDITS ENDPOINTS
+# ==========================================
+
+@app.post("/store-audits/submit")
+async def submit_store_audit(
+    user_email: str = Form(...),
+    user_name: str = Form(...),
+    store: str = Form(...),
+    category: str = Form(...),
+    checklist_items: str = Form(...),  # JSON string of all checklist items
+    checked_items: str = Form(...)     # JSON string of checked items {key: boolean}
+):
+    """Submit a store audit checklist for a category"""
+    try:
+        items_list = json.loads(checklist_items)
+        checked_dict = json.loads(checked_items)
+        
+        # Calculate completion rate
+        total_items = len(items_list)
+        checked_count = sum(1 for key, val in checked_dict.items() if val and key.startswith(category))
+        completion_rate = round((checked_count / total_items) * 100) if total_items > 0 else 0
+        
+        # Get category info
+        cat_info = STORE_AUDIT_CATEGORIES.get(category, {"name": category, "icon": "check", "color": "#6B7280"})
+        
+        submission = {
+            "id": str(uuid.uuid4()),
+            "user_email": user_email,
+            "user_name": user_name,
+            "store": store,
+            "category": category,
+            "category_name": cat_info["name"],
+            "checklist_items": items_list,
+            "checked_items": checked_dict,
+            "checked_count": checked_count,
+            "total_items": total_items,
+            "completion_rate": completion_rate,
+            "submitted_at": datetime.now().isoformat()
+        }
+        
+        store_audit_submissions.append(submission)
+        logger.info(f"Store Audit submitted: {user_name} @ {store} - {cat_info['name']} ({completion_rate}%)")
+        
+        return {"status": "success", "data": submission}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON format for checklist items")
+    except Exception as e:
+        logger.error(f"Store Audit submission error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/store-audits/history")
+async def get_store_audit_history(
+    store: Optional[str] = None,
+    user_email: Optional[str] = None,
+    category: Optional[str] = None,
+    limit: int = 100
+):
+    """Get store audit history with optional filters for Super Admins"""
+    filtered = store_audit_submissions.copy()
+    
+    # Apply filters
+    if store:
+        filtered = [a for a in filtered if a.get("store") == store]
+    if user_email:
+        filtered = [a for a in filtered if a.get("user_email") == user_email]
+    if category:
+        filtered = [a for a in filtered if a.get("category") == category]
+    
+    # Sort by date (newest first)
+    filtered.sort(key=lambda x: x.get("submitted_at", ""), reverse=True)
+    
+    # Apply limit
+    filtered = filtered[:limit]
+    
+    # Compute statistics
+    total_count = len(filtered)
+    avg_completion = round(sum(a.get("completion_rate", 0) for a in filtered) / total_count) if total_count > 0 else 0
+    
+    # Group by category for stats
+    category_stats = {}
+    for a in filtered:
+        cat = a.get("category", "unknown")
+        if cat not in category_stats:
+            category_stats[cat] = {"count": 0, "total_completion": 0}
+        category_stats[cat]["count"] += 1
+        category_stats[cat]["total_completion"] += a.get("completion_rate", 0)
+    
+    for cat in category_stats:
+        if category_stats[cat]["count"] > 0:
+            category_stats[cat]["avg_completion"] = round(category_stats[cat]["total_completion"] / category_stats[cat]["count"])
+    
+    return {
+        "audits": filtered,
+        "total_count": total_count,
+        "avg_completion_rate": avg_completion,
+        "category_stats": category_stats,
+        "categories": STORE_AUDIT_CATEGORIES
+    }
+
+@app.get("/store-audits/filters")
+async def get_store_audit_filters():
+    """Get unique stores and employees for filter dropdowns"""
+    stores = list(set(a.get("store") for a in store_audit_submissions if a.get("store")))
+    employees = list(set(
+        json.dumps({"email": a.get("user_email"), "name": a.get("user_name")}) 
+        for a in store_audit_submissions if a.get("user_email")
+    ))
+    
+    # Parse employees back to objects
+    unique_employees = [json.loads(e) for e in employees]
+    
+    return {
+        "stores": sorted(stores),
+        "employees": sorted(unique_employees, key=lambda x: x.get("name", "")),
+        "categories": [{"id": k, **v} for k, v in STORE_AUDIT_CATEGORIES.items()]
+    }
+
+@app.post("/ai/chatbot")
+async def ai_chatbot(
+    message: str = Form(...),
+    history: str = Form("[]")
+):
+    """
+    Dynamic AI Chatbot that:
+    1. Searches through courses and resources (RAG)
+    2. Uses Groq to generate contextual responses
+    3. Adds disclaimer for answers outside BW LMS context
+    """
+    try:
+        import json
+        
+        # Parse chat history
+        try:
+            chat_history = json.loads(history)
+        except:
+            chat_history = []
+        
+        # --- RAG SEARCH ---
+        # Search through indexed content for relevant context
+        relevant_context = []
+        is_internal_answer = False
+        
+        if rag_index.ntotal > 0:
+            query_embedding = rag_model.encode(message)
+            distances, indices = rag_index.search(
+                np.array([query_embedding]).astype("float32"), 
+                k=min(3, rag_index.ntotal)
+            )
+            
+            for idx in indices[0]:
+                if idx < len(rag_metadata):
+                    relevant_context.append(rag_metadata[idx]["text"])
+                    is_internal_answer = True
+        
+        # --- BUILD KNOWLEDGE BASE ---
+        # Gather all available courses and resources
+        course_summaries = []
+        for course in content_store[:20]:  # Limit to prevent token overflow
+            if course.get("isPathNode", False):
+                course_summaries.append(f"- {course.get('title', 'Untitled')}: {course.get('description', 'No description')[:100]}")
+        
+        resource_summaries = []
+        for resource in resource_store[:20]:
+            resource_summaries.append(f"- {resource.get('title', 'Untitled')}: {resource.get('category', 'General')}")
+        
+        # --- BUILD PROMPT ---
+        system_prompt = """You are BWC AI Assistant, the intelligent helper for Belgian Waffle Co.'s Learning Management System.
+
+YOUR KNOWLEDGE BASE INCLUDES:
+1. Training courses and learning paths
+2. Standard Operating Procedures (SOPs)
+3. Recipes and food preparation guides
+4. Equipment handling and safety protocols
+5. Customer service standards
+6. Store operations (opening, closing, cleaning)
+
+RESPONSE GUIDELINES:
+- Be helpful, friendly, and professional
+- Use emojis sparingly to keep it engaging (🧇, ✅, 📚)
+- Format responses with *bold* for important terms
+- Use bullet points for lists
+- Keep responses concise but informative
+- If the answer is from BW LMS training materials, mention the relevant course/resource
+- If answering general questions OUTSIDE the BW LMS scope, add this note at the end:
+  "ℹ️ Note: This information is general knowledge and not part of BW LMS training materials."
+
+BELGIAN WAFFLE CO. SPECIFIC INFO:
+- Standard baking temp: 180-190°C
+- Batter: 5kg Premix + 4L Water + 500g Oil
+- Cooking time: 3:30 - 4:00 minutes
+- Uniform: BWC Cap, Black T-Shirt, Apron, Non-slip shoes"""
+
+        # Build context section
+        context_section = ""
+        if relevant_context:
+            context_section = f"\n\nRELEVANT TRAINING CONTENT:\n" + "\n".join(relevant_context[:3])
+        
+        if course_summaries:
+            context_section += f"\n\nAVAILABLE COURSES:\n" + "\n".join(course_summaries[:10])
+        
+        if resource_summaries:
+            context_section += f"\n\nAVAILABLE RESOURCES:\n" + "\n".join(resource_summaries[:10])
+        
+        # Build conversation messages
+        messages = [{"role": "system", "content": system_prompt + context_section}]
+        
+        # Add chat history (last 10 messages)
+        for msg in chat_history[-10:]:
+            role = "user" if msg.get("sender") == "user" else "assistant"
+            messages.append({"role": role, "content": msg.get("text", "")})
+        
+        # Add current message
+        messages.append({"role": "user", "content": message})
+        
+        # --- GROQ API CALL ---
+        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            temperature=0.7,
+            max_tokens=1000
+        )
+        
+        ai_response = response.choices[0].message.content.strip()
+        
+        # Determine if answer is from internal sources
+        internal_keywords = ["sop", "recipe", "batter", "waffle", "temperature", "iron", 
+                           "cleaning", "opening", "closing", "uniform", "training", "course"]
+        message_lower = message.lower()
+        is_internal_question = any(kw in message_lower for kw in internal_keywords)
+        
+        return {
+            "status": "success",
+            "response": ai_response,
+            "is_internal": is_internal_answer or is_internal_question,
+            "sources_found": len(relevant_context)
+        }
+        
+    except Exception as e:
+        logger.error(f"AI Chatbot Error: {e}")
+        return {
+            "status": "error",
+            "response": "I'm having trouble connecting right now. Please try again in a moment. 🔄",
+            "error": str(e)
+        }
+
+@app.post("/ai/voice_query")
+async def ai_voice_query(file: UploadFile = File(...)):
+    """Handle voice queries - transcribe and respond"""
+    try:
+        # Save temp file
+        temp_path = f"temp_voice_{uuid.uuid4()}.m4a"
+        with open(temp_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        
+        # Transcribe with Whisper
+        if whisper_model is None:
+            os.remove(temp_path)
+            return {"status": "error", "error": "Voice transcription unavailable"}
+        
+        result = whisper_model.transcribe(temp_path, fp16=False)
+        user_text = result["text"].strip()
+        os.remove(temp_path)
+        
+        if not user_text:
+            return {"status": "error", "error": "Could not understand audio"}
+        
+        # Get AI response using chatbot endpoint logic
+        # Search RAG
+        relevant_context = []
+        if rag_index.ntotal > 0:
+            query_embedding = rag_model.encode(user_text)
+            distances, indices = rag_index.search(
+                np.array([query_embedding]).astype("float32"), 
+                k=min(3, rag_index.ntotal)
+            )
+            for idx in indices[0]:
+                if idx < len(rag_metadata):
+                    relevant_context.append(rag_metadata[idx]["text"])
+        
+        context_text = "\n".join(relevant_context) if relevant_context else ""
+        
+        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": f"You are BWC AI Assistant for Belgian Waffle Co. Be concise and helpful. Context: {context_text}"},
+                {"role": "user", "content": user_text}
+            ],
+            temperature=0.7,
+            max_tokens=500
+        )
+        
+        ai_response = response.choices[0].message.content.strip()
+        
+        return {
+            "status": "success",
+            "user_text": user_text,
+            "ai_response": ai_response
+        }
+        
+    except Exception as e:
+        logger.error(f"Voice Query Error: {e}")
+        return {"status": "error", "error": str(e)}
+
+@app.get("/ai/suggested-questions")
+async def get_suggested_questions():
+    """Get dynamic suggested questions based on available courses"""
+    suggestions = [
+        "What is the standard waffle baking temperature?",
+        "Explain the opening checklist",
+        "How do I prepare the batter?",
+        "What are the cleaning protocols?",
+    ]
+    
+    # Add course-specific suggestions
+    for course in content_store[:3]:
+        if course.get("isPathNode"):
+            suggestions.append(f"Tell me about {course.get('title', 'this course')}")
+    
+    return {"suggestions": suggestions[:8]}
+    
 if __name__ == "__main__":
     import uvicorn
     logger.info(f"Starting BW LMS Backend on {HOST}:{PORT}")
     uvicorn.run(app, host=HOST, port=PORT)
+

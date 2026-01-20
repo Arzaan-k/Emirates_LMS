@@ -291,10 +291,22 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
             setShowOptions(false);
             setIsVideoPlaying(true);
 
-            // Play video
-            // Video plays automatically via isVideoPlaying state
-            if (!currentNode.videoUrl) {
+            // Play video explicitly using ref
+            if (currentNode.videoUrl && videoRef.current) {
+                try {
+                    await videoRef.current.setPositionAsync(0);
+                    await videoRef.current.playAsync();
+                    console.log('[Simulation] Video playback started');
+                } catch (e) {
+                    console.error('[Simulation] Error playing video:', e);
+                    // If video fails to play, proceed to next step
+                    setTimeout(() => {
+                        handleVideoEnd({ didJustFinish: true });
+                    }, 1000);
+                }
+            } else if (!currentNode.videoUrl) {
                 // No video - proceed to next step after short delay
+                console.log('[Simulation] No video, proceeding to next step');
                 setTimeout(() => {
                     handleVideoEnd({ didJustFinish: true });
                 }, 1500);
@@ -329,72 +341,90 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
         }
     };
 
-    // Handle video completion
-    const handleVideoEnd = async (status) => {
-        if (status.didJustFinish && isVideoPlaying) {
-            setIsVideoPlaying(false);
+    // Handle video completion - called on every playback status update
+    const handleVideoEnd = useCallback(async (status) => {
+        // Only process when video has actually finished playing
+        // Check both didJustFinish AND ensure we're in a playing state
+        if (!status.didJustFinish) return;
+        if (!isVideoPlaying) return;
 
-            // Find next node based on correct option
-            const correctOption = currentNode.options.find(o => o.isCorrect);
+        console.log('[Simulation] Video finished, processing next step');
+        setIsVideoPlaying(false);
 
-            // Calculate total steps in the simulation
-            const totalSteps = simulation.nodes.length;
-            // stepsCompleted is incremented BEFORE this function is called (in handleOptionSelect)
-            // So after completing last step, stepsCompleted will equal totalSteps
-            const allStepsCompleted = (stepsCompleted >= totalSteps);
+        // Find next node based on correct option
+        const correctOption = currentNode?.options?.find(o => o.isCorrect);
 
-            // Determine if there's a valid next node to navigate to
-            let nextNode = null;
-            if (correctOption && correctOption.nextNodeId) {
-                nextNode = simulation.nodes.find(n => n.id === correctOption.nextNodeId);
-            }
+        // Calculate total steps in the simulation
+        const totalSteps = simulation?.nodes?.length || 0;
+        // stepsCompleted is incremented BEFORE this function is called (in handleOptionSelect)
+        // So after completing last step, stepsCompleted will equal totalSteps
+        const allStepsCompleted = (stepsCompleted >= totalSteps);
 
-            // Check if this is the intentional final step (correct option has no nextNodeId)
-            const isIntentionalFinalStep = correctOption && !correctOption.nextNodeId;
+        // Determine if there's a valid next node to navigate to
+        let nextNode = null;
+        if (correctOption && correctOption.nextNodeId) {
+            nextNode = simulation.nodes.find(n => n.id === correctOption.nextNodeId);
+        }
 
-            // Simulation should complete ONLY when:
-            // 1. This is the intentional final step (no nextNodeId set), OR
-            // 2. All steps have been completed AND there's no valid next node
-            if (isIntentionalFinalStep && allStepsCompleted) {
-                // Intentional completion - all steps done and marked as final
-                handleSimulationComplete();
-            } else if (nextNode) {
-                // Navigate to the next node
-                setCurrentNodeId(nextNode.id);
-                setCurrentNode(nextNode);
+        // Check if this is the intentional final step (correct option has no nextNodeId)
+        const isIntentionalFinalStep = correctOption && !correctOption.nextNodeId;
 
-                // Force video component to re-mount with new source
+        console.log('[Simulation] Navigation check:', {
+            stepsCompleted,
+            totalSteps,
+            allStepsCompleted,
+            nextNodeId: correctOption?.nextNodeId,
+            hasNextNode: !!nextNode,
+            isIntentionalFinalStep
+        });
+
+        // Simulation should complete ONLY when:
+        // 1. This is the intentional final step (no nextNodeId set), OR
+        // 2. All steps have been completed AND there's no valid next node
+        if (isIntentionalFinalStep && allStepsCompleted) {
+            // Intentional completion - all steps done and marked as final
+            console.log('[Simulation] Completing simulation (final step)');
+            handleSimulationComplete();
+        } else if (nextNode) {
+            // Navigate to the next node
+            console.log('[Simulation] Navigating to next node:', nextNode.title);
+            setCurrentNodeId(nextNode.id);
+            setCurrentNode(nextNode);
+
+            // Force video component to re-mount with new source
+            setVideoKey(prev => prev + 1);
+
+            // Show options after short transition (video paused, waiting for user)
+            setTimeout(() => {
+                setShowOptions(true);
+            }, 400);
+        } else if (allStepsCompleted) {
+            // All steps completed but no explicit next node - complete the simulation
+            console.log('[Simulation] Completing simulation (all steps done)');
+            handleSimulationComplete();
+        } else {
+            // Edge case: nextNodeId points to non-existent node but steps remain
+            // Find the next node in sequence that hasn't been visited
+            console.warn('[Simulation] nextNodeId reference not found, attempting to find next sequential node');
+
+            // Get current node index and try to go to next node in array order
+            const currentIndex = simulation.nodes.findIndex(n => n.id === currentNode?.id);
+            if (currentIndex >= 0 && currentIndex < simulation.nodes.length - 1) {
+                const fallbackNextNode = simulation.nodes[currentIndex + 1];
+                console.log('[Simulation] Using fallback next node:', fallbackNextNode.title);
+                setCurrentNodeId(fallbackNextNode.id);
+                setCurrentNode(fallbackNextNode);
                 setVideoKey(prev => prev + 1);
-
-                // Show options after short transition (video paused, waiting for user)
                 setTimeout(() => {
                     setShowOptions(true);
                 }, 400);
-            } else if (allStepsCompleted) {
-                // All steps completed but no explicit next node - complete the simulation
-                handleSimulationComplete();
             } else {
-                // Edge case: nextNodeId points to non-existent node but steps remain
-                // Find the next node in sequence that hasn't been visited
-                console.warn('nextNodeId reference not found, attempting to find next sequential node');
-
-                // Get current node index and try to go to next node in array order
-                const currentIndex = simulation.nodes.findIndex(n => n.id === currentNode.id);
-                if (currentIndex >= 0 && currentIndex < simulation.nodes.length - 1) {
-                    const fallbackNextNode = simulation.nodes[currentIndex + 1];
-                    setCurrentNodeId(fallbackNextNode.id);
-                    setCurrentNode(fallbackNextNode);
-                    setVideoKey(prev => prev + 1);
-                    setTimeout(() => {
-                        setShowOptions(true);
-                    }, 400);
-                } else {
-                    // Truly no more nodes available - complete simulation
-                    handleSimulationComplete();
-                }
+                // Truly no more nodes available - complete simulation
+                console.log('[Simulation] No more nodes, completing simulation');
+                handleSimulationComplete();
             }
         }
-    };
+    }, [isVideoPlaying, currentNode, simulation, stepsCompleted]);
 
     // Handle simulation completion
     const handleSimulationComplete = async () => {

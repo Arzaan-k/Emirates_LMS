@@ -91,59 +91,121 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
 
         setUploading(true);
         let completed = 0;
+        let failed = 0;
+        const failedFiles = [];
 
         // Determine learning path type based on toggle
         const learningPathType = isSelfLearning ? 'self_learning' : 'career_progression';
 
-        for (const file of files) {
-            try {
-                const formData = new FormData();
-                formData.append('title', file.name.replace(/\.[^/.]+$/, "")); // Remove extension
-                formData.append('description', "Bulk Uploaded Content");
-                formData.append('authorRole', "Store Manager");
-                formData.append('timestamp', new Date().toISOString());
-                formData.append('isPathNode', String(isPathNode));
-                formData.append('category', selectedBucket || "General"); // Required field
-                formData.append('learning_path_type', learningPathType); // NEW: Add learning path type
-                if (selectedBucket) {
-                    formData.append('bucket', selectedBucket);
+        // Helper function to delay between uploads
+        const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+        // Get the selected bucket name (not just ID)
+        const selectedBucketData = courseBuckets.find(b => b.id === selectedBucket);
+        const bucketName = selectedBucketData?.name || "General";
+
+        // Helper function to upload a single file with retries
+        const uploadWithRetry = async (file, maxRetries = 3) => {
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    const formData = new FormData();
+                    formData.append('title', file.name.replace(/\.[^/.]+$/, "")); // Remove extension
+                    formData.append('description', "Bulk Uploaded Content");
+                    formData.append('category', bucketName); // Use bucket NAME, not ID
+                    formData.append('isPathNode', String(isPathNode));
+                    formData.append('learning_path_type', learningPathType);
+                    if (selectedBucket) {
+                        formData.append('bucket', bucketName); // Use bucket NAME here too
+                    }
+                    formData.append('file', {
+                        uri: file.uri,
+                        name: file.name,
+                        type: file.mimeType || 'video/mp4'
+                    });
+
+                    // Use timeout controller for large files (5 minutes timeout per file)
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+
+                    console.log(`[Upload] Attempt ${attempt}/${maxRetries} for ${file.name} to bucket: ${bucketName}`);
+
+                    const response = await fetch(`${API_URL}/resources/upload`, {
+                        method: 'POST',
+                        body: formData,
+                        signal: controller.signal,
+                    });
+
+                    clearTimeout(timeoutId);
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(`Server error: ${response.status} - ${errorText}`);
+                    }
+
+                    console.log(`[Upload] Success: ${file.name}`);
+                    return true; // Success
+
+                } catch (error) {
+                    console.error(`[Upload] Attempt ${attempt} failed for ${file.name}:`, error.message);
+
+                    if (attempt < maxRetries) {
+                        // Wait before retrying (exponential backoff: 2s, 4s, 8s...)
+                        const waitTime = Math.pow(2, attempt) * 1000;
+                        console.log(`[Upload] Retrying in ${waitTime / 1000}s...`);
+                        await delay(waitTime);
+                    } else {
+                        // All retries failed
+                        return false;
+                    }
                 }
-                formData.append('file', {
-                    uri: file.uri,
-                    name: file.name,
-                    type: file.mimeType || 'video/mp4'
-                });
-
-                await fetch(`${API_URL}/upload`, {
-                    method: 'POST',
-                    body: formData,
-                    headers: {
-                        'Accept': 'application/json',
-                        'Content-Type': 'multipart/form-data',
-                    },
-                });
-
-                completed++;
-                setProgress(completed / files.length);
-
-            } catch (error) {
-                console.error("Upload failed for", file.name, error);
-                Alert.alert("Upload Error", `Failed to upload ${file.name}`);
             }
+            return false;
+        };
+
+        // Upload files sequentially with delays
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+
+            // Add a small delay between consecutive uploads to prevent overwhelming the server
+            if (i > 0) {
+                await delay(1000); // 1 second delay between files
+            }
+
+            const success = await uploadWithRetry(file);
+
+            if (success) {
+                completed++;
+            } else {
+                failed++;
+                failedFiles.push(file.name);
+            }
+
+            setProgress((completed + failed) / files.length);
         }
 
-        // Show success message before resetting state
+        // Show appropriate message based on results
         const uploadedPathName = isSelfLearning ? 'Self Learning' : 'Career Progression';
 
         setUploading(false);
         setFiles([]);
         setProgress(0);
         setSelectedBucket(null);
-        setIsSelfLearning(false); // Reset self learning toggle
-        setIsPathNode(true); // Reset to default true for next upload
-        onUploadComplete();
-        Alert.alert("Success", `All files uploaded to ${uploadedPathName} path!`);
-        onClose();
+        setIsSelfLearning(false);
+        setIsPathNode(true);
+
+        if (failed === 0) {
+            Alert.alert("Success! 🎉", `All ${completed} files uploaded to ${uploadedPathName} path!`);
+            onUploadComplete();
+            onClose();
+        } else if (completed > 0) {
+            Alert.alert(
+                "Partial Success",
+                `${completed} files uploaded successfully.\n${failed} files failed:\n${failedFiles.join('\n')}`,
+                [{ text: "OK", onPress: () => { onUploadComplete(); onClose(); } }]
+            );
+        } else {
+            Alert.alert("Upload Failed", `All uploads failed. Please check your network connection and try again.`);
+        }
     };
 
     return (
