@@ -1,0 +1,22 @@
+# Render Blueprint for LMS Backend Deployment
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: newlms-backend
+    runtime: python
+    region: oregon  # or singapore for closer to India
+    plan: free  # Change to 'starter' ($7/mo) for production
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.4"
+      - key: GROQ_API_KEY
+        sync: false  # Set manually in Render dashboard for security
+      - key: ELEVENLABS_API_KEY
+        sync: false  # Set manually in Render dashboard for security
+      - key: ELEVENLABS_VOICE_ID
+        value: "3AMU7jXQuQa3oRvRqUmb"
+    healthCheckPath: /
+    autoDeploy: true

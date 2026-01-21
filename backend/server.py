@@ -1,7 +1,8 @@
 import os
 import sys
-# Add custom library path for PyTorch and AI dependencies
-sys.path.insert(0, r"C:\torch_libs")
+# Add custom library path for PyTorch and AI dependencies (Windows local dev only)
+if os.path.exists(r"C:\torch_libs"):
+    sys.path.insert(0, r"C:\torch_libs")
 
 import shutil
 import asyncio
@@ -49,17 +50,19 @@ def add_course_to_rag(course_id, transcript):
         })
 
 # --- CONFIGURATION ---
-PORT = 8000
+# Render sets PORT env variable; fallback to 8000 for local development
+PORT = int(os.environ.get("PORT", 8000))
 HOST = "0.0.0.0"
-BASE_URL = "http://172.20.10.2:8000"  # Local network IP for physical device
+# BASE_URL: Use RENDER_EXTERNAL_URL if on Render, otherwise use local IP
+BASE_URL = os.environ.get("RENDER_EXTERNAL_URL", "http://172.20.10.2:8000")
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("BW_LMS_Backend")
 
 # --- ELEVENLABS CONFIG ---
-ELEVENLABS_API_KEY = "sk_6ecd572e870639a9cb94b52be1b37f7d093d2857734c5a5a"
-VOICE_ID = "3AMU7jXQuQa3oRvRqUmb" # Updated voice ID from user request
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "sk_6ecd572e870639a9cb94b52be1b37f7d093d2857734c5a5a")
+VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "3AMU7jXQuQa3oRvRqUmb")
 
 # --- GROQ CONFIG ---
 # Check if environment variable is already set (e.g. from .env or system), otherwise use this default
