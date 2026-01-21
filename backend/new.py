@@ -1,6 +1,14 @@
 import requests
+import os
+from dotenv import load_dotenv
 
-API_KEY = "sk_6ecd572e870639a9cb94b52be1b37f7d093d2857734c5a5a"
+# Load environment variables
+load_dotenv()
+
+API_KEY = os.environ.get("ELEVENLABS_API_KEY")
+if not API_KEY:
+    raise ValueError("ELEVENLABS_API_KEY not found in environment variables")
+
 VOICE_ID = "Y6nOpHQlW4lnf9GRRc8f"  # Best emotive Hindi voice
 URL = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}"
 

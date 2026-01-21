@@ -13,6 +13,10 @@ import uuid
 from datetime import datetime
 from urllib.parse import unquote
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -61,13 +65,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("BW_LMS_Backend")
 
 # --- ELEVENLABS CONFIG ---
-ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "sk_6ecd572e870639a9cb94b52be1b37f7d093d2857734c5a5a")
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
+if not ELEVENLABS_API_KEY:
+    raise ValueError("ELEVENLABS_API_KEY environment variable is not set. Please check your .env file.")
+
 VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "3AMU7jXQuQa3oRvRqUmb")
 
 # --- GROQ CONFIG ---
-# Check if environment variable is already set (e.g. from .env or system), otherwise use this default
-if not os.environ.get("GROQ_API_KEY"):
-    os.environ["GROQ_API_KEY"] = "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"
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+if not GROQ_API_KEY:
+    raise ValueError("GROQ_API_KEY environment variable is not set. Please check your .env file.")
 
 def generate_elevenlabs_audio(text):
     """Generates audio from text using ElevenLabs API and returns Base64 string."""
@@ -3739,9 +3746,9 @@ async def voice_query(file: UploadFile = File(...)):
         return {"error": f"AI Text Gen Failed: {str(e)}"}
 
     # 2. AUDIO GENERATION (ELEVENLABS)
-    ELEVENLABS_API_KEY = "sk_6ecd572e870639a9cb94b52be1b37f7d093d2857734c5a5a"
-    VOICE_ID = "Y6nOpHQlW4lnf9GRRc8f"
-    URL = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}"
+    # Use the global ELEVENLABS_API_KEY from environment
+    FEEDBACK_VOICE_ID = "Y6nOpHQlW4lnf9GRRc8f"  # Different voice for feedback
+    URL = f"https://api.elevenlabs.io/v1/text-to-speech/{FEEDBACK_VOICE_ID}"
 
     headers = {
         "xi-api-key": ELEVENLABS_API_KEY,
@@ -7253,7 +7260,7 @@ async def generate_consequence(request: ConsequenceRequest):
     """Generate AI consequence for wrong choice."""
     try:
         from groq import Groq
-        groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY", "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"))
+        groq_client = Groq(api_key=GROQ_API_KEY)
         
         prompt = f"""
         You are a training simulation for 'The Belgian Waffle Co.' restaurant.

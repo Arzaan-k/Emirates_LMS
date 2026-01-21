@@ -3,6 +3,10 @@ from moviepy.editor import ColorClip
 from faster_whisper import WhisperModel
 from groq import Groq
 import datetime
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 def test_pipeline():
     print("1. Testing MoviePy (Video Creation)...")
@@ -40,7 +44,11 @@ def test_pipeline():
 
     print("\n4. Testing Groq Quiz Gen...")
     try:
-        client = Groq(api_key="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")
+        groq_api_key = os.environ.get("GROQ_API_KEY")
+        if not groq_api_key:
+            print("   - FAILED: GROQ_API_KEY not found in environment variables")
+            return
+        client = Groq(api_key=groq_api_key)
         chat_completion = client.chat.completions.create(
             messages=[
                 {
