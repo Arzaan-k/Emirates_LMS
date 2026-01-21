@@ -51,7 +51,7 @@ def add_course_to_rag(course_id, transcript):
 # --- CONFIGURATION ---
 PORT = 8000
 HOST = "0.0.0.0"
-BASE_URL = "http://192.168.29.119:8000"  # Local network IP for physical device
+BASE_URL = "http://172.20.10.2:8000"  # Local network IP for physical device
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
