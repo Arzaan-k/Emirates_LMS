@@ -1,10 +1,14 @@
 import os
 import sys
+# Add custom library path for PyTorch and AI dependencies (Windows local dev only)
+if os.path.exists(r"C:\torch_libs"):
+    sys.path.insert(0, r"C:\torch_libs")
+
 import shutil
 import asyncio
 import json
 import logging
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 import uuid
 from datetime import datetime
 from urllib.parse import unquote
@@ -13,70 +17,54 @@ from urllib.parse import unquote
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, BackgroundTasks, Request, Depends, Header
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, BackgroundTasks, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from groq import Groq
 
 # Database imports
-from database import get_db, SessionLocal, check_database_health
+from database import get_db, SessionLocal
 from sqlalchemy.orm import Session
 import db_operations as db_ops
-from models import User as DBUser, Content as DBContent, CourseCompletion as DBCourseCompletion, ProgressionLevel, AccessRule
+from models import User as DBUser, Content as DBContent, CourseCompletion as DBCourseCompletion
 
-# Authentication and Security imports
-from auth import (
-    hash_password, verify_password, is_password_hashed,
-    create_access_token, create_refresh_token, verify_token,
-    get_current_user, require_auth, require_admin, require_privilege,
-    generate_user_token_data
-)
-from security import (
-    setup_security, limiter, get_allowed_origins,
-    sanitize_string, sanitize_filename, validate_email,
-    validate_file_extension, get_file_type,
-    validate_password_strength, MAX_FILE_SIZE_MB, MAX_VIDEO_SIZE_MB
-)
+# AI/ML imports - loaded from C:\torch_libs
+from sentence_transformers import SentenceTransformer
+import faiss
+import numpy as np
 
-# AI Services (using Groq API instead of local models)
-import ai_services
+rag_model = SentenceTransformer("all-MiniLM-L6-v2")
 
-# CDN Service for video storage (Cloudflare R2)
-import cdn_service
-
-# RAG Service for vector search (uses Groq - zero extra cost)
-import rag_service
-
-# Legacy rag_metadata for backward compatibility
+rag_index = faiss.IndexFlatL2(384)
 rag_metadata = []
 
 def chunk_text(text, chunk_size=200, overlap=40):
-    """Split text into overlapping chunks for RAG."""
-    return rag_service.chunk_text(text, chunk_size, overlap)
+    words = text.split()
+    chunks = []
+    for i in range(0, len(words), chunk_size - overlap):
+        chunk = " ".join(words[i:i+chunk_size])
+        chunks.append(chunk)
+    return chunks
 
 
 def add_course_to_rag(course_id, transcript):
-    """Add course transcript to RAG system."""
-    # Use the new RAG service
-    chunks_added = rag_service.add_to_rag(course_id, transcript)
-    
-    # Also maintain legacy rag_metadata for backward compatibility
     chunks = chunk_text(transcript)
+
     for chunk in chunks:
+        emb = rag_model.encode(chunk)
+        rag_index.add(np.array([emb]).astype("float32"))
         rag_metadata.append({
             "course_id": course_id,
             "text": chunk
         })
-    
-    return chunks_added
 
 # --- CONFIGURATION ---
 # Render sets PORT env variable; fallback to 8000 for local development
 PORT = int(os.environ.get("PORT", 8000))
 HOST = "0.0.0.0"
 # BASE_URL: Use RENDER_EXTERNAL_URL if on Render, otherwise use local IP
-BASE_URL = os.environ.get("RENDER_EXTERNAL_URL", "http://192.168.29.119:8000")
+BASE_URL = os.environ.get("RENDER_EXTERNAL_URL", "http://172.20.10.2:8000")
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
@@ -128,33 +116,32 @@ def generate_elevenlabs_audio(text):
         logger.error(f"TTS Generation Error: {e}")
         return None
 
+# --- LOAD AI MODELS ---
+import whisper
+logger.info("Loading OpenAI Whisper Model (Small - fast with good accuracy)...")
+whisper_model = whisper.load_model("small")
+logger.info("OpenAI Whisper Model Loaded (Small - optimized for speed).")
+
 # --- APP SETUP ---
-app = FastAPI(
-    title="BW LMS Backend",
-    description="Learning Management System Backend API",
-    version="2.0.0"
-)
+app = FastAPI(title="BW LMS Realtime Backend")
 
-# Setup security middleware (rate limiting, headers, logging)
-setup_security(app)
-
-# CORS Configuration - use allowed origins from environment
-allowed_origins = get_allowed_origins()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
-logger.info(f"CORS configured for origins: {allowed_origins}")
 
-# --- FFMPEG PATH FOR VIDEO PROCESSING ---
-# Required for moviepy video processing
+# --- FFMPEG FIX FOR WHISPER ---
+# Whisper requires 'ffmpeg' to be in the PATH. We add multiple possible locations.
+import os
+
+# Add WinGet-installed FFmpeg path (Windows)
 FFMPEG_WINGET_PATH = r"C:\Users\Arzaan Ali Khan\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.0.1-full_build\bin"
-if os.path.exists(FFMPEG_WINGET_PATH) and FFMPEG_WINGET_PATH not in os.environ.get("PATH", ""):
-    os.environ["PATH"] = FFMPEG_WINGET_PATH + os.pathsep + os.environ.get("PATH", "")
-    logger.info(f"FFmpeg path added: {FFMPEG_WINGET_PATH}")
+if os.path.exists(FFMPEG_WINGET_PATH) and FFMPEG_WINGET_PATH not in os.environ["PATH"]:
+    os.environ["PATH"] = FFMPEG_WINGET_PATH + os.pathsep + os.environ["PATH"]
+    logger.info(f"FFmpeg WinGet Path added: {FFMPEG_WINGET_PATH}")
 
 # Also try imageio_ffmpeg as fallback
 try:
@@ -201,41 +188,14 @@ def log_action(action: str, target: str, details: str = "", admin_email: str = "
     """
     Helper to log an audit action.
     """
-    log_id = f"log-{uuid.uuid4()}"
-    now = datetime.now()
-    
-    # DB log (without id - let database auto-generate it)
-    db_log = {
-        "action": action,
-        "timestamp": now,
-        "target": target,
-        "details": details,
-        "user_email": admin_email
-    }
-
-    # Save to database
-    try:
-        db = SessionLocal()
-        try:
-            db_ops.create_audit_log(db, db_log)
-            logger.debug(f"Audit log saved to DB: {action} - {target}")
-        finally:
-            db.close()
-    except Exception as e:
-        logger.error(f"Error saving audit log to DB: {e}")
-
-    # In-memory log (with string id for backward compatibility)
     new_log = {
-        "id": log_id,
+        "id": f"log-{uuid.uuid4()}",
         "action": action,
-        "timestamp": now.isoformat(),
+        "timestamp": datetime.now().isoformat(),
         "target": target,
         "details": details,
-        "user_email": admin_email,
-        "admin_email": admin_email  # Keep for backward compatibility
+        "admin_email": admin_email
     }
-
-    # Also keep in memory for backward compatibility
     audit_logs.insert(0, new_log)
     # Keep only last 100 logs
     if len(audit_logs) > 100:
@@ -298,87 +258,6 @@ quiz_store: List[dict] = []  # {id, title, description, questions, created_at, c
 quiz_submissions: List[dict] = []  # {id, quiz_id, user_name, answers, score, submitted_at}
 notification_store: List[dict] = [] # {id, title, message, type, created_at, read_by}
 resource_store: List[dict] = [] # {id, title, category, type, url, description, created_at, size}
-
-# ==========================================
-# DATABASE LOADING ON STARTUP
-# ==========================================
-def load_data_from_database():
-    """Load all data from PostgreSQL database into in-memory stores on startup."""
-    global content_store, resource_store, quiz_store
-    
-    try:
-        db = SessionLocal()
-        
-        # Load Content (Learning Path nodes)
-        try:
-            db_content = db_ops.get_all_content(db)
-            for item in db_content:
-                content_item = {
-                    "id": item.id,
-                    "title": item.title,
-                    "description": item.description or "",
-                    "videoUrl": item.video_url or item.file_url or "",
-                    "authorRole": "Store Manager",
-                    "timestamp": item.timestamp.isoformat() if item.timestamp else datetime.now().isoformat(),
-                    "isPathNode": item.is_path_node or False,
-                    "skippable": False,
-                    "xp": 50,
-                    "transcript": item.transcript or "",
-                    "quiz": item.quiz,
-                    "bucket": item.bucket,
-                    "learning_path_type": item.learning_path_type or "career_progression",
-                }
-                content_store.append(content_item)
-            logger.info(f"Loaded {len(content_store)} content items from database")
-        except Exception as e:
-            logger.error(f"Error loading content from DB: {e}")
-        
-        # Load Resources
-        try:
-            db_resources = db_ops.get_all_resources(db)
-            for item in db_resources:
-                resource_item = {
-                    "id": item.id,
-                    "title": item.title,
-                    "category": item.category or "",
-                    "description": item.description or "",
-                    "url": item.url or "",
-                    "type": item.resource_type or "File",
-                    "timestamp": item.created_at.isoformat() if item.created_at else datetime.now().isoformat(),
-                    "size": str(item.file_size) if item.file_size else "Unknown"
-                }
-                resource_store.append(resource_item)
-            logger.info(f"Loaded {len(resource_store)} resources from database")
-        except Exception as e:
-            logger.error(f"Error loading resources from DB: {e}")
-        
-        # Load Quizzes
-        try:
-            db_quizzes = db_ops.get_all_quizzes(db)
-            for item in db_quizzes:
-                quiz_item = {
-                    "id": item.id,
-                    "title": item.title,
-                    "description": item.description or "",
-                    "questions": item.questions or [],
-                    "created_at": item.created_at.isoformat() if item.created_at else datetime.now().isoformat(),
-                    "created_by": item.created_by or "",
-                    "difficulty": item.difficulty or "medium",
-                    "time": item.time_limit or "10 mins"
-                }
-                quiz_store.append(quiz_item)
-            logger.info(f"Loaded {len(quiz_store)} quizzes from database")
-        except Exception as e:
-            logger.error(f"Error loading quizzes from DB: {e}")
-        
-        db.close()
-        logger.info("Database loading completed successfully!")
-        
-    except Exception as e:
-        logger.error(f"Failed to load data from database: {e}")
-
-# Load data from database on import (server startup)
-load_data_from_database()
 
 # LOCATION TRACKING STORE
 location_store: dict = {}  # {user_id: {user_id, name, latitude, longitude, timestamp, active}}
@@ -449,16 +328,6 @@ async def get_privileges():
        {"id": p, "name": p.replace("_", " ").title(), "icon": PRIVILEGE_ICONS.get(p, "box")}
        for p in ALL_PRIVILEGES
     ]
-
-@app.get("/cdn/status")
-async def get_cdn_status():
-    """Check CDN configuration and connectivity status"""
-    return cdn_service.check_cdn_status()
-
-@app.get("/rag/status")
-async def get_rag_status():
-    """Check RAG system status and statistics"""
-    return rag_service.get_rag_stats()
 
 # User categories for organizing users
 user_categories: List[dict] = [
@@ -881,525 +750,21 @@ access_control_store: dict = {
         "accessible_buckets": ["1", "2", "3", "4", "5"],  # All buckets
         "max_courses_visible": -1  # -1 means unlimited
     },
+    # Higher roles have full access by default (not listed = full access)
 }
-
-# ===========================================================================
-# DYNAMIC LEVEL HIERARCHY SYSTEM (DATABASE-BACKED)
-# ===========================================================================
-# Levels are now stored in PostgreSQL and cached in memory for performance
-# Each level has: id, name, order, icon, color, description, min_nodes
-
-# In-memory cache for levels (refreshed on changes)
-level_hierarchy_cache: list = []
-
-def load_levels_from_db():
-    """Load all progression levels from database into cache."""
-    global level_hierarchy_cache
-    try:
-        db = SessionLocal()
-        db_levels = db.query(ProgressionLevel).order_by(ProgressionLevel.order).all()
-        
-        # Fetch access rules to get courses and buckets
-        access_rules = db.query(AccessRule).all()
-        rules_map = {rule.level_name: rule for rule in access_rules}
-        
-        level_hierarchy_cache = []
-        for lvl in db_levels:
-            # Get associated rule
-            rule = rules_map.get(lvl.name)
-            courses = rule.accessible_courses if rule else []
-            buckets = rule.accessible_buckets if rule else []
-            
-            level_hierarchy_cache.append({
-                "id": lvl.id,
-                "name": lvl.name,
-                "order": lvl.order,
-                "icon": lvl.icon or "medal-outline",
-                "color": lvl.color or "#6B7280",
-                "description": lvl.description or "",
-                "min_nodes": lvl.min_nodes or 0,
-                "courses": courses,
-                "accessible_buckets": buckets
-            })
-        db.close()
-        db.close()
-        logger.info(f"Loaded {len(level_hierarchy_cache)} progression levels from database with course assignments")
-        
-        # Initialize with defaults if database returned empty list
-        if not level_hierarchy_cache:
-            logger.info("Database empty, initializing default levels...")
-            init_default_levels()
-            
-    except Exception as e:
-        logger.error(f"Failed to load levels from database: {e}")
-        # Initialize with defaults if database error
-        if not level_hierarchy_cache:
-            init_default_levels()
-
-def init_default_levels():
-    """Initialize default progression levels if table is empty."""
-    global level_hierarchy_cache
-    default_levels = [
-        {"id": "level_0", "name": "Waffler", "order": 0, "icon": "account", "color": "#6B7280", "description": "Entry level - new team members", "min_nodes": 0},
-        {"id": "level_1", "name": "Silver Waffler", "order": 1, "icon": "medal-outline", "color": "#9CA3AF", "description": "Basic training completed", "min_nodes": 10},
-        {"id": "level_2", "name": "Gold Waffler", "order": 2, "icon": "medal", "color": "#F59E0B", "description": "Advanced training completed", "min_nodes": 25},
-        {"id": "level_3", "name": "Shift Manager", "order": 3, "icon": "clock-outline", "color": "#EF4444", "description": "Leadership track initiated", "min_nodes": 40},
-        {"id": "level_4", "name": "Assistant Store Manager", "order": 4, "icon": "store-outline", "color": "#F59E0B", "description": "Store management training", "min_nodes": 60},
-        {"id": "level_5", "name": "Store Manager", "order": 5, "icon": "store", "color": "#D97706", "description": "Full store management", "min_nodes": 80},
-    ]
-    
-    try:
-        db = SessionLocal()
-        # Check if levels exist
-        existing = db.query(ProgressionLevel).count()
-        if existing == 0:
-            for lvl in default_levels:
-                # Create Level
-                db_level = ProgressionLevel(
-                    id=lvl["id"],
-                    name=lvl["name"],
-                    order=lvl["order"],
-                    icon=lvl["icon"],
-                    color=lvl["color"],
-                    description=lvl["description"],
-                    min_nodes=lvl["min_nodes"]
-                )
-                db.add(db_level)
-                
-                # Create Access Rule (buckets/courses)
-                if "accessible_buckets" in lvl and lvl["accessible_buckets"]:
-                    rule = AccessRule(
-                        level_name=lvl["name"],
-                        accessible_buckets=lvl["accessible_buckets"],
-                        accessible_courses=lvl.get("courses", [])
-                    )
-                    db.add(rule)
-                    
-            db.commit()
-            logger.info(f"Initialized {len(default_levels)} default progression levels in database")
-        db.close()
-        # Reload cache (avoid recursion infinite loop by checking count inside load not needed if we rely on db state)
-        # But load_levels_from_db calls init if empty. So we must be sure we actually added something.
-        
-        # Manually reload cache logic here or better, call load_levels_from_db but prevent infinite loop
-        # Since we just added levels, load_levels_from_db should find them and not call init again.
-        load_levels_from_db()
-    except Exception as e:
-        logger.error(f"Failed to init default levels: {e}")
-        # Use defaults in memory as fallback
-        level_hierarchy_cache = default_levels
-
-def save_level_to_db(level_data: dict):
-    """Save or update a level in the database."""
-    try:
-        db = SessionLocal()
-        existing = db.query(ProgressionLevel).filter(ProgressionLevel.id == level_data["id"]).first()
-        if existing:
-            existing.name = level_data.get("name", existing.name)
-            existing.order = level_data.get("order", existing.order)
-            existing.icon = level_data.get("icon", existing.icon)
-            existing.color = level_data.get("color", existing.color)
-            existing.description = level_data.get("description", existing.description)
-            existing.min_nodes = level_data.get("min_nodes", existing.min_nodes)
-        else:
-            new_lvl = ProgressionLevel(
-                id=level_data["id"],
-                name=level_data["name"],
-                order=level_data.get("order", 0),
-                icon=level_data.get("icon", "medal-outline"),
-                color=level_data.get("color", "#6B7280"),
-                description=level_data.get("description", ""),
-                min_nodes=level_data.get("min_nodes", 0)
-            )
-            db.add(new_lvl)
-            db.add(new_lvl)
-        
-        # Also save AccessRule (courses/buckets)
-        # Note: level_data might not have courses/buckets if just updating basic info
-        # But if they ARE present, we should save them
-        if "courses" in level_data or "accessible_buckets" in level_data:
-            rule = db.query(AccessRule).filter(AccessRule.level_name == level_data["name"]).first()
-            if not rule:
-                rule = AccessRule(level_name=level_data["name"])
-                db.add(rule)
-            
-            if "courses" in level_data:
-                rule.accessible_courses = level_data["courses"]
-            if "accessible_buckets" in level_data:
-                rule.accessible_buckets = level_data["accessible_buckets"]
-                
-        db.commit()
-        db.close()
-        load_levels_from_db()  # Refresh cache
-        return True
-    except Exception as e:
-        logger.error(f"Failed to save level to database: {e}")
-        return False
-
-def delete_level_from_db(level_id: str):
-    """Delete a level from the database."""
-    try:
-        db = SessionLocal()
-        db.query(ProgressionLevel).filter(ProgressionLevel.id == level_id).delete()
-        db.commit()
-        db.close()
-        load_levels_from_db()  # Refresh cache
-        return True
-    except Exception as e:
-        logger.error(f"Failed to delete level from database: {e}")
-        return False
-
-def update_level_orders_in_db(level_orders: list):
-    """Update order of multiple levels in database."""
-    try:
-        db = SessionLocal()
-        for new_order, level_id in enumerate(level_orders):
-            db.query(ProgressionLevel).filter(ProgressionLevel.id == level_id).update({"order": new_order})
-        db.commit()
-        db.close()
-        load_levels_from_db()  # Refresh cache
-        return True
-    except Exception as e:
-        logger.error(f"Failed to update level orders: {e}")
-        return False
-
-def get_level_hierarchy() -> list:
-    """Get the current level hierarchy sorted by order."""
-    if not level_hierarchy_cache:
-        load_levels_from_db()
-    return sorted(level_hierarchy_cache, key=lambda x: x.get("order", 0))
-
-def get_level_names() -> list:
-    """Get ordered list of level names (for backward compatibility)."""
-    return [level["name"] for level in get_level_hierarchy()]
-
-def get_level_by_name(name: str) -> dict:
-    """Get level by name."""
-    for level in get_level_hierarchy():
-        if level["name"].lower() == name.lower():
-            return level
-    return None
-
-def get_level_by_id(level_id: str) -> dict:
-    """Get level by ID."""
-    for level in get_level_hierarchy():
-        if level["id"] == level_id:
-            return level
-    return None
-
-def get_user_level_index(user_category: str) -> int:
-    """Get the index (order) of user's level in the hierarchy. Higher = more access."""
-    level = get_level_by_name(user_category)
-    if level:
-        return level.get("order", 0)
-    
-    # Unknown category - default to highest if it's a manager/admin role
-    lower_cat = user_category.lower() if user_category else ""
-    if any(x in lower_cat for x in ["manager", "director", "admin", "superadmin"]):
-        hierarchy = get_level_hierarchy()
-        return hierarchy[-1]["order"] if hierarchy else 0
-    return 0  # Default to lowest level
-
-def get_accessible_levels(user_category: str) -> list:
-    """Get list of level names this user can access (their level and all below)."""
-    user_order = get_user_level_index(user_category)
-    hierarchy = get_level_hierarchy()
-    return [level["name"] for level in hierarchy if level.get("order", 0) <= user_order]
-
-def get_accessible_buckets(user_category: str) -> list:
-    """Get list of buckets this user can access based on their level."""
-    level = get_level_by_name(user_category)
-    if level:
-        buckets = level.get("accessible_buckets", [])
-        if not buckets:  # Empty means full access
-            return []
-        return buckets
-    return []
-
-def filter_courses_by_level(courses: list, user_category: str, is_admin: bool = False) -> list:
-    """
-    Filter courses based on user's level in the hierarchy.
-    - Users can see courses for their level and all lower levels
-    - Admin/Manager roles with high-level access can see everything
-    - Courses without a target_level are accessible to all
-    """
-    # Admins and high-level managers see everything
-    if is_admin:
-        accessible_buckets = get_accessible_buckets(user_category)
-        if not accessible_buckets:  # Empty = full access
-            return courses
-    
-    user_level_order = get_user_level_index(user_category)
-    accessible_levels = get_accessible_levels(user_category)
-    
-    filtered = []
-    for course in courses:
-        # Get course's target level (if specified)
-        course_target_level = course.get("target_level") or course.get("targetLevel") or course.get("bucket")
-        
-        # No target level = accessible to all
-        if not course_target_level:
-            filtered.append(course)
-            continue
-        
-        # Check if course's target level is in user's accessible levels
-        course_target_level_str = str(course_target_level)
-        
-        # Check by level name
-        if course_target_level_str in accessible_levels:
-            filtered.append(course)
-            continue
-        
-        # Check by bucket name mapping (bucket might match a level category)
-        for level_name in accessible_levels:
-            if level_name.lower() in course_target_level_str.lower():
-                filtered.append(course)
-                break
-        else:
-            # Check if bucket is in accessible buckets for this level
-            accessible_buckets = get_accessible_buckets(user_category)
-            if not accessible_buckets:  # Empty means full access
-                filtered.append(course)
-            elif course_target_level_str in accessible_buckets or any(b.lower() in course_target_level_str.lower() for b in accessible_buckets):
-                filtered.append(course)
-    
-    return filtered
-
-# ===========================================================================
-# LEVEL MANAGEMENT API ENDPOINTS
-# ===========================================================================
-
-@app.get("/admin/levels")
-async def get_levels():
-    """Get all levels in the hierarchy (ordered)."""
-    return {"levels": get_level_hierarchy()}
-
-@app.post("/admin/levels")
-async def create_level(data: dict):
-    """Create a new level in the hierarchy (saved to database)."""
-    name = data.get("name")
-    if not name:
-        raise HTTPException(status_code=400, detail="Level name is required")
-    
-    # Check if level name already exists
-    if get_level_by_name(name):
-        raise HTTPException(status_code=400, detail=f"Level '{name}' already exists")
-    
-    # Get the next order number
-    hierarchy = get_level_hierarchy()
-    max_order = max([l.get("order", 0) for l in hierarchy], default=-1)
-    
-    new_level = {
-        "id": f"level_{uuid.uuid4().hex[:8]}",
-        "name": name,
-        "order": data.get("order", max_order + 1),
-        "icon": data.get("icon", "medal-outline"),
-        "color": data.get("color", "#F59E0B"),
-        "description": data.get("description", ""),
-        "min_nodes": data.get("min_nodes", 0)
-    }
-    
-    # Save to database
-    if save_level_to_db(new_level):
-        logger.info(f"New level created and saved to DB: {name} (order: {new_level['order']})")
-        return {"status": "success", "level": new_level}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to save level to database")
-
-@app.put("/admin/levels/{level_id}")
-async def update_level(level_id: str, data: dict):
-    """Update an existing level (saved to database)."""
-    level = get_level_by_id(level_id)
-    if not level:
-        raise HTTPException(status_code=404, detail="Level not found")
-    
-    # Check if new name conflicts with another level
-    if "name" in data:
-        existing = get_level_by_name(data["name"])
-        if existing and existing["id"] != level_id:
-            raise HTTPException(status_code=400, detail=f"Level name '{data['name']}' already exists")
-    
-    # Build updated level data
-    updated_level = {
-        "id": level_id,
-        "name": data.get("name", level["name"]),
-        "order": data.get("order", level["order"]),
-        "icon": data.get("icon", level["icon"]),
-        "color": data.get("color", level["color"]),
-        "description": data.get("description", level.get("description", "")),
-        "min_nodes": data.get("min_nodes", level.get("min_nodes", 0))
-    }
-    
-    # Save to database
-    if save_level_to_db(updated_level):
-        logger.info(f"Level updated and saved to DB: {updated_level['name']}")
-        return {"status": "success", "level": updated_level}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to update level in database")
-
-@app.delete("/admin/levels/{level_id}")
-async def delete_level(level_id: str):
-    """Delete a level from the hierarchy (from database)."""
-    level = get_level_by_id(level_id)
-    if not level:
-        raise HTTPException(status_code=404, detail="Level not found")
-    
-    level_name = level["name"]
-    
-    # Delete from database
-    if delete_level_from_db(level_id):
-        logger.info(f"Level deleted from DB: {level_name}")
-        return {"status": "success", "message": f"Level '{level_name}' deleted"}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to delete level from database")
-
-@app.post("/admin/levels/reorder")
-async def reorder_levels(data: dict):
-    """
-    Reorder levels via drag-and-drop (saved to database).
-    Expects: {"level_order": ["level_id_1", "level_id_2", ...]}
-    """
-    level_order = data.get("level_order", [])
-    if not level_order:
-        raise HTTPException(status_code=400, detail="level_order array is required")
-    
-    # Validate all level IDs exist
-    for level_id in level_order:
-        if not get_level_by_id(level_id):
-            raise HTTPException(status_code=400, detail=f"Level ID '{level_id}' not found")
-    
-    # Update order in database
-    if update_level_orders_in_db(level_order):
-        logger.info(f"Levels reordered and saved to DB: {len(level_order)} levels")
-        return {"status": "success", "levels": get_level_hierarchy()}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to reorder levels in database")
-
-# ===========================================================================
-# LEVEL COURSE ASSIGNMENT API ENDPOINTS
-# ===========================================================================
-
-@app.get("/admin/levels/{level_id}/courses")
-async def get_level_courses(level_id: str):
-    """Get courses assigned to a specific level."""
-    level = get_level_by_id(level_id)
-    if not level:
-        raise HTTPException(status_code=404, detail="Level not found")
-    
-    course_ids = level.get("courses", [])
-    
-    # Get full course details for each ID
-    courses = []
-    for course_id in course_ids:
-        for c in content_store:
-            if c.get("id") == course_id:
-                courses.append(c)
-                break
-    
-    return {"level": level["name"], "courses": courses}
-
-@app.post("/admin/levels/{level_id}/courses")
-async def assign_course_to_level(level_id: str, data: dict):
-    """Assign a course to a level."""
-    level = get_level_by_id(level_id)
-    if not level:
-        raise HTTPException(status_code=404, detail="Level not found")
-    
-    course_id = data.get("course_id")
-    if not course_id:
-        raise HTTPException(status_code=400, detail="course_id is required")
-    
-    # Initialize courses list if not exists
-    if "courses" not in level:
-        level["courses"] = []
-    
-    # Add course if not already assigned
-    if course_id not in level["courses"]:
-        level["courses"].append(course_id)
-        
-        # Save to database (will update AccessRule)
-        if save_level_to_db(level):
-            logger.info(f"Course {course_id} assigned to level {level['name']} and saved to DB")
-        else:
-             raise HTTPException(status_code=500, detail="Failed to save assignment to database")
-    
-    return {"status": "success", "level": level}
-
-@app.delete("/admin/levels/{level_id}/courses/{course_id}")
-async def remove_course_from_level(level_id: str, course_id: str):
-    """Remove a course from a level (saved to database)."""
-    level = get_level_by_id(level_id)
-    if not level:
-        raise HTTPException(status_code=404, detail="Level not found")
-    
-    if "courses" in level and course_id in level["courses"]:
-        level["courses"].remove(course_id)
-        
-        # Save to database (will update AccessRule)
-        if save_level_to_db(level):
-            logger.info(f"Course {course_id} removed from level {level['name']} and saved to DB")
-        else:
-            raise HTTPException(status_code=500, detail="Failed to save change to database")
-    
-    return {"status": "success", "level": level}
-
-@app.post("/admin/levels/{level_id}/courses/reorder")
-async def reorder_level_courses(level_id: str, data: dict):
-    """
-    Reorder courses within a level via drag-and-drop (saved to database).
-    Expects: {"course_order": ["course_id_1", "course_id_2", ...]}
-    """
-    level = get_level_by_id(level_id)
-    if not level:
-        raise HTTPException(status_code=404, detail="Level not found")
-    
-    course_order = data.get("course_order", [])
-    if not course_order:
-        raise HTTPException(status_code=400, detail="course_order array is required")
-        
-    # Validation happens in helper if needed, but here we just update the list
-    level["courses"] = course_order
-    
-    # Save to database (will update AccessRule)
-    if save_level_to_db(level):
-        logger.info(f"Level {level['name']} courses reordered: {len(course_order)} courses")
-        return {"status": "success", "level": level}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to save reorder to database")
-    
-    # Update course order
-    level["courses"] = course_order
-    
-    logger.info(f"Courses reordered in level {level['name']}: {len(course_order)} courses")
-    return {"status": "success", "level": level}
 
 
 # --- AUDIT LOG ENDPOINTS ---
 
 @app.get("/audit-logs")
-async def get_audit_logs(action_type: Optional[str] = None, db: Session = Depends(get_db)):
-    # Try database first
-    try:
-        db_logs = db_ops.get_audit_logs(db, action=action_type, limit=100)
-        logs_list = [db_ops.model_to_dict(log) for log in db_logs]
-
-        # Collect unique action types
-        unique_types = list(set([log["action"] for log in logs_list]))
-
-        if action_type:
-            return {"logs": logs_list, "action_types": unique_types}
-
-        return {"logs": logs_list, "action_types": unique_types}
-    except Exception as e:
-        logger.error(f"Error fetching audit logs from DB: {e}")
-
-    # Fallback to in-memory
+async def get_audit_logs(action_type: Optional[str] = None):
+    # Collect unique action types
     unique_types = list(set([log["action"] for log in audit_logs]))
-
+    
     if action_type:
         filtered = [log for log in audit_logs if log["action"] == action_type]
         return {"logs": filtered, "action_types": unique_types}
-
+    
     return {"logs": audit_logs, "action_types": unique_types}
 
 # ==========================================
@@ -1428,86 +793,66 @@ async def create_meeting(
     duration_minutes: int = Form(30),
     host_name: str = Form(...),
     host_email: str = Form(...),
-    invited_users: str = Form("[]"),  # JSON array of user emails OR "all" for everyone
-    db: Session = Depends(get_db)
+    invited_users: str = Form("[]")  # JSON array of user emails OR "all" for everyone
 ):
     """Create a new virtual meeting and notify invited users"""
+    meeting_id = str(uuid.uuid4())
+    room_id = f"bw-meeting-{meeting_id[:8]}"  # Short room ID for joining
+    
+    # Parse invited users list
     try:
-        meeting_id = str(uuid.uuid4())
-        room_id = f"bw-meeting-{meeting_id[:8]}"  # Short room ID for joining
-
-        # Parse invited users list
-        try:
-            invited_users_list = json.loads(invited_users) if invited_users and invited_users != "all" else []
-        except:
-            invited_users_list = []
-
-        invite_all = len(invited_users_list) == 0  # If no specific users, invite all
-
-        # Create meeting in DATABASE
-        meeting_data = {
-            "id": meeting_id,
-            "title": title,
-            "description": description,
-            "scheduled_at": datetime.fromisoformat(scheduled_at) if scheduled_at else datetime.now(),
-            "duration_minutes": duration_minutes,
-            "host_name": host_name,
-            "host_email": host_email,
-            "room_id": room_id,
-            "status": "scheduled",
-            "participants": []
-        }
-
-        try:
-            db_meeting = db_ops.create_meeting(db, meeting_data)
-        except Exception as db_error:
-            logger.error(f"Database meeting error: {db_error}")
-            db.rollback()
-            # Continue with in-memory tracking
-
-        # Also store in memory for backward compatibility
-        new_meeting = {
-            **meeting_data,
-            "scheduled_at": scheduled_at,
-            "created_at": datetime.now().isoformat(),
-            "invited_users": invited_users_list,
-            "invite_all": invite_all
-        }
-
-        meetings_store.insert(0, new_meeting)
-        logger.info(f"Meeting Created: {title} scheduled for {scheduled_at} by {host_name} (invite_all={invite_all}, invited={len(invited_users_list)} users)")
-
-        # Broadcast meeting notification to all connected clients
-        await manager.broadcast({
-            "type": "MEETING_SCHEDULED",
-            "data": new_meeting
-        })
-
-        # Create notification entry
-        meeting_notif = {
-            "id": str(uuid.uuid4()),
-            "title": f"📅 Meeting: {title}",
-            "message": f"{host_name} scheduled a meeting for {scheduled_at[:16].replace('T', ' at ')}. Tap to join when it starts.",
-            "type": "meeting",
-            "meeting_id": meeting_id,
-            "created_at": datetime.now().isoformat(),
-            "read_by": [],
-            "invited_users": invited_users_list,
-            "invite_all": invite_all
-        }
-        notification_store.append(meeting_notif)
-
-        # Broadcast notification (frontend will filter based on invited_users)
-        await manager.broadcast({
-            "type": "NOTIFICATION",
-            "data": meeting_notif
-        })
-
-        return {"status": "success", "meeting": new_meeting}
-
-    except Exception as e:
-        logger.error(f"Error creating meeting: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to create meeting: {str(e)}")
+        invited_users_list = json.loads(invited_users) if invited_users and invited_users != "all" else []
+    except:
+        invited_users_list = []
+    
+    invite_all = len(invited_users_list) == 0  # If no specific users, invite all
+    
+    new_meeting = {
+        "id": meeting_id,
+        "title": title,
+        "description": description,
+        "scheduled_at": scheduled_at,
+        "duration_minutes": duration_minutes,
+        "host_name": host_name,
+        "host_email": host_email,
+        "room_id": room_id,
+        "status": "scheduled",  # scheduled, ongoing, ended
+        "created_at": datetime.now().isoformat(),
+        "participants": [],  # List of {user_email, user_name, joined_at}
+        "invited_users": invited_users_list,  # List of invited user emails
+        "invite_all": invite_all  # True if everyone is invited
+    }
+    
+    meetings_store.insert(0, new_meeting)
+    logger.info(f"Meeting Created: {title} scheduled for {scheduled_at} by {host_name} (invite_all={invite_all}, invited={len(invited_users_list)} users)")
+    
+    # Broadcast meeting notification to all connected clients
+    await manager.broadcast({
+        "type": "MEETING_SCHEDULED",
+        "data": new_meeting
+    })
+    
+    # Create notification entry
+    meeting_notif = {
+        "id": str(uuid.uuid4()),
+        "title": f"📅 Meeting: {title}",
+        "message": f"{host_name} scheduled a meeting for {scheduled_at[:16].replace('T', ' at ')}. Tap to join when it starts.",
+        "type": "meeting",
+        "meeting_id": meeting_id,
+        "created_at": datetime.now().isoformat(),
+        "read_by": [],
+        "invited_users": invited_users_list,  # Store who was invited
+        "invite_all": invite_all  # Store if it's a broadcast to all
+    }
+    notification_store.append(meeting_notif)
+    
+    # Broadcast notification (frontend will filter based on invited_users)
+    await manager.broadcast({
+        "type": "NOTIFICATION",
+        "data": meeting_notif
+    })
+    
+    return {"status": "success", "meeting": new_meeting}
 
 @app.post("/meetings/{meeting_id}/join")
 async def join_meeting(
@@ -1603,44 +948,21 @@ async def delete_meeting(meeting_id: str):
 
 
 @app.get("/crm/tickets")
-async def get_crm_tickets(db: Session = Depends(get_db)):
+async def get_crm_tickets():
     """Get all CRM tickets (for admin/manager)"""
-    try:
-        db_tickets = db_ops.get_all_crm_tickets(db)
-        tickets_list = [db_ops.model_to_dict(t) for t in db_tickets]
-        # Also include in-memory for backward compatibility
-        return tickets_list if tickets_list else crm_tickets
-    except Exception as e:
-        logger.error(f"Error fetching CRM tickets from DB: {e}")
-        return crm_tickets
+    return crm_tickets
 
 @app.get("/crm/tickets/available")
-async def get_available_tickets(category_id: str = None, db: Session = Depends(get_db)):
+async def get_available_tickets(category_id: str = None):
     """Get unassigned tickets, optionally filtered by category"""
-    try:
-        db_tickets = db_ops.get_all_crm_tickets(db, status="open")
-        available = [db_ops.model_to_dict(t) for t in db_tickets if t.assigned_to is None]
-        if category_id:
-            available = [t for t in available if t.get("category_id") == category_id]
-        return available if available else [t for t in crm_tickets if t.get("status") == "open" and t.get("assigned_to") is None and (not category_id or t.get("category_id") == category_id)]
-    except Exception as e:
-        logger.error(f"Error fetching available tickets from DB: {e}")
-        available = [t for t in crm_tickets if t.get("status") == "open" and t.get("assigned_to") is None]
-        if category_id:
-            available = [t for t in available if t.get("category_id") == category_id]
-        return available
+    available = [t for t in crm_tickets if t.get("status") == "open" and t.get("assigned_to") is None]
+    if category_id:
+        available = [t for t in available if t.get("category_id") == category_id]
+    return available
 
 @app.get("/crm/tickets/{ticket_id}")
-async def get_ticket_by_id(ticket_id: str, db: Session = Depends(get_db)):
+async def get_ticket_by_id(ticket_id: str):
     """Get a specific ticket by ID"""
-    try:
-        db_ticket = db_ops.get_crm_ticket_by_id(db, ticket_id)
-        if db_ticket:
-            return db_ops.model_to_dict(db_ticket)
-    except Exception as e:
-        logger.error(f"Error fetching ticket from DB: {e}")
-
-    # Fallback to in-memory
     for ticket in crm_tickets:
         if ticket.get("id") == ticket_id:
             return ticket
@@ -1655,8 +977,7 @@ async def create_crm_ticket(
     customer_phone: str = Form(""),
     subject: str = Form(...),
     description: str = Form(...),
-    priority: str = Form("medium"),  # low, medium, high, critical
-    db: Session = Depends(get_db)
+    priority: str = Form("medium")  # low, medium, high, critical
 ):
     """Manager creates a new CRM ticket"""
     new_ticket = {
@@ -1670,21 +991,9 @@ async def create_crm_ticket(
         "description": description,
         "priority": priority,
         "status": "open",
-        "created_at": datetime.now(),
+        "created_at": datetime.now().isoformat(),
         "assigned_to": None
     }
-
-    # Save to database
-    try:
-        db_ticket = db_ops.create_crm_ticket(db, new_ticket)
-        new_ticket["created_at"] = new_ticket["created_at"].isoformat()
-        logger.info(f"CRM Ticket Created in DB: {new_ticket['id']} - {subject}")
-    except Exception as e:
-        logger.error(f"Error creating CRM ticket in DB: {e}")
-        db.rollback()
-        new_ticket["created_at"] = new_ticket["created_at"].isoformat()
-
-    # Also keep in memory for backward compatibility
     crm_tickets.append(new_ticket)
     logger.info(f"CRM Ticket Created: {new_ticket['id']} - {subject}")
     return {"status": "success", "ticket": new_ticket}
@@ -1693,53 +1002,35 @@ async def create_crm_ticket(
 async def assign_crm_task(
     user_email: str = Form(...),
     user_name: str = Form(...),
-    category_id: str = Form(...),  # Course category they completed
-    db: Session = Depends(get_db)
+    category_id: str = Form(...)  # Course category they completed
 ):
     """Assign an available CRM ticket to user after course completion
-
+    
     Smart matching based on course type:
     - Safety & Hygiene (3) or Customer Service (4) → Complaint tickets
     - Other courses (1, 2, 5) → Query or Request tickets
     """
     # Get allowed ticket types for this course category
     allowed_types = COURSE_TO_TICKET_TYPE.get(category_id, ["Query", "Request"])
-
-    # Try to find from database first
-    try:
-        db_tickets = db_ops.get_all_crm_tickets(db, status="open")
-        available_tickets_db = [
-            db_ops.model_to_dict(t) for t in db_tickets
-            if t.type in allowed_types and t.assigned_to is None
-        ]
-        if not available_tickets_db:
-            # Fallback: Try any open ticket
-            available_tickets_db = [
-                db_ops.model_to_dict(t) for t in db_tickets
-                if t.assigned_to is None
-            ]
-        available_tickets = available_tickets_db if available_tickets_db else []
-    except Exception as e:
-        logger.error(f"Error fetching tickets from DB: {e}")
-        available_tickets = []
-
-    # Fallback to in-memory if no DB tickets
+    
+    # Find unassigned ticket matching the allowed types
+    available_tickets = [
+        t for t in crm_tickets 
+        if t.get("type") in allowed_types 
+        and t.get("status") == "open" 
+        and t.get("assigned_to") is None
+    ]
+    
     if not available_tickets:
-        available_tickets = [
-            t for t in crm_tickets
-            if t.get("type") in allowed_types
-            and t.get("status") == "open"
-            and t.get("assigned_to") is None
-        ]
-        if not available_tickets:
-            available_tickets = [t for t in crm_tickets if t.get("status") == "open" and t.get("assigned_to") is None]
-
+        # Fallback: Try any open ticket if no matching type available
+        available_tickets = [t for t in crm_tickets if t.get("status") == "open" and t.get("assigned_to") is None]
+    
     if not available_tickets:
         return {"status": "no_tickets", "message": "No tickets available for assignment"}
-
+    
     # Pick the first available (could be randomized)
     ticket = available_tickets[0]
-
+    
     # Create assignment
     assignment = {
         "id": f"task-{str(uuid.uuid4())[:8]}",
@@ -1747,36 +1038,18 @@ async def assign_crm_task(
         "user_email": user_email,
         "user_name": user_name,
         "course_category_id": category_id,
-        "assigned_at": datetime.now(),
+        "assigned_at": datetime.now().isoformat(),
         "status": "assigned",
         "resolution": None,
         "completed_at": None,
         "xp_earned": 0
     }
-
-    # Save to database
-    try:
-        db_assignment = db_ops.create_crm_task_assignment(db, assignment)
-        assignment["assigned_at"] = assignment["assigned_at"].isoformat()
-
-        # Update ticket in database
-        db_ops.update_crm_ticket(db, ticket["id"], {
-            "assigned_to": user_email,
-            "status": "in_progress"
-        })
-        logger.info(f"CRM Task Assigned in DB: {assignment['id']} to {user_email}")
-    except Exception as e:
-        logger.error(f"Error creating assignment in DB: {e}")
-        db.rollback()
-        assignment["assigned_at"] = assignment["assigned_at"].isoformat()
-
-    # Also keep in memory for backward compatibility
     crm_task_assignments.append(assignment)
-
-    # Mark ticket as assigned in memory
+    
+    # Mark ticket as assigned
     ticket["assigned_to"] = user_email
     ticket["status"] = "in_progress"
-
+    
     logger.info(f"CRM Task Assigned: {assignment['id']} to {user_email}")
     
     # Broadcast notification to user
@@ -1804,113 +1077,42 @@ async def assign_crm_task(
     return {"status": "success", "assignment": assignment, "ticket": ticket}
 
 @app.get("/crm/my-tasks")
-async def get_my_crm_tasks(user_email: str, db: Session = Depends(get_db)):
+async def get_my_crm_tasks(user_email: str):
     """Get all CRM tasks assigned to a user"""
     my_tasks = []
-
-    # Try database first
-    try:
-        db_tasks = db_ops.get_user_crm_tasks(db, user_email)
-        for assignment in db_tasks:
-            assignment_dict = db_ops.model_to_dict(assignment)
+    for assignment in crm_task_assignments:
+        if assignment.get("user_email") == user_email:
             # Attach ticket details
-            ticket_db = db_ops.get_crm_ticket_by_id(db, assignment.ticket_id) if assignment.ticket_id else None
-            assignment_dict["ticket"] = db_ops.model_to_dict(ticket_db) if ticket_db else None
-            my_tasks.append(assignment_dict)
-    except Exception as e:
-        logger.error(f"Error fetching user tasks from DB: {e}")
-
-    # Fallback to in-memory if no DB tasks
-    if not my_tasks:
-        for assignment in crm_task_assignments:
-            if assignment.get("user_email") == user_email:
-                # Attach ticket details
-                ticket = next((t for t in crm_tickets if t.get("id") == assignment.get("ticket_id")), None)
-                my_tasks.append({
-                    **assignment,
-                    "ticket": ticket
-                })
-
+            ticket = next((t for t in crm_tickets if t.get("id") == assignment.get("ticket_id")), None)
+            my_tasks.append({
+                **assignment,
+                "ticket": ticket
+            })
     return my_tasks
 
 @app.post("/crm/tasks/{task_id}/complete")
 async def complete_crm_task(
     task_id: str,
-    resolution: str = Form(...),
-    db: Session = Depends(get_db)
+    resolution: str = Form(...)
 ):
     """Complete a CRM task with resolution - awards 50 XP"""
     XP_REWARD = 50
-
-    # Try database first
-    try:
-        db_task = db_ops.get_crm_task_by_id(db, task_id)
-        if db_task:
-            # Update task
-            db_ops.update_crm_task(db, task_id, {
-                "status": "completed",
-                "resolution": resolution,
-                "completed_at": datetime.now(),
-                "xp_earned": XP_REWARD
-            })
-
-            # Update ticket status
-            if db_task.ticket_id:
-                db_ops.update_crm_ticket(db, db_task.ticket_id, {"status": "resolved"})
-
-            assignment = db_ops.model_to_dict(db_task)
-            assignment["status"] = "completed"
-            assignment["resolution"] = resolution
-            assignment["completed_at"] = datetime.now().isoformat()
-            assignment["xp_earned"] = XP_REWARD
-
-            logger.info(f"CRM Task Completed in DB: {task_id} - Awarded {XP_REWARD} XP")
-
-            # Update in-memory as well
-            for mem_assignment in crm_task_assignments:
-                if mem_assignment.get("id") == task_id:
-                    mem_assignment["status"] = "completed"
-                    mem_assignment["resolution"] = resolution
-                    mem_assignment["completed_at"] = assignment["completed_at"]
-                    mem_assignment["xp_earned"] = XP_REWARD
-                    break
-
-            # Broadcast completion
-            await manager.broadcast({
-                "type": "CRM_TASK_COMPLETED",
-                "data": {
-                    "task_id": task_id,
-                    "user_email": assignment.get("user_email"),
-                    "xp_earned": XP_REWARD
-                }
-            })
-
-            return {
-                "status": "success",
-                "message": f"Task completed! You earned {XP_REWARD} XP",
-                "xp_earned": XP_REWARD,
-                "assignment": assignment
-            }
-    except Exception as e:
-        logger.error(f"Error completing task in DB: {e}")
-        db.rollback()
-
-    # Fallback to in-memory
+    
     for assignment in crm_task_assignments:
         if assignment.get("id") == task_id:
             assignment["status"] = "completed"
             assignment["resolution"] = resolution
             assignment["completed_at"] = datetime.now().isoformat()
             assignment["xp_earned"] = XP_REWARD
-
+            
             # Update ticket status
             for ticket in crm_tickets:
                 if ticket.get("id") == assignment.get("ticket_id"):
                     ticket["status"] = "resolved"
                     break
-
+            
             logger.info(f"CRM Task Completed: {task_id} - Awarded {XP_REWARD} XP")
-
+            
             # Broadcast completion
             await manager.broadcast({
                 "type": "CRM_TASK_COMPLETED",
@@ -1920,38 +1122,27 @@ async def complete_crm_task(
                     "xp_earned": XP_REWARD
                 }
             })
-
+            
             return {
                 "status": "success",
                 "message": f"Task completed! You earned {XP_REWARD} XP",
                 "xp_earned": XP_REWARD,
                 "assignment": assignment
             }
-
+    
     raise HTTPException(status_code=404, detail="Task not found")
 
 @app.delete("/crm/tickets/{ticket_id}")
-async def delete_crm_ticket(ticket_id: str, db: Session = Depends(get_db)):
+async def delete_crm_ticket(ticket_id: str):
     """Delete a CRM ticket (admin only)"""
     global crm_tickets
-
-    # Delete from database
-    try:
-        db_deleted = db_ops.delete_crm_ticket(db, ticket_id)
-        if db_deleted:
-            logger.info(f"CRM Ticket Deleted from DB: {ticket_id}")
-    except Exception as e:
-        logger.error(f"Error deleting CRM ticket from DB: {e}")
-        db.rollback()
-
-    # Also delete from in-memory
     initial_len = len(crm_tickets)
     crm_tickets = [t for t in crm_tickets if t.get("id") != ticket_id]
-
+    
     if len(crm_tickets) < initial_len:
         logger.info(f"CRM Ticket Deleted: {ticket_id}")
         return {"status": "success"}
-
+    
     raise HTTPException(status_code=404, detail="Ticket not found")
 
 # --- KNOWLEDGE BASE ENDPOINTS ---
@@ -1973,38 +1164,14 @@ async def create_category(name: str = Form(...), icon: str = Form(...), color1: 
     return {"status": "success", "category": new_cat}
 
 @app.get("/resources")
-async def get_resources(db: Session = Depends(get_db)):
-    # Try database first
-    try:
-        db_resources = db_ops.get_all_resources(db)
-        resources_list = [db_ops.model_to_dict(r) for r in db_resources]
-        return resources_list if resources_list else resource_store
-    except Exception as e:
-        logger.error(f"Error fetching resources from DB: {e}")
-        return resource_store
+async def get_resources():
+    return resource_store
 
 # --- COURSE BUCKETS ENDPOINTS ---
 
 @app.get("/course-buckets")
-async def get_course_buckets(db: Session = Depends(get_db)):
+async def get_course_buckets():
     """Get all course buckets for organizing courses"""
-    # Try database first
-    try:
-        db_buckets = db_ops.get_all_course_buckets(db)
-        if db_buckets:
-            buckets = [db_ops.model_to_dict(b) for b in db_buckets]
-            # Convert datetime objects to strings
-            for b in buckets:
-                if b.get("created_at") and hasattr(b["created_at"], "isoformat"):
-                    b["created_at"] = b["created_at"].isoformat()
-            # Merge with in-memory (for backward compatibility)
-            existing_ids = {b["id"] for b in buckets}
-            for b in course_buckets:
-                if b.get("id") not in existing_ids:
-                    buckets.append(b)
-            return buckets
-    except Exception as e:
-        logger.error(f"Error fetching course buckets from DB: {e}")
     return course_buckets
 
 @app.post("/course-buckets")
@@ -2012,27 +1179,16 @@ async def create_course_bucket(
     name: str = Form(...),
     description: str = Form(""),
     color: str = Form("#6366F1"),
-    icon: str = Form("folder"),
-    db: Session = Depends(get_db)
+    icon: str = Form("folder")
 ):
     """Create a new course bucket"""
-    new_id = str(uuid.uuid4())
     new_bucket = {
-        "id": new_id,
+        "id": str(uuid.uuid4()),
         "name": name,
         "description": description,
         "color": color,
         "icon": icon
     }
-
-    # Save to database
-    try:
-        db_ops.create_course_bucket(db, new_bucket)
-        logger.info(f"Course Bucket saved to DB: {new_id}")
-    except Exception as e:
-        logger.error(f"Error saving course bucket to DB: {e}")
-
-    # Also keep in memory for backward compatibility
     course_buckets.append(new_bucket)
     logger.info(f"Course Bucket Created: {name}")
     return {"status": "success", "bucket": new_bucket}
@@ -2043,20 +1199,9 @@ async def update_course_bucket(
     name: str = Form(None),
     description: str = Form(None),
     color: str = Form(None),
-    icon: str = Form(None),
-    db: Session = Depends(get_db)
+    icon: str = Form(None)
 ):
     """Update an existing course bucket"""
-    updates = {}
-    if name is not None: updates["name"] = name
-    if description is not None: updates["description"] = description
-    if color is not None: updates["color"] = color
-    if icon is not None: updates["icon"] = icon
-
-    # Update in database
-    db_bucket = db_ops.update_course_bucket(db, bucket_id, updates)
-
-    # Also update in-memory
     for bucket in course_buckets:
         if bucket.get("id") == bucket_id:
             if name is not None: bucket["name"] = name
@@ -2065,29 +1210,19 @@ async def update_course_bucket(
             if icon is not None: bucket["icon"] = icon
             logger.info(f"Course Bucket Updated: {bucket_id}")
             return {"status": "success", "bucket": bucket}
-
-    if db_bucket:
-        logger.info(f"Course Bucket Updated in DB: {bucket_id}")
-        return {"status": "success", "bucket": db_ops.model_to_dict(db_bucket)}
-
     raise HTTPException(status_code=404, detail="Bucket not found")
 
 @app.delete("/course-buckets/{bucket_id}")
-async def delete_course_bucket(bucket_id: str, db: Session = Depends(get_db)):
+async def delete_course_bucket(bucket_id: str):
     """Delete a course bucket"""
     global course_buckets
-
-    # Delete from database
-    db_deleted = db_ops.delete_course_bucket(db, bucket_id)
-
-    # Also delete from in-memory
     initial_len = len(course_buckets)
     course_buckets = [b for b in course_buckets if b.get("id") != bucket_id]
-
-    if db_deleted or len(course_buckets) < initial_len:
+    
+    if len(course_buckets) < initial_len:
         logger.info(f"Course Bucket Deleted: {bucket_id}")
         return {"status": "success"}
-
+    
     raise HTTPException(status_code=404, detail="Bucket not found")
 
 # ==========================================
@@ -2348,90 +1483,21 @@ async def check_and_apply_level_up(user_email: str):
 
 
 @app.get("/proctored-assessments")
-async def get_proctored_assessments(db: Session = Depends(get_db)):
+async def get_proctored_assessments():
     """Get all active proctored assessments"""
-    # Get from database
-    db_assessments = db_ops.get_all_assessments(db, active_only=True)
-    assessments = []
-
-    for assessment in db_assessments:
-        assessments.append({
-            "id": assessment.id,
-            "title": assessment.title,
-            "description": assessment.description,
-            "questions": assessment.questions,
-            "time_limit_minutes": assessment.time_limit_minutes,
-            "passing_score": assessment.passing_score,
-            "created_at": assessment.created_at.isoformat() if assessment.created_at else datetime.now().isoformat(),
-            "created_by": assessment.created_by,
-            "active": assessment.active,
-            "is_active": assessment.active,
-            "total_questions": assessment.total_questions or len(assessment.questions or [])
-        })
-
-    # Merge with in-memory assessments
-    existing_ids = {a["id"] for a in assessments}
-    for a in proctored_assessments:
-        if a.get("id") not in existing_ids and a.get("is_active", True):
-            assessments.append(a)
-
-    return assessments
+    return [a for a in proctored_assessments if a.get("is_active", True)]
 
 @app.get("/proctored-assessments/all")
-async def get_all_proctored_assessments(db: Session = Depends(get_db)):
+async def get_all_proctored_assessments():
     """Get all proctored assessments (admin)"""
-    # Get from database
-    db_assessments = db_ops.get_all_assessments(db, active_only=False)
-    assessments = []
-
-    for assessment in db_assessments:
-        assessments.append({
-            "id": assessment.id,
-            "title": assessment.title,
-            "description": assessment.description,
-            "questions": assessment.questions,
-            "time_limit_minutes": assessment.time_limit_minutes,
-            "passing_score": assessment.passing_score,
-            "created_at": assessment.created_at.isoformat() if assessment.created_at else datetime.now().isoformat(),
-            "created_by": assessment.created_by,
-            "active": assessment.active,
-            "is_active": assessment.active,
-            "total_questions": assessment.total_questions or len(assessment.questions or [])
-        })
-
-    # Merge with in-memory assessments
-    existing_ids = {a["id"] for a in assessments}
-    for a in proctored_assessments:
-        if a.get("id") not in existing_ids:
-            assessments.append(a)
-
-    return assessments
+    return proctored_assessments
 
 @app.get("/proctored-assessments/{assessment_id}")
-async def get_proctored_assessment(assessment_id: str, db: Session = Depends(get_db)):
+async def get_proctored_assessment(assessment_id: str):
     """Get a specific proctored assessment"""
-    # Try database first
-    db_assessment = db_ops.get_assessment_by_id(db, assessment_id)
-    if db_assessment:
-        return {
-            "id": db_assessment.id,
-            "title": db_assessment.title,
-            "description": db_assessment.description,
-            "questions": db_assessment.questions,
-            "time_limit_minutes": db_assessment.time_limit_minutes,
-            "passing_score": db_assessment.passing_score,
-            "created_at": db_assessment.created_at.isoformat() if db_assessment.created_at else datetime.now().isoformat(),
-            "created_by": db_assessment.created_by,
-            "active": db_assessment.active,
-            "is_active": db_assessment.active,
-            "total_questions": db_assessment.total_questions or len(db_assessment.questions or [])
-        }
-
-    # Fallback to in-memory store
     for assessment in proctored_assessments:
         if assessment.get("id") == assessment_id:
             return assessment
-
     raise HTTPException(status_code=404, detail="Assessment not found")
 
 # REMOVED: Duplicate endpoint - now handled by unified endpoint at line 4522
@@ -2597,21 +1663,8 @@ Requirements:
         raise HTTPException(status_code=500, detail=f"Failed to generate questions: {str(e)}")
 
 @app.put("/proctored-assessments/{assessment_id}/toggle")
-async def toggle_assessment_active(assessment_id: str, db: Session = Depends(get_db)):
+async def toggle_assessment_active(assessment_id: str):
     """Toggle assessment active/inactive status"""
-    # Try database first
-    db_assessment = db_ops.get_assessment_by_id(db, assessment_id)
-    if db_assessment:
-        new_active = not db_assessment.active
-        db_ops.update_assessment(db, assessment_id, {"active": new_active})
-        # Also update in-memory
-        for assessment in proctored_assessments:
-            if assessment.get("id") == assessment_id:
-                assessment["is_active"] = new_active
-                assessment["active"] = new_active
-        return {"status": "success", "is_active": new_active}
-
-    # Fallback to in-memory
     for assessment in proctored_assessments:
         if assessment.get("id") == assessment_id:
             assessment["is_active"] = not assessment.get("is_active", True)
@@ -2619,21 +1672,16 @@ async def toggle_assessment_active(assessment_id: str, db: Session = Depends(get
     raise HTTPException(status_code=404, detail="Assessment not found")
 
 @app.delete("/proctored-assessments/{assessment_id}")
-async def delete_proctored_assessment(assessment_id: str, db: Session = Depends(get_db)):
+async def delete_proctored_assessment(assessment_id: str):
     """Delete a proctored assessment"""
     global proctored_assessments
-
-    # Delete from database
-    db_deleted = db_ops.delete_assessment(db, assessment_id)
-
-    # Also delete from in-memory
     initial_len = len(proctored_assessments)
     proctored_assessments = [a for a in proctored_assessments if a.get("id") != assessment_id]
-
-    if db_deleted or len(proctored_assessments) < initial_len:
+    
+    if len(proctored_assessments) < initial_len:
         logger.info(f"Proctored Assessment Deleted: {assessment_id}")
         return {"status": "success"}
-
+    
     raise HTTPException(status_code=404, detail="Assessment not found")
 
 @app.post("/proctored-assessments/{assessment_id}/submit")
@@ -2646,121 +1694,90 @@ async def submit_assessment(
     violations: int = Form(0),
     breach_log: str = Form("[]"),  # JSON string of breach log array
     critical_breaches: int = Form(0),
-    warning_breaches: int = Form(0),
-    db: Session = Depends(get_db)
+    warning_breaches: int = Form(0)
 ):
     """Submit a proctored assessment attempt with detailed breach tracking"""
     import json
-
+    
+    # Find assessment
+    assessment = None
+    for a in proctored_assessments:
+        if a.get("id") == assessment_id:
+            assessment = a
+            break
+    
+    if not assessment:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+    
     try:
-        # Find assessment from database
-        db_assessment = db_ops.get_assessment_by_id(db, assessment_id)
-        assessment = None
-
-        if db_assessment:
-            assessment = {
-                "id": db_assessment.id,
-                "title": db_assessment.title,
-                "questions": db_assessment.questions or [],
-                "passing_score": db_assessment.passing_score,
-                "time_limit_minutes": db_assessment.time_limit_minutes
-            }
-        else:
-            # Fallback to in-memory store
-            for a in proctored_assessments:
-                if a.get("id") == assessment_id:
-                    assessment = a
-                    break
-
-        if not assessment:
-            raise HTTPException(status_code=404, detail="Assessment not found")
-
-        try:
-            answers_list = json.loads(answers)
-        except:
-            raise HTTPException(status_code=400, detail="Invalid answers format")
-
-        # Parse breach log
-        try:
-            breach_log_list = json.loads(breach_log)
-        except:
-            breach_log_list = []
-
-        # Calculate score
-        correct_count = 0
-        total = len(assessment["questions"])
-
-        for i, ans in enumerate(answers_list):
-            if i < total and ans == assessment["questions"][i].get("correctIndex"):
-                correct_count += 1
-
-        score_percent = (correct_count / total * 100) if total > 0 else 0
-        passed = score_percent >= assessment.get("passing_score", 70)
-
-        # Determine integrity status based on breaches
-        integrity_status = "clean"
-        if critical_breaches > 0:
-            integrity_status = "flagged"
-        elif warning_breaches > 2:
-            integrity_status = "suspicious"
-        elif violations > 0:
-            integrity_status = "minor_issues"
-
-        # Create submission record for DATABASE
-        submission_data = {
-            "id": str(uuid.uuid4()),
-            "assessment_id": assessment_id,
-            "assessment_title": assessment.get("title"),
-            "user_email": user_email,
-            "user_name": user_name,
-            "answers": answers_list,
-            "correct_count": correct_count,
-            "total_questions": total,
-            "score_percent": round(score_percent, 1),
+        answers_list = json.loads(answers)
+    except:
+        raise HTTPException(status_code=400, detail="Invalid answers format")
+    
+    # Parse breach log
+    try:
+        breach_log_list = json.loads(breach_log)
+    except:
+        breach_log_list = []
+    
+    # Calculate score
+    correct_count = 0
+    total = len(assessment["questions"])
+    
+    for i, ans in enumerate(answers_list):
+        if i < total and ans == assessment["questions"][i].get("correctIndex"):
+            correct_count += 1
+    
+    score_percent = (correct_count / total * 100) if total > 0 else 0
+    passed = score_percent >= assessment.get("passing_score", 70)
+    
+    # Determine integrity status based on breaches
+    integrity_status = "clean"
+    if critical_breaches > 0:
+        integrity_status = "flagged"
+    elif warning_breaches > 2:
+        integrity_status = "suspicious"
+    elif violations > 0:
+        integrity_status = "minor_issues"
+    
+    # Create submission record with enhanced breach data
+    submission = {
+        "id": str(uuid.uuid4()),
+        "assessment_id": assessment_id,
+        "assessment_title": assessment.get("title"),
+        "user_email": user_email,
+        "user_name": user_name,
+        "answers": answers_list,
+        "correct_count": correct_count,
+        "total_questions": total,
+        "score_percent": round(score_percent, 1),
+        "score": round(score_percent, 1),  # Alias for compatibility
+        "passed": passed,
+        "time_taken_seconds": time_taken_seconds,
+        "time_limit_seconds": assessment.get("time_limit_minutes", 30) * 60,
+        "violations": violations,
+        "breach_log": breach_log_list,
+        "critical_breaches": critical_breaches,
+        "warning_breaches": warning_breaches,
+        "integrity_status": integrity_status,
+        "submitted_at": datetime.now().isoformat()
+    }
+    
+    assessment_submissions.insert(0, submission)
+    logger.info(f"Assessment Submitted: {user_name} scored {score_percent}% on {assessment.get('title')} (Breaches: {violations}, Critical: {critical_breaches})")
+    
+    return {
+        "status": "success",
+        "submission": submission,
+        "result": {
+            "score": round(score_percent, 1),
+            "correct": correct_count,
+            "total": total,
             "passed": passed,
-            "time_taken_seconds": time_taken_seconds,
-            "time_limit_seconds": assessment.get("time_limit_minutes", 30) * 60,
-            "violations": violations,
-            "breach_log": breach_log_list,
-            "critical_breaches": critical_breaches,
-            "warning_breaches": warning_breaches,
+            "passing_score": assessment.get("passing_score", 70),
             "integrity_status": integrity_status
         }
-
-        try:
-            db_submission = db_ops.create_assessment_submission(db, submission_data)
-        except Exception as db_error:
-            logger.error(f"Database assessment submission error: {db_error}")
-            db.rollback()
-            # Continue with in-memory tracking
-
-        # Also store in memory for backward compatibility
-        submission = {
-            **submission_data,
-            "score": round(score_percent, 1),  # Alias for compatibility
-            "submitted_at": datetime.now().isoformat()
-        }
-
-        assessment_submissions.insert(0, submission)
-        logger.info(f"Assessment Submitted: {user_name} scored {score_percent}% on {assessment.get('title')} (Breaches: {violations}, Critical: {critical_breaches})")
-
-        return {
-            "status": "success",
-            "submission": submission,
-            "result": {
-                "score": round(score_percent, 1),
-                "correct": correct_count,
-                "total": total,
-                "passed": passed,
-                "passing_score": assessment.get("passing_score", 70),
-                "integrity_status": integrity_status
-            }
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Assessment submission error: {e}")
-        raise HTTPException(status_code=500, detail=f"Submission failed: {str(e)}")
+    }
 
 @app.get("/proctored-assessments/submissions/all")
 async def get_all_submissions():
@@ -2821,7 +1838,7 @@ async def process_video_content(file_path: str, filename: str):
                 logger.info("Video trimmed successfully.")
 
             
-        # 2. TRANSCRIBE (Using Groq Whisper API via ai_services)
+        # 2. TRANSCRIBE (OpenAI Whisper) - with fallback if model not available
         logger.info("Starting AI Processing...")
         # Use simple path construction to avoid path issues
         audio_path = f"{os.path.dirname(file_path)}/{filename}_audio.mp3"
@@ -2831,45 +1848,67 @@ async def process_video_content(file_path: str, filename: str):
         # Get event loop for async operations (needed for quiz generation)
         loop = asyncio.get_event_loop()
         
-        # Extract audio first
-        def check_and_extract_audio():
-            v = VideoFileClip(file_path)
-            has_audio = False
-            if v.audio:
-                v.audio.write_audiofile(audio_path, logger=None)
-                has_audio = True
-            v.close()
-            return has_audio
+        # Check if Whisper model is available
+        if whisper_model is None:
+            logger.warning("Whisper model not loaded. Skipping transcription (AI features disabled).")
+            print("--- [DEBUG] Whisper model is None - using placeholder transcript")
+            transcript_text = f"Training video content for: {filename}. AI transcription unavailable - please review video manually."
+            # Continue to quiz generation with fallback
+        else:
+            # Check for audio track (blocking)
+            def check_and_extract_audio():
+                v = VideoFileClip(file_path)
+                has_audio = False
+                if v.audio:
+                    v.audio.write_audiofile(audio_path, logger=None)
+                    has_audio = True
+                v.close()
+                return has_audio
 
-        has_audio = await loop.run_in_executor(None, check_and_extract_audio)
-        
-        if has_audio:
-            logger.info("Transcribing with Groq Whisper API...")
-            print("--- [DEBUG] Running Groq Whisper Transcription...")
-            try:
-                # Use ai_services for Groq Whisper transcription
-                result = await loop.run_in_executor(None, lambda: ai_services.transcribe_audio(audio_path))
-                if result and "text" in result:
+            has_audio = await loop.run_in_executor(None, check_and_extract_audio)
+            
+            if has_audio:
+                logger.info("Transcribing with OpenAI Whisper...")
+                print("--- [DEBUG] Running Whisper...")
+                # Run in thread to avoid blocking event loop
+                # Add error handling for Whisper tensor size mismatch issues
+                try:
+                    result = await loop.run_in_executor(None, lambda: whisper_model.transcribe(
+                        audio_path,
+                        fp16=False,
+                        language='en',  # Specify language to improve stability
+                        condition_on_previous_text=False  # Prevent tensor size mismatches
+                    ))
                     transcript_text = result["text"]
                     logger.info(f"Transcript Generated: {transcript_text[:50]}...")
                     print(f"--- [DEBUG] Transcript: {transcript_text[:50]}...")
-                else:
-                    logger.warning("Transcription returned empty result")
-                    transcript_text = f"Training video content for: {filename}. Transcription unavailable."
-            except Exception as transcribe_error:
-                logger.warning(f"Groq transcription failed: {transcribe_error}")
-                transcript_text = f"Training video content for: {filename}. Transcription failed - please review video manually."
+                except Exception as whisper_error:
+                    logger.warning(f"Whisper transcription failed: {whisper_error}")
+                    logger.warning("Attempting fallback transcription with minimal settings...")
+                    try:
+                        # Fallback: Try with minimal settings
+                        result = await loop.run_in_executor(None, lambda: whisper_model.transcribe(
+                            audio_path,
+                            fp16=False,
+                            temperature=0.0,
+                            no_speech_threshold=0.6,
+                            condition_on_previous_text=False
+                        ))
+                        transcript_text = result["text"]
+                        logger.info(f"Fallback transcription succeeded: {transcript_text[:50]}...")
+                    except Exception as fallback_error:
+                        logger.error(f"Fallback transcription also failed: {fallback_error}")
+                        transcript_text = "Transcription failed due to audio processing error. Please try re-uploading the video or use a different audio format."
 
-            # Cleanup audio file
-            if os.path.exists(audio_path):
-                try:
-                    os.remove(audio_path)
-                except:
-                    pass
-        else:
-            logger.warning("Video has no audio track. Skipping transcription.")
-            print("--- [DEBUG] No audio track found.")
-            return {"transcript": transcript_text, "quiz": quiz_data} # Exit early if no audio
+                if os.path.exists(audio_path):
+                    try:
+                        os.remove(audio_path)
+                    except:
+                        pass
+            else:
+                logger.warning("Video has no audio track. Skipping transcription.")
+                print("--- [DEBUG] No audio track found.")
+                return {"transcript": transcript_text, "quiz": quiz_data} # Exit early if no audio
 
         # 3. GENERATE QUIZ (Groq)
         print("--- [DEBUG] Generating Quiz with Groq...")
@@ -2943,19 +1982,7 @@ async def process_path_node_background(file_path: str, filename: str, content_id
             quiz = ai_result["quiz"]
             print(f"--- [DEBUG] BACKGROUND AI Result: Transcript Len={len(transcript) if transcript else 0}")
             
-            # *** UPDATE DATABASE WITH TRANSCRIPT AND QUIZ ***
-            try:
-                db = SessionLocal()
-                db_ops.update_content(db, content_id, {
-                    "transcript": transcript,
-                    "quiz": quiz
-                })
-                db.close()
-                logger.info(f"Content updated in DB with transcript/quiz: {content_id}")
-            except Exception as db_err:
-                logger.error(f"Error updating content in DB: {db_err}")
-            
-            # Update Content Store (in-memory)
+            # Update Content Store
             found = False
             for item in content_store:
                 if item["id"] == content_id:
@@ -2988,13 +2015,12 @@ async def process_path_node_background(file_path: str, filename: str, content_id
 async def upload_resource(
     background_tasks: BackgroundTasks,  # Injected dependency
     title: str = Form(...),
-    category: str = Form(...),
+    category: str = Form(...), 
     description: str = Form(...),
     isPathNode: str = Form("false"),  # Changed to str to handle frontend sending "true"/"false" strings
     bucket: str = Form(None),  # Optional bucket/category for the course
     learning_path_type: str = Form("career_progression"),  # NEW: "self_learning" or "career_progression"
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    file: UploadFile = File(...)
 ):
     # Convert isPathNode string to boolean (frontend sends "true" or "false")
     # Handle various truthy values just in case
@@ -3007,17 +2033,14 @@ async def upload_resource(
     print(f"--- [DEBUG] Upload Request: Title={title}, IsPathNode={isPathNode} -> {is_path_node_bool}, LearningPathType={learning_path_type}, File={file.filename} ---")
     # Save file
     file_id = str(uuid.uuid4())
-    # Decode URL-encoded filename to prevent 404 errors (e.g., %20 -> space)
-    original_filename = unquote(file.filename)
-    filename = f"{file_id}_{original_filename}"
+    filename = f"{file_id}_{file.filename}"
     file_path = os.path.join(UPLOAD_DIR, filename)
     
     # Use chunked copying to avoid loading large files entirely into memory
     with open(file_path, "wb") as buffer:
         while content := await file.read(1024 * 1024):  # Read 1MB chunks
             buffer.write(content)
-    
-    # Default to local URL
+        
     file_url = f"{BASE_URL}/uploads/{filename}"
     
     # Determine type
@@ -3028,23 +2051,6 @@ async def upload_resource(
     elif "image" in content_type: res_type = "Image"
     elif "sheet" in content_type or "excel" in content_type: res_type = "Excel"
     
-    # Try to upload to CDN if enabled (for videos especially)
-    if cdn_service.CDN_ENABLED:
-        logger.info(f"CDN enabled, uploading {res_type} to Cloudflare R2...")
-        cdn_content_type = cdn_service.get_content_type(original_filename)
-        cdn_url = cdn_service.upload_to_cdn(file_path, f"content/{filename}", cdn_content_type)
-        if cdn_url:
-            file_url = cdn_url
-            logger.info(f"CDN upload successful: {cdn_url}")
-            # Optionally remove local file after CDN upload for videos to save space
-            # (uncomment if you want to save disk space)
-            # if res_type == "Video":
-            #     os.remove(file_path)
-        else:
-            logger.warning("CDN upload failed, using local storage as fallback")
-    else:
-        logger.info("CDN not configured, using local storage")
-    
     # Create Resource Object
     new_resource = {
         "id": file_id,
@@ -3054,29 +2060,8 @@ async def upload_resource(
         "url": file_url,
         "type": res_type,
         "timestamp": datetime.now().isoformat(),
-        "size": "Unknown"
+        "size": "Unknown" 
     }
-
-    # Save to database
-    try:
-        db_resource = {
-            "id": file_id,
-            "title": title,
-            "category": category,
-            "description": description,
-            "url": file_url,
-            "resource_type": res_type,
-            "created_at": datetime.now(),
-            "file_size": None,
-            "thumbnail": None
-        }
-        db_ops.create_resource(db, db_resource)
-        logger.info(f"Resource saved to DB: {title}")
-    except Exception as e:
-        logger.error(f"Error saving resource to DB: {e}")
-        db.rollback()
-
-    # Also keep in memory for backward compatibility
     resource_store.append(new_resource)
     
     # [LOGIC] Optional: Add to Learning Path
@@ -3101,27 +2086,6 @@ async def upload_resource(
             "status": "processing" # Optional flag for UI
         }
         
-        # *** SAVE CONTENT TO DATABASE ***
-        try:
-            db_content = {
-                "id": file_id,
-                "title": title,
-                "description": description,
-                "video_url": file_url,
-                "bucket": bucket,
-                "resource_type": res_type,
-                "is_path_node": True,
-                "learning_path_type": learning_path_type,
-                "transcript": "Processing...",
-                "quiz": None,
-                "timestamp": datetime.now(),
-                "created_at": datetime.now()
-            }
-            db_ops.create_content(db, db_content)
-            logger.info(f"Content saved to DB: {title} (ID: {file_id})")
-        except Exception as e:
-            logger.error(f"Error saving content to DB: {e}")
-            db.rollback()
         
         # Add to store based on learning path type:
         # - Self Learning: Append to END (new courses become last node in path)
@@ -3353,150 +2317,12 @@ async def delete_meeting(meeting_id: str):
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "message": "BW LMS Backend Running", "version": "2.0.0"}
-
-
-@app.get("/health")
-async def health_check():
-    """
-    Health check endpoint for monitoring and load balancers.
-    Checks database connectivity and AI services.
-    """
-    db_status = check_database_health()
-    ai_status = ai_services.check_ai_services_health()
-
-    overall_status = "healthy" if db_status["status"] == "healthy" else "unhealthy"
-
-    return {
-        "status": overall_status,
-        "timestamp": datetime.now().isoformat(),
-        "version": "2.0.0",
-        "services": {
-            "database": db_status,
-            "ai": ai_status
-        }
-    }
-
-
-@app.post("/auth/refresh")
-async def refresh_token(data: dict):
-    """
-    Refresh access token using refresh token.
-    """
-    refresh_token_str = data.get("refresh_token")
-
-    if not refresh_token_str:
-        raise HTTPException(status_code=400, detail="Refresh token required")
-
-    payload = verify_token(refresh_token_str, token_type="refresh")
-
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
-
-    email = payload.get("email")
-
-    # Get user data to generate new access token
-    db = SessionLocal()
-    try:
-        user_db = db_ops.get_user_by_email(db, email)
-        if not user_db:
-            raise HTTPException(status_code=401, detail="User not found")
-
-        user_data = {
-            "email": user_db.email,
-            "name": user_db.name,
-            "role": user_db.role or "User",
-            "category": user_db.category or "Employee",
-            "privileges": user_db.privileges or [],
-            "is_superadmin": user_db.is_superadmin or False,
-            "has_admin_access": user_db.has_admin_access or False,
-            "store": user_db.store or "Unassigned"
-        }
-
-        token_data = generate_user_token_data(user_data)
-        new_access_token = create_access_token(token_data)
-
-        return {
-            "access_token": new_access_token,
-            "token_type": "bearer"
-        }
-    finally:
-        db.close()
-
-
-@app.get("/auth/me")
-async def get_current_user_info(current_user: dict = Depends(require_auth)):
-    """
-    Get current authenticated user's information.
-    Requires valid JWT token.
-    """
-    return {
-        "status": "success",
-        "user": current_user
-    }
+    return {"status": "ok", "message": "BW LMS Backend Running"}
 
 @app.get("/content")
-async def get_content(
-    db: Session = Depends(get_db),
-    authorization: Optional[str] = Header(None)
-):
-    """
-    Returns uploaded content filtered by user's level.
-    - Authenticated users see courses up to their level
-    - Unauthenticated users see all courses (for backward compatibility)
-    """
-    # Get user info from token
-    user_category = None
-    is_authenticated = False
-    
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.replace("Bearer ", "")
-        try:
-            payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-            user_category = payload.get("category") or payload.get("role", "Waffler")
-            is_authenticated = True
-        except:
-            pass
-    
-    # Get content from database
-    db_content = db_ops.get_all_content(db)
-    content_list = []
-
-    for content in db_content:
-        content_list.append({
-            "id": content.id,
-            "title": content.title,
-            "description": content.description,
-            "videoUrl": content.video_url,
-            "authorRole": content.resource_type or "Manager",
-            "timestamp": content.created_at.isoformat() if content.created_at else content.timestamp.isoformat(),
-            "isPathNode": content.is_path_node or False,
-            "skippable": False,
-            "xp": 50,
-            "transcript": content.transcript,
-            "quiz": content.quiz,
-            "bucket": content.bucket,
-            "bucket_id": content.bucket_id,
-            "learning_path_type": content.learning_path_type,
-            "target_level": content.bucket  # Use bucket as target level for now
-        })
-
-    # Merge with in-memory content (for backward compatibility)
-    existing_ids = {c["id"] for c in content_list}
-    for item in content_store:
-        if item.get("id") not in existing_ids:
-            # Add target_level from bucket if not present
-            item_copy = item.copy()
-            if "target_level" not in item_copy:
-                item_copy["target_level"] = item_copy.get("bucket")
-            content_list.append(item_copy)
-
-    # Apply level-based filtering if user is authenticated
-    if is_authenticated and user_category:
-        content_list = filter_courses_by_level(content_list, user_category)
-        logger.info(f"Content filtered for level '{user_category}': {len(content_list)} courses")
-
-    return content_list
+async def get_content():
+    """Returns all uploaded content."""
+    return content_store
 
 @app.post("/upload")
 async def upload_content(
@@ -3507,358 +2333,148 @@ async def upload_content(
     isPathNode: bool = Form(False),
     bucket: str = Form(None),  # NEW: Optional bucket/category for the course
     learning_path_type: str = Form("career_progression"),  # NEW: 'self_learning' or 'career_progression'
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    file: UploadFile = File(...)
 ):
     """
     Receives new content (Files + Metadata) from Managers.
     Saves file to disk, updates memory, and broadcasts to clients.
     """
-    try:
-        # 1. Save content to disk
-        file_location = f"{UPLOAD_DIR}/{file.filename}"
-        with open(file_location, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+    # 1. Save content to disk
+    file_location = f"{UPLOAD_DIR}/{file.filename}"
+    with open(file_location, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    # --- AI PROCESSING (Transcribe & Quiz) ---
+    ai_result = await process_video_content(file_location, file.filename)
+    transcript_text = ai_result["transcript"]
+    quiz_data = ai_result["quiz"]
+    
+    # 2. Generate Public URL
+    video_url = f"{BASE_URL}/uploads/{file.filename}"
+    
+    logger.info(f"New Content Uploaded: {title} by {authorRole} (File: {file.filename}, Bucket: {bucket}, PathType: {learning_path_type})")
 
-        # --- AI PROCESSING (Transcribe & Quiz) ---
-        ai_result = await process_video_content(file_location, file.filename)
-        transcript_text = ai_result["transcript"]
-        quiz_data = ai_result["quiz"]
-
-        # 2. Generate Public URL
-        video_url = f"{BASE_URL}/uploads/{file.filename}"
-
-        logger.info(f"New Content Uploaded: {title} by {authorRole} (File: {file.filename}, Bucket: {bucket}, PathType: {learning_path_type})")
-
-        # 3. Store Metadata in Database
-        item_id = str(uuid.uuid4())
-        content_data = {
-            "id": item_id,
-            "title": title,
-            "description": description,
-            "bucket": bucket,
-            "bucket_id": bucket,
-            "resource_type": authorRole,
-            "video_url": video_url,
-            "file_url": video_url,
-            "duration": "30s",
-            "is_path_node": isPathNode,
-            "learning_path_type": learning_path_type,
-            "transcript": transcript_text,
-            "quiz": quiz_data,
-            "extra_data": {"timestamp": timestamp}
-        }
-
-        db_content = db_ops.create_content(db, content_data)
-
-        # 4. Also store in memory for backward compatibility
-        item_data = {
-            "id": item_id,
-            "title": title,
-            "description": description,
-            "videoUrl": video_url,
-            "authorRole": authorRole,
-            "timestamp": timestamp,
-            "isPathNode": isPathNode,
-            "skippable": False,
-            "xp": 50,
-            "transcript": transcript_text,
-            "quiz": quiz_data,
-            "bucket": bucket,
-            "bucket_id": bucket,
-            "learning_path_type": learning_path_type
-        }
-
-        content_store.insert(0, item_data)  # Add to top
-
-        # 5. Real-time Broadcast
-        await manager.broadcast({
-            "type": "NEW_CONTENT",
-            "data": item_data
-        })
-
-        # Add to RAG index if transcript available
-        if transcript_text and transcript_text != "Transcription Unavailable":
-            add_course_to_rag(item_id, transcript_text)
-
-        return {"status": "success", "message": "Content uploaded and broadcasted", "url": video_url}
-
-    except Exception as e:
-        logger.error(f"Error uploading content: {e}")
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to upload content: {str(e)}")
+    # 3. Store Metadata
+    item_id = str(uuid.uuid4())
+    item_data = {
+        "id": item_id,
+        "title": title,
+        "description": description,
+        "videoUrl": video_url,
+        "authorRole": authorRole,
+        "timestamp": timestamp,
+        "isPathNode": isPathNode,
+        "skippable": False, 
+        "xp": 50,
+        "transcript": transcript_text,
+        "quiz": quiz_data,
+        "bucket": bucket,  # NEW: Store bucket/category
+        "bucket_id": bucket,  # COMPATIBILITY: Required for get_content_library
+        "learning_path_type": learning_path_type  # NEW: Store learning path type
+    }
+    
+    content_store.insert(0, item_data) # Add to top
+    
+    # 4. Real-time Broadcast
+    await manager.broadcast({
+        "type": "NEW_CONTENT",
+        "data": item_data
+    })
+    
+    return {"status": "success", "message": "Content uploaded and broadcasted", "url": video_url}
 
 from fastapi import HTTPException
 
 @app.put("/content/{item_id}")
-async def update_content(item_id: str, request: UpdateContentRequest, db: Session = Depends(get_db)):
-    try:
-        updates = {}
-        if request.title is not None:
-            updates["title"] = request.title
-        if request.description is not None:
-            updates["description"] = request.description
-        if request.quiz is not None:
-            updates["quiz"] = request.quiz
-
-        # Update in database
-        db_content = db_ops.update_content(db, item_id, updates)
-        if not db_content:
-            # Try in-memory store
-            for item in content_store:
-                if item.get("id") == item_id:
-                    if request.title is not None: item["title"] = request.title
-                    if request.description is not None: item["description"] = request.description
-                    if request.skippable is not None: item["skippable"] = request.skippable
-                    if request.quiz is not None: item["quiz"] = request.quiz
-
-                    logger.info(f"Content Updated (memory): {item_id}")
-                    return {"status": "success", "data": item}
-
-            raise HTTPException(status_code=404, detail="Content not found")
-
-        # Also update in-memory store
-        for item in content_store:
-            if item.get("id") == item_id:
-                if request.title is not None: item["title"] = request.title
-                if request.description is not None: item["description"] = request.description
-                if request.skippable is not None: item["skippable"] = request.skippable
-                if request.quiz is not None: item["quiz"] = request.quiz
-                break
-
-        logger.info(f"Content Updated: {item_id}")
-        return {"status": "success", "data": {
-            "id": db_content.id,
-            "title": db_content.title,
-            "description": db_content.description,
-            "quiz": db_content.quiz
-        }}
-
-    except Exception as e:
-        logger.error(f"Error updating content: {e}")
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to update content: {str(e)}")
+async def update_content(item_id: str, request: UpdateContentRequest):
+    for item in content_store:
+        if item.get("id") == item_id:
+            if request.title is not None: item["title"] = request.title
+            if request.description is not None: item["description"] = request.description
+            if request.skippable is not None: item["skippable"] = request.skippable
+            if request.quiz is not None: item["quiz"] = request.quiz
+            
+            logger.info(f"Content Updated: {item_id}")
+            return {"status": "success", "data": item}
+    
+    raise HTTPException(status_code=404, detail="Content not found")
 
 @app.delete("/content/{item_id}")
-async def delete_content(item_id: str, db: Session = Depends(get_db)):
-    """
-    Delete a course/content completely from everywhere:
-    - PostgreSQL (Content table)
-    - PostgreSQL (Resource table)
-    - Cloudflare R2 CDN
-    - Local uploads folder
-    - In-memory stores
-    """
-    global content_store, resource_store
+async def delete_content(item_id: str):
+    global content_store
+    initial_len = len(content_store)
+    content_store = [item for item in content_store if item.get("id") != item_id]
     
-    try:
-        deleted_something = False
-        video_url = None
-        
-        # 1. Find the content to get the video URL for cleanup
-        for item in content_store:
-            if item.get("id") == item_id:
-                video_url = item.get("videoUrl", "")
-                break
-        
-        # Also check resource_store
-        if not video_url:
-            for item in resource_store:
-                if item.get("id") == item_id:
-                    video_url = item.get("url", "")
-                    break
-        
-        # 2. Delete from PostgreSQL - Content table
-        try:
-            deleted_db = db_ops.delete_content(db, item_id)
-            if deleted_db:
-                deleted_something = True
-                logger.info(f"Deleted from Content table: {item_id}")
-        except Exception as e:
-            logger.error(f"Error deleting from Content table: {e}")
-        
-        # 3. Delete from PostgreSQL - Resource table
-        try:
-            deleted_resource = db_ops.delete_resource(db, item_id)
-            if deleted_resource:
-                deleted_something = True
-                logger.info(f"Deleted from Resource table: {item_id}")
-        except Exception as e:
-            logger.error(f"Error deleting from Resource table: {e}")
-        
-        # 4. Delete from CDN (Cloudflare R2) if URL is a CDN URL
-        if video_url and cdn_service.CDN_ENABLED:
-            try:
-                # Extract the object key from CDN URL
-                if cdn_service.R2_PUBLIC_URL and cdn_service.R2_PUBLIC_URL in video_url:
-                    object_key = video_url.replace(cdn_service.R2_PUBLIC_URL, "").lstrip("/")
-                    cdn_service.delete_from_cdn(object_key)
-                    logger.info(f"Deleted from CDN: {object_key}")
-            except Exception as e:
-                logger.error(f"Error deleting from CDN: {e}")
-        
-        # 5. Delete local file if exists
-        if video_url:
-            try:
-                # Extract filename from URL
-                if "/uploads/" in video_url:
-                    filename = video_url.split("/uploads/")[-1]
-                    file_path = os.path.join(UPLOAD_DIR, filename)
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                        logger.info(f"Deleted local file: {file_path}")
-            except Exception as e:
-                logger.error(f"Error deleting local file: {e}")
-        
-        # 6. Delete from in-memory content_store
-        initial_content_len = len(content_store)
-        content_store = [item for item in content_store if item.get("id") != item_id]
-        if len(content_store) < initial_content_len:
-            deleted_something = True
-        
-        # 7. Delete from in-memory resource_store
-        initial_resource_len = len(resource_store)
-        resource_store = [item for item in resource_store if item.get("id") != item_id]
-        if len(resource_store) < initial_resource_len:
-            deleted_something = True
-        
-        # 8. Delete from RAG vector store
-        try:
-            rag_removed = rag_service.clear_rag_for_course(item_id)
-            if rag_removed > 0:
-                logger.info(f"Removed {rag_removed} RAG chunks for: {item_id}")
-        except Exception as e:
-            logger.error(f"Error clearing RAG: {e}")
-        
-        if deleted_something:
-            logger.info(f"Content completely deleted: {item_id}")
-            
-            # Broadcast deletion to connected clients
-            await manager.broadcast({
-                "type": "CONTENT_DELETED",
-                "data": {"id": item_id}
-            })
-            
-            # Log the action
-            log_action("DELETE_CONTENT", item_id, "Course/content deleted from all locations")
-            
-            return {"status": "success", "message": "Content deleted from all locations"}
-
-        raise HTTPException(status_code=404, detail="Content not found")
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting content: {e}")
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to delete content: {str(e)}")
+    if len(content_store) < initial_len:
+         logger.info(f"Content Deleted: {item_id}")
+         return {"status": "success"}
+    
+    raise HTTPException(status_code=404, detail="Content not found")
 
 # --- NEWS FEED ENDPOINTS ---
 
 @app.get("/news")
-async def get_news(db: Session = Depends(get_db)):
+async def get_news():
     """Get all news articles, sorted by date (newest first)"""
-    # Get news from database
-    db_news = db_ops.get_all_news(db, limit=100)
-    news_list = []
-
-    for news in db_news:
-        news_list.append({
-            "id": news.id,
-            "title": news.title,
-            "content": news.content,
-            "author": news.author,
-            "image": news.image,
-            "date": news.date or "Just now",
-            "created_at": news.created_at.isoformat() if news.created_at else datetime.now().isoformat()
-        })
-
-    # Merge with in-memory news (for backward compatibility)
-    existing_ids = {n["id"] for n in news_list}
-    for item in news_feed:
-        if item.get("id") not in existing_ids:
-            news_list.append(item)
-
-    return sorted(news_list, key=lambda x: x.get('created_at', ''), reverse=True)
+    return sorted(news_feed, key=lambda x: x.get('created_at', ''), reverse=True)
 
 @app.post("/news")
 async def create_news(
     title: str = Form(...),
     content: str = Form(...),
     author: str = Form(...),
-    image: Optional[UploadFile] = File(None),
-    db: Session = Depends(get_db)
+    image: Optional[UploadFile] = File(None)
 ):
     """Create a new news article and broadcast to all users"""
-    try:
-        news_id = str(uuid.uuid4())
+    news_id = str(uuid.uuid4())
+    
+    # Handle image upload
+    image_url = None
+    if image:
+        file_extension = image.filename.split('.')[-1]
+        file_name = f"news_{news_id}.{file_extension}"
+        file_path = os.path.join(UPLOAD_DIR, file_name)
+        with open(file_path, "wb") as f:
+            f.write(await image.read())
+        image_url = f"{BASE_URL}/uploads/{file_name}"
+    
+    news_item = {
+        "id": news_id,
+        "title": title,
+        "content": content,
+        "author": author,
+        "image": image_url or "https://images.unsplash.com/photo-1557682250-33bd709cbe85?w=800",
+        "date": "Just now",
+        "created_at": datetime.now().isoformat()
+    }
+    
+    news_feed.append(news_item)
+    news_feed.append(news_item)
+    logger.info(f"News Created: {title}")
 
-        # Handle image upload
-        image_url = None
-        if image:
-            file_extension = image.filename.split('.')[-1]
-            file_name = f"news_{news_id}.{file_extension}"
-            file_path = os.path.join(UPLOAD_DIR, file_name)
-            with open(file_path, "wb") as f:
-                f.write(await image.read())
-            image_url = f"{BASE_URL}/uploads/{file_name}"
-
-        # Create news in database
-        news_data = {
-            "id": news_id,
-            "title": title,
-            "content": content,
-            "author": author,
-            "image": image_url or "https://images.unsplash.com/photo-1557682250-33bd709cbe85?w=800",
-            "date": "Just now"
-        }
-
-        db_news = db_ops.create_news_post(db, news_data)
-
-        # Also store in memory for backward compatibility
-        news_item = {
-            **news_data,
-            "created_at": datetime.now().isoformat()
-        }
-
-        news_feed.append(news_item)
-        logger.info(f"News Created: {title}")
-
-        # [AUDIT] Log news
-        log_action("CREATE_CAMPAIGN", title, "Posted news/announcement to all users")
-
-        # Broadcast to all connected clients
-        await manager.broadcast({
-            "type": "NEWS_POSTED",
-            "data": news_item
-        })
-
-        return {"status": "success", "data": news_item}
-
-    except Exception as e:
-        logger.error(f"Error creating news: {e}")
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to create news: {str(e)}")
+    # [AUDIT] Log news
+    log_action("CREATE_CAMPAIGN", title, "Posted news/announcement to all users")
+    
+    # Broadcast to all connected clients
+    await manager.broadcast({
+        "type": "NEWS_POSTED",
+        "data": news_item
+    })
+    
+    return {"status": "success", "data": news_item}
 
 @app.delete("/news/{news_id}")
-async def delete_news(news_id: str, db: Session = Depends(get_db)):
+async def delete_news(news_id: str):
     """Delete a news article"""
-    try:
-        # Delete from database (Note: Need to add delete_news function to db_operations.py)
-        # For now, just delete from memory
-        global news_feed
-        initial_len = len(news_feed)
-        news_feed = [n for n in news_feed if n.get("id") != news_id]
-
-        if len(news_feed) < initial_len:
-            logger.info(f"News Deleted: {news_id}")
-            return {"status": "success"}
-
-        raise HTTPException(status_code=404, detail="News not found")
-
-    except Exception as e:
-        logger.error(f"Error deleting news: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete news: {str(e)}")
+    global news_feed
+    initial_len = len(news_feed)
+    news_feed = [n for n in news_feed if n.get("id") != news_id]
+    
+    if len(news_feed) < initial_len:
+        logger.info(f"News Deleted: {news_id}")
+        return {"status": "success"}
+    
+    raise HTTPException(status_code=404, detail="News not found")
 
 # --- LIVE QUIZZES ENDPOINTS ---
 
@@ -4760,94 +3376,56 @@ class QuizCreateRequest(BaseModel):
     created_by: str
 
 @app.post("/quiz/create")
-async def create_quiz(payload: QuizCreateRequest, db: Session = Depends(get_db)):
+async def create_quiz(payload: QuizCreateRequest):
     """
     Create a new quiz and broadcast to all users.
     """
-    try:
-        quiz_id = str(uuid.uuid4())
-        quiz_data = {
-            "id": quiz_id,
+    import uuid
+    from datetime import datetime
+    
+    quiz_id = str(uuid.uuid4())
+    quiz_data = {
+        "id": quiz_id,
+        "title": payload.title,
+        "description": payload.description,
+        "questions": payload.questions,
+        "created_at": datetime.now().isoformat(),
+        "created_by": payload.created_by
+    }
+    
+    quiz_store.append(quiz_data)
+    logger.info(f"Quiz Created: {quiz_data['title']} by {quiz_data['created_by']}")
+
+    
+    # Broadcast quiz assignment notification
+    await manager.broadcast({
+        "type": "QUIZ_ASSIGNED",
+        "data": {
+            "quiz_id": quiz_id,
             "title": payload.title,
             "description": payload.description,
-            "questions": payload.questions,
-            "created_by": payload.created_by,
-            "difficulty": "medium",
-            "time_limit": "15 mins",
-            "source": "manual"
+            "question_count": len(payload.questions)
         }
-
-        # Create in database
-        db_quiz = db_ops.create_quiz(db, quiz_data)
-
-        # Also store in memory for backward compatibility
-        memory_quiz = {
-            **quiz_data,
-            "created_at": datetime.now().isoformat()
-        }
-        quiz_store.append(memory_quiz)
-
-        logger.info(f"Quiz Created: {quiz_data['title']} by {quiz_data['created_by']}")
-
-        # Broadcast quiz assignment notification
-        await manager.broadcast({
-            "type": "QUIZ_ASSIGNED",
-            "data": {
-                "quiz_id": quiz_id,
-                "title": payload.title,
-                "description": payload.description,
-                "question_count": len(payload.questions)
-            }
-        })
-
-        return {"status": "success", "quiz_id": quiz_id}
-
-    except Exception as e:
-        logger.error(f"Error creating quiz: {e}")
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to create quiz: {str(e)}")
+    })
+    
+    return {"status": "success", "quiz_id": quiz_id}
 
 @app.get("/quiz/list")
-async def list_quizzes(db: Session = Depends(get_db)):
+async def list_quizzes():
     """
     Get all created quizzes (without answers).
     """
     quizzes = []
-
-    # Get quizzes from database
-    db_quizzes = db_ops.get_all_quizzes(db)
-    for quiz in db_quizzes:
-        quiz_copy = {
-            "id": quiz.id,
-            "title": quiz.title,
-            "description": quiz.description,
-            "created_at": quiz.created_at.isoformat() if quiz.created_at else datetime.now().isoformat(),
-            "created_by": quiz.created_by,
-            "difficulty": quiz.difficulty,
-            "time_limit": quiz.time_limit,
-            "questions": [
-                {
-                    "question": q.get("question", ""),
-                    "options": q.get("options", [])
-                } for q in (quiz.questions or [])
-            ]
-        }
-        quizzes.append(quiz_copy)
-
-    # Merge with in-memory quizzes (for backward compatibility)
-    existing_ids = {q["id"] for q in quizzes}
     for quiz in quiz_store:
-        if quiz.get("id") not in existing_ids:
-            # Remove correct answers from response
-            quiz_copy = quiz.copy()
-            quiz_copy["questions"] = [
-                {
-                    "question": q["question"],
-                    "options": q["options"]
-                } for q in quiz["questions"]
-            ]
-            quizzes.append(quiz_copy)
-
+        # Remove correct answers from response
+        quiz_copy = quiz.copy()
+        quiz_copy["questions"] = [
+            {
+                "question": q["question"],
+                "options": q["options"]
+            } for q in quiz["questions"]
+        ]
+        quizzes.append(quiz_copy)
     return quizzes
 
 class GenerateQuizRequest(BaseModel):
@@ -4899,26 +3477,10 @@ async def generate_quiz_ondemand(request: GenerateQuizRequest):
 
 
 @app.get("/quiz/{quiz_id}")
-async def get_quiz(quiz_id: str, db: Session = Depends(get_db)):
+async def get_quiz(quiz_id: str):
     """
     Get specific quiz details (for taking quiz).
     """
-    # Try database first
-    db_quiz = db_ops.get_quiz_by_id(db, quiz_id)
-    if db_quiz:
-        return {
-            "id": db_quiz.id,
-            "title": db_quiz.title,
-            "description": db_quiz.description,
-            "questions": [
-                {
-                    "question": q.get("question", ""),
-                    "options": q.get("options", [])
-                } for q in (db_quiz.questions or [])
-            ]
-        }
-
-    # Fallback to in-memory store
     for quiz in quiz_store:
         if quiz["id"] == quiz_id:
             # Return without correct answers
@@ -4936,74 +3498,50 @@ async def get_quiz(quiz_id: str, db: Session = Depends(get_db)):
     return {"error": "Quiz not found"}
 
 @app.post("/quiz/submit")
-async def submit_quiz(submission: QuizSubmission, db: Session = Depends(get_db)):
+async def submit_quiz(submission: QuizSubmission):
     """
     Submit quiz answers and calculate score.
     """
-    try:
-        # Find quiz from database
-        db_quiz = db_ops.get_quiz_by_id(db, submission.quiz_id)
-        quiz = None
-        if db_quiz:
-            quiz = {
-                "id": db_quiz.id,
-                "title": db_quiz.title,
-                "questions": db_quiz.questions or []
-            }
-        else:
-            # Fallback to in-memory store
-            for q in quiz_store:
-                if q["id"] == submission.quiz_id:
-                    quiz = q
-                    break
-
-        if not quiz:
-            return {"error": "Quiz not found"}
-
-        # Calculate score
-        score = 0
-        for i, answer in enumerate(submission.answers):
-            if i < len(quiz["questions"]):
-                if answer == quiz["questions"][i]["correctIndex"]:
-                    score += 1
-
-        # Save submission to database
-        submission_data = {
-            "id": str(uuid.uuid4()),
-            "quiz_id": submission.quiz_id,
-            "user_name": submission.user_name,
-            "user_email": None,
-            "answers": submission.answers,
-            "score": float(score)
-        }
-
-        try:
-            db_submission = db_ops.create_quiz_submission(db, submission_data)
-        except Exception as db_error:
-            logger.error(f"Database quiz submission error: {db_error}")
-            db.rollback()
-            # Continue with in-memory tracking
-
-        # Also store in memory for backward compatibility
-        memory_submission = {
-            **submission_data,
-            "total": len(quiz["questions"]),
-            "submitted_at": datetime.now().isoformat()
-        }
-        quiz_submissions.append(memory_submission)
-
-        logger.info(f"Quiz Submitted: {submission.user_name} scored {score}/{len(quiz['questions'])}")
-
-        return {
-            "status": "success",
-            "score": score,
-            "total": len(quiz["questions"]),
-            "percentage": round((score / len(quiz["questions"])) * 100, 2)
-        }
-
-    except Exception as e:
-        logger.error(f"Error submitting quiz: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to submit quiz: {str(e)}")
+    import uuid
+    from datetime import datetime
+    
+    # Find quiz
+    quiz = None
+    for q in quiz_store:
+        if q["id"] == submission.quiz_id:
+            quiz = q
+            break
+    
+    if not quiz:
+        return {"error": "Quiz not found"}
+    
+    # Calculate score
+    score = 0
+    for i, answer in enumerate(submission.answers):
+        if i < len(quiz["questions"]):
+            if answer == quiz["questions"][i]["correctIndex"]:
+                score += 1
+    
+    # Save submission
+    submission_data = {
+        "id": str(uuid.uuid4()),
+        "quiz_id": submission.quiz_id,
+        "user_name": submission.user_name,
+        "answers": submission.answers,
+        "score": score,
+        "total": len(quiz["questions"]),
+        "submitted_at": datetime.now().isoformat()
+    }
+    
+    quiz_submissions.append(submission_data)
+    logger.info(f"Quiz Submitted: {submission.user_name} scored {score}/{len(quiz['questions'])}")
+    
+    return {
+        "status": "success",
+        "score": score,
+        "total": len(quiz["questions"]),
+        "percentage": round((score / len(quiz["questions"])) * 100, 2)
+    }
 
 @app.get("/quiz/{quiz_id}/results")
 async def get_quiz_results(quiz_id: str):
@@ -5300,14 +3838,15 @@ async def roleplay_voice_endpoint(file: UploadFile = File(...), history: str = F
         file_size = os.path.getsize(temp_filename)
         logger.info(f"Received Audio File: {temp_filename}, Size: {file_size} bytes")
 
-        # 2. TRANSCRIBE (Using Groq Whisper API)
-        try:
-            result = ai_services.transcribe_audio(temp_filename, language="en")
-            user_text = result.get("text", "").strip() if result else ""
-            logger.info(f"Transcribed: {user_text[:80]}...")
-        except Exception as transcribe_err:
-            logger.error(f"Transcription error: {transcribe_err}")
-            user_text = ""
+        # 2. TRANSCRIBE (WHISPER - English Only for best accuracy)
+        result = whisper_model.transcribe(
+            temp_filename, 
+            language="en",  # English only for best accuracy
+            fp16=False,     # CPU optimization
+            condition_on_previous_text=False  # Faster, prevents repetition loops
+        )
+        user_text = result["text"].strip()
+        logger.info(f"Transcribed: {user_text[:80]}...")
         
         # Cleanup
         os.remove(temp_filename)
@@ -5353,102 +3892,58 @@ async def send_notification_endpoint(
     title: str = Form(...),
     message: str = Form(...),
     type: str = Form("ordinary"),
-    file: Optional[UploadFile] = File(None),
-    db: Session = Depends(get_db)
+    file: Optional[UploadFile] = File(None)
 ):
     """Send a notification to all users. Supports optional image/video upload."""
-    try:
-        notification_id = str(uuid.uuid4())
-
-        # Handle file upload if present
-        media_url = None
-        if file and file.filename:
-            file_extension = file.filename.split('.')[-1].lower()
-            file_name = f"notif_{notification_id}.{file_extension}"
-            file_path = os.path.join(UPLOAD_DIR, file_name)
-
-            with open(file_path, "wb") as f:
-                content = await file.read()
-                f.write(content)
-
-            media_url = f"{BASE_URL}/uploads/{file_name}"
-            logger.info(f"Notification media uploaded: {media_url}")
-
-        # Create notification in DATABASE
-        notification_data = {
-            "id": notification_id,
-            "title": title,
-            "message": message,
-            "notification_type": type,
-            "is_crucial": type == 'crucial',
-            "priority": "high" if type == 'crucial' else "normal",
-            "read_by": [],
-            "target_users": []
-        }
-
-        try:
-            db_notif = db_ops.create_notification(db, notification_data)
-        except Exception as db_error:
-            logger.error(f"Database notification error: {db_error}")
-            db.rollback()
-            # Continue with in-memory tracking
-
-        # Also store in memory for backward compatibility
-        new_notif = {
-            "id": notification_id,
-            "title": title,
-            "message": message,
-            "type": type,
-            "mediaUrl": media_url,
-            "created_at": datetime.now().isoformat(),
-            "read_by": []
-        }
-        notification_store.insert(0, new_notif)
-
-        # For crucial notifications, also store in crucial_notification_store for blocking modal
-        if type == 'crucial':
-            crucial_notification_store["current"] = new_notif
-
-        logger.info(f"Broadcasting Notification: {title}")
-
-        # Broadcast to all users
-        await manager.broadcast({
-            "type": "CRUCIAL_NOTIFICATION" if type == 'crucial' else "NOTIFICATION",
-            "data": new_notif
-        })
-
-        return {"status": "success", "id": notification_id}
-
-    except Exception as e:
-        logger.error(f"Error sending notification: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to send notification: {str(e)}")
+    notification_id = str(uuid.uuid4())
+    
+    # Handle file upload if present
+    media_url = None
+    if file and file.filename:
+        file_extension = file.filename.split('.')[-1].lower()
+        file_name = f"notif_{notification_id}.{file_extension}"
+        file_path = os.path.join(UPLOAD_DIR, file_name)
+        
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        
+        media_url = f"{BASE_URL}/uploads/{file_name}"
+        logger.info(f"Notification media uploaded: {media_url}")
+    
+    new_notif = {
+        "id": notification_id,
+        "title": title,
+        "message": message,
+        "type": type,
+        "mediaUrl": media_url,
+        "created_at": datetime.now().isoformat(),
+        "read_by": []
+    }
+    notification_store.insert(0, new_notif)
+    
+    # For crucial notifications, also store in crucial_notification_store for blocking modal
+    if type == 'crucial':
+        crucial_notification_store["current"] = new_notif
+    
+    logger.info(f"Broadcasting Notification: {title}")
+    
+    # Broadcast to all users
+    await manager.broadcast({
+        "type": "CRUCIAL_NOTIFICATION" if type == 'crucial' else "NOTIFICATION",
+        "data": new_notif
+    })
+    
+    return {"status": "success", "id": notification_id}
 
 @app.get("/notifications")
-async def get_notifications(user_id: Optional[str] = "user", db: Session = Depends(get_db)):
-    # Get notifications from database
-    db_notifications = db_ops.get_all_notifications(db, limit=100)
+async def get_notifications(user_id: Optional[str] = "user"):
+    # Filter out read ones if needed, or return all with 'isRead' flag
     results = []
-
-    for n in db_notifications:
-        results.append({
-            "id": n.id,
-            "title": n.title,
-            "message": n.message,
-            "type": n.notification_type or "ordinary",
-            "created_at": n.created_at.isoformat() if n.created_at else datetime.now().isoformat(),
-            "read_by": n.read_by or [],
-            "isRead": user_id in (n.read_by or []),
-            "mediaUrl": None
-        })
-
-    # Merge with in-memory notifications
-    existing_ids = {r["id"] for r in results}
     for n in notification_store:
-        if n.get("id") not in existing_ids:
-            n_copy = n.copy()
-            n_copy["isRead"] = user_id in n["read_by"]
-            results.append(n_copy)
-
+        n_copy = n.copy()
+        n_copy["isRead"] = user_id in n["read_by"]
+        results.append(n_copy)
     return results
 
 @app.get("/notifications/crucial")
@@ -5485,33 +3980,24 @@ async def get_crucial_notifications(user_id: str = "user"):
     return {"id": None, "read": True}
 
 @app.post("/notifications/{notif_id}/read")
-async def mark_notification_read(notif_id: str, user_id: str = "user", db: Session = Depends(get_db)):
-    try:
-        # Mark as read in database
-        db_ops.mark_notification_read(db, notif_id, user_id)
-
-        # Check crucial_notification_store first
-        if crucial_notification_store.get("current"):
-            current = crucial_notification_store["current"]
-            if current.get("id") == notif_id:
-                if user_id not in current.get("read_by", []):
-                    current["read_by"].append(user_id)
-                # Clear the current crucial notification since it's been acknowledged
-                crucial_notification_store["current"] = None
-                return {"status": "success"}
-
-        # Check regular notification_store
-        for n in notification_store:
-            if n["id"] == notif_id:
-                if user_id not in n["read_by"]:
-                    n["read_by"].append(user_id)
-                return {"status": "success"}
-
-        return {"status": "success"}
-
-    except Exception as e:
-        logger.error(f"Error marking notification as read: {e}")
-        raise HTTPException(status_code=404, detail="Notification not found")
+async def mark_notification_read(notif_id: str, user_id: str = "user"):
+    # Check crucial_notification_store first
+    if crucial_notification_store.get("current"):
+        current = crucial_notification_store["current"]
+        if current.get("id") == notif_id:
+            if user_id not in current.get("read_by", []):
+                current["read_by"].append(user_id)
+            # Clear the current crucial notification since it's been acknowledged
+            crucial_notification_store["current"] = None
+            return {"status": "success"}
+    
+    # Check regular notification_store
+    for n in notification_store:
+        if n["id"] == notif_id:
+            if user_id not in n["read_by"]:
+                n["read_by"].append(user_id)
+            return {"status": "success"}
+    raise HTTPException(status_code=404, detail="Notification not found")
 
 
 # ==========================================
@@ -5599,7 +4085,7 @@ async def get_user_detailed_report(user_email: str):
 # ==========================================
 
 @app.post("/location/update")
-async def update_location(data: dict, db: Session = Depends(get_db)):
+async def update_location(data: dict):
     """
     Employee sends GPS coordinates.
     Stores in location_store with active=True.
@@ -5608,11 +4094,11 @@ async def update_location(data: dict, db: Session = Depends(get_db)):
     latitude = data.get('latitude')
     longitude = data.get('longitude')
     timestamp = data.get('timestamp')
-
+    
     # Get user name from users_store
     user_name = users_store.get(user_id, {}).get('name', user_id)
-
-    location_data = {
+    
+    location_store[user_id] = {
         "user_id": user_id,
         "name": user_name,
         "latitude": latitude,
@@ -5620,41 +4106,18 @@ async def update_location(data: dict, db: Session = Depends(get_db)):
         "timestamp": timestamp,
         "active": True
     }
-
-    # Save to database
-    try:
-        db_ops.update_location(db, user_id, {
-            "name": user_name,
-            "latitude": latitude,
-            "longitude": longitude,
-            "timestamp": datetime.now(),
-            "active": True
-        })
-    except Exception as e:
-        logger.error(f"Error saving location to DB: {e}")
-
-    # Also keep in memory for backward compatibility
-    location_store[user_id] = location_data
-
+    
     logger.info(f"Location updated for {user_name}: ({latitude}, {longitude})")
     return {"status": "success"}
 
 
 @app.post("/location/stop")
-async def stop_location(data: dict, db: Session = Depends(get_db)):
+async def stop_location(data: dict):
     """
     Employee stops sharing location.
     Sets active=False.
     """
     user_id = data.get('user_id')
-
-    # Update in database
-    try:
-        db_ops.update_location(db, user_id, {"active": False})
-    except Exception as e:
-        logger.error(f"Error updating location in DB: {e}")
-
-    # Also update in-memory
     if user_id in location_store:
         location_store[user_id]["active"] = False
         logger.info(f"Location tracking stopped for {user_id}")
@@ -5662,113 +4125,43 @@ async def stop_location(data: dict, db: Session = Depends(get_db)):
 
 
 @app.get("/location/all")
-async def get_all_locations(db: Session = Depends(get_db)):
+async def get_all_locations():
     """
     Returns all employee locations for Admin/Manager.
     """
-    # Try database first
-    try:
-        db_locations = db_ops.get_all_locations(db, active_only=False)
-        if db_locations:
-            locations = []
-            for loc in db_locations:
-                loc_dict = db_ops.model_to_dict(loc)
-                if loc_dict.get("timestamp") and hasattr(loc_dict["timestamp"], "isoformat"):
-                    loc_dict["timestamp"] = loc_dict["timestamp"].isoformat()
-                locations.append(loc_dict)
-            # Merge with in-memory
-            existing_ids = {loc.get("user_email") or loc.get("user_id") for loc in locations}
-            for user_id, loc in location_store.items():
-                if user_id not in existing_ids:
-                    locations.append(loc)
-            return locations
-    except Exception as e:
-        logger.error(f"Error fetching locations from DB: {e}")
     return list(location_store.values())
 
 
 @app.post("/users/login")
-@limiter.limit("5/minute")
-async def login_user(request: Request, data: dict, db: Session = Depends(get_db)):
+async def login_user(data: dict):
     """
-    Authenticates a user and returns their profile with JWT token.
-    Rate limited to 5 attempts per minute.
+    Authenticates a user and returns their profile.
     """
     email = data.get('email')
     password = data.get('password')
-
+    
     if not email or not password:
         return {"status": "error", "message": "Email and password are required"}
-
-    # Sanitize email input
-    email = sanitize_string(email, max_length=255).lower().strip()
-
-    user_data = None
-    password_valid = False
-
-    # Try database first
-    user_db = db_ops.get_user_by_email(db, email)
-    if user_db:
-        # Check password - support both hashed and legacy plaintext
-        if is_password_hashed(user_db.password):
-            password_valid = verify_password(password, user_db.password)
-        else:
-            # Legacy plaintext comparison (for migration period)
-            password_valid = user_db.password == password
-
-        if password_valid:
-            user_data = {
-                "email": user_db.email,
-                "name": user_db.name,
-                "role": user_db.role or "User",
-                "category": user_db.category or "Employee",
-                "privileges": user_db.privileges or [],
-                "is_superadmin": user_db.is_superadmin or False,
-                "has_admin_access": user_db.has_admin_access or False,
-                "store": user_db.store or "Unassigned",
-                "self_learning_completed": user_db.self_learning_completed or False
-            }
-
-    # Fallback to in-memory store for backward compatibility
-    if not user_data and email in users_store:
+    
+    # Check credentials
+    if email in users_store:
         user = users_store[email]
-        stored_password = user.get("password", "")
-
-        # Check password - support both hashed and legacy plaintext
-        if is_password_hashed(stored_password):
-            password_valid = verify_password(password, stored_password)
-        else:
-            password_valid = stored_password == password
-
-        if password_valid:
-            user_data = {
-                "email": user["email"],
-                "name": user["name"],
-                "role": user.get("role", "User"),
-                "category": user.get("category", "Employee"),
-                "privileges": user.get("privileges", []),
-                "is_superadmin": user.get("is_superadmin", False),
-                "has_admin_access": user.get("has_admin_access", False),
-                "store": user.get("store", "Unassigned"),
-                "self_learning_completed": user.get("self_learning_completed", False)
+        if user["password"] == password:
+            # Login successful
+            log_user_activity(email, "LOGIN", "User logged in")
+            return {
+                "status": "success",
+                "user": {
+                    "email": user["email"],
+                    "name": user["name"],
+                    "role": user.get("role", "User"),
+                    "category": user.get("category", "Employee"),
+                    "privileges": user.get("privileges", []),
+                    "is_superadmin": user.get("is_superadmin", False),
+                    "has_admin_access": user.get("has_admin_access", False)
+                }
             }
-
-    if user_data:
-        # Login successful - generate JWT tokens
-        log_user_activity(email, "LOGIN", "User logged in")
-
-        token_data = generate_user_token_data(user_data)
-        access_token = create_access_token(token_data)
-        refresh_token = create_refresh_token(email)
-
-        return {
-            "status": "success",
-            "user": user_data,
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "token_type": "bearer"
-        }
-
+            
     return {"status": "error", "message": "Invalid credentials"}
 
 
@@ -5777,12 +4170,9 @@ async def login_user(request: Request, data: dict, db: Session = Depends(get_db)
 # ==========================================
 
 @app.post("/users/create")
-@limiter.limit("10/hour")
-async def create_user(request: Request, data: dict, db: Session = Depends(get_db)):
+async def create_user(data: dict):
     """
     Creates a new user account with category, privileges, and store assignment.
-    Passwords are securely hashed using bcrypt.
-    Rate limited to 10 creations per hour.
     """
     name = data.get('name')
     email = data.get('email')
@@ -5791,132 +4181,78 @@ async def create_user(request: Request, data: dict, db: Session = Depends(get_db
     category = data.get('category', 'Employee')
     privileges = data.get('privileges', [])
     store = data.get('store', 'Unassigned')
-
+    
     # Validation
     if not name or not email or not password:
         return {"status": "error", "message": "Missing required fields"}
-
-    # Sanitize inputs
-    name = sanitize_string(name, max_length=255)
-    email = sanitize_string(email, max_length=255).lower().strip()
-    store = sanitize_string(store, max_length=255)
-
-    # Validate email format
-    if not validate_email(email):
-        return {"status": "error", "message": "Invalid email format"}
-
-    # Validate password strength
-    is_valid, error_msg = validate_password_strength(password)
-    if not is_valid:
-        return {"status": "error", "message": error_msg}
-
-    # Check if user exists in database
-    existing_user = db_ops.get_user_by_email(db, email)
-    if existing_user:
-        return {"status": "error", "message": "User already exists"}
-
-    # Check in-memory store as well (for backward compatibility)
+    
+    # Check if user exists
     if email in users_store:
         return {"status": "error", "message": "User already exists"}
-
+    
     # Validate privileges - ensure they are valid
     valid_privileges = [p for p in privileges if p in ALL_PRIVILEGES]
-
+    
     # Determine if user has admin access based on privileges or category
     has_admin_access = len(valid_privileges) > 0 or category in ['Super Admin', 'Manager', 'Supervisor']
+    
+    # Create user
+    users_store[email] = {
+        "email": email,
+        "name": name,
+        "password": password,  # In production: hash this!
+        "role": role,
+        "category": category,
+        "privileges": valid_privileges,
+        "is_superadmin": category == 'Super Admin',
+        "has_admin_access": has_admin_access,
+        "store": store,
+        "created_at": datetime.now().isoformat(),
+        "self_learning_completed": False  # NEW: New users must complete self-learning first
+    }
+    
+    logger.info(f"User created: {name} ({email}) - Role: {role} - Store: {store} - Privileges: {valid_privileges}")
+    
+    # [AUDIT] Log user creation
+    log_action("CREATE_USER", name, f"Created new {role} account for {email} ({store})")
 
-    # Hash the password securely
-    hashed_password = hash_password(password)
-
-    # Create user in database
-    try:
-        user_data = {
-            "email": email,
-            "name": name,
-            "password": hashed_password,  # Now properly hashed
-            "role": role,
-            "category": category,
-            "privileges": valid_privileges,
-            "is_superadmin": category == 'Super Admin',
-            "has_admin_access": has_admin_access,
-            "store": store,
-            "self_learning_completed": False
-        }
-        db_user = db_ops.create_user(db, user_data)
-
-        logger.info(f"User created in DB: {name} ({email}) - Role: {role} - Store: {store}")
-
-        # Also add to in-memory store for backward compatibility
-        users_store[email] = {
-            **user_data,
-            "created_at": datetime.now().isoformat()
-        }
-
-        # [AUDIT] Log user creation
-        log_action("CREATE_USER", name, f"Created new {role} account for {email} ({store})")
-
-        return {"status": "success", "user_id": email, "privileges_count": len(valid_privileges)}
-
-    except Exception as e:
-        logger.error(f"Error creating user: {e}")
-        db.rollback()
-        return {"status": "error", "message": f"Failed to create user: {str(e)}"}
+    return {"status": "success", "user_id": email, "privileges_count": len(valid_privileges)}
 
 
 @app.post("/users/update")
-async def update_user(data: dict, db: Session = Depends(get_db)):
+async def update_user(data: dict):
     """
     Updates an existing user's privileges, role, and store assignment.
     """
     email = data.get('email')
-    if not email:
-        return {"status": "error", "message": "Email is required"}
-
-    # Try database first
-    user_db = db_ops.get_user_by_email(db, email)
-    if not user_db and email not in users_store:
+    if not email or email not in users_store:
         return {"status": "error", "message": "User not found"}
-
-    try:
-        updates = {}
-
-        # Build updates dictionary
-        if 'role' in data:
-            updates['role'] = data['role']
-        if 'category' in data:
-            updates['category'] = data['category']
-        if 'name' in data:
-            updates['name'] = data['name']
-        if 'store' in data:
-            updates['store'] = data['store']
-        if 'privileges' in data:
-            valid_privileges = [p for p in data['privileges'] if p in ALL_PRIVILEGES]
-            updates['privileges'] = valid_privileges
-            category = data.get('category', user_db.category if user_db else users_store[email].get('category'))
-            updates['has_admin_access'] = len(valid_privileges) > 0 or category in ['Super Admin', 'Manager', 'Supervisor']
-
-            # Update superadmin status if category changes
-            if category == 'Super Admin':
-                updates['is_superadmin'] = True
-
-        # Update in database
-        if user_db:
-            updated_user = db_ops.update_user(db, email, updates)
-            logger.info(f"User updated in DB: {email} - Updates: {updates}")
-
-        # Update in-memory store for backward compatibility
-        if email in users_store:
-            user = users_store[email]
-            for key, value in updates.items():
-                user[key] = value
-
-        logger.info(f"User updated: {email} - Store: {updates.get('store')} - Privileges: {updates.get('privileges')}")
-        return {"status": "success", "message": "User updated successfully"}
-
-    except Exception as e:
-        logger.error(f"Error updating user: {e}")
-        db.rollback()
-        return {"status": "error", "message": f"Failed to update user: {str(e)}"}
+        
+    user = users_store[email]
+    
+    # Update allowed fields
+    if 'role' in data:
+        user['role'] = data['role']
+    if 'category' in data:
+        user['category'] = data['category']
+    if 'privileges' in data:
+        privileges = data['privileges']
+        valid_privileges = [p for p in privileges if p in ALL_PRIVILEGES]
+        user['privileges'] = valid_privileges
+        user['has_admin_access'] = len(valid_privileges) > 0 or user['category'] in ['Super Admin', 'Manager', 'Supervisor']
+        
+        # Update superadmin status if category changes
+        if user['category'] == 'Super Admin':
+            user['is_superadmin'] = True
+            
+    if 'name' in data:
+        user['name'] = data['name']
+    
+    if 'store' in data:
+        user['store'] = data['store']
+        
+    logger.info(f"User updated: {email} - Store: {user.get('store')} - Privileges: {user.get('privileges')}")
+    return {"status": "success", "message": "User updated successfully"}
 
 
 @app.get("/users/list")
@@ -5925,63 +4261,43 @@ async def list_users(
     limit: int = 50,
     search: str = "",
     store: str = "",
-    role: str = "",
-    db: Session = Depends(get_db)
+    role: str = ""
 ):
     """
     Returns all users (without passwords) with pagination and filtering.
     Supports search by name/email, filter by store and role.
     """
     users = []
-
-    # Get users from database
-    db_users = db_ops.get_all_users(db)
-    for user_db in db_users:
-        users.append({
-            "email": user_db.email,
-            "name": user_db.name,
-            "role": user_db.role or "User",
-            "category": user_db.category or "Employee",
-            "privileges": user_db.privileges or [],
-            "is_superadmin": user_db.is_superadmin or False,
-            "has_admin_access": user_db.has_admin_access or False,
-            "store": user_db.store or "Unassigned",
-            "created_at": user_db.created_at.isoformat() if user_db.created_at else ""
-        })
-
-    # Merge with in-memory users (for backward compatibility)
-    existing_emails = {u["email"] for u in users}
     for email, user_data in users_store.items():
-        if email not in existing_emails:
-            users.append({
-                "email": user_data["email"],
-                "name": user_data["name"],
-                "role": user_data.get("role", "User"),
-                "category": user_data.get("category", "Employee"),
-                "privileges": user_data.get("privileges", []),
-                "is_superadmin": user_data.get("is_superadmin", False),
-                "has_admin_access": user_data.get("has_admin_access", False),
-                "store": user_data.get("store", "Unassigned"),
-                "created_at": user_data.get("created_at", "")
-            })
-
+        users.append({
+            "email": user_data["email"],
+            "name": user_data["name"],
+            "role": user_data.get("role", "User"),
+            "category": user_data.get("category", "Employee"),
+            "privileges": user_data.get("privileges", []),
+            "is_superadmin": user_data.get("is_superadmin", False),
+            "has_admin_access": user_data.get("has_admin_access", False),
+            "store": user_data.get("store", "Unassigned"),
+            "created_at": user_data.get("created_at", "")
+        })
+    
     # Apply filters
     if search:
         search_lower = search.lower()
         users = [u for u in users if search_lower in u["name"].lower() or search_lower in u["email"].lower()]
-
+    
     if store and store != "All":
         users = [u for u in users if u["store"] == store]
-
+    
     if role and role != "All":
         users = [u for u in users if u["role"] == role]
-
+    
     # Calculate pagination
     total = len(users)
     start = (page - 1) * limit
     end = start + limit
     paginated_users = users[start:end]
-
+    
     return {
         "users": paginated_users,
         "total": total,
@@ -6085,35 +4401,22 @@ async def get_stores():
 
 
 @app.get("/stores/summary")
-async def get_stores_summary(db: Session = Depends(get_db)):
+async def get_stores_summary():
     """
     Returns stores with employee count for analytics.
     """
     store_summary = []
-
-    # Get all users from database
-    db_users = db_ops.get_all_users(db)
-
     for store in STORES_LIST:
-        # Count from database users
-        db_employee_count = sum(1 for u in db_users if u.store == store["name"])
-
-        # Count from in-memory users (excluding duplicates)
-        db_emails = {u.email for u in db_users}
-        memory_employee_count = sum(1 for email, u in users_store.items()
-                                    if u.get("store") == store["name"] and email not in db_emails)
-
-        total_employee_count = db_employee_count + memory_employee_count
-
+        employee_count = sum(1 for u in users_store.values() if u.get("store") == store["name"])
         store_summary.append({
             **store,
-            "employee_count": total_employee_count
+            "employee_count": employee_count
         })
     return store_summary
 
 
 @app.post("/users/bulk-upload")
-async def bulk_upload_users(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def bulk_upload_users(file: UploadFile = File(...)):
     """
     Bulk upload users from Excel/CSV file.
     Expected columns: Name, Email, Password, Role, Category, Store
@@ -6121,22 +4424,22 @@ async def bulk_upload_users(file: UploadFile = File(...), db: Session = Depends(
     try:
         import pandas as pd
         import io
-
+        
         contents = await file.read()
-
+        
         # Determine file type and read
         if file.filename.endswith('.csv'):
             df = pd.read_csv(io.BytesIO(contents))
         else:
             df = pd.read_excel(io.BytesIO(contents))
-
+        
         # Normalize column names (case-insensitive)
         df.columns = df.columns.str.strip().str.lower()
-
+        
         created_count = 0
         skipped_count = 0
         errors = []
-
+        
         for idx, row in df.iterrows():
             try:
                 email = str(row.get('email', '')).strip()
@@ -6145,21 +4448,19 @@ async def bulk_upload_users(file: UploadFile = File(...), db: Session = Depends(
                 role = str(row.get('role', 'Employee')).strip()
                 category = str(row.get('category', 'Employee')).strip()
                 store = str(row.get('store', 'Unassigned')).strip()
-
+                
                 if not email or not name:
                     errors.append(f"Row {idx + 2}: Missing name or email")
                     skipped_count += 1
                     continue
-
-                # Check if user exists in database
-                existing_user = db_ops.get_user_by_email(db, email)
-                if existing_user or email in users_store:
+                
+                if email in users_store:
                     errors.append(f"Row {idx + 2}: User {email} already exists")
                     skipped_count += 1
                     continue
-
-                # Create user in database
-                user_data = {
+                
+                # Create user
+                users_store[email] = {
                     "email": email,
                     "name": name,
                     "password": password,
@@ -6169,38 +4470,23 @@ async def bulk_upload_users(file: UploadFile = File(...), db: Session = Depends(
                     "is_superadmin": False,
                     "has_admin_access": category in ['Super Admin', 'Manager', 'Supervisor'],
                     "store": store,
-                    "self_learning_completed": False
+                    "created_at": datetime.now().isoformat()
                 }
-
-                try:
-                    db_ops.create_user(db, user_data)
-
-                    # Also add to in-memory store for backward compatibility
-                    users_store[email] = {
-                        **user_data,
-                        "created_at": datetime.now().isoformat()
-                    }
-
-                    created_count += 1
-
-                except Exception as create_error:
-                    db.rollback()
-                    errors.append(f"Row {idx + 2}: Failed to create user - {str(create_error)}")
-                    skipped_count += 1
-
+                created_count += 1
+                
             except Exception as row_error:
                 errors.append(f"Row {idx + 2}: {str(row_error)}")
                 skipped_count += 1
-
+        
         logger.info(f"Bulk upload completed: {created_count} created, {skipped_count} skipped")
-
+        
         return {
             "status": "success",
             "created": created_count,
             "skipped": skipped_count,
             "errors": errors[:10]  # Return first 10 errors only
         }
-
+        
     except Exception as e:
         logger.error(f"Bulk upload error: {e}")
         raise HTTPException(status_code=400, detail=f"Failed to process file: {str(e)}")
@@ -6228,41 +4514,26 @@ async def get_bulk_upload_template():
 
 
 @app.get("/users/{email}")
-async def get_user(email: str, db: Session = Depends(get_db)):
+async def get_user(email: str):
     """
     Returns a specific user by email (without password).
     """
-    # Try database first
-    user_db = db_ops.get_user_by_email(db, email)
-    if user_db:
-        return {
-            "email": user_db.email,
-            "name": user_db.name,
-            "role": user_db.role or "User",
-            "category": user_db.category or "Employee",
-            "privileges": user_db.privileges or [],
-            "is_superadmin": user_db.is_superadmin or False,
-            "has_admin_access": user_db.has_admin_access or False,
-            "store": user_db.store or "Unassigned",
-            "self_learning_completed": user_db.self_learning_completed or False
-        }
-
-    # Fallback to in-memory store
-    if email in users_store:
-        user_data = users_store[email]
-        return {
-            "email": user_data["email"],
-            "name": user_data["name"],
-            "role": user_data.get("role", "User"),
-            "category": user_data.get("category", "Employee"),
-            "privileges": user_data.get("privileges", []),
-            "is_superadmin": user_data.get("is_superadmin", False),
-            "has_admin_access": user_data.get("has_admin_access", False),
-            "store": user_data.get("store", "Unassigned"),
-            "self_learning_completed": user_data.get("self_learning_completed", False)
-        }
-
-    raise HTTPException(status_code=404, detail="User not found")
+    if email not in users_store:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    user_data = users_store[email]
+    return {
+        "email": user_data["email"],
+        "name": user_data["name"],
+        "role": user_data.get("role", "User"),
+        "category": user_data.get("category", "Employee"),
+        "privileges": user_data.get("privileges", []),
+        "is_superadmin": user_data.get("is_superadmin", False),
+        "has_admin_access": user_data.get("has_admin_access", False),
+        "store": user_data.get("store", "Unassigned"),
+        "is_superadmin": user_data.get("is_superadmin", False),
+        "has_admin_access": user_data.get("has_admin_access", False)
+    }
 
 
 @app.put("/users/{email}/privileges")
@@ -6292,125 +4563,68 @@ async def update_user_privileges(email: str, data: dict):
 # ==========================================
 
 @app.post("/attendance/punch-in")
-async def punch_in(data: dict, db: Session = Depends(get_db)):
+async def punch_in(data: dict):
     """
     Employee punches in for work.
     """
-    try:
-        user_id = data.get('user_id')
-        timestamp = data.get('timestamp')
-
-        # Check if already punched in (in-memory check)
-        for record in attendance_records:
-            if record['user_id'] == user_id and not record.get('punch_out'):
-                return {"status": "error", "message": "Already punched in"}
-
-        # Get user data
-        user_data = users_store.get(user_id, {})
-        user_name = user_data.get('name', user_id)
-        store = user_data.get('store', 'Unknown')
-
-        # Create attendance record in DATABASE
-        attendance_data = {
-            "id": str(uuid.uuid4()),
-            "user_email": user_id,
-            "user_name": user_name,
-            "punch_in": datetime.fromisoformat(timestamp.replace('Z', '+00:00')) if timestamp else datetime.now(),
-            "punch_out": None,
-            "duration_minutes": None,
-            "location_lat": data.get('latitude'),
-            "location_lng": data.get('longitude'),
-            "store": store
-        }
-
-        try:
-            db_attendance = db_ops.create_attendance_record(db, attendance_data)
-        except Exception as db_error:
-            logger.error(f"Database attendance error: {db_error}")
-            db.rollback()
-            # Continue with in-memory tracking
-
-        # Also store in memory for backward compatibility
-        record = {
-            "id": str(len(attendance_records) + 1),
-            "user_id": user_id,
-            "punch_in": timestamp,
-            "punch_out": None,
-            "duration_minutes": None
-        }
-
-        attendance_records.append(record)
-        logger.info(f"Punch in: {user_id} at {timestamp}")
-        log_user_activity(user_id, "PUNCH_IN", f"Punched in at {timestamp}")
-        return {"status": "success"}
-
-    except Exception as e:
-        logger.error(f"Error punching in: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to punch in: {str(e)}")
+    user_id = data.get('user_id')
+    timestamp = data.get('timestamp')
+    
+    # Check if already punched in
+    for record in attendance_records:
+        if record['user_id'] == user_id and not record.get('punch_out'):
+            return {"status": "error", "message": "Already punched in"}
+    
+    record = {
+        "id": str(len(attendance_records) + 1),
+        "user_id": user_id,
+        "punch_in": timestamp,
+        "punch_out": None,
+        "duration_minutes": None
+    }
+    
+    attendance_records.append(record)
+    logger.info(f"Punch in: {user_id} at {timestamp}")
+    log_user_activity(user_id, "PUNCH_IN", f"Punched in at {timestamp}")
+    return {"status": "success"}
 
 
 @app.post("/attendance/punch-out")
-async def punch_out(data: dict, db: Session = Depends(get_db)):
+async def punch_out(data: dict):
     """
     Employee punches out from work.
     """
-    try:
-        user_id = data.get('user_id')
-        timestamp = data.get('timestamp')
-
-        # Find active attendance record in memory
-        for record in attendance_records:
-            if record['user_id'] == user_id and not record.get('punch_out'):
-                record['punch_out'] = timestamp
-
-                # Calculate duration
-                punch_in_dt = datetime.fromisoformat(record['punch_in'].replace('Z', '+00:00'))
-                punch_out_dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                duration = (punch_out_dt - punch_in_dt).total_seconds() / 60
-                record['duration_minutes'] = int(duration)
-
-                logger.info(f"Punch out: {user_id} at {timestamp}, duration: {duration}min")
-                log_user_activity(user_id, "PUNCH_OUT", f"Punched out after {int(duration)} mins")
-                return {"status": "success", "duration_minutes": int(duration)}
-
-        return {"status": "error", "message": "No active punch-in found"}
-
-    except Exception as e:
-        logger.error(f"Error punching out: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to punch out: {str(e)}")
+    user_id = data.get('user_id')
+    timestamp = data.get('timestamp')
+    
+    # Find active attendance record
+    for record in attendance_records:
+        if record['user_id'] == user_id and not record.get('punch_out'):
+            record['punch_out'] = timestamp
+            
+            # Calculate duration
+            punch_in_dt = datetime.fromisoformat(record['punch_in'].replace('Z', '+00:00'))
+            punch_out_dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            duration = (punch_out_dt - punch_in_dt).total_seconds() / 60
+            record['duration_minutes'] = int(duration)
+            
+            record['duration_minutes'] = int(duration)
+            
+            logger.info(f"Punch out: {user_id} at {timestamp}, duration: {duration}min")
+            log_user_activity(user_id, "PUNCH_OUT", f"Punched out after {int(duration)} mins")
+            return {"status": "success", "duration_minutes": int(duration)}
+    
+    return {"status": "error", "message": "No active punch-in found"}
 
 
 @app.get("/attendance/history")
-async def attendance_history(user_id: str = None, db: Session = Depends(get_db)):
+async def attendance_history(user_id: str = None):
     """
     Returns attendance history.
     """
-    # Get from database
     if user_id:
-        db_attendance = db_ops.get_user_attendance(db, user_id, limit=100)
-        records = []
-        for att in db_attendance:
-            records.append({
-                "id": att.id,
-                "user_id": att.user_email,
-                "user_email": att.user_email,
-                "user_name": att.user_name,
-                "punch_in": att.punch_in.isoformat() if att.punch_in else None,
-                "punch_out": att.punch_out.isoformat() if att.punch_out else None,
-                "duration_minutes": att.duration_minutes,
-                "store": att.store
-            })
-
-        # Merge with in-memory records
-        existing_ids = {r["id"] for r in records}
-        for r in attendance_records:
-            if r.get("user_id") == user_id and r.get("id") not in existing_ids:
-                records.append(r)
-
-        return records
-    else:
-        # Return all attendance records from memory
-        return attendance_records
+        return [r for r in attendance_records if r['user_id'] == user_id]
+    return attendance_records
 
 
 # ==========================================
@@ -6592,29 +4806,6 @@ async def create_assessment(
         "total_questions": len(questions_list)
     }
 
-    # Save to database
-    try:
-        db = SessionLocal()
-        try:
-            db_assessment_data = {
-                "id": new_id,
-                "title": title,
-                "description": description,
-                "questions": questions_list,
-                "time_limit_minutes": time_limit_minutes,
-                "passing_score": passing_score,
-                "created_by": created_by,
-                "active": True,
-                "total_questions": len(questions_list)
-            }
-            db_ops.create_assessment(db, db_assessment_data)
-            logger.info(f"Proctored Assessment saved to DB: {new_id}")
-        finally:
-            db.close()
-    except Exception as e:
-        logger.error(f"Error saving assessment to DB: {e}")
-
-    # Also keep in memory for backward compatibility
     proctored_assessments.insert(0, assessment)
     logger.info(f"Proctored Assessment Created: {title} with {len(questions_list)} questions")
 
@@ -6623,28 +4814,24 @@ async def create_assessment(
 @app.put("/proctored-assessments/{assessment_id}")
 async def update_assessment(
     assessment_id: str,
-    request: Request,
-    db: Session = Depends(get_db)
+    request: Request
 ):
     """
     Update an existing proctored assessment.
     """
     import json
-
-    # Check if assessment exists (database first, then in-memory)
-    db_assessment = db_ops.get_assessment_by_id(db, assessment_id)
-    memory_assessment = None
+    
+    # Check if assessment exists
     matching = [a for a in proctored_assessments if a["id"] == assessment_id]
-    if matching:
-        memory_assessment = matching[0]
-
-    if not db_assessment and not memory_assessment:
+    if not matching:
         raise HTTPException(status_code=404, detail="Assessment not found")
+        
+    assessment = matching[0]
 
     # Try to get JSON body first
     try:
         content_type = request.headers.get("content-type", "")
-
+        
         if "application/json" in content_type:
             body = await request.json()
             title = body.get("title")
@@ -6662,7 +4849,7 @@ async def update_assessment(
             time_limit_minutes = int(form_data.get("time_limit_minutes", 30)) if form_data.get("time_limit_minutes") else None
             passing_score = int(form_data.get("passing_score", 70)) if form_data.get("passing_score") else None
             created_by = form_data.get("created_by")
-
+            
             if questions_str:
                 try:
                     questions_list = json.loads(questions_str)
@@ -6671,32 +4858,19 @@ async def update_assessment(
             else:
                 questions_list = None
 
-        # Build updates dict
-        updates = {}
-        if title: updates["title"] = title
-        if description is not None: updates["description"] = description
-        if time_limit_minutes: updates["time_limit_minutes"] = time_limit_minutes
-        if passing_score: updates["passing_score"] = passing_score
-        if questions_list:
+        # Update fields if provided
+        if title: assessment["title"] = title
+        if description is not None: assessment["description"] = description
+        if time_limit_minutes: assessment["time_limit_minutes"] = time_limit_minutes
+        if passing_score: assessment["passing_score"] = passing_score
+        if questions_list: 
             if not isinstance(questions_list, list) or len(questions_list) == 0:
-                raise HTTPException(status_code=400, detail="Questions must be a non-empty array")
-            updates["questions"] = questions_list
-            updates["total_questions"] = len(questions_list)
-        if created_by: updates["created_by"] = created_by
-
-        # Update in database
-        if db_assessment and updates:
-            db_ops.update_assessment(db, assessment_id, updates)
-            logger.info(f"Assessment updated in DB: {assessment_id}")
-
-        # Also update in-memory
-        if memory_assessment:
-            for key, value in updates.items():
-                memory_assessment[key] = value
-
-        # Return updated assessment
-        result_assessment = memory_assessment if memory_assessment else db_ops.model_to_dict(db_ops.get_assessment_by_id(db, assessment_id))
-        return {"status": "success", "message": "Assessment updated", "assessment": result_assessment}
+                 raise HTTPException(status_code=400, detail="Questions must be a non-empty array")
+            assessment["questions"] = questions_list
+            assessment["total_questions"] = len(questions_list)
+        if created_by: assessment["created_by"] = created_by
+        
+        return {"status": "success", "message": "Assessment updated", "assessment": assessment}
 
     except HTTPException:
         raise
@@ -6704,25 +4878,30 @@ async def update_assessment(
         logger.error(f"Error updating assessment: {e}")
         raise HTTPException(status_code=400, detail=f"Invalid request: {str(e)}")
 
-# REMOVED: Duplicate endpoints - now handled by database-aware endpoints at lines 1699-1784
-# @app.get("/proctored-assessments")
-# @app.get("/proctored-assessments/all")
-# @app.delete("/proctored-assessments/{assessment_id}")
+@app.get("/proctored-assessments")
+async def get_assessments():
+    return [a for a in proctored_assessments if a.get("active", True)]
+
+@app.get("/proctored-assessments/all")
+async def get_all_assessments():
+    return proctored_assessments
+
+@app.delete("/proctored-assessments/{assessment_id}")
+async def delete_assessment(assessment_id: str):
+    global proctored_assessments
+    initial_len = len(proctored_assessments)
+    proctored_assessments = [a for a in proctored_assessments if a["id"] != assessment_id]
+    if len(proctored_assessments) < initial_len:
+        return {"status": "success", "message": "Assessment deleted"}
+    return {"status": "error", "message": "Assessment not found"}
+
+# REMOVED: Duplicate endpoint - now handled by more complete endpoint at line 1654
 # @app.post("/proctored-assessments/{assessment_id}/submit")
+# async def submit_assessment(assessment_id: str, submission: AssessmentSubmission):
+#     ...
 
 @app.get("/proctored-assessments/{assessment_id}/submissions")
-async def get_assessment_submissions(assessment_id: str, db: Session = Depends(get_db)):
-    """Get all submissions for a proctored assessment"""
-    # Try database first
-    db_submissions = db_ops.get_assessment_submissions(db, assessment_id)
-    if db_submissions:
-        submissions = [db_ops.model_to_dict(s) for s in db_submissions]
-        # Convert datetime objects to strings
-        for s in submissions:
-            if s.get("submitted_at") and hasattr(s["submitted_at"], "isoformat"):
-                s["submitted_at"] = s["submitted_at"].isoformat()
-        return submissions
-    # Fallback to in-memory
+async def get_assessment_submissions(assessment_id: str):
     return [s for s in assessment_submissions if s["assessment_id"] == assessment_id]
 
 
@@ -6802,17 +4981,28 @@ async def ask_ai_about_course(req: AskAIRequest):
 
         context_text = ""
         
-        # Use RAG service for semantic search (OpenAI embeddings)
-        try:
-            context_text = rag_service.get_context_for_question(
-                req.question, 
-                req.course_id, 
-                max_chunks=4
-            )
-            if context_text:
-                logger.info(f"RAG found context for question: {req.question[:50]}...")
-        except Exception as rag_error:
-            logger.warning(f"RAG search failed: {rag_error}")
+        # Try RAG first if index has data
+        if rag_index.ntotal > 0:
+            try:
+                # 1. Embed Question
+                q_emb = rag_model.encode(req.question)
+
+                # 2. Vector Search
+                k = min(8, rag_index.ntotal)  # Don't request more than available
+                D, I = rag_index.search(np.array([q_emb]).astype("float32"), k)
+
+                # 3. Filter only this course
+                context_chunks = []
+                for idx in I[0]:
+                    if idx >= 0 and idx < len(rag_metadata):
+                        meta = rag_metadata[idx]
+                        if meta["course_id"] == req.course_id:
+                            context_chunks.append(meta["text"])
+
+                if context_chunks:
+                    context_text = "\n\n".join(context_chunks[:4])
+            except Exception as rag_error:
+                logger.warning(f"RAG search failed, falling back to transcript: {rag_error}")
         
         # Fallback: Use transcript directly from content_store
         if not context_text:
@@ -6917,33 +5107,8 @@ async def bulk_upload_assessment(
             "created_by": created_by,
             "questions": questions,
             "created_at": datetime.now().isoformat(),
-            "active": True,
-            "total_questions": len(questions)
+            "active": True
         }
-
-        # Save to database
-        try:
-            db = SessionLocal()
-            try:
-                db_assessment_data = {
-                    "id": new_id,
-                    "title": title,
-                    "description": description,
-                    "questions": questions,
-                    "time_limit_minutes": time_limit_minutes,
-                    "passing_score": passing_score,
-                    "created_by": created_by,
-                    "active": True,
-                    "total_questions": len(questions)
-                }
-                db_ops.create_assessment(db, db_assessment_data)
-                logger.info(f"Bulk Upload Assessment saved to DB: {new_id}")
-            finally:
-                db.close()
-        except Exception as e:
-            logger.error(f"Error saving bulk upload assessment to DB: {e}")
-
-        # Also keep in memory for backward compatibility
         proctored_assessments.append(assessment)
         return {"status": "success", "id": new_id, "questions_count": len(questions)}
         
@@ -7121,43 +5286,29 @@ async def track_course_completion(
     max_score: int = Form(100),
     time_spent_seconds: int = Form(0),
     quiz_correct: int = Form(0),
-    quiz_total: int = Form(0),
-    db: Session = Depends(get_db)
+    quiz_total: int = Form(0)
 ):
     """Track when a user completes a course/module and update their learning profile."""
     try:
         profile = ensure_user_profile(user_email)
-
+        
         # Determine skill categories from course title
         matched_skills = categorize_content_by_skill(course_title, bucket or "")
-
-        # Create completion record in DATABASE
-        completion_data = {
+        
+        # Create completion record
+        completion = {
             "id": str(uuid.uuid4()),
             "user_email": user_email,
             "course_id": course_id,
             "course_title": course_title,
             "bucket": bucket,
-            "score": float(score) if score else None,
-            "time_spent_seconds": time_spent_seconds,
-            "quiz_correct": quiz_correct,
-            "quiz_total": quiz_total,
-            "quiz_answers": None
-        }
-
-        try:
-            db_completion = db_ops.create_course_completion(db, completion_data)
-        except Exception as db_error:
-            logger.error(f"Database completion error: {db_error}")
-            db.rollback()
-            # Continue with in-memory tracking
-
-        # Also store in memory for backward compatibility
-        completion = {
-            **completion_data,
+            "score": score,
             "max_score": max_score,
             "percentage": round((score / max_score) * 100, 1) if max_score > 0 else 0,
+            "time_spent_seconds": time_spent_seconds,
             "completed_at": datetime.now().isoformat(),
+            "quiz_correct": quiz_correct,
+            "quiz_total": quiz_total,
             "matched_skills": matched_skills
         }
         course_completions.append(completion)
@@ -7827,25 +5978,24 @@ async def track_completion(
     course_id: str = Form(...),
     bucket: str = Form("general"),
     xp_earned: int = Form(50),
-    course_title: str = Form(None),  # Optional title from frontend
-    db: Session = Depends(get_db)
+    course_title: str = Form(None)  # Optional title from frontend
 ):
     """Track module/course completion and award XP."""
     try:
         profile = ensure_user_profile(user_email)
-
+        
         # Find skill key using title for better categorization
         skill_key = find_skill_key_from_content(bucket, course_title or "")
-
+        
         # Calculate actual XP (base + skill matching bonus if skill found)
         actual_xp = int(xp_earned)
         if skill_key and skill_key != "onboarding":  # Bonus for non-default skill match
             actual_xp += 10
-
+        
         profile["courses_completed"] += 1
         profile["total_xp"] += actual_xp
         profile["last_activity"] = datetime.now().isoformat()
-
+        
         # Update skill score if matched
         if skill_key and skill_key in profile["skill_scores"]:
             current_skill = profile["skill_scores"][skill_key]
@@ -7854,31 +6004,14 @@ async def track_completion(
             current_skill["attempts"] = current_skill.get("attempts", 0) + 1
             if current_skill["max_score"] > 0:
                 current_skill["percentage"] = int((current_skill["score"] / current_skill["max_score"]) * 100)
-
-        # Record specific completion in DATABASE
-        completion_data = {
+        
+        # Record specific completion
+        completion_record = {
             "id": str(uuid.uuid4()),
             "user_email": user_email,
             "course_id": course_id,
             "course_title": course_title,
             "bucket": bucket,
-            "score": None,
-            "time_spent_seconds": None,
-            "quiz_answers": None,
-            "quiz_correct": None,
-            "quiz_total": None
-        }
-
-        try:
-            db_completion = db_ops.create_course_completion(db, completion_data)
-        except Exception as db_error:
-            logger.error(f"Database completion error: {db_error}")
-            db.rollback()
-            # Continue with in-memory tracking even if database fails
-
-        # Also store in memory for backward compatibility
-        completion_record = {
-            **completion_data,
             "xp": actual_xp,
             "completed_at": datetime.now().isoformat()
         }
@@ -10388,29 +8521,28 @@ ACTION_TYPES = {
 }
 
 
-# DUPLICATE ENDPOINT - Removed to avoid conflicts, using the migrated version at line ~777
-# @app.get("/audit-logs")
-# async def get_audit_logs(
-#     admin_email: str = None,
-#     action_type: str = None,
-#     limit: int = 50
-# ):
-#     """Get audit logs with optional filters"""
-#     filtered = audit_logs
-#
-#     if admin_email:
-#         filtered = [log for log in filtered if log["admin_email"] == admin_email]
-#     if action_type:
-#         filtered = [log for log in filtered if log["action"] == action_type]
-#
-#     # Sort by timestamp descending
-#     filtered = sorted(filtered, key=lambda x: x["timestamp"], reverse=True)[:limit]
-#
-#     return {
-#         "logs": filtered,
-#         "total": len(filtered),
-#         "action_types": list(ACTION_TYPES.keys())
-#     }
+@app.get("/audit-logs")
+async def get_audit_logs(
+    admin_email: str = None,
+    action_type: str = None,
+    limit: int = 50
+):
+    """Get audit logs with optional filters"""
+    filtered = audit_logs
+    
+    if admin_email:
+        filtered = [log for log in filtered if log["admin_email"] == admin_email]
+    if action_type:
+        filtered = [log for log in filtered if log["action"] == action_type]
+    
+    # Sort by timestamp descending
+    filtered = sorted(filtered, key=lambda x: x["timestamp"], reverse=True)[:limit]
+    
+    return {
+        "logs": filtered,
+        "total": len(filtered),
+        "action_types": list(ACTION_TYPES.keys())
+    }
 
 
 @app.post("/audit-logs")
@@ -10418,18 +8550,21 @@ async def add_audit_log(
     admin_email: str = Form(...),
     action: str = Form(...),
     target: str = Form(...),
-    details: str = Form(""),
-    db: Session = Depends(get_db)
+    details: str = Form("")
 ):
     """Add new audit log entry"""
-    # Use the log_action helper which now saves to DB
-    log_action(action, target, details, admin_email)
-
-    # Return the last added log
-    if audit_logs:
-        return {"status": "success", "log": audit_logs[0]}
-
-    return {"status": "success"}
+    new_log = {
+        "id": len(audit_logs) + 1,
+        "timestamp": datetime.now().isoformat(),
+        "admin_email": admin_email,
+        "action": action,
+        "target": target,
+        "details": details,
+        "ip_address": "0.0.0.0"
+    }
+    audit_logs.insert(0, new_log)
+    
+    return {"status": "success", "log": new_log}
 
 
 # ==========================================
@@ -10593,60 +8728,24 @@ async def delete_certification_type(cert_id: str):
 # ==========================================
 
 @app.get("/scheduled-exams")
-async def get_scheduled_exams(db: Session = Depends(get_db)):
+async def get_scheduled_exams():
     """Get all scheduled exams (admin view)"""
-    try:
-        db_exams = db_ops.get_all_scheduled_exams(db)
-        exams_list = [db_ops.model_to_dict(e) for e in db_exams]
-        return exams_list if exams_list else scheduled_exams
-    except Exception as e:
-        logger.error(f"Error fetching scheduled exams from DB: {e}")
-        return scheduled_exams
+    return scheduled_exams
 
 @app.get("/scheduled-exams/user/{user_email}")
-async def get_user_scheduled_exams(user_email: str, db: Session = Depends(get_db)):
+async def get_user_scheduled_exams(user_email: str):
     """Get scheduled exams assigned to a specific user"""
     user_exams = []
     user_email_lower = user_email.lower().strip()
-
+    
     logger.info(f"[ScheduledExams] Fetching exams for user: {user_email}")
-
-    # Try database first
-    try:
-        db_exams = db_ops.get_all_scheduled_exams(db)
-        logger.info(f"[ScheduledExams] Total scheduled exams from DB: {len(db_exams)}")
-
-        for exam in db_exams:
-            assigned_users = exam.assigned_users if exam.assigned_users else []
-            # Case-insensitive email matching
-            assigned_users_lower = [u.lower().strip() if isinstance(u, str) else "" for u in assigned_users]
-
-            if user_email_lower in assigned_users_lower:
-                # Get attendance from DB
-                attendance_db = db_ops.get_user_exam_attendance(db, exam.id, user_email)
-                attendance_dict = db_ops.model_to_dict(attendance_db) if attendance_db else None
-
-                exam_dict = db_ops.model_to_dict(exam)
-                exam_dict["attendance"] = attendance_dict
-                exam_dict["can_start"] = attendance_dict.get("marked_present", False) if attendance_dict else False
-                exam_dict["has_completed"] = attendance_dict.get("completed", False) if attendance_dict else False
-                user_exams.append(exam_dict)
-                logger.info(f"[ScheduledExams] Found exam '{exam.title}' for user {user_email}")
-
-        if user_exams:
-            logger.info(f"[ScheduledExams] Returning {len(user_exams)} exams for {user_email}")
-            return user_exams
-    except Exception as e:
-        logger.error(f"Error fetching user scheduled exams from DB: {e}")
-
-    # Fallback to in-memory
     logger.info(f"[ScheduledExams] Total scheduled exams: {len(scheduled_exams)}")
-
+    
     for exam in scheduled_exams:
         assigned_users = exam.get("assigned_users", [])
         # Case-insensitive email matching
         assigned_users_lower = [u.lower().strip() if isinstance(u, str) else "" for u in assigned_users]
-
+        
         if user_email_lower in assigned_users_lower:
             # Find the original email for attendance lookup
             original_email = user_email
@@ -10654,10 +8753,10 @@ async def get_user_scheduled_exams(user_email: str, db: Session = Depends(get_db
                 if lower_email == user_email_lower:
                     original_email = assigned_users[i]
                     break
-
+            
             # Check if user's attendance record exists (case-insensitive)
-            attendance = next((a for a in scheduled_exam_attendance
-                              if a["exam_id"] == exam["id"] and
+            attendance = next((a for a in scheduled_exam_attendance 
+                              if a["exam_id"] == exam["id"] and 
                               a["user_email"].lower().strip() == user_email_lower), None)
             exam_copy = exam.copy()
             exam_copy["attendance"] = attendance
@@ -10665,21 +8764,13 @@ async def get_user_scheduled_exams(user_email: str, db: Session = Depends(get_db
             exam_copy["has_completed"] = attendance.get("completed", False) if attendance else False
             user_exams.append(exam_copy)
             logger.info(f"[ScheduledExams] Found exam '{exam.get('title')}' for user {user_email}")
-
+    
     logger.info(f"[ScheduledExams] Returning {len(user_exams)} exams for {user_email}")
     return user_exams
 
 @app.get("/scheduled-exams/{exam_id}")
-async def get_scheduled_exam(exam_id: str, db: Session = Depends(get_db)):
+async def get_scheduled_exam(exam_id: str):
     """Get a specific scheduled exam"""
-    try:
-        db_exam = db_ops.get_scheduled_exam_by_id(db, exam_id)
-        if db_exam:
-            return db_ops.model_to_dict(db_exam)
-    except Exception as e:
-        logger.error(f"Error fetching scheduled exam from DB: {e}")
-
-    # Fallback to in-memory
     for exam in scheduled_exams:
         if exam.get("id") == exam_id:
             return exam
@@ -10699,20 +8790,19 @@ async def create_scheduled_exam(
     questions: str = Form(...),  # JSON array of questions
     time_limit_minutes: int = Form(30),
     passing_score: int = Form(70),
-    created_by: str = Form("Admin"),
-    db: Session = Depends(get_db)
+    created_by: str = Form("Admin")
 ):
     """Create a new scheduled exam"""
     import json
-
+    
     try:
         assigned_list = json.loads(assigned_users)
         questions_list = json.loads(questions)
     except:
         raise HTTPException(status_code=400, detail="Invalid JSON format for users or questions")
-
+    
     exam_id = str(uuid.uuid4())
-
+    
     new_exam = {
         "id": exam_id,
         "title": title,
@@ -10728,22 +8818,10 @@ async def create_scheduled_exam(
         "time_limit_minutes": time_limit_minutes,
         "passing_score": passing_score,
         "created_by": created_by,
-        "created_at": datetime.now(),
+        "created_at": datetime.now().isoformat(),
         "status": "scheduled"  # scheduled, ongoing, completed, cancelled
     }
-
-    # Save to database
-    try:
-        db_ops.create_scheduled_exam(db, new_exam)
-        logger.info(f"Scheduled exam saved to DB: {title}")
-    except Exception as e:
-        logger.error(f"Error saving scheduled exam to DB: {e}")
-        db.rollback()
-
-    # Convert created_at for in-memory and response
-    new_exam["created_at"] = new_exam["created_at"].isoformat()
-
-    # Also keep in memory for backward compatibility
+    
     scheduled_exams.insert(0, new_exam)
     
     # Create attendance records for all assigned users
@@ -10762,15 +8840,6 @@ async def create_scheduled_exam(
             "completed": False,
             "submission_id": None
         }
-
-        # Save to database
-        try:
-            db_ops.create_exam_attendance(db, attendance_record)
-        except Exception as e:
-            logger.error(f"Error saving attendance record to DB: {e}")
-            db.rollback()
-
-        # Also keep in memory for backward compatibility
         scheduled_exam_attendance.append(attendance_record)
     
     # Send notification to all assigned users
@@ -10805,191 +8874,85 @@ async def create_scheduled_exam(
     return {"status": "success", "exam": new_exam}
 
 @app.get("/scheduled-exams/{exam_id}/attendance")
-async def get_exam_attendance(exam_id: str, db: Session = Depends(get_db)):
+async def get_exam_attendance(exam_id: str):
     """Get attendance list for a scheduled exam"""
-    try:
-        db_attendance = db_ops.get_exam_attendance(db, exam_id)
-        attendance_list = [db_ops.model_to_dict(a) for a in db_attendance]
-        return attendance_list if attendance_list else [a for a in scheduled_exam_attendance if a["exam_id"] == exam_id]
-    except Exception as e:
-        logger.error(f"Error fetching exam attendance from DB: {e}")
-        return [a for a in scheduled_exam_attendance if a["exam_id"] == exam_id]
+    attendance = [a for a in scheduled_exam_attendance if a["exam_id"] == exam_id]
+    return attendance
 
 @app.post("/scheduled-exams/{exam_id}/mark-present")
 async def mark_user_present(
     exam_id: str,
     user_email: str = Form(...),
-    marked_by: str = Form(...),
-    db: Session = Depends(get_db)
+    marked_by: str = Form(...)
 ):
     """Mark a user as present for the exam (supervisor action)"""
-    # Try database first
-    try:
-        db_attendance = db_ops.get_user_exam_attendance(db, exam_id, user_email)
-        if db_attendance:
-            db_ops.update_exam_attendance(db, db_attendance.id, {
-                "marked_present": True,
-                "marked_by": marked_by,
-                "marked_at": datetime.now()
-            })
-            attendance = db_ops.model_to_dict(db_attendance)
-            attendance["marked_present"] = True
-            attendance["marked_by"] = marked_by
-            attendance["marked_at"] = datetime.now().isoformat()
-
-            # Update in-memory as well
-            for mem_attendance in scheduled_exam_attendance:
-                if mem_attendance["exam_id"] == exam_id and mem_attendance["user_email"] == user_email:
-                    mem_attendance["marked_present"] = True
-                    mem_attendance["marked_by"] = marked_by
-                    mem_attendance["marked_at"] = attendance["marked_at"]
-                    break
-
-            # Notify the user that they can start the exam
-            await manager.broadcast({
-                "type": "EXAM_START_ENABLED",
-                "exam_id": exam_id,
-                "user_email": user_email
-            })
-
-            logger.info(f"User {user_email} marked present for exam {exam_id} by {marked_by}")
-            return {"status": "success", "attendance": attendance}
-    except Exception as e:
-        logger.error(f"Error marking user present in DB: {e}")
-        db.rollback()
-
-    # Fallback to in-memory
+    # Find attendance record
     for attendance in scheduled_exam_attendance:
         if attendance["exam_id"] == exam_id and attendance["user_email"] == user_email:
             attendance["marked_present"] = True
             attendance["marked_by"] = marked_by
             attendance["marked_at"] = datetime.now().isoformat()
-
+            
             # Notify the user that they can start the exam
             await manager.broadcast({
                 "type": "EXAM_START_ENABLED",
                 "exam_id": exam_id,
                 "user_email": user_email
             })
-
+            
             logger.info(f"User {user_email} marked present for exam {exam_id} by {marked_by}")
             return {"status": "success", "attendance": attendance}
-
+    
     raise HTTPException(status_code=404, detail="Attendance record not found")
 
 @app.post("/scheduled-exams/{exam_id}/mark-absent")
 async def mark_user_absent(
     exam_id: str,
     user_email: str = Form(...),
-    marked_by: str = Form(...),
-    db: Session = Depends(get_db)
+    marked_by: str = Form(...)
 ):
     """Mark a user as absent for the exam"""
-    # Try database first
-    try:
-        db_attendance = db_ops.get_user_exam_attendance(db, exam_id, user_email)
-        if db_attendance:
-            db_ops.update_exam_attendance(db, db_attendance.id, {
-                "marked_present": False,
-                "marked_by": marked_by,
-                "marked_at": datetime.now()
-            })
-            attendance = db_ops.model_to_dict(db_attendance)
-            attendance["marked_present"] = False
-            attendance["marked_by"] = marked_by
-            attendance["marked_at"] = datetime.now().isoformat()
-
-            # Update in-memory as well
-            for mem_attendance in scheduled_exam_attendance:
-                if mem_attendance["exam_id"] == exam_id and mem_attendance["user_email"] == user_email:
-                    mem_attendance["marked_present"] = False
-                    mem_attendance["marked_by"] = marked_by
-                    mem_attendance["marked_at"] = attendance["marked_at"]
-                    break
-
-            logger.info(f"User {user_email} marked absent for exam {exam_id} by {marked_by}")
-            return {"status": "success", "attendance": attendance}
-    except Exception as e:
-        logger.error(f"Error marking user absent in DB: {e}")
-        db.rollback()
-
-    # Fallback to in-memory
     for attendance in scheduled_exam_attendance:
         if attendance["exam_id"] == exam_id and attendance["user_email"] == user_email:
             attendance["marked_present"] = False
             attendance["marked_by"] = marked_by
             attendance["marked_at"] = datetime.now().isoformat()
-
+            
             logger.info(f"User {user_email} marked absent for exam {exam_id} by {marked_by}")
             return {"status": "success", "attendance": attendance}
-
+    
     raise HTTPException(status_code=404, detail="Attendance record not found")
 
 @app.post("/scheduled-exams/{exam_id}/start")
 async def start_scheduled_exam(
     exam_id: str,
-    user_email: str = Form(...),
-    db: Session = Depends(get_db)
+    user_email: str = Form(...)
 ):
     """User starts the scheduled exam (after being marked present)"""
-    # Try database first
-    attendance = None
-    exam = None
-
-    try:
-        db_attendance = db_ops.get_user_exam_attendance(db, exam_id, user_email)
-        if db_attendance:
-            attendance = db_ops.model_to_dict(db_attendance)
-            db_exam = db_ops.get_scheduled_exam_by_id(db, exam_id)
-            if db_exam:
-                exam = db_ops.model_to_dict(db_exam)
-    except Exception as e:
-        logger.error(f"Error fetching attendance/exam from DB: {e}")
-
-    # Fallback to in-memory
-    if not attendance:
-        attendance = next((a for a in scheduled_exam_attendance
-                          if a["exam_id"] == exam_id and a["user_email"] == user_email), None)
-
-    if not exam:
-        exam = next((e for e in scheduled_exams if e["id"] == exam_id), None)
-
+    # Check attendance
+    attendance = next((a for a in scheduled_exam_attendance 
+                      if a["exam_id"] == exam_id and a["user_email"] == user_email), None)
+    
     if not attendance:
         raise HTTPException(status_code=404, detail="You are not assigned to this exam")
-
+    
     if not attendance["marked_present"]:
         raise HTTPException(status_code=403, detail="You must be marked present by supervisor to start the exam")
-
+    
     if attendance["completed"]:
         raise HTTPException(status_code=400, detail="You have already completed this exam")
-
+    
+    # Get exam details
+    exam = next((e for e in scheduled_exams if e["id"] == exam_id), None)
     if not exam:
         raise HTTPException(status_code=404, detail="Exam not found")
-
+    
     # Mark as started
-    start_time_iso = datetime.now().isoformat()
-
-    # Update database
-    try:
-        db_attendance = db_ops.get_user_exam_attendance(db, exam_id, user_email)
-        if db_attendance:
-            db_ops.update_exam_attendance(db, db_attendance.id, {
-                "started_exam": True,
-                "start_time": datetime.now()
-            })
-    except Exception as e:
-        logger.error(f"Error updating exam start in DB: {e}")
-        db.rollback()
-
-    # Update in-memory
-    for mem_attendance in scheduled_exam_attendance:
-        if mem_attendance["exam_id"] == exam_id and mem_attendance["user_email"] == user_email:
-            mem_attendance["started_exam"] = True
-            mem_attendance["start_time"] = start_time_iso
-            break
-
+    attendance["started_exam"] = True
+    attendance["start_time"] = datetime.now().isoformat()
+    
     logger.info(f"User {user_email} started exam {exam_id}")
-
+    
     return {
         "status": "success",
         "exam": {
@@ -11000,7 +8963,7 @@ async def start_scheduled_exam(
             "time_limit_minutes": exam["time_limit_minutes"],
             "passing_score": exam["passing_score"]
         },
-        "start_time": start_time_iso
+        "start_time": attendance["start_time"]
     }
 
 @app.post("/scheduled-exams/{exam_id}/submit")
@@ -11144,35 +9107,19 @@ Requirements:
         raise HTTPException(status_code=500, detail=f"Failed to generate questions: {str(e)}")
 
 @app.delete("/scheduled-exams/{exam_id}")
-async def delete_scheduled_exam(exam_id: str, db: Session = Depends(get_db)):
+async def delete_scheduled_exam(exam_id: str):
     """Delete a scheduled exam"""
     global scheduled_exams, scheduled_exam_attendance
-
-    # Delete from database
-    try:
-        # Delete attendance records first (foreign key constraint)
-        db_attendance_list = db_ops.get_exam_attendance(db, exam_id)
-        for attendance in db_attendance_list:
-            db.delete(attendance)
-
-        # Delete exam
-        db_deleted = db_ops.delete_scheduled_exam(db, exam_id)
-        if db_deleted:
-            logger.info(f"Scheduled Exam Deleted from DB: {exam_id}")
-    except Exception as e:
-        logger.error(f"Error deleting scheduled exam from DB: {e}")
-        db.rollback()
-
-    # Delete from in-memory
+    
     original_len = len(scheduled_exams)
     scheduled_exams = [e for e in scheduled_exams if e["id"] != exam_id]
-
+    
     if len(scheduled_exams) == original_len:
         raise HTTPException(status_code=404, detail="Scheduled exam not found")
-
+    
     # Remove attendance records
     scheduled_exam_attendance = [a for a in scheduled_exam_attendance if a["exam_id"] != exam_id]
-
+    
     logger.info(f"Scheduled Exam Deleted: {exam_id}")
     return {"status": "success", "message": "Scheduled exam deleted"}
 
@@ -11727,97 +9674,17 @@ async def get_store_audit_filters():
 
 @app.post("/ai/chatbot")
 async def ai_chatbot(
-    request: Request,
     message: str = Form(...),
-    history: str = Form("[]"),
-    authorization: Optional[str] = Header(None)
+    history: str = Form("[]")
 ):
     """
-    Role & Privilege-Based AI Chatbot that:
-    1. Requires authentication to determine user role and privileges
-    2. Only answers based on LMS content (courses, transcripts, resources)
-    3. Filters content by role: employees see employee content
-    4. Filters content by privileges: admins only see content related to their privileges
-    5. Superadmins see everything
-    6. Refuses to answer general knowledge questions outside LMS scope
+    Dynamic AI Chatbot that:
+    1. Searches through courses and resources (RAG)
+    2. Uses Groq to generate contextual responses
+    3. Adds disclaimer for answers outside BW LMS context
     """
     try:
         import json
-        
-        # --- AUTHENTICATION & ROLE/PRIVILEGE/LEVEL DETECTION ---
-        user_role = "employee"
-        user_privileges = []
-        is_superadmin = False
-        user_name = "User"
-        user_category = "Waffler"  # Default to lowest level
-        
-        # Try to get user from authorization header
-        if authorization and authorization.startswith("Bearer "):
-            token = authorization.replace("Bearer ", "")
-            try:
-                payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-                user_role = payload.get("role", "employee").lower()
-                user_privileges = payload.get("privileges", [])
-                is_superadmin = payload.get("is_superadmin", False)
-                user_name = payload.get("name", "User")
-                # Get user's level/category for level-based filtering
-                user_category = payload.get("category") or payload.get("role", "Waffler")
-            except jwt.ExpiredSignatureError:
-                pass
-            except jwt.InvalidTokenError:
-                pass
-        
-        is_admin = user_role in ["admin", "manager", "superadmin"] or is_superadmin
-        
-        # Get user's accessible levels based on their category
-        accessible_levels = get_accessible_levels(user_category)
-        user_level_index = get_user_level_index(user_category)
-        
-        # --- PRIVILEGE TO CONTENT CATEGORY MAPPING ---
-        # Maps privileges to content categories they can access
-        PRIVILEGE_CONTENT_MAP = {
-            "upload_training": ["training", "course", "video", "learning path", "sop"],
-            "manage_learning_path": ["learning path", "course", "training", "module"],
-            "post_quiz": ["quiz", "assessment", "question", "test"],
-            "assign_quiz": ["quiz", "assessment", "test", "score"],
-            "proctored_assessment": ["exam", "proctored", "assessment", "test"],
-            "proctored_create_manage": ["exam", "proctored", "assessment", "test"],
-            "proctored_view_results": ["exam", "result", "score", "report", "proctored"],
-            "scheduled_exams": ["exam", "schedule", "assessment"],
-            "exam_reports": ["exam", "report", "result", "score"],
-            "reports": ["report", "analytics", "score", "completion", "progress"],
-            "view_analytics": ["analytics", "report", "dashboard", "metrics"],
-            "team_list": ["team", "employee", "user", "staff", "member"],
-            "post_news": ["news", "announcement", "update", "notification"],
-            "audits": ["audit", "compliance", "checklist", "inspection"],
-            "live_tracking": ["tracking", "location", "attendance", "clock"],
-            "manage_simulations": ["simulation", "interactive", "roleplay", "scenario"],
-            "crm_tickets": ["crm", "ticket", "support", "customer"],
-            "support_library": ["support", "help", "faq", "documentation"],
-            "create_user": ["user", "employee", "team", "onboarding"],
-            "send_notification": ["notification", "message", "alert"],
-            "manage_buckets": ["bucket", "category", "course", "organization"],
-            "bulk_upload": ["upload", "bulk", "import", "migration"],
-            "access_control": ["access", "permission", "role", "security"],
-            "view_audit_logs": ["audit", "log", "activity", "history"],
-        }
-        
-        # Get all accessible categories based on privileges
-        accessible_categories = set()
-        if is_superadmin:
-            # Superadmins can access everything
-            for categories in PRIVILEGE_CONTENT_MAP.values():
-                accessible_categories.update(categories)
-            accessible_categories.add("all")  # Special marker for full access
-        elif is_admin and user_privileges:
-            for priv in user_privileges:
-                if priv in PRIVILEGE_CONTENT_MAP:
-                    accessible_categories.update(PRIVILEGE_CONTENT_MAP[priv])
-            # All admins get basic training access
-            accessible_categories.update(["training", "course", "sop", "recipe", "procedure"])
-        else:
-            # Employees get standard training content
-            accessible_categories.update(["training", "course", "sop", "recipe", "procedure", "safety"])
         
         # Parse chat history
         try:
@@ -11825,155 +9692,77 @@ async def ai_chatbot(
         except:
             chat_history = []
         
-        # --- RAG SEARCH (Privilege-Filtered) ---
+        # --- RAG SEARCH ---
+        # Search through indexed content for relevant context
         relevant_context = []
-        matched_sources = []
+        is_internal_answer = False
         
-        try:
-            rag_results = rag_service.search_rag(message, top_k=5)
-            for result in rag_results:
-                content_type = result.get("type", "training").lower()
-                content_category = result.get("category", "").lower()
-                
-                # Check if user has access based on privileges
-                has_access = False
-                if is_superadmin or "all" in accessible_categories:
-                    has_access = True
-                else:
-                    # Check if content matches any accessible category
-                    for cat in accessible_categories:
-                        if cat in content_type or cat in content_category or cat in result.get("title", "").lower():
-                            has_access = True
-                            break
-                
-                if has_access:
-                    relevant_context.append(result.get("text", ""))
-                    matched_sources.append({
-                        "title": result.get("title", "Training Content"),
-                        "type": content_type
-                    })
-        except Exception as rag_error:
-            logger.warning(f"RAG search failed: {rag_error}")
+        if rag_index.ntotal > 0:
+            query_embedding = rag_model.encode(message)
+            distances, indices = rag_index.search(
+                np.array([query_embedding]).astype("float32"), 
+                k=min(3, rag_index.ntotal)
+            )
+            
+            for idx in indices[0]:
+                if idx < len(rag_metadata):
+                    relevant_context.append(rag_metadata[idx]["text"])
+                    is_internal_answer = True
         
-        # --- BUILD LEVEL & PRIVILEGE-FILTERED KNOWLEDGE BASE ---
+        # --- BUILD KNOWLEDGE BASE ---
+        # Gather all available courses and resources
         course_summaries = []
-        course_details = []
-        
-        # First, apply level-based filtering to courses
-        level_filtered_courses = filter_courses_by_level(content_store[:50], user_category, is_admin)
-        
-        for course in level_filtered_courses:
+        for course in content_store[:20]:  # Limit to prevent token overflow
             if course.get("isPathNode", False):
-                content_type = course.get("type", "training").lower()
-                content_category = course.get("category", "").lower()
-                title = course.get('title', '').lower()
-                
-                # For admins, also check privilege-based access
-                has_privilege_access = True
-                if is_admin and not is_superadmin:
-                    has_privilege_access = False
-                    for cat in accessible_categories:
-                        if cat in content_type or cat in content_category or cat in title:
-                            has_privilege_access = True
-                            break
-                    # General training is accessible to all admins
-                    if not has_privilege_access and any(cat in ["training", "course", "sop"] for cat in accessible_categories):
-                        has_privilege_access = True
-                
-                if has_privilege_access:
-                    course_title = course.get('title', 'Untitled')
-                    description = course.get('description', '')[:150]
-                    transcript = course.get('transcript', '')[:300] if course.get('transcript') else ''
-                    bucket = course.get('bucket', 'General')
-                    
-                    course_summaries.append(f"- {course_title} ({bucket}): {description}")
-                    if transcript:
-                        course_details.append(f"[{course_title}]: {transcript}")
+                course_summaries.append(f"- {course.get('title', 'Untitled')}: {course.get('description', 'No description')[:100]}")
         
         resource_summaries = []
         for resource in resource_store[:20]:
-            resource_category = resource.get("category", "").lower()
-            resource_type = resource.get("type", "").lower()
-            
-            # Check access based on privileges
-            has_access = False
-            if is_superadmin or "all" in accessible_categories:
-                has_access = True
-            else:
-                for cat in accessible_categories:
-                    if cat in resource_category or cat in resource_type:
-                        has_access = True
-                        break
-                # General resources are accessible to all
-                if not has_access and resource_category in ["general", "training", "sop", ""]:
-                    has_access = True
-            
-            if has_access:
-                resource_summaries.append(f"- {resource.get('title', 'Untitled')}: {resource.get('category', 'General')}")
+            resource_summaries.append(f"- {resource.get('title', 'Untitled')}: {resource.get('category', 'General')}")
         
-        # --- CHECK IF WE HAVE RELEVANT CONTENT ---
-        has_relevant_content = len(relevant_context) > 0 or len(course_summaries) > 0
+        # --- BUILD PROMPT ---
+        system_prompt = """You are BWC AI Assistant, the intelligent helper for Belgian Waffle Co.'s Learning Management System.
+
+YOUR KNOWLEDGE BASE INCLUDES:
+1. Training courses and learning paths
+2. Standard Operating Procedures (SOPs)
+3. Recipes and food preparation guides
+4. Equipment handling and safety protocols
+5. Customer service standards
+6. Store operations (opening, closing, cleaning)
+
+RESPONSE GUIDELINES:
+- Be helpful, friendly, and professional
+- Use emojis sparingly to keep it engaging (🧇, ✅, 📚)
+- Format responses with *bold* for important terms
+- Use bullet points for lists
+- Keep responses concise but informative
+- If the answer is from BW LMS training materials, mention the relevant course/resource
+- If answering general questions OUTSIDE the BW LMS scope, add this note at the end:
+  "ℹ️ Note: This information is general knowledge and not part of BW LMS training materials."
+
+BELGIAN WAFFLE CO. SPECIFIC INFO:
+- Standard baking temp: 180-190°C
+- Batter: 5kg Premix + 4L Water + 500g Oil
+- Cooking time: 3:30 - 4:00 minutes
+- Uniform: BWC Cap, Black T-Shirt, Apron, Non-slip shoes"""
+
+        # Build context section
+        context_section = ""
+        if relevant_context:
+            context_section = f"\n\nRELEVANT TRAINING CONTENT:\n" + "\n".join(relevant_context[:3])
         
-        # --- BUILD LEVEL & PRIVILEGE-AWARE PROMPT ---
-        if is_superadmin:
-            role_context = "a Superadmin with FULL ACCESS to all LMS features and content"
-            access_note = "You have access to ALL content across the entire LMS system."
-            level_note = "Full access to all levels"
-        elif is_admin and user_privileges:
-            privilege_names = ", ".join(user_privileges[:5])
-            if len(user_privileges) > 5:
-                privilege_names += f" (+{len(user_privileges) - 5} more)"
-            role_context = f"an Admin ({user_category}) with privileges: {privilege_names}"
-            access_note = f"You can access content related to your privileges and levels up to {user_category}."
-            level_note = f"Levels: {', '.join(accessible_levels)}"
-        elif is_admin:
-            role_context = f"an Admin at level: {user_category}"
-            access_note = f"You have access to training content for levels: {', '.join(accessible_levels)}."
-            level_note = f"Levels: {', '.join(accessible_levels)}"
-        else:
-            role_context = f"an Employee at level: {user_category}"
-            access_note = f"You have access to courses for your level ({user_category}) and below."
-            level_note = f"Accessible levels: {', '.join(accessible_levels)}"
+        if course_summaries:
+            context_section += f"\n\nAVAILABLE COURSES:\n" + "\n".join(course_summaries[:10])
         
-        system_prompt = f"""You are BWC AI Assistant, the EXCLUSIVE training assistant for Belgian Waffle Co.'s Learning Management System (LMS).
-
-👤 CURRENT USER: {user_name} ({role_context})
-📋 ACCESS LEVEL: {access_note}
-🎯 TRAINING LEVEL: {level_note}
-
-🚨 CRITICAL RULES - YOU MUST FOLLOW THESE STRICTLY:
-1. You can ONLY answer questions based on the LMS content provided below
-2. You CANNOT answer general knowledge questions (like "Who is Elon Musk?", "What is the capital of France?")
-3. If asked about anything NOT related to the LMS training content, respond with:
-   "❌ I can only answer questions related to your BW LMS training materials. Please ask me about courses, SOPs, or training content available to you."
-4. If the user asks about content OUTSIDE their level access (e.g., a Waffler asking about Shift Manager content), respond with:
-   "🔒 That content is for a higher level than yours. Complete your current courses to unlock more content!"
-5. NEVER make up information - only use what's in the provided context
-
-AVAILABLE LMS CONTENT FOR THIS USER (filtered by level: {user_category}):
-{chr(10).join(course_summaries[:15]) if course_summaries else "No courses currently available for your level."}
-
-TRANSCRIPT/DETAILED CONTENT:
-{chr(10).join(relevant_context[:3]) if relevant_context else chr(10).join(course_details[:3]) if course_details else "No detailed content available."}
-
-AVAILABLE RESOURCES:
-{chr(10).join(resource_summaries[:10]) if resource_summaries else "No resources currently available for your access level."}
-
-USER'S ACCESSIBLE LEVELS: {', '.join(accessible_levels)}
-
-RESPONSE FORMAT:
-- If the question relates to accessible LMS content: Answer helpfully with relevant course/resource references
-- If the question is about content outside user's level: Politely mention they need to progress to unlock it
-- If the question is NOT about LMS content at all: Politely decline and redirect to LMS topics
-- Use emojis sparingly (🧇, ✅, 📚, 🔒)
-- Format with *bold* for key terms
-- Be concise and helpful"""
-
+        if resource_summaries:
+            context_section += f"\n\nAVAILABLE RESOURCES:\n" + "\n".join(resource_summaries[:10])
+        
         # Build conversation messages
-        messages = [{"role": "system", "content": system_prompt}]
+        messages = [{"role": "system", "content": system_prompt + context_section}]
         
-        # Add chat history (last 6 messages to save tokens)
-        for msg in chat_history[-6:]:
+        # Add chat history (last 10 messages)
+        for msg in chat_history[-10:]:
             role = "user" if msg.get("sender") == "user" else "assistant"
             messages.append({"role": role, "content": msg.get("text", "")})
         
@@ -11985,25 +9774,23 @@ RESPONSE FORMAT:
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=messages,
-            temperature=0.3,
-            max_tokens=800
+            temperature=0.7,
+            max_tokens=1000
         )
         
         ai_response = response.choices[0].message.content.strip()
         
+        # Determine if answer is from internal sources
+        internal_keywords = ["sop", "recipe", "batter", "waffle", "temperature", "iron", 
+                           "cleaning", "opening", "closing", "uniform", "training", "course"]
+        message_lower = message.lower()
+        is_internal_question = any(kw in message_lower for kw in internal_keywords)
+        
         return {
             "status": "success",
             "response": ai_response,
-            "is_internal": len(relevant_context) > 0,
-            "sources_found": len(relevant_context),
-            "user_role": user_role,
-            "user_category": user_category,
-            "user_level_index": user_level_index,
-            "accessible_levels": accessible_levels,
-            "user_privileges": user_privileges if is_admin else [],
-            "content_available": has_relevant_content,
-            "is_superadmin": is_superadmin,
-            "courses_available": len(course_summaries)
+            "is_internal": is_internal_answer or is_internal_question,
+            "sources_found": len(relevant_context)
         }
         
     except Exception as e:
@@ -12015,160 +9802,50 @@ RESPONSE FORMAT:
         }
 
 @app.post("/ai/voice_query")
-async def ai_voice_query(
-    file: UploadFile = File(...),
-    authorization: Optional[str] = Header(None)
-):
-    """Handle voice queries - transcribe and respond (LMS content only, privilege-filtered)"""
+async def ai_voice_query(file: UploadFile = File(...)):
+    """Handle voice queries - transcribe and respond"""
     try:
-        # --- AUTHENTICATION & ROLE/PRIVILEGE DETECTION ---
-        user_role = "employee"
-        user_privileges = []
-        is_superadmin = False
-        user_name = "User"
-        
-        if authorization and authorization.startswith("Bearer "):
-            token = authorization.replace("Bearer ", "")
-            try:
-                payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-                user_role = payload.get("role", "employee").lower()
-                user_privileges = payload.get("privileges", [])
-                is_superadmin = payload.get("is_superadmin", False)
-                user_name = payload.get("name", "User")
-            except:
-                pass
-        
-        is_admin = user_role in ["admin", "manager", "superadmin"] or is_superadmin
-        
-        # --- PRIVILEGE TO CONTENT CATEGORY MAPPING ---
-        PRIVILEGE_CONTENT_MAP = {
-            "upload_training": ["training", "course", "video", "sop"],
-            "manage_learning_path": ["learning path", "course", "training"],
-            "post_quiz": ["quiz", "assessment", "question"],
-            "assign_quiz": ["quiz", "assessment", "test"],
-            "proctored_assessment": ["exam", "proctored", "assessment"],
-            "reports": ["report", "analytics", "score"],
-            "view_analytics": ["analytics", "report", "dashboard"],
-            "team_list": ["team", "employee", "user"],
-            "audits": ["audit", "compliance", "checklist"],
-            "manage_simulations": ["simulation", "interactive", "roleplay"],
-        }
-        
-        # Get accessible categories
-        accessible_categories = set()
-        if is_superadmin:
-            for categories in PRIVILEGE_CONTENT_MAP.values():
-                accessible_categories.update(categories)
-            accessible_categories.add("all")
-        elif is_admin and user_privileges:
-            for priv in user_privileges:
-                if priv in PRIVILEGE_CONTENT_MAP:
-                    accessible_categories.update(PRIVILEGE_CONTENT_MAP[priv])
-            accessible_categories.update(["training", "course", "sop", "recipe"])
-        else:
-            accessible_categories.update(["training", "course", "sop", "recipe", "safety"])
-        
         # Save temp file
         temp_path = f"temp_voice_{uuid.uuid4()}.m4a"
         with open(temp_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
         
-        # Transcribe with Groq Whisper API
-        try:
-            result = ai_services.transcribe_audio(temp_path)
-            user_text = result.get("text", "").strip() if result else ""
+        # Transcribe with Whisper
+        if whisper_model is None:
             os.remove(temp_path)
-        except Exception as transcribe_err:
-            os.remove(temp_path)
-            logger.error(f"Transcription error: {transcribe_err}")
-            return {"status": "error", "error": "Voice transcription failed"}
+            return {"status": "error", "error": "Voice transcription unavailable"}
+        
+        result = whisper_model.transcribe(temp_path, fp16=False)
+        user_text = result["text"].strip()
+        os.remove(temp_path)
         
         if not user_text:
             return {"status": "error", "error": "Could not understand audio"}
         
-        # Get privilege-filtered context from RAG
-        context_text = ""
-        try:
-            results = rag_service.search_rag(user_text, top_k=3)
-            for r in results:
-                content_type = r.get("type", "training").lower()
-                content_category = r.get("category", "").lower()
-                
-                has_access = False
-                if is_superadmin or "all" in accessible_categories:
-                    has_access = True
-                else:
-                    for cat in accessible_categories:
-                        if cat in content_type or cat in content_category:
-                            has_access = True
-                            break
-                
-                if has_access:
-                    context_text += r.get("text", "") + "\n"
-        except Exception as e:
-            logger.warning(f"RAG search failed in voice query: {e}")
+        # Get AI response using chatbot endpoint logic
+        # Search RAG
+        relevant_context = []
+        if rag_index.ntotal > 0:
+            query_embedding = rag_model.encode(user_text)
+            distances, indices = rag_index.search(
+                np.array([query_embedding]).astype("float32"), 
+                k=min(3, rag_index.ntotal)
+            )
+            for idx in indices[0]:
+                if idx < len(rag_metadata):
+                    relevant_context.append(rag_metadata[idx]["text"])
         
-        # Build privilege-filtered course context
-        course_info = []
-        for course in content_store[:15]:
-            if course.get("isPathNode"):
-                content_type = course.get("type", "training").lower()
-                content_category = course.get("category", "").lower()
-                title = course.get('title', '').lower()
-                
-                has_access = False
-                if is_superadmin or "all" in accessible_categories or not is_admin:
-                    has_access = True
-                else:
-                    for cat in accessible_categories:
-                        if cat in content_type or cat in content_category or cat in title:
-                            has_access = True
-                            break
-                    if not has_access and any(cat in ["training", "course", "sop"] for cat in accessible_categories):
-                        has_access = True
-                
-                if has_access:
-                    course_info.append(f"- {course.get('title', 'Untitled')}: {course.get('description', '')[:100]}")
+        context_text = "\n".join(relevant_context) if relevant_context else ""
         
-        # Build role context
-        if is_superadmin:
-            role_context = "a Superadmin with full access"
-        elif is_admin and user_privileges:
-            role_context = f"an Admin with privileges: {', '.join(user_privileges[:3])}"
-        elif is_admin:
-            role_context = "an Admin with basic access"
-        else:
-            role_context = "an Employee"
-        
-        system_prompt = f"""You are BWC AI Assistant for Belgian Waffle Co.'s LMS.
-
-👤 User: {user_name} ({role_context})
-
-🚨 CRITICAL RULES:
-1. ONLY answer questions based on the training content provided below
-2. If the question is NOT about LMS training content, respond with:
-   "I can only answer questions about your BW training materials. Please ask about courses, SOPs, or procedures."
-3. If content is outside user's access, respond with:
-   "You don't have access to that information."
-4. NEVER answer general knowledge questions
-
-AVAILABLE TRAINING CONTENT:
-{chr(10).join(course_info[:8]) if course_info else "No courses available."}
-
-CONTEXT FROM TRAINING MATERIALS:
-{context_text if context_text else "No specific context found."}
-
-Be concise and helpful. Reference specific courses when relevant."""
-
         client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": f"You are BWC AI Assistant for Belgian Waffle Co. Be concise and helpful. Context: {context_text}"},
                 {"role": "user", "content": user_text}
             ],
-            temperature=0.3,
-            max_tokens=400
+            temperature=0.7,
+            max_tokens=500
         )
         
         ai_response = response.choices[0].message.content.strip()
@@ -12202,20 +9879,6 @@ async def get_suggested_questions():
     
 if __name__ == "__main__":
     import uvicorn
-    from database import Base, engine
-    
-    # Create new tables if they don't exist (for ProgressionLevel, AccessRule)
-    logger.info("Creating/verifying database tables...")
-    try:
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables created/verified successfully")
-    except Exception as e:
-        logger.error(f"Failed to create database tables: {e}")
-    
-    # Load progression levels from database (or init defaults)
-    logger.info("Loading progression levels from database...")
-    load_levels_from_db()
-    
     logger.info(f"Starting BW LMS Backend on {HOST}:{PORT}")
     uvicorn.run(app, host=HOST, port=PORT)
 

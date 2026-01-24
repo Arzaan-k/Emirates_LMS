@@ -57,6 +57,12 @@ const CreateUser = ({
     const [bulkUploading, setBulkUploading] = useState(false);
     const [bulkResult, setBulkResult] = useState(null);
 
+    // Dynamic display roles (fetched from backend - progression levels)
+    const [displayRoles, setDisplayRoles] = useState(['Waffler', 'Silver Waffler', 'Gold Waffler', 'Shift Manager', 'Store Manager']);
+    const [showNewRole, setShowNewRole] = useState(false);
+    const [newRoleName, setNewRoleName] = useState('');
+    const [creatingRole, setCreatingRole] = useState(false);
+
     const isSuperAdmin = userProfile?.is_superadmin || userProfile?.role === 'Super Admin';
 
     // Filter stores based on search
@@ -74,6 +80,7 @@ const CreateUser = ({
             fetchCategories();
             fetchPrivileges();
             fetchStores();
+            fetchDisplayRoles(); // Fetch dynamic progression levels
             setBulkResult(null);
             setStoreSearch('');
 
@@ -112,6 +119,63 @@ const CreateUser = ({
                 { id: '3', name: 'Supervisor', description: 'Limited admin', color: '#F59E0B' },
                 { id: '4', name: 'Employee', description: 'Regular access', color: '#FCD34D' },
             ]);
+        }
+    };
+
+    // Fetch dynamic progression levels for Display Role
+    const fetchDisplayRoles = async () => {
+        try {
+            const response = await fetch(`${API_URL}/admin/levels`);
+            const data = await response.json();
+            if (data.levels && Array.isArray(data.levels)) {
+                // Sort by order and extract names
+                const sortedLevels = data.levels.sort((a, b) => a.order - b.order);
+                const levelNames = sortedLevels.map(l => l.name);
+                setDisplayRoles(levelNames);
+            }
+        } catch (error) {
+            console.error('Error fetching display roles:', error);
+            // Keep default displayRoles on error
+        }
+    };
+
+    // Create a new progression level (role)
+    const handleCreateRole = async () => {
+        if (!newRoleName.trim()) return;
+
+        setCreatingRole(true);
+        try {
+            // Get current max order
+            const maxOrder = displayRoles.length;
+
+            const response = await fetch(`${API_URL}/admin/levels`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: newRoleName.trim(),
+                    order: maxOrder,
+                    icon: 'medal-outline',
+                    color: '#F59E0B',
+                    description: `${newRoleName.trim()} progression level`
+                })
+            });
+
+            const result = await response.json();
+            if (result.status === 'success' || result.level) {
+                // Refresh display roles
+                await fetchDisplayRoles();
+                setRole(newRoleName.trim());
+                setNewRoleName('');
+                setShowNewRole(false);
+                Alert.alert('Success', `"${newRoleName.trim()}" progression level created!`);
+            } else {
+                Alert.alert('Error', result.detail || 'Failed to create role');
+            }
+        } catch (error) {
+            console.error('Error creating role:', error);
+            Alert.alert('Error', 'Failed to create progression level');
+        } finally {
+            setCreatingRole(false);
         }
     };
 
@@ -168,11 +232,11 @@ const CreateUser = ({
             setRole('Super Admin');
             selectAllPrivileges();
         } else if (newCategory === 'Manager') {
-            setRole('Manager');
+            setRole(displayRoles[displayRoles.length - 1] || 'Store Manager'); // Highest progression level
         } else if (newCategory === 'Supervisor') {
-            setRole('Supervisor');
+            setRole(displayRoles[Math.floor(displayRoles.length / 2)] || 'Gold Waffler'); // Middle level
         } else {
-            setRole('Employee');
+            setRole(displayRoles[0] || 'Waffler'); // Entry level (first progression role)
             clearAllPrivileges();
         }
     };
@@ -619,24 +683,66 @@ const CreateUser = ({
                                     </View>
                                 )}
 
-                                {/* Role Selection */}
+                                {/* Role Selection - Uses dynamic progression levels */}
                                 <View style={styles.section}>
                                     <Text style={styles.sectionTitle}>
-                                        <Feather name="briefcase" size={16} color={THEME.primaryDark} /> Display Role
+                                        <Feather name="briefcase" size={16} color={THEME.primaryDark} /> Display Role (Progression Level)
                                     </Text>
-                                    <View style={styles.roleRow}>
-                                        {['Admin', 'Manager', 'Supervisor', 'Employee'].map(r => (
+                                    <Text style={styles.sectionDesc}>Select the employee's progression level</Text>
+
+                                    {!showNewRole ? (
+                                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.roleScroll}>
+                                            {displayRoles.map(r => (
+                                                <TouchableOpacity
+                                                    key={r}
+                                                    style={[styles.roleBtn, role === r && styles.roleActive]}
+                                                    onPress={() => setRole(r)}
+                                                >
+                                                    <Text style={[styles.roleText, role === r && styles.roleTextActive]}>
+                                                        {r}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            ))}
+                                            {/* Add New Role Button */}
+                                            {isSuperAdmin && (
+                                                <TouchableOpacity
+                                                    style={styles.addRoleBtn}
+                                                    onPress={() => setShowNewRole(true)}
+                                                >
+                                                    <Feather name="plus" size={16} color={THEME.primaryDark} />
+                                                    <Text style={styles.addRoleText}>New</Text>
+                                                </TouchableOpacity>
+                                            )}
+                                        </ScrollView>
+                                    ) : (
+                                        <View style={styles.newRoleRow}>
+                                            <TextInput
+                                                style={styles.newRoleInput}
+                                                placeholder="New Role Name (e.g., Team Lead)"
+                                                placeholderTextColor="#92400E"
+                                                value={newRoleName}
+                                                onChangeText={setNewRoleName}
+                                                autoFocus
+                                            />
                                             <TouchableOpacity
-                                                key={r}
-                                                style={[styles.roleBtn, role === r && styles.roleActive]}
-                                                onPress={() => setRole(r)}
+                                                style={[styles.newRoleBtnSave, creatingRole && { opacity: 0.6 }]}
+                                                onPress={handleCreateRole}
+                                                disabled={creatingRole}
                                             >
-                                                <Text style={[styles.roleText, role === r && styles.roleTextActive]}>
-                                                    {r}
-                                                </Text>
+                                                {creatingRole ? (
+                                                    <ActivityIndicator size="small" color="#FFF" />
+                                                ) : (
+                                                    <Feather name="check" size={18} color="#FFF" />
+                                                )}
                                             </TouchableOpacity>
-                                        ))}
-                                    </View>
+                                            <TouchableOpacity style={styles.newRoleBtnCancel} onPress={() => {
+                                                setShowNewRole(false);
+                                                setNewRoleName('');
+                                            }}>
+                                                <Feather name="x" size={18} color="#FFF" />
+                                            </TouchableOpacity>
+                                        </View>
+                                    )}
                                 </View>
 
                                 {/* Privileges Section */}
@@ -987,6 +1093,9 @@ const styles = StyleSheet.create({
         gap: 8,
         marginTop: 8,
     },
+    roleScroll: {
+        marginTop: 8,
+    },
     roleBtn: {
         paddingHorizontal: 16,
         paddingVertical: 10,
@@ -994,6 +1103,7 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: '#FDE68A',
         backgroundColor: '#FFFFFF',
+        marginRight: 10,
     },
     roleActive: {
         backgroundColor: '#F59E0B',
@@ -1006,6 +1116,51 @@ const styles = StyleSheet.create({
     },
     roleTextActive: {
         color: '#FFF',
+    },
+    // Add New Role styles
+    addRoleBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: '#D97706',
+        borderStyle: 'dashed',
+        backgroundColor: '#FFFBEB',
+        gap: 4,
+    },
+    addRoleText: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#D97706',
+    },
+    newRoleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginTop: 8,
+    },
+    newRoleInput: {
+        flex: 1,
+        borderWidth: 1,
+        borderColor: '#FDE68A',
+        borderRadius: 12,
+        paddingHorizontal: 14,
+        height: 44,
+        fontSize: 14,
+        backgroundColor: '#FFFFFF',
+        color: '#451A03',
+    },
+    newRoleBtnSave: {
+        backgroundColor: '#10B981',
+        padding: 12,
+        borderRadius: 12,
+    },
+    newRoleBtnCancel: {
+        backgroundColor: '#9CA3AF',
+        padding: 12,
+        borderRadius: 12,
     },
     privilegeHeader: {
         flexDirection: 'row',

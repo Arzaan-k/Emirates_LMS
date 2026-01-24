@@ -59,11 +59,13 @@ const TeamListScreen = ({ navigation, route }) => {
     const [editModalVisible, setEditModalVisible] = useState(false);
     const [editingUser, setEditingUser] = useState(null);
 
-    // Role options for filtering
-    const roleFilters = ['All', 'Waffler', 'Silver Waffler', 'Gold Waffler', 'Shift Manager', 'Store Manager', 'Super Admin'];
+    // Dynamic role filters (fetched from backend)
+    const [roleFilters, setRoleFilters] = useState(['All', 'Waffler', 'Silver Waffler', 'Gold Waffler', 'Shift Manager', 'Store Manager', 'Super Admin']);
+    const [levelColorMap, setLevelColorMap] = useState({});  // Maps level name to color
 
     useEffect(() => {
         fetchStores();
+        fetchLevels(); // Fetch dynamic levels for role filters
         fetchUsers(1, true);
     }, []);
 
@@ -73,6 +75,31 @@ const TeamListScreen = ({ navigation, route }) => {
         }, 300);
         return () => clearTimeout(timer);
     }, [searchQuery, selectedFilter, selectedStore]);
+
+    // Fetch dynamic levels from backend
+    const fetchLevels = async () => {
+        try {
+            const response = await fetch(`${API_URL}/admin/levels`);
+            const data = await response.json();
+            if (data.levels && Array.isArray(data.levels)) {
+                // Sort by order and extract names
+                const sortedLevels = data.levels.sort((a, b) => a.order - b.order);
+                const levelNames = sortedLevels.map(l => l.name);
+                // Add 'All' at start and 'Super Admin' at end (not a progression level)
+                setRoleFilters(['All', ...levelNames, 'Super Admin']);
+
+                // Build color map
+                const colorMap = {};
+                sortedLevels.forEach(l => {
+                    colorMap[l.name] = l.color || '#6B7280';
+                });
+                setLevelColorMap(colorMap);
+            }
+        } catch (error) {
+            console.error('Failed to fetch levels:', error);
+            // Keep default roleFilters on error
+        }
+    };
 
     const fetchStores = async () => {
         try {
@@ -166,6 +193,11 @@ const TeamListScreen = ({ navigation, route }) => {
     };
 
     const getRoleColor = (role) => {
+        // First check dynamic colors from API
+        if (levelColorMap[role]) {
+            return levelColorMap[role];
+        }
+        // Fallback defaults
         const colors = {
             'Super Admin': '#7C2D12', // Strong Brown
             'Store Manager': '#B45309', // Deep Amber

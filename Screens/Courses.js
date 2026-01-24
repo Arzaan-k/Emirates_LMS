@@ -15,6 +15,7 @@ import { MaterialCommunityIcons, Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import CoursePath from "../Components/CoursePath";
 import QuizSection from "../Components/QuizSection";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { Video, ResizeMode } from 'expo-av';
 import { Modal } from 'react-native';
@@ -351,7 +352,15 @@ const AllCourses = () => {
 
     const fetchCourses = async () => {
         try {
-            const response = await fetch(`${API_URL}/content`);
+            // Get auth token for level-based filtering
+            const token = await AsyncStorage.getItem('userToken');
+
+            const headers = {};
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+
+            const response = await fetch(`${API_URL}/content`, { headers });
             const data = await response.json();
             // Map backend data to UI model
             const mappedCourses = data.map(item => {

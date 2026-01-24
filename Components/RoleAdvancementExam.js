@@ -597,8 +597,8 @@ export default function RoleAdvancementExam({ userEmail, onComplete, visible, on
                                     result?.integrity_status === 'flagged' && { color: '#EF4444' }
                                 ]}>
                                     {result?.integrity_status === 'clean' ? 'Clean ✓' :
-                                     result?.integrity_status === 'flagged' ? 'Flagged ⚠️' :
-                                     result?.integrity_status === 'suspicious' ? 'Suspicious' : 'Minor Issues'}
+                                        result?.integrity_status === 'flagged' ? 'Flagged ⚠️' :
+                                            result?.integrity_status === 'suspicious' ? 'Suspicious' : 'Minor Issues'}
                                 </Text>
                             </View>
                         </View>

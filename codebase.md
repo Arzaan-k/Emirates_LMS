@@ -1199,7 +1199,7 @@ def add_course_to_rag(course_id, transcript):
 # --- CONFIGURATION ---
 PORT = 8000
 HOST = "0.0.0.0"
-BASE_URL = "http://192.168.29.119:8000"  # Local network IP for physical device
+BASE_URL = "http://10.29.147.160:8000"  # Local network IP for physical device
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
@@ -23395,7 +23395,7 @@ const styles = StyleSheet.create({
 // Change this IP to your machine's local IP address or production URL
 
 // const API_URL = "https://793f456d9585.ngrok-free.app"; // Physical Device (Local)
-const API_URL = "http://192.168.29.119:8000"; // Local Network IP
+const API_URL = "http://10.29.147.160:8000"; // Local Network IP
 
 // For production with Ngrok:
 // const API_URL = "https://your-ngrok-url.ngrok-free.app";
