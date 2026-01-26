@@ -53,7 +53,7 @@ export default function MeetingSchedulerModal({ visible, onClose, hostName, host
     const fetchUsers = async () => {
         setLoadingUsers(true);
         try {
-            const response = await fetch(`${API_URL}/users/list?limit=100`);
+            const response = await fetch(`${API_URL}/api/v1/users/list?limit=100`);
             const data = await response.json();
             setUsers(data.users || []);
         } catch (error) {
@@ -106,7 +106,7 @@ export default function MeetingSchedulerModal({ visible, onClose, hostName, host
             const invitedEmails = inviteAll ? [] : selectedUsers.map(u => u.email);
             formData.append('invited_users', JSON.stringify(invitedEmails));
 
-            const response = await fetch(`${API_URL}/meetings`, {
+            const response = await fetch(`${API_URL}/api/v1/meetings`, {
                 method: 'POST',
                 body: formData
             });

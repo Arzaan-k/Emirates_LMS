@@ -106,7 +106,7 @@ const CreateUser = ({
 
     const fetchCategories = async () => {
         try {
-            const response = await fetch(`${API_URL}/users/categories`);
+            const response = await fetch(`${API_URL}/api/v1/users/categories`);
             const data = await response.json();
             if (Array.isArray(data)) {
                 setCategories(data);
@@ -125,7 +125,7 @@ const CreateUser = ({
     // Fetch dynamic progression levels for Display Role
     const fetchDisplayRoles = async () => {
         try {
-            const response = await fetch(`${API_URL}/admin/levels`);
+            const response = await fetch(`${API_URL}/api/v1/levels`);
             const data = await response.json();
             if (data.levels && Array.isArray(data.levels)) {
                 // Sort by order and extract names
@@ -148,7 +148,7 @@ const CreateUser = ({
             // Get current max order
             const maxOrder = displayRoles.length;
 
-            const response = await fetch(`${API_URL}/admin/levels`, {
+            const response = await fetch(`${API_URL}/api/v1/levels`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -181,7 +181,7 @@ const CreateUser = ({
 
     const fetchPrivileges = async () => {
         try {
-            const response = await fetch(`${API_URL}/users/privileges`);
+            const response = await fetch(`${API_URL}/api/v1/users/privileges`);
             const data = await response.json();
             if (Array.isArray(data)) {
                 setPrivileges(data);
@@ -244,7 +244,7 @@ const CreateUser = ({
     const handleCreateCategory = async () => {
         if (!newCategoryName.trim()) return;
         try {
-            const response = await fetch(`${API_URL}/users/categories`, {
+            const response = await fetch(`${API_URL}/api/v1/users/categories`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name: newCategoryName, description: '', color: '#F59E0B' })
@@ -322,7 +322,7 @@ const CreateUser = ({
                 type: file.mimeType || 'application/octet-stream'
             });
 
-            const response = await fetch(`${API_URL}/users/bulk-upload`, {
+            const response = await fetch(`${API_URL}/api/v1/users/bulk-upload`, {
                 method: 'POST',
                 body: formData,
                 headers: {

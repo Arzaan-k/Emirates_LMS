@@ -390,7 +390,7 @@ export default function Profile({ navigation, route }) {
                     const timestamp = new Date().toISOString();
 
                     // Send to backend
-                    await fetch(`${API_URL}/location/update`, {
+                    await fetch(`${API_URL}/api/v1/tracking/location/update`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -425,7 +425,7 @@ export default function Profile({ navigation, route }) {
 
         // Notify backend
         try {
-            await fetch(`${API_URL}/location/stop`, {
+            await fetch(`${API_URL}/api/v1/tracking/location/stop`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ user_id: userProfile.email })
@@ -452,7 +452,7 @@ export default function Profile({ navigation, route }) {
         setIsPunchedIn(true);
 
         try {
-            await fetch(`${API_URL}/attendance/punch-in`, {
+            await fetch(`${API_URL}/api/v1/tracking/attendance/punch-in`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -480,7 +480,7 @@ export default function Profile({ navigation, route }) {
         }
 
         try {
-            await fetch(`${API_URL}/attendance/punch-out`, {
+            await fetch(`${API_URL}/api/v1/tracking/attendance/punch-out`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

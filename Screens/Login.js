@@ -139,7 +139,7 @@ export default function Login({ navigation }) {
 
         setLoading(true);
         try {
-            const response = await fetch(`${API_URL}/users/login`, {
+            const response = await fetch(`${API_URL}/api/v1/auth/login-json`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email: username, password: password })

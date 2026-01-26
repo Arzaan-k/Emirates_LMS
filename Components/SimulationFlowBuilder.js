@@ -636,7 +636,7 @@ export default function SimulationFlowBuilder({ existingSimulation, onSave, onCl
         };
 
         try {
-            const response = await fetch(`${API_URL}/simulation/save`, {
+            const response = await fetch(`${API_URL}/api/v1/simulations/save`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(simulationData),

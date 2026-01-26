@@ -271,7 +271,7 @@ export default function ManagerDashboard({ route, navigation }) {
         setIsChatLoading(true);
 
         try {
-            const res = await fetch(`${API_URL}/admin/ask-ai`, {
+            const res = await fetch(`${API_URL}/api/v1/ai/ask`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ query })
@@ -299,7 +299,7 @@ export default function ManagerDashboard({ route, navigation }) {
     const fetchBuckets = async () => {
         setLoadingBuckets(true);
         try {
-            const res = await fetch(`${API_URL}/course-buckets`);
+            const res = await fetch(`${API_URL}/api/v1/content/buckets/all`);
             const data = await res.json();
             setCourseBuckets(data);
         } catch (e) { console.error('Error fetching buckets:', e); }
@@ -309,7 +309,7 @@ export default function ManagerDashboard({ route, navigation }) {
     const fetchCategories = async () => {
         setLoadingCats(true);
         try {
-            const res = await fetch(`${API_URL}/resources/categories`);
+            const res = await fetch(`${API_URL}/api/v1/content/resources/categories`);
             const data = await res.json();
             setCategories(data);
             // Default to first if available
@@ -327,7 +327,7 @@ export default function ManagerDashboard({ route, navigation }) {
             formData.append('color1', '#6366F1'); // Default Indigo
             formData.append('color2', '#4338CA');
 
-            const res = await fetch(`${API_URL}/resources/category`, {
+            const res = await fetch(`${API_URL}/api/v1/content/resources/all/category`, {
                 method: 'POST',
                 body: formData
             });
@@ -445,7 +445,7 @@ export default function ManagerDashboard({ route, navigation }) {
                 });
             }
 
-            const response = await fetch(`${API_URL}/news`, {
+            const response = await fetch(`${API_URL}/api/v1/notifications/news`, {
                 method: 'POST',
                 body: formData
             });
@@ -502,7 +502,7 @@ export default function ManagerDashboard({ route, navigation }) {
                 });
             }
 
-            const response = await fetch(`${API_URL}/live-quizzes`, {
+            const response = await fetch(`${API_URL}/api/v1/quizzes/live`, {
                 method: 'POST',
                 body: formData
             });
@@ -608,9 +608,9 @@ export default function ManagerDashboard({ route, navigation }) {
     useEffect(() => {
         const fetchPath = async () => {
             try {
-                const res = await fetch(`${API_URL}/path/nodes`);
+                const res = await fetch(`${API_URL}/api/v1/content/path-nodes`);
                 const data = await res.json();
-                setPathNodes(data);
+                setPathNodes(data.courses || (Array.isArray(data) ? data : []));
             } catch (e) { console.error(e); }
         };
         fetchPath();
@@ -661,7 +661,7 @@ export default function ManagerDashboard({ route, navigation }) {
         }
 
         try {
-            const response = await fetch(`${API_URL}/quiz/create`, {
+            const response = await fetch(`${API_URL}/api/v1/quizzes/create`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -690,7 +690,7 @@ export default function ManagerDashboard({ route, navigation }) {
 
     const fetchQuizzes = async () => {
         try {
-            const response = await fetch(`${API_URL}/quiz/list`);
+            const response = await fetch(`${API_URL}/api/v1/quizzes/list`);
             const quizzes = await response.json();
             setCreatedQuizzes(quizzes);
         } catch (error) {
@@ -700,7 +700,7 @@ export default function ManagerDashboard({ route, navigation }) {
 
     const viewResults = async (quizId) => {
         try {
-            const response = await fetch(`${API_URL}/quiz/${quizId}/results`);
+            const response = await fetch(`${API_URL}/api/v1/quizzes/${quizId}/results`);
             const results = await response.json();
             setSelectedQuizResults(results);
             setResultsModalVisible(true);
@@ -735,7 +735,7 @@ export default function ManagerDashboard({ route, navigation }) {
     // --- CREATE USER HANDLER ---
     const handleCreateUser = async (userData) => {
         try {
-            const response = await fetch(`${API_URL}/users/create`, {
+            const response = await fetch(`${API_URL}/api/v1/users/create`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(userData)
@@ -762,7 +762,7 @@ export default function ManagerDashboard({ route, navigation }) {
 
     const handleUpdateNode = async (id, updatedData) => {
         try {
-            const response = await fetch(`${API_URL}/content/${id}`, {
+            const response = await fetch(`${API_URL}/api/v1/content/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(updatedData)
@@ -782,7 +782,7 @@ export default function ManagerDashboard({ route, navigation }) {
 
     const handleDeleteNode = async (id) => {
         try {
-            const response = await fetch(`${API_URL}/content/${id}`, {
+            const response = await fetch(`${API_URL}/api/v1/content/${id}`, {
                 method: 'DELETE'
             });
             if (response.ok) {
@@ -853,7 +853,7 @@ export default function ManagerDashboard({ route, navigation }) {
             }
 
             // Corrected Endpoint
-            const response = await fetch(`${API_URL}/notifications/send`, {
+            const response = await fetch(`${API_URL}/api/v1/notifications/send`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'multipart/form-data' },
                 body: formData

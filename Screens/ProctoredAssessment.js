@@ -150,7 +150,7 @@ export default function ProctoredAssessment({ route, navigation }) {
     const fetchAssessments = async () => {
         setLoadingAssessments(true);
         try {
-            const url = isAdmin ? `${API_URL}/proctored-assessments/all` : `${API_URL}/proctored-assessments`;
+            const url = isAdmin ? `${API_URL}/api/v1/assessments/proctored/all` : `${API_URL}/api/v1/assessments/proctored`;
             const response = await fetch(url);
             const data = await response.json();
             setAssessments(data);
@@ -360,14 +360,14 @@ export default function ProctoredAssessment({ route, navigation }) {
             let response;
             if (editingId) {
                 // UPDATE EXISTING
-                response = await fetch(`${API_URL}/proctored-assessments/${editingId}`, {
+                response = await fetch(`${API_URL}/api/v1/assessments/proctored/${editingId}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
             } else {
                 // CREATE NEW
-                response = await fetch(`${API_URL}/proctored-assessments`, {
+                response = await fetch(`${API_URL}/api/v1/assessments/proctored`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
@@ -433,7 +433,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                 type: bulkFile.mimeType || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             });
 
-            const response = await fetch(`${API_URL}/proctored-assessments/bulk-upload`, {
+            const response = await fetch(`${API_URL}/api/v1/assessments/proctored/bulk-upload`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'multipart/form-data' },
                 body: formData
@@ -538,7 +538,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                         ai_generated: true
                     };
 
-                    const createResponse = await fetch(`${API_URL}/proctored-assessments`, {
+                    const createResponse = await fetch(`${API_URL}/api/v1/assessments/proctored`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(assessmentPayload)
@@ -568,7 +568,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                 formData.append('content', aiContent);
                 formData.append('created_by', userProfile?.name || 'Admin');
 
-                response = await fetch(`${API_URL}/proctored-assessments/ai-generate`, {
+                response = await fetch(`${API_URL}/api/v1/assessments/proctored/ai-generate`, {
                     method: 'POST',
                     body: formData
                 });
@@ -680,10 +680,10 @@ export default function ProctoredAssessment({ route, navigation }) {
             formData.append('critical_breaches', criticalBreaches.toString());
             formData.append('warning_breaches', warningBreaches.toString());
 
-            // [FIX] Use correct endpoint for scheduled exams
+            // Use correct /api/v1/ endpoints for both scheduled and proctored exams
             const submitUrl = isScheduledExam
-                ? `${API_URL}/scheduled-exams/${selectedAssessment.id}/submit`
-                : `${API_URL}/proctored-assessments/${selectedAssessment.id}/submit`;
+                ? `${API_URL}/api/v1/assessments/scheduled/${selectedAssessment.id}/submit`
+                : `${API_URL}/api/v1/assessments/proctored/${selectedAssessment.id}/submit`;
 
             const response = await fetch(submitUrl, {
                 method: 'POST',
@@ -771,7 +771,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                 {
                     text: "Delete", style: "destructive", onPress: async () => {
                         try {
-                            const res = await fetch(`${API_URL}/proctored-assessments/${id}`, { method: 'DELETE' });
+                            const res = await fetch(`${API_URL}/api/v1/assessments/proctored/${id}`, { method: 'DELETE' });
                             const data = await res.json();
                             if (data.status === 'success') {
                                 Alert.alert("Deleted", "Assessment removed.");
@@ -815,7 +815,7 @@ export default function ProctoredAssessment({ route, navigation }) {
         setViewMode('results');
         setLoadingSubmissions(true);
         try {
-            const res = await fetch(`${API_URL}/proctored-assessments/${assessment.id}/submissions`);
+            const res = await fetch(`${API_URL}/api/v1/assessments/proctored/${assessment.id}/submissions`);
             const data = await res.json();
             setViewSubmissions(data);
         } catch (e) {

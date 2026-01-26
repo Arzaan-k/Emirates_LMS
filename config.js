@@ -6,7 +6,7 @@
 // ============================================
 
 // OPTION 1: Local Development (Physical Device on same network)
-const API_URL = "http://10.233.54.1:8000";
+const API_URL = "http://192.168.29.119:8000";
 
 // OPTION 2: Render.com Production (ACTIVE FOR APK BUILD)
 // const API_URL = "https://bwc-lms.onrender.com";

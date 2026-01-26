@@ -50,7 +50,7 @@ export default function SimulationAdminManager({ onClose }) {
                 Promise.all(
                     simList.map(async (sim) => {
                         try {
-                            const analyticsRes = await fetch(`${API_URL}/simulation/analytics/${sim.id}`);
+                            const analyticsRes = await fetch(`${API_URL}/api/v1/simulations/analytics/${sim.id}`);
                             const analyticsData = await analyticsRes.json();
                             setAnalytics(prev => ({ ...prev, [sim.id]: analyticsData }));
                         } catch (e) {
@@ -83,7 +83,7 @@ export default function SimulationAdminManager({ onClose }) {
                     style: 'destructive',
                     onPress: async () => {
                         try {
-                            await fetch(`${API_URL}/simulation/${simulationId}`, {
+                            await fetch(`${API_URL}/api/v1/simulations/${simulationId}`, {
                                 method: 'DELETE',
                             });
                             fetchSimulations();

@@ -277,7 +277,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
 
         setIsTranslating(true);
         try {
-            const response = await fetch(`${API_URL}/ai/translate`, {
+            const response = await fetch(`${API_URL}/api/v1/ai/translate`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -645,7 +645,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
             formData.append("user_name", "User");
             formData.append("category_id", categoryId || lesson.bucket || "1");
 
-            const response = await fetch(`${API_URL}/crm/assign-task`, {
+            const response = await fetch(`${API_URL}/api/v1/crm/assign-task`, {
                 method: "POST",
                 body: formData,
             });

@@ -56,7 +56,7 @@ export default function CRMTicketModal({ visible, onClose, onTicketCreated }) {
     const fetchTickets = async () => {
         setLoading(true);
         try {
-            const response = await fetch(`${API_URL}/crm/tickets`);
+            const response = await fetch(`${API_URL}/api/v1/crm/tickets`);
             const data = await response.json();
             if (Array.isArray(data)) {
                 setTickets(data);
@@ -96,7 +96,7 @@ export default function CRMTicketModal({ visible, onClose, onTicketCreated }) {
             formData.append('description', description.trim());
             formData.append('priority', priority);
 
-            const response = await fetch(`${API_URL}/crm/tickets`, {
+            const response = await fetch(`${API_URL}/api/v1/crm/tickets`, {
                 method: 'POST',
                 body: formData
             });
@@ -131,7 +131,7 @@ export default function CRMTicketModal({ visible, onClose, onTicketCreated }) {
                     style: 'destructive',
                     onPress: async () => {
                         try {
-                            await fetch(`${API_URL}/crm/tickets/${ticketId}`, { method: 'DELETE' });
+                            await fetch(`${API_URL}/api/v1/crm/tickets/${ticketId}`, { method: 'DELETE' });
                             fetchTickets();
                         } catch (error) {
                             console.error('Delete error:', error);

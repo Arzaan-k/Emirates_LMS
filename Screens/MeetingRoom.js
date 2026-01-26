@@ -176,7 +176,7 @@ export default function MeetingRoom({ route, navigation }) {
             formData.append('user_email', userEmail || 'user@company.com');
             formData.append('user_name', userName || 'User');
 
-            const response = await fetch(`${API_URL}/meetings/${meeting.id}/join`, {
+            const response = await fetch(`${API_URL}/api/v1/meetings/${meeting.id}/join`, {
                 method: 'POST',
                 body: formData
             });
@@ -205,7 +205,7 @@ export default function MeetingRoom({ route, navigation }) {
                             const formData = new FormData();
                             formData.append('user_email', userEmail || 'user@company.com');
 
-                            await fetch(`${API_URL}/meetings/${meeting.id}/leave`, {
+                            await fetch(`${API_URL}/api/v1/meetings/${meeting.id}/leave`, {
                                 method: 'POST',
                                 body: formData
                             });

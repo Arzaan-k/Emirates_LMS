@@ -322,7 +322,7 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
             } else {
                 // Generate AI consequence
                 try {
-                    const res = await fetch(`${API_URL}/simulation/generate-consequence`, {
+                    const res = await fetch(`${API_URL}/api/v1/simulations/generate-consequence`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -432,7 +432,7 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
 
         // Save progress to backend
         try {
-            await fetch(`${API_URL}/simulation/complete`, {
+            await fetch(`${API_URL}/api/v1/simulations/complete`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

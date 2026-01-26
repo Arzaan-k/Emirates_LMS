@@ -45,7 +45,7 @@ export default function AccessControlModal({ visible, onClose }) {
         setLoading(true);
         try {
             // 1. Fetch Dynamic Levels from backend
-            const levelsRes = await fetch(`${API_URL}/admin/levels`);
+            const levelsRes = await fetch(`${API_URL}/api/v1/levels`);
             const levelsData = await levelsRes.json();
             const levels = levelsData.levels || [];
 
@@ -54,12 +54,12 @@ export default function AccessControlModal({ visible, onClose }) {
             setLevelData(sortedLevels);
 
             // 2. Fetch Buckets
-            const bucketRes = await fetch(`${API_URL}/course-buckets`);
+            const bucketRes = await fetch(`${API_URL}/api/v1/content/buckets/all`);
             const bucketData = await bucketRes.json();
             setBuckets(bucketData || []);
 
             // 3. Fetch All Courses - Career Progression courses for curriculum assignment
-            const courseRes = await fetch(`${API_URL}/content`);
+            const courseRes = await fetch(`${API_URL}/api/v1/content`);
             const courseData = await courseRes.json();
             const careerProgressionCourses = (courseData || []).filter(c => {
                 const pathType = c.learning_path_type || 'career_progression';
@@ -69,7 +69,7 @@ export default function AccessControlModal({ visible, onClose }) {
             setAllCourses(careerProgressionCourses);
 
             // 4. Fetch Access Rules
-            const rulesRes = await fetch(`${API_URL}/admin/access-rules`);
+            const rulesRes = await fetch(`${API_URL}/api/v1/users/privileges/all`);
             const rulesData = await rulesRes.json();
 
             // Initialize staged assignments from existing rules (by level name)
@@ -102,7 +102,7 @@ export default function AccessControlModal({ visible, onClose }) {
         setSaving(true);
         try {
             const levelOrder = levelData.map(l => l.id);
-            const response = await fetch(`${API_URL}/admin/levels/reorder`, {
+            const response = await fetch(`${API_URL}/api/v1/levels/reorder`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ level_order: levelOrder }),
@@ -146,7 +146,7 @@ export default function AccessControlModal({ visible, onClose }) {
             formData.append('accessible_buckets', JSON.stringify(existingRules.accessible_buckets || []));
             formData.append('max_courses_visible', String(existingRules.max_courses_visible || -1));
 
-            const res = await fetch(`${API_URL}/admin/access-rules/${level.name}`, {
+            const res = await fetch(`${API_URL}/api/v1/users/privileges/all/${level.name}`, {
                 method: 'POST',
                 body: formData
             });

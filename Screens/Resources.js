@@ -260,7 +260,7 @@ export default function Resources() {
     const fetchResources = async () => {
         try {
             setLoading(true);
-            const res = await fetch(`${API_URL}/resources`);
+            const res = await fetch(`${API_URL}/api/v1/content/resources/all`);
             const data = await res.json();
             if (Array.isArray(data) && data.length > 0) {
                 // Transform backend data to match our UI structure
@@ -278,7 +278,7 @@ export default function Resources() {
             }
 
             // Also fetch categories
-            const catRes = await fetch(`${API_URL}/resources/categories`);
+            const catRes = await fetch(`${API_URL}/api/v1/content/resources/categories`);
             const catData = await catRes.json();
             if (Array.isArray(catData) && catData.length > 0) {
                 setCategories(catData.map(cat => ({

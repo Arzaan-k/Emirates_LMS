@@ -54,7 +54,7 @@ export default function CRMTaskScreen({ route, navigation }) {
             const formData = new FormData();
             formData.append('resolution', resolution.trim());
 
-            const response = await fetch(`${API_URL}/crm/tasks/${task?.id}/complete`, {
+            const response = await fetch(`${API_URL}/api/v1/crm/tasks/${task?.id}/complete`, {
                 method: 'POST',
                 body: formData
             });

@@ -469,7 +469,7 @@ export default function CoursePath(props) {
     // Check if user is eligible for role advancement exam
     const checkAdvancementEligibility = async () => {
         try {
-            const response = await fetch(`${API_URL}/role-advancement/eligibility/${userEmail}`);
+            const response = await fetch(`${API_URL}/api/v1/levels/role-advancement/eligibility/${userEmail}`);
             const data = await response.json();
             setIsEligibleForAdvancement(data.eligible === true);
             if (data.eligible) {
@@ -500,16 +500,16 @@ export default function CoursePath(props) {
     const loadCoursePath = async () => {
         try {
             // 1. Fetch User Progress
-            const progressRes = await fetch(`${API_URL}/user/level-progress/${userEmail}`);
+            const progressRes = await fetch(`${API_URL}/api/v1/levels/user/${userEmail}/progress`);
             const progressData = await progressRes.json();
             setUserProgress(progressData);
 
             // 2. Fetch Access Rules (Curriculum)
-            const rulesRes = await fetch(`${API_URL}/admin/access-rules`);
+            const rulesRes = await fetch(`${API_URL}/api/v1/users/privileges/all`);
             const rulesData = await rulesRes.json();
 
             // 3. Fetch Courses for the specific learning path type
-            const learningPathRes = await fetch(`${API_URL}/learning-paths/content/${learningPathType}?user_email=${userEmail}`);
+            const learningPathRes = await fetch(`${API_URL}/api/v1/content/learning-paths/${learningPathType}?user_email=${userEmail}`);
             const learningPathData = await learningPathRes.json();
 
             // If the path is locked, show empty state or handle accordingly
@@ -527,9 +527,9 @@ export default function CoursePath(props) {
             );
 
             // Also fetch from general path/nodes for backward compatibility
-            const statusRes = await fetch(`${API_URL}/path/nodes?user_email=${userEmail}&t=${Date.now()}`);
+            const statusRes = await fetch(`${API_URL}/api/v1/content/path-nodes?user_email=${userEmail}&t=${Date.now()}`);
             const statusData = await statusRes.json();
-            statusData.filter(c => c.status === 'completed').forEach(c => {
+            (statusData.courses || []).filter(c => c.status === 'completed').forEach(c => {
                 completedIds.add(c.id || c.videoUrl);
             });
 
@@ -589,7 +589,7 @@ export default function CoursePath(props) {
                 if (allCompleted && onComplete) {
                     // Mark self-learning as complete on the backend
                     try {
-                        await fetch(`${API_URL}/learning-paths/complete-self-learning/${userEmail}`, {
+                        await fetch(`${API_URL}/api/v1/content/learning-paths/complete-self-learning/${userEmail}`, {
                             method: 'POST'
                         });
                         onComplete(); // Refresh parent status

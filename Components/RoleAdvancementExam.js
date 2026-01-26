@@ -231,7 +231,7 @@ export default function RoleAdvancementExam({ userEmail, onComplete, visible, on
     const checkEligibility = async () => {
         setStatus('checking');
         try {
-            const response = await fetch(`${API_URL}/role-advancement/eligibility/${userEmail}`);
+            const response = await fetch(`${API_URL}/api/v1/levels/role-advancement/eligibility/${userEmail}`);
             const data = await response.json();
             setEligibility(data);
             setStatus(data.eligible ? 'eligible' : 'not_eligible');
@@ -261,7 +261,7 @@ export default function RoleAdvancementExam({ userEmail, onComplete, visible, on
             const formData = new FormData();
             formData.append("user_email", userEmail);
 
-            const response = await fetch(`${API_URL}/role-advancement/generate-exam`, {
+            const response = await fetch(`${API_URL}/api/v1/levels/role-advancement/generate-exam`, {
                 method: "POST",
                 body: formData,
             });
@@ -269,7 +269,7 @@ export default function RoleAdvancementExam({ userEmail, onComplete, visible, on
 
             if (data.status === "success" || data.status === "exists") {
                 // Fetch the exam
-                const examResponse = await fetch(`${API_URL}/role-advancement/exam/${userEmail}`);
+                const examResponse = await fetch(`${API_URL}/api/v1/levels/role-advancement/exam/${userEmail}`);
                 const examData = await examResponse.json();
 
                 if (examData.status === "success") {
@@ -352,7 +352,7 @@ export default function RoleAdvancementExam({ userEmail, onComplete, visible, on
             formData.append("critical_breaches", criticalBreaches.toString());
             formData.append("warning_breaches", warningBreaches.toString());
 
-            const response = await fetch(`${API_URL}/role-advancement/submit-exam`, {
+            const response = await fetch(`${API_URL}/api/v1/levels/role-advancement/submit-exam`, {
                 method: "POST",
                 body: formData,
             });

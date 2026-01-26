@@ -79,7 +79,7 @@ const TeamListScreen = ({ navigation, route }) => {
     // Fetch dynamic levels from backend
     const fetchLevels = async () => {
         try {
-            const response = await fetch(`${API_URL}/admin/levels`);
+            const response = await fetch(`${API_URL}/api/v1/levels`);
             const data = await response.json();
             if (data.levels && Array.isArray(data.levels)) {
                 // Sort by order and extract names
@@ -130,7 +130,7 @@ const TeamListScreen = ({ navigation, route }) => {
                 role: selectedFilter === 'All' ? '' : selectedFilter
             });
 
-            const response = await fetch(`${API_URL}/users/list?${params}`);
+            const response = await fetch(`${API_URL}/api/v1/users/list?${params}`);
             const data = await response.json();
 
             if (data.users) {
@@ -171,7 +171,7 @@ const TeamListScreen = ({ navigation, route }) => {
 
     const handleUpdateUser = async (updatedData) => {
         try {
-            const response = await fetch(`${API_URL}/users/update`, {
+            const response = await fetch(`${API_URL}/api/v1/users/update`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(updatedData)

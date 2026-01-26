@@ -193,7 +193,7 @@ export default function InteractiveSimulationHub({ onClose }) {
 
     const fetchHistory = async () => {
         try {
-            const res = await fetch(`${API_URL}/simulation/history/user`);
+            const res = await fetch(`${API_URL}/api/v1/simulations/history/user`);
             const data = await res.json();
             setHistory(data);
         } catch (e) {

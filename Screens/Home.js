@@ -232,7 +232,7 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
 
     setIsTranslating(true);
     try {
-      const response = await fetch(`${API_URL}/ai/translate`, {
+      const response = await fetch(`${API_URL}/api/v1/ai/translate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1091,7 +1091,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail }) {
       await AsyncStorage.setItem('acknowledged_notifications', JSON.stringify(Array.from(acknowledgedNotifIds.current)));
 
       setCrucialNotif(null);
-      await fetch(`${API_URL}/notifications/${id}/read`, { method: 'POST' });
+      await fetch(`${API_URL}/api/v1/notifications/${id}/read`, { method: 'POST' });
     } catch (e) {
       console.error("Ack Error", e);
       setCrucialNotif(null);
@@ -1106,9 +1106,9 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail }) {
   // FETCH PATH NODES
   const fetchPathNodes = async () => {
     try {
-      const response = await fetch(`${API_URL}/path/nodes`);
+      const response = await fetch(`${API_URL}/api/v1/content/path-nodes`);
       const data = await response.json();
-      setPathNodes(data);
+      setPathNodes(data.courses || (Array.isArray(data) ? data : []));
     } catch (error) {
       console.error("Error fetching path:", error);
     }
@@ -1117,7 +1117,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail }) {
   // FETCH NEWS FEED
   const fetchNews = async () => {
     try {
-      const response = await fetch(`${API_URL}/news`);
+      const response = await fetch(`${API_URL}/api/v1/notifications/news`);
       const data = await response.json();
       if (Array.isArray(data)) {
         setNewsData(data);
@@ -1130,7 +1130,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail }) {
   // FETCH LIVE QUIZZES
   const fetchLiveQuizzes = async () => {
     try {
-      const response = await fetch(`${API_URL}/live-quizzes`);
+      const response = await fetch(`${API_URL}/api/v1/quizzes/live`);
       const data = await response.json();
       if (Array.isArray(data)) {
         setLiveQuizzesData(data);
@@ -1143,7 +1143,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail }) {
   const startQuiz = async (quizData) => {
     if (!quizData.questions) {
       try {
-        const response = await fetch(`${API_URL}/quiz/${quizData.quiz_id || quizData.id}`);
+        const response = await fetch(`${API_URL}/api/v1/quizzes/${quizData.quiz_id || quizData.id}`);
         const fullQuiz = await response.json();
         if (fullQuiz.error) throw new Error(fullQuiz.error);
         setActiveQuiz(fullQuiz);
@@ -1163,7 +1163,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail }) {
   const fetchNotifications = async () => {
     if (!userEmail) return;
     try {
-      const res = await fetch(`${API_URL}/notifications`);
+      const res = await fetch(`${API_URL}/api/v1/notifications`);
       const data = await res.json();
       if (Array.isArray(data)) {
         // Filter notifications relevant to this user
@@ -1182,7 +1182,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail }) {
   // FETCH PROCTORED ASSESSMENTS
   const fetchProctoredAssessments = async () => {
     try {
-      const response = await fetch(`${API_URL}/proctored-assessments`);
+      const response = await fetch(`${API_URL}/api/v1/assessments/proctored`);
       const data = await response.json();
       if (Array.isArray(data)) {
         setAssignedProctoring(data);
@@ -1204,7 +1204,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail }) {
         }
       } catch (err) { console.log("Error loading acks", err); }
 
-      const res = await fetch(`${API_URL}/notifications/crucial`);
+      const res = await fetch(`${API_URL}/api/v1/notifications/crucial`);
       const data = await res.json();
 
       // DEBUG: Log the response from the API
@@ -1223,7 +1223,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail }) {
   // [NEW] FETCH MEETINGS
   const fetchMeetings = async () => {
     try {
-      const response = await fetch(`${API_URL}/meetings`);
+      const response = await fetch(`${API_URL}/api/v1/meetings`);
       const data = await response.json();
       if (Array.isArray(data)) {
         // Filter only scheduled/ongoing meetings
@@ -1239,7 +1239,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail }) {
     try {
       // Use actual user email from props
       if (!userEmail) return; // Skip if userEmail not loaded yet
-      const response = await fetch(`${API_URL}/crm/my-tasks?user_email=${encodeURIComponent(userEmail)}`);
+      const response = await fetch(`${API_URL}/api/v1/crm/my-tasks?user_email=${encodeURIComponent(userEmail)}`);
       const data = await response.json();
       if (Array.isArray(data)) {
         setCrmTasks(data);

@@ -40,7 +40,7 @@ export default function QuizTakingModal({ visible, quiz, onClose, userName = "Us
             formData.append('user_name', userName);
             formData.append('answers', JSON.stringify(answers));
 
-            const response = await fetch(`${API_URL}/quiz/submit`, {
+            const response = await fetch(`${API_URL}/api/v1/quizzes/submit`, {
                 method: 'POST',
                 body: formData
             });

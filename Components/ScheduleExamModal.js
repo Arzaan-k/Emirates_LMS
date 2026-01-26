@@ -97,7 +97,7 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
         setLoadingUsers(true);
         try {
             console.log("Fetching users for exam scheduling...");
-            const res = await fetch(`${API_URL}/users/list?limit=1000`);
+            const res = await fetch(`${API_URL}/api/v1/users/list?limit=1000`);
             const data = await res.json();
 
             if (data && data.users) {

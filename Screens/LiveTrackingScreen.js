@@ -57,7 +57,7 @@ export default function LiveTrackingScreen({ navigation }) {
 
     const fetchLocations = async () => {
         try {
-            const res = await fetch(`${API_URL}/location/all`);
+            const res = await fetch(`${API_URL}/api/v1/tracking/location/all`);
             const data = await res.json();
             setLocations(data);
 

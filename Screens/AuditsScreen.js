@@ -143,7 +143,7 @@ const AuditsScreen = ({ navigation, route }) => {
             formData.append('checklist_items', JSON.stringify(auditChecklists[selectedCategory]));
             formData.append('checked_items', JSON.stringify(checkedItems));
 
-            const response = await fetch(`${API_URL}/store-audits/submit`, {
+            const response = await fetch(`${API_URL}/api/v1/crm/audits/submit`, {
                 method: 'POST',
                 body: formData
             });
@@ -180,7 +180,7 @@ const AuditsScreen = ({ navigation, route }) => {
     // Fetch Filters for History
     const fetchFilters = async () => {
         try {
-            const response = await fetch(`${API_URL}/store-audits/filters`);
+            const response = await fetch(`${API_URL}/api/v1/crm/audits/checklists`);
             const data = await response.json();
             setFilters(data);
         } catch (error) {
@@ -192,7 +192,7 @@ const AuditsScreen = ({ navigation, route }) => {
     const fetchHistory = async () => {
         setHistoryLoading(true);
         try {
-            let url = `${API_URL}/store-audits/history?limit=100`;
+            let url = `${API_URL}/api/v1/crm/audits/submissions?limit=100`;
             if (selectedStore) url += `&store=${encodeURIComponent(selectedStore)}`;
             if (selectedEmployee) url += `&user_email=${encodeURIComponent(selectedEmployee)}`;
             if (selectedHistoryCategory) url += `&category=${encodeURIComponent(selectedHistoryCategory)}`;

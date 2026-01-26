@@ -59,7 +59,7 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
 
         setIsTranslating(true);
         try {
-            const response = await fetch(`${API_URL}/ai/translate`, {
+            const response = await fetch(`${API_URL}/api/v1/ai/translate`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -212,7 +212,7 @@ function AskAIChatModal({ visible, courseData, onClose }) {
         setLoading(true);
 
         try {
-            const response = await fetch(`${API_URL}/ask-ai`, {
+            const response = await fetch(`${API_URL}/api/v1/ai/ask`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -340,7 +340,7 @@ const AllCourses = () => {
     const fetchBuckets = async () => {
         setLoadingBuckets(true);
         try {
-            const response = await fetch(`${API_URL}/course-buckets`);
+            const response = await fetch(`${API_URL}/api/v1/content/buckets/all`);
             const data = await response.json();
             setCourseBuckets(data);
         } catch (error) {
@@ -360,7 +360,7 @@ const AllCourses = () => {
                 headers['Authorization'] = `Bearer ${token}`;
             }
 
-            const response = await fetch(`${API_URL}/content`, { headers });
+            const response = await fetch(`${API_URL}/api/v1/content`, { headers });
             const data = await response.json();
             // Map backend data to UI model
             const mappedCourses = data.map(item => {
@@ -593,7 +593,7 @@ export default function Courses({ userEmail = "user" }) {
     const fetchSelfLearningStatus = async () => {
         try {
             setLoadingStatus(true);
-            const response = await fetch(`${API_URL}/learning-paths/self-learning-status/${userEmail}`);
+            const response = await fetch(`${API_URL}/api/v1/users/${userEmail}/self-learning-status`);
             const data = await response.json();
             setSelfLearningStatus(data);
         } catch (error) {

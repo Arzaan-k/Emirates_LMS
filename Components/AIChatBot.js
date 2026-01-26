@@ -71,7 +71,7 @@ export default function AIChatBot() {
 
     const fetchSuggestedQuestions = async () => {
         try {
-            const res = await fetch(`${API_URL}/ai/suggested-questions`);
+            const res = await fetch(`${API_URL}/api/v1/ai/ask`);
             const data = await res.json();
             if (data.suggestions && data.suggestions.length > 0) {
                 setSuggestedQuestions(data.suggestions);
@@ -153,7 +153,7 @@ export default function AIChatBot() {
                 headers['Authorization'] = `Bearer ${token}`;
             }
 
-            const response = await fetch(`${API_URL}/ai/chatbot`, {
+            const response = await fetch(`${API_URL}/api/v1/ai/ask`, {
                 method: 'POST',
                 headers: headers,
                 body: formData,

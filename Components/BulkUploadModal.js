@@ -41,7 +41,7 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
     const fetchBuckets = async () => {
         setLoadingBuckets(true);
         try {
-            const res = await fetch(`${API_URL}/course-buckets`);
+            const res = await fetch(`${API_URL}/api/v1/content/buckets/all`);
             const data = await res.json();
             setCourseBuckets(data);
         } catch (e) { console.error('Error fetching buckets:', e); }
@@ -129,7 +129,7 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
 
                     console.log(`[Upload] Attempt ${attempt}/${maxRetries} for ${file.name} to bucket: ${bucketName}`);
 
-                    const response = await fetch(`${API_URL}/resources/upload`, {
+                    const response = await fetch(`${API_URL}/api/v1/content/resources/all/upload`, {
                         method: 'POST',
                         body: formData,
                         signal: controller.signal,

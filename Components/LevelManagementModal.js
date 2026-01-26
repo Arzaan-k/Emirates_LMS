@@ -84,7 +84,7 @@ export default function LevelManagementModal({ visible, onClose }) {
         setLoading(true);
         try {
             const headers = await getAuthHeaders();
-            const response = await fetch(`${API_URL}/admin/levels`, { headers });
+            const response = await fetch(`${API_URL}/api/v1/levels`, { headers });
             const data = await response.json();
             setLevels(data.levels || []);
         } catch (error) {
@@ -98,7 +98,7 @@ export default function LevelManagementModal({ visible, onClose }) {
     const fetchAllCourses = async () => {
         try {
             const headers = await getAuthHeaders();
-            const response = await fetch(`${API_URL}/content`, { headers });
+            const response = await fetch(`${API_URL}/api/v1/content`, { headers });
             const data = await response.json();
             setAllCourses(data || []);
         } catch (error) {
@@ -119,7 +119,7 @@ export default function LevelManagementModal({ visible, onClose }) {
             const headers = await getAuthHeaders();
             const levelOrder = levels.map(l => l.id);
 
-            const response = await fetch(`${API_URL}/admin/levels/reorder`, {
+            const response = await fetch(`${API_URL}/api/v1/levels/reorder`, {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({ level_order: levelOrder }),
@@ -149,7 +149,7 @@ export default function LevelManagementModal({ visible, onClose }) {
         setSaving(true);
         try {
             const headers = await getAuthHeaders();
-            const response = await fetch(`${API_URL}/admin/levels`, {
+            const response = await fetch(`${API_URL}/api/v1/levels`, {
                 method: 'POST',
                 headers,
                 body: JSON.stringify(newLevel),
@@ -185,7 +185,7 @@ export default function LevelManagementModal({ visible, onClose }) {
         setSaving(true);
         try {
             const headers = await getAuthHeaders();
-            const response = await fetch(`${API_URL}/admin/levels/${editingLevel.id}`, {
+            const response = await fetch(`${API_URL}/api/v1/levels/${editingLevel.id}`, {
                 method: 'PUT',
                 headers,
                 body: JSON.stringify(editingLevel),
@@ -217,7 +217,7 @@ export default function LevelManagementModal({ visible, onClose }) {
                     onPress: async () => {
                         try {
                             const headers = await getAuthHeaders();
-                            await fetch(`${API_URL}/admin/levels/${level.id}`, {
+                            await fetch(`${API_URL}/api/v1/levels/${level.id}`, {
                                 method: 'DELETE',
                                 headers,
                             });
@@ -327,7 +327,7 @@ export default function LevelManagementModal({ visible, onClose }) {
             const newOrder = data.map(c => c.id);
             try {
                 const headers = await getAuthHeaders();
-                await fetch(`${API_URL}/admin/levels/${showCourseModal.id}/courses/reorder`, {
+                await fetch(`${API_URL}/api/v1/levels/${showCourseModal.id}/courses/reorder`, {
                     method: 'POST',
                     headers,
                     body: JSON.stringify({ course_order: newOrder }),
@@ -342,7 +342,7 @@ export default function LevelManagementModal({ visible, onClose }) {
         const assignCourse = async (courseId) => {
             try {
                 const headers = await getAuthHeaders();
-                await fetch(`${API_URL}/admin/levels/${showCourseModal.id}/courses`, {
+                await fetch(`${API_URL}/api/v1/levels/${showCourseModal.id}/courses`, {
                     method: 'POST',
                     headers,
                     body: JSON.stringify({ course_id: courseId }),
@@ -360,7 +360,7 @@ export default function LevelManagementModal({ visible, onClose }) {
         const removeCourse = async (courseId) => {
             try {
                 const headers = await getAuthHeaders();
-                await fetch(`${API_URL}/admin/levels/${showCourseModal.id}/courses/${courseId}`, {
+                await fetch(`${API_URL}/api/v1/levels/${showCourseModal.id}/courses/${courseId}`, {
                     method: 'DELETE',
                     headers,
                 });

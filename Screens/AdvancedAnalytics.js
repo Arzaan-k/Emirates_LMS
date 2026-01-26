@@ -84,14 +84,14 @@ const AnalyticsDashboard = ({ onNavigate }) => {
 
     const fetchDashboard = async () => {
         try {
-            const res = await fetch(`${API_URL}/analytics/dashboard`);
+            const res = await fetch(`${API_URL}/api/v1/analytics/dashboard`);
             const json = await res.json();
 
             if (json.overview && json.trend && json.risk_summary) {
                 setData(json);
             } else {
                 // Fallback logic kept from previous step
-                const usersRes = await fetch(`${API_URL}/users/list?limit=1000`);
+                const usersRes = await fetch(`${API_URL}/api/v1/users/list?limit=1000`);
                 const usersData = await usersRes.json();
                 const storesRes = await fetch(`${API_URL}/stores/summary`);
                 const storesData = await storesRes.json();
@@ -246,7 +246,7 @@ const EmployeeDetailReport = ({ email, onBack }) => {
     useEffect(() => {
         const fetchReport = async () => {
             try {
-                const res = await fetch(`${API_URL}/analytics/detailed-report/${email}`);
+                const res = await fetch(`${API_URL}/api/v1/analytics/detailed-report/${email}`);
                 const data = await res.json();
                 setReport(data);
             } catch (e) {
@@ -345,7 +345,7 @@ const StorePerformance = () => {
 
     const fetchStores = async () => {
         try {
-            let res = await fetch(`${API_URL}/analytics/stores`);
+            let res = await fetch(`${API_URL}/api/v1/analytics/stores`);
             let json = await res.json();
 
             if (Array.isArray(json) && json.length > 0) {
@@ -412,7 +412,7 @@ const EmployeePerformance = ({ onSelect }) => {
     useEffect(() => { fetchEmployees(); }, []);
     const fetchEmployees = async () => {
         try {
-            const res = await fetch(`${API_URL}/users/list?limit=50`);
+            const res = await fetch(`${API_URL}/api/v1/users/list?limit=50`);
             const json = await res.json();
             setEmployees(json.users || []);
         } catch (e) { console.error(e); } finally { setLoading(false); }
@@ -459,12 +459,12 @@ const TrainingEffectiveness = () => {
     useEffect(() => { fetchData(); }, []);
     const fetchData = async () => {
         try {
-            const res = await fetch(`${API_URL}/analytics/training-effectiveness`);
+            const res = await fetch(`${API_URL}/api/v1/analytics/training-effectiveness`);
             const json = await res.json();
             if (Array.isArray(json)) setCourses(json);
             else {
                 // Fallback
-                const contentRes = await fetch(`${API_URL}/content`);
+                const contentRes = await fetch(`${API_URL}/api/v1/content`);
                 const contentData = await contentRes.json();
                 if (Array.isArray(contentData)) {
                     setCourses(contentData.slice(0, 10).map((c, i) => ({
@@ -509,7 +509,7 @@ const HygieneCompliance = () => {
     useEffect(() => { fetchData(); }, []);
     const fetchData = async () => {
         try {
-            const res = await fetch(`${API_URL}/analytics/hygiene-compliance`);
+            const res = await fetch(`${API_URL}/api/v1/analytics/hygiene-compliance`);
             const json = await res.json();
             if (json.summary) setData(json);
             else {
@@ -583,7 +583,7 @@ const ReportsExport = () => {
     useEffect(() => { fetchReportData(); }, []);
     const fetchReportData = async () => {
         try {
-            const [usersRes, storesRes] = await Promise.all([fetch(`${API_URL}/users/list?limit=1000`), fetch(`${API_URL}/stores/summary`)]);
+            const [usersRes, storesRes] = await Promise.all([fetch(`${API_URL}/api/v1/users/list?limit=1000`), fetch(`${API_URL}/stores/summary`)]);
             setReportData({ users: (await usersRes.json()).users || [], stores: (await storesRes.json()) || [] });
         } catch (e) {
             console.error(e);
