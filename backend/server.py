@@ -76,7 +76,7 @@ def add_course_to_rag(course_id, transcript):
 PORT = int(os.environ.get("PORT", 8000))
 HOST = "0.0.0.0"
 # BASE_URL: Use RENDER_EXTERNAL_URL if on Render, otherwise use local IP
-BASE_URL = os.environ.get("RENDER_EXTERNAL_URL", "http://192.168.29.119:8000")
+BASE_URL = os.environ.get("RENDER_EXTERNAL_URL", "http://172.20.10.2:8000")
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
@@ -935,6 +935,70 @@ def load_levels_from_db():
         # Initialize with defaults if database error
         if not level_hierarchy_cache:
             init_default_levels()
+
+def load_access_rules_from_db():
+    """Load all access rules from database into the in-memory access_control_store."""
+    global access_control_store
+    try:
+        db = SessionLocal()
+        access_rules = db.query(AccessRule).all()
+        
+        # Rebuild access_control_store from database
+        for rule in access_rules:
+            access_control_store[rule.level_name] = {
+                "accessible_courses": rule.accessible_courses or [],
+                "accessible_buckets": rule.accessible_buckets or [],
+                "max_courses_visible": rule.max_courses_visible if rule.max_courses_visible is not None else -1
+            }
+        
+        db.close()
+        logger.info(f"Loaded {len(access_rules)} access rules from database into access_control_store")
+        
+    except Exception as e:
+        logger.error(f"Failed to load access rules from database: {e}")
+
+
+def save_access_rule_to_db(level_name: str, accessible_courses: list, accessible_buckets: list, max_courses_visible: int = -1):
+    """Save or update an access rule in the database."""
+    try:
+        db = SessionLocal()
+        
+        # Check if rule already exists
+        existing_rule = db.query(AccessRule).filter(AccessRule.level_name == level_name).first()
+        
+        if existing_rule:
+            # Update existing rule
+            existing_rule.accessible_courses = accessible_courses
+            existing_rule.accessible_buckets = accessible_buckets
+            existing_rule.max_courses_visible = max_courses_visible
+            existing_rule.updated_at = datetime.utcnow()
+        else:
+            # Create new rule
+            new_rule = AccessRule(
+                level_name=level_name,
+                accessible_courses=accessible_courses,
+                accessible_buckets=accessible_buckets,
+                max_courses_visible=max_courses_visible
+            )
+            db.add(new_rule)
+        
+        db.commit()
+        db.close()
+        
+        # Update in-memory store as well
+        access_control_store[level_name] = {
+            "accessible_courses": accessible_courses,
+            "accessible_buckets": accessible_buckets,
+            "max_courses_visible": max_courses_visible
+        }
+        
+        logger.info(f"Access rule saved to database for level: {level_name}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to save access rule to database: {e}")
+        return False
+
 
 def init_default_levels():
     """Initialize default progression levels if table is empty."""
@@ -2197,18 +2261,81 @@ async def update_single_level_config(
     return {"status": "success", "level": level_name, "config": level_config_store[level_name]}
 
 @app.get("/admin/access-rules")
-async def get_access_rules():
-    """Get access control rules for all roles"""
-    return access_control_store
+async def get_access_rules(db: Session = Depends(get_db)):
+    """
+    Get access control rules for all roles.
+    Includes validation to remove deleted course IDs.
+    """
+    global access_control_store
+    
+    try:
+        # 1. Get all valid content IDs from DB
+        valid_content_ids = {c.id for c in db.query(DBContent.id).all()}
+        
+        # 2. Get all access rules from DB
+        db_rules = db.query(AccessRule).all()
+        start_count = 0
+        end_count = 0
+        dirty = False
+        
+        cleaned_rules = {}
+        
+        for rule in db_rules:
+            current_courses = rule.accessible_courses or []
+            start_count += len(current_courses)
+            
+            # Filter out deleted courses
+            valid_courses = [cid for cid in current_courses if cid in valid_content_ids]
+            end_count += len(valid_courses)
+            
+            # If changes detected, update DB record
+            if len(valid_courses) < len(current_courses):
+                rule.accessible_courses = valid_courses
+                dirty = True
+            
+            # Build clean dictionary for response
+            cleaned_rules[rule.level_name] = {
+                "accessible_courses": valid_courses,
+                "accessible_buckets": rule.accessible_buckets or [],
+                "max_courses_visible": rule.max_courses_visible or -1
+            }
+            
+        if dirty:
+            db.commit()
+            logger.info(f"Cleaned up access rules: Removed {start_count - end_count} invalid course references")
+            
+            # Update in-memory store
+            access_control_store = cleaned_rules
+            
+        # If DB was empty or incomplete, merge with in-memory (but this shouldn't happen usually)
+        if not cleaned_rules:
+             return access_control_store
+
+        return cleaned_rules
+        
+    except Exception as e:
+        logger.error(f"Error cleaning access rules: {e}")
+        # Fallback to in-memory store if DB fails
+        return access_control_store
 
 @app.post("/admin/access-rules")
 async def update_access_rules(rules: str = Form(...)):
-    """Update all access control rules (JSON object)"""
+    """Update all access control rules (JSON object) - persisted to database"""
     global access_control_store
     try:
         new_rules = json.loads(rules)
+        
+        # Save each rule to database
+        for level_name, rule_data in new_rules.items():
+            accessible_courses = rule_data.get("accessible_courses", [])
+            accessible_buckets = rule_data.get("accessible_buckets", [])
+            max_courses_visible = rule_data.get("max_courses_visible", -1)
+            
+            save_access_rule_to_db(level_name, accessible_courses, accessible_buckets, max_courses_visible)
+        
+        # Update in-memory store
         access_control_store = new_rules
-        logger.info("Access control rules updated")
+        logger.info("Access control rules updated and saved to database")
         return {"status": "success", "rules": access_control_store}
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON format")
@@ -2220,21 +2347,181 @@ async def update_role_access(
     accessible_buckets: str = Form("[]"),  # JSON array of bucket IDs
     max_courses_visible: int = Form(-1)
 ):
-    """Update access rules for a specific role"""
+    """Update access rules for a specific role - persisted to database"""
     try:
         courses = json.loads(accessible_courses)
         buckets = json.loads(accessible_buckets)
         
-        access_control_store[role_name] = {
+        # Save to database (this also updates in-memory store)
+        success = save_access_rule_to_db(role_name, courses, buckets, max_courses_visible)
+        
+        if success:
+            logger.info(f"Access rules updated and saved to database for {role_name}")
+            return {"status": "success", "role": role_name, "rules": access_control_store[role_name]}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to save access rule to database")
+            
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON format")
+
+@app.get("/content")
+async def get_all_content_api(
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Get Content with Strict Access Control.
+    - If Authorization header present: Filters based on User Role.
+    - If No Header: Returns ALL (for Admin Panel/Legacy).
+    """
+    try:
+        # 1. Fetch all content first
+        db_content = db_ops.get_all_content(db)
+        
+        # 2. Check Authentication & Apply Filtering
+        if authorization:
+            try:
+                token = authorization.split(" ")[1]
+                payload = verify_token(token)
+                if payload:
+                    email = payload.get("sub")
+                    user = db_ops.get_user_by_email(db, email)
+                    
+                    # If user exists and is NOT an Admin/Manager, apply filters
+                    # "Store Manager", "CEO", "Super Admin" bypass filters
+                    if user and user.role not in ["Store Manager", "CEO", "Super Admin", "Admin", "Shift Manager"]:
+                        # Strict Filtering for basic roles (Waffler, Silver, Gold)
+                        rules = db_ops.get_access_rule_by_level(db, user.role)
+                        
+                        if rules:
+                            allowed_courses = rules.accessible_courses or []
+                            allowed_buckets = rules.accessible_buckets or []
+                            
+                            # Log for debug
+                            # logger.info(f"Filtering content for {user.role}: Allowed Courses={len(allowed_courses)}, Buckets={len(allowed_buckets)}")
+                            
+                            filtered_content = []
+                            for c in db_content:
+                                # Strict check: ID or Bucket must match
+                                if c.id in allowed_courses or c.bucket in allowed_buckets:
+                                    filtered_content.append(c)
+                            
+                            db_content = filtered_content
+                        else:
+                            # No rules defined for this role -> Show NOTHING (Strict)
+                            db_content = []
+            except Exception as e:
+                logger.warning(f"Auth check failed in /content: {e}")
+                # If token invalid, proceed as unauthenticated (or could block, but keeping legacy safe)
+
+        content_list = []
+        for item in db_content:
+            content_list.append({
+                "id": item.id,
+                "title": item.title,
+                "description": item.description or "",
+                "bucket": item.bucket,
+                "videoUrl": item.video_url or item.file_url or "",
+                "file_url": item.video_url or item.file_url or "",
+                "audio_url": getattr(item, 'audio_url', None),
+                "thumbnail_url": item.thumbnail,
+                "learning_path_type": item.learning_path_type or "career_progression",
+                "isPathNode": item.is_path_node or False,
+                "timestamp": item.timestamp.isoformat() if item.timestamp else datetime.now().isoformat(),
+                "duration": "30s",
+                "authorRole": "Store Manager",
+                "resource_type": "Store Manager",
+                "transcript": item.transcript or "",
+                "quiz": item.quiz,
+                "bucket_id": item.bucket
+            })
+            
+        return content_list
+        
+    except Exception as e:
+        logger.error(f"Error fetching all content: {e}")
+        return content_store
+
+@app.get("/admin/access-rules")
+async def get_all_access_rules(db: Session = Depends(get_db)):
+    """
+    Get ALL access rules for all levels from database.
+    Returns: { "Waffler": { accessible_courses: [...], ... }, "Silver Waffler": {...}, ... }
+    """
+    try:
+        # First, try to get from database
+        from models import AccessRule
+        db_rules = db.query(AccessRule).all()
+        
+        result = {}
+        for rule in db_rules:
+            result[rule.level_name] = {
+                "accessible_courses": rule.accessible_courses or [],
+                "accessible_buckets": rule.accessible_buckets or [],
+                "max_courses_visible": rule.max_courses_visible or -1
+            }
+        
+        # Merge with in-memory store (for any levels not in DB yet)
+        for level_name, rules in access_control_store.items():
+            if level_name not in result:
+                result[level_name] = rules
+        
+        logger.info(f"Returning {len(result)} access rules")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error fetching all access rules: {e}")
+        # Fallback to in-memory store
+        return access_control_store
+
+@app.post("/admin/access-rules/{level_name}")
+async def save_level_access_rules(
+    level_name: str,
+    accessible_courses: str = Form("[]"),
+    accessible_buckets: str = Form("[]"),
+    max_courses_visible: int = Form(-1),
+    db: Session = Depends(get_db)
+):
+    """
+    Save access rules for a specific level to database.
+    Called by Admin Panel when saving curriculum assignments.
+    """
+    global access_control_store
+    try:
+        courses = json.loads(accessible_courses)
+        buckets = json.loads(accessible_buckets) if accessible_buckets else []
+        
+        # Save to database using db_ops
+        rule = db_ops.create_or_update_access_rule(
+            db, 
+            level_name,
+            courses,
+            buckets,
+            max_courses_visible
+        )
+        
+        # Also update in-memory store for immediate effect
+        access_control_store[level_name] = {
             "accessible_courses": courses,
             "accessible_buckets": buckets,
             "max_courses_visible": max_courses_visible
         }
         
-        logger.info(f"Access rules updated for {role_name}")
-        return {"status": "success", "role": role_name, "rules": access_control_store[role_name]}
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON format")
+        logger.info(f"Access rules saved for {level_name}: {len(courses)} courses, {len(buckets)} buckets")
+        
+        return {
+            "status": "success",
+            "level": level_name,
+            "courses_count": len(courses),
+            "buckets_count": len(buckets)
+        }
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error saving access rules: {e}")
+        raise HTTPException(status_code=400, detail="Invalid JSON format for courses/buckets")
+    except Exception as e:
+        logger.error(f"Error saving access rules for {level_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save access rules: {str(e)}")
 
 @app.get("/admin/access-rules/{role_name}/courses")
 async def get_accessible_courses_for_role(role_name: str):
@@ -2266,64 +2553,121 @@ async def get_accessible_courses_for_role(role_name: str):
     
     return {"role": role_name, "full_access": False, "courses": accessible_courses}
 
-@app.get("/user/level-progress/{user_email}")
-async def get_user_level_progress(user_email: str):
-    """Get user's current level and progress to next level"""
-    # Get user's completed courses count
-    user_completions = [c for c in course_completions if c.get("user_email") == user_email]
-    completed_count = len(user_completions)
-    
-    # Get user from store
-    user = users_store.get(user_email, {})
-    current_role = user.get("role", "Waffler")
-    
-    # Check if current role is a progressable level
-    level_info = level_config_store.get(current_role)
-    
-    if not level_info:
-        # Not a progressable role (e.g., Store Manager, Area Manager)
+@app.get("/learning-paths/content/{path_type}")
+async def get_learning_path_content_endpoint(
+    path_type: str,
+    user_email: str = "user",
+    db: Session = Depends(get_db)
+):
+    """
+    Get courses for a learning path type (self_learning or career_progression).
+    Returns all courses with completion status for the given user.
+    """
+    try:
+        from sqlalchemy import or_
+        from models import Content as DBContent
+        
+        # Get user's role
+        user = db_ops.get_user_by_email(db, user_email)
+        user_role = user.role if user else "Waffler"
+        
+        # Fetch courses based on path type - PROPER SEPARATION
+        if path_type == "self_learning":
+            # Self-learning ONLY shows self_learning courses
+            courses = db.query(DBContent).filter(
+                DBContent.learning_path_type == "self_learning"
+            ).order_by(DBContent.timestamp).all()
+        else:
+            # Career progression - shows career_progression courses OR unspecified (NULL/empty)
+            # Excludes self_learning courses
+            courses = db.query(DBContent).filter(
+                or_(
+                    DBContent.learning_path_type == "career_progression",
+                    DBContent.learning_path_type == None,
+                    DBContent.learning_path_type == ""
+                )
+            ).order_by(DBContent.timestamp).all()
+        
+        # Get user's completed course IDs
+        user_completed_ids = set()
+        try:
+            user_completed_ids = db_ops.get_user_completed_course_ids(db, user_email)
+            node_ids = db_ops.get_user_completed_node_ids(db, user_email)
+            user_completed_ids = user_completed_ids.union(node_ids)
+        except:
+            pass
+        
+        # Build response with status
+        response_courses = []
+        found_active = False
+        
+        for i, course in enumerate(courses):
+            is_completed = course.id in user_completed_ids
+            
+            # Sequential unlocking for self_learning
+            if path_type == "self_learning":
+                if is_completed:
+                    status = "completed"
+                elif not found_active:
+                    status = "active"
+                    found_active = True
+                else:
+                    status = "locked"
+            else:
+                # Career progression - status determined by frontend
+                status = "completed" if is_completed else "active"
+            
+            response_courses.append({
+                "id": course.id,
+                "title": course.title,
+                "description": course.description or "",
+                "bucket": course.bucket,
+                "videoUrl": course.video_url or course.file_url or "",
+                "thumbnail_url": course.thumbnail,
+                "learning_path_type": course.learning_path_type or "career_progression",
+                "timestamp": course.timestamp.isoformat() if course.timestamp else None,
+                "status": status,
+                "xp": 50,
+                "transcript": course.transcript or "",
+                "quiz": course.quiz
+            })
+        
         return {
-            "user_email": user_email,
-            "current_level": current_role,
-            "completed_nodes": completed_count,
-            "is_manager": True,
-            "can_progress": False
+            "is_locked": False,
+            "courses": response_courses,
+            "total": len(response_courses)
         }
-    
-    # Calculate progress to next level
-    next_level = level_info.get("next_level")
-    next_level_info = level_config_store.get(next_level) if next_level else None
-    
-    nodes_for_next = next_level_info.get("min_nodes", 999) if next_level_info else 999
-    progress_percent = min(100, int((completed_count / nodes_for_next) * 100)) if nodes_for_next > 0 else 100
-    
-    return {
-        "user_email": user_email,
-        "current_level": current_role,
-        "current_level_info": level_info,
-        "completed_nodes": completed_count,
-        "next_level": next_level,
-        "nodes_for_next_level": nodes_for_next,
-        "nodes_remaining": max(0, nodes_for_next - completed_count),
-        "progress_percent": progress_percent,
-        "is_manager": False,
-        "can_progress": next_level is not None and completed_count >= nodes_for_next
-    }
+        
+    except Exception as e:
+        logger.error(f"Error getting learning path content: {e}")
+        return {"is_locked": False, "courses": [], "total": 0}
+
+@app.get("/user/level-progress/{user_email}")
+async def get_user_level_progress(user_email: str, db: Session = Depends(get_db)):
+    """Get user's current level and progress to next level - OPTIMIZED with DB queries"""
+    return db_ops.get_user_level_progress(db, user_email)
 
 @app.post("/user/check-level-up/{user_email}")
-async def check_and_apply_level_up(user_email: str):
-    """Check if user qualifies for level up and apply it"""
-    progress = await get_user_level_progress(user_email)
-    
-    if progress.get("can_progress"):
+async def check_and_apply_level_up(user_email: str, db: Session = Depends(get_db)):
+    """Check if user qualifies for level up and apply it - OPTIMIZED with DB queries"""
+    progress = db_ops.get_user_level_progress(db, user_email)
+
+    # Check if user can progress (all required courses completed)
+    nodes_completed = progress.get("nodes_completed_in_level", 0)
+    nodes_required = progress.get("nodes_required_in_level", 0)
+    can_progress = progress.get("next_level") is not None and nodes_required > 0 and nodes_completed >= nodes_required
+
+    if can_progress:
         new_level = progress.get("next_level")
-        
-        # Update user's role in store
-        if user_email in users_store:
-            old_level = users_store[user_email].get("role")
-            users_store[user_email]["role"] = new_level
+        old_level = progress.get("current_level")
+
+        # Update user's role in database
+        user = db_ops.get_user_by_email(db, user_email)
+        if user:
+            user.role = new_level
+            db.commit()
             logger.info(f"User {user_email} leveled up from {old_level} to {new_level}")
-            
+
             # Broadcast level-up event
             await manager.broadcast({
                 "type": "LEVEL_UP",
@@ -2334,14 +2678,14 @@ async def check_and_apply_level_up(user_email: str):
                     "completed_nodes": progress.get("completed_nodes")
                 }
             })
-            
+
             return {
                 "status": "success",
                 "leveled_up": True,
                 "old_level": old_level,
                 "new_level": new_level
             }
-    
+
     return {"status": "success", "leveled_up": False, "current_level": progress.get("current_level")}
 
 # --- PROCTORED ASSESSMENT ENDPOINTS ---
@@ -3512,26 +3856,51 @@ async def upload_content(
 ):
     """
     Receives new content (Files + Metadata) from Managers.
-    Saves file to disk, updates memory, and broadcasts to clients.
+    Uploads video to Cloudflare R2 CDN, stores metadata in database.
     """
     try:
-        # 1. Save content to disk
-        file_location = f"{UPLOAD_DIR}/{file.filename}"
+        item_id = str(uuid.uuid4())
+
+        # 1. Save content temporarily to disk for AI processing
+        file_ext = file.filename.split('.')[-1] if '.' in file.filename else 'mp4'
+        unique_filename = f"content_{item_id}.{file_ext}"
+        file_location = f"{UPLOAD_DIR}/{unique_filename}"
+
         with open(file_location, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
         # --- AI PROCESSING (Transcribe & Quiz) ---
-        ai_result = await process_video_content(file_location, file.filename)
+        ai_result = await process_video_content(file_location, unique_filename)
         transcript_text = ai_result["transcript"]
         quiz_data = ai_result["quiz"]
 
-        # 2. Generate Public URL
-        video_url = f"{BASE_URL}/uploads/{file.filename}"
+        # 2. Upload to Cloudflare R2 CDN
+        video_url = None
+        cdn_object_key = f"courses/{unique_filename}"
 
-        logger.info(f"New Content Uploaded: {title} by {authorRole} (File: {file.filename}, Bucket: {bucket}, PathType: {learning_path_type})")
+        if cdn_service.CDN_ENABLED:
+            content_type = cdn_service.get_content_type(unique_filename)
+            cdn_url = cdn_service.upload_to_cdn(file_location, cdn_object_key, content_type)
+            if cdn_url:
+                video_url = cdn_url
+                logger.info(f"Content uploaded to CDN: {cdn_url}")
+                # Delete local file after successful CDN upload
+                try:
+                    os.remove(file_location)
+                    logger.info(f"Deleted local file after CDN upload: {file_location}")
+                except:
+                    pass
+            else:
+                logger.warning("CDN upload failed, falling back to local storage")
+                video_url = f"{BASE_URL}/uploads/{unique_filename}"
+        else:
+            # CDN not enabled, use local storage
+            video_url = f"{BASE_URL}/uploads/{unique_filename}"
+            logger.info(f"CDN disabled, using local storage: {video_url}")
 
-        # 3. Store Metadata in Database
-        item_id = str(uuid.uuid4())
+        logger.info(f"New Content Uploaded: {title} by {authorRole} (File: {unique_filename}, Bucket: {bucket}, PathType: {learning_path_type})")
+
+        # 3. Store ONLY Metadata in Database (video is on CDN)
         content_data = {
             "id": item_id,
             "title": title,
@@ -3546,10 +3915,11 @@ async def upload_content(
             "learning_path_type": learning_path_type,
             "transcript": transcript_text,
             "quiz": quiz_data,
-            "extra_data": {"timestamp": timestamp}
+            "extra_data": {"timestamp": timestamp, "cdn_object_key": cdn_object_key}
         }
 
         db_content = db_ops.create_content(db, content_data)
+        logger.info(f"Content metadata saved to database: {item_id}")
 
         # 4. Also store in memory for backward compatibility
         item_data = {
@@ -3581,7 +3951,13 @@ async def upload_content(
         if transcript_text and transcript_text != "Transcription Unavailable":
             add_course_to_rag(item_id, transcript_text)
 
-        return {"status": "success", "message": "Content uploaded and broadcasted", "url": video_url}
+        return {
+            "status": "success",
+            "message": "Content uploaded to CDN and metadata saved to database",
+            "url": video_url,
+            "cdn_enabled": cdn_service.CDN_ENABLED,
+            "content_id": item_id
+        }
 
     except Exception as e:
         logger.error(f"Error uploading content: {e}")
@@ -3650,24 +4026,48 @@ async def delete_content(item_id: str, db: Session = Depends(get_db)):
     - In-memory stores
     """
     global content_store, resource_store
-    
+
     try:
         deleted_something = False
         video_url = None
-        
-        # 1. Find the content to get the video URL for cleanup
-        for item in content_store:
-            if item.get("id") == item_id:
-                video_url = item.get("videoUrl", "")
-                break
-        
+        cdn_object_key = None
+
+        # 1. First check DATABASE for video URL (most reliable source)
+        try:
+            db_content = db_ops.get_content_by_id(db, item_id)
+            if db_content:
+                video_url = db_content.video_url or db_content.file_url
+                # Check extra_data for cdn_object_key
+                if db_content.extra_data and isinstance(db_content.extra_data, dict):
+                    cdn_object_key = db_content.extra_data.get("cdn_object_key")
+                logger.info(f"Found content in DB with URL: {video_url}")
+        except Exception as e:
+            logger.error(f"Error finding content in DB: {e}")
+
+        # Also check in-memory stores if not found in DB
+        if not video_url:
+            for item in content_store:
+                if item.get("id") == item_id:
+                    video_url = item.get("videoUrl") or item.get("video_url", "")
+                    break
+
         # Also check resource_store
         if not video_url:
             for item in resource_store:
                 if item.get("id") == item_id:
                     video_url = item.get("url", "")
                     break
-        
+
+        # Also check Resource table in database
+        if not video_url:
+            try:
+                db_resource = db_ops.get_resource_by_id(db, item_id)
+                if db_resource:
+                    video_url = db_resource.url
+                    logger.info(f"Found resource in DB with URL: {video_url}")
+            except Exception as e:
+                logger.error(f"Error finding resource in DB: {e}")
+
         # 2. Delete from PostgreSQL - Content table
         try:
             deleted_db = db_ops.delete_content(db, item_id)
@@ -3687,11 +4087,15 @@ async def delete_content(item_id: str, db: Session = Depends(get_db)):
             logger.error(f"Error deleting from Resource table: {e}")
         
         # 4. Delete from CDN (Cloudflare R2) if URL is a CDN URL
-        if video_url and cdn_service.CDN_ENABLED:
+        if cdn_service.CDN_ENABLED:
             try:
-                # Extract the object key from CDN URL
-                if cdn_service.R2_PUBLIC_URL and cdn_service.R2_PUBLIC_URL in video_url:
-                    object_key = video_url.replace(cdn_service.R2_PUBLIC_URL, "").lstrip("/")
+                # Use stored cdn_object_key if available, otherwise extract from URL
+                object_key = cdn_object_key
+                if not object_key and video_url and cdn_service.R2_PUBLIC_URL:
+                    if cdn_service.R2_PUBLIC_URL in video_url:
+                        object_key = video_url.replace(cdn_service.R2_PUBLIC_URL, "").lstrip("/")
+
+                if object_key:
                     cdn_service.delete_from_cdn(object_key)
                     logger.info(f"Deleted from CDN: {object_key}")
             except Exception as e:
@@ -3789,11 +4193,11 @@ async def create_news(
     image: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db)
 ):
-    """Create a new news article and broadcast to all users"""
+    """Create a new news article and broadcast to all users. Images uploaded to CDN."""
     try:
         news_id = str(uuid.uuid4())
 
-        # Handle image upload
+        # Handle image upload - upload to CDN
         image_url = None
         if image:
             file_extension = image.filename.split('.')[-1]
@@ -3801,7 +4205,25 @@ async def create_news(
             file_path = os.path.join(UPLOAD_DIR, file_name)
             with open(file_path, "wb") as f:
                 f.write(await image.read())
-            image_url = f"{BASE_URL}/uploads/{file_name}"
+
+            # Upload to Cloudflare R2 CDN
+            if cdn_service.CDN_ENABLED:
+                cdn_object_key = f"news/{file_name}"
+                content_type = cdn_service.get_content_type(file_name)
+                cdn_url = cdn_service.upload_to_cdn(file_path, cdn_object_key, content_type)
+                if cdn_url:
+                    image_url = cdn_url
+                    logger.info(f"News image uploaded to CDN: {cdn_url}")
+                    # Delete local file after successful CDN upload
+                    try:
+                        os.remove(file_path)
+                    except:
+                        pass
+                else:
+                    image_url = f"{BASE_URL}/uploads/{file_name}"
+                    logger.warning("CDN upload failed for news image, using local storage")
+            else:
+                image_url = f"{BASE_URL}/uploads/{file_name}"
 
         # Create news in database
         news_data = {
@@ -3842,19 +4264,43 @@ async def create_news(
 
 @app.delete("/news/{news_id}")
 async def delete_news(news_id: str, db: Session = Depends(get_db)):
-    """Delete a news article"""
+    """Delete a news article - from DATABASE and CDN"""
+    global news_feed
     try:
-        # Delete from database (Note: Need to add delete_news function to db_operations.py)
-        # For now, just delete from memory
-        global news_feed
-        initial_len = len(news_feed)
+        # Get image URL before deletion for CDN cleanup
+        image_url = None
+        try:
+            db_news = db_ops.get_news_post_by_id(db, news_id)
+            if db_news:
+                image_url = db_news.image
+        except:
+            pass
+
+        # Also check in-memory
+        if not image_url:
+            for n in news_feed:
+                if n.get("id") == news_id:
+                    image_url = n.get("image")
+                    break
+
+        # Delete from CDN if image is stored there
+        if image_url and cdn_service.CDN_ENABLED and cdn_service.R2_PUBLIC_URL:
+            try:
+                if cdn_service.R2_PUBLIC_URL in image_url:
+                    object_key = image_url.replace(cdn_service.R2_PUBLIC_URL, "").lstrip("/")
+                    cdn_service.delete_from_cdn(object_key)
+                    logger.info(f"Deleted news image from CDN: {object_key}")
+            except Exception as e:
+                logger.error(f"Error deleting news image from CDN: {e}")
+
+        # Delete from database
+        db_ops.delete_news_post(db, news_id)
+
+        # Also delete from in-memory
         news_feed = [n for n in news_feed if n.get("id") != news_id]
 
-        if len(news_feed) < initial_len:
-            logger.info(f"News Deleted: {news_id}")
-            return {"status": "success"}
-
-        raise HTTPException(status_code=404, detail="News not found")
+        logger.info(f"News Deleted: {news_id}")
+        return {"status": "success"}
 
     except Exception as e:
         logger.error(f"Error deleting news: {e}")
@@ -3863,9 +4309,29 @@ async def delete_news(news_id: str, db: Session = Depends(get_db)):
 # --- LIVE QUIZZES ENDPOINTS ---
 
 @app.get("/live-quizzes")
-async def get_live_quizzes():
-    """Get all live topic quizzes"""
-    return live_quizzes
+async def get_live_quizzes(db: Session = Depends(get_db)):
+    """Get all live topic quizzes - from DATABASE"""
+    # Get from database
+    db_quizzes = db_ops.get_all_live_quizzes(db, active_only=True)
+    result = []
+    for quiz in db_quizzes:
+        result.append({
+            "id": quiz.id,
+            "title": quiz.title,
+            "difficulty": quiz.difficulty,
+            "time": quiz.time_limit,
+            "questions": quiz.questions or [],
+            "image": quiz.image,
+            "created_at": quiz.created_at.isoformat() if quiz.created_at else None
+        })
+
+    # Merge with in-memory for backward compatibility
+    existing_ids = {q["id"] for q in result}
+    for quiz in live_quizzes:
+        if quiz.get("id") not in existing_ids:
+            result.append(quiz)
+
+    return result
 
 @app.post("/live-quizzes")
 async def create_live_quiz(
@@ -3873,63 +4339,128 @@ async def create_live_quiz(
     difficulty: str = Form(...),
     time: str = Form(...),
     questions: str = Form(...),  # JSON string of questions array
-    image: Optional[UploadFile] = File(None)
+    image: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db)
 ):
-    """Create a new topic quiz and broadcast to all users"""
-    quiz_id = str(uuid.uuid4())
-    
-    # Parse questions JSON
+    """Create a new topic quiz and broadcast to all users - SAVES TO DATABASE"""
     try:
-        questions_list = json.loads(questions)
-    except:
-        raise HTTPException(status_code=400, detail="Invalid questions format")
-    
-    # Handle image upload
-    image_url = None
-    if image:
-        file_extension = image.filename.split('.')[-1]
-        file_name = f"quiz_{quiz_id}.{file_extension}"
-        file_path = os.path.join(UPLOAD_DIR, file_name)
-        with open(file_path, "wb") as f:
-            f.write(await image.read())
-        image_url = f"{BASE_URL}/uploads/{file_name}"
-    
-    quiz_item = {
-        "id": quiz_id,
-        "title": title,
-        "difficulty": difficulty,
-        "time": time,
-        "questions": questions_list,
-        "image": image_url or "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800",
-        "created_at": datetime.now().isoformat()
-    }
-    
-    live_quizzes.append(quiz_item)
-    logger.info(f"Live Quiz Created: {title}")
+        quiz_id = str(uuid.uuid4())
 
-    # [AUDIT] Log quiz assignment
-    log_action("ASSIGN_QUIZ", title, f"Assigned quiz ({difficulty}, {time})")
-    
-    # Broadcast to all connected clients
-    await manager.broadcast({
-        "type": "QUIZ_POSTED",
-        "data": quiz_item
-    })
-    
-    return {"status": "success", "data": quiz_item}
+        # Parse questions JSON
+        try:
+            questions_list = json.loads(questions)
+        except:
+            raise HTTPException(status_code=400, detail="Invalid questions format")
+
+        # Handle image upload - upload to CDN
+        image_url = None
+        if image:
+            file_extension = image.filename.split('.')[-1]
+            file_name = f"quiz_{quiz_id}.{file_extension}"
+            file_path = os.path.join(UPLOAD_DIR, file_name)
+            with open(file_path, "wb") as f:
+                f.write(await image.read())
+
+            # Upload to Cloudflare R2 CDN
+            if cdn_service.CDN_ENABLED:
+                cdn_object_key = f"quizzes/{file_name}"
+                content_type = cdn_service.get_content_type(file_name)
+                cdn_url = cdn_service.upload_to_cdn(file_path, cdn_object_key, content_type)
+                if cdn_url:
+                    image_url = cdn_url
+                    logger.info(f"Quiz image uploaded to CDN: {cdn_url}")
+                    # Delete local file after successful CDN upload
+                    try:
+                        os.remove(file_path)
+                    except:
+                        pass
+                else:
+                    image_url = f"{BASE_URL}/uploads/{file_name}"
+                    logger.warning("CDN upload failed for quiz image, using local storage")
+            else:
+                image_url = f"{BASE_URL}/uploads/{file_name}"
+
+        # Save to database
+        quiz_data = {
+            "id": quiz_id,
+            "title": title,
+            "difficulty": difficulty,
+            "time_limit": time,
+            "questions": questions_list,
+            "image": image_url or "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800"
+        }
+        db_ops.create_live_quiz(db, quiz_data)
+
+        quiz_item = {
+            "id": quiz_id,
+            "title": title,
+            "difficulty": difficulty,
+            "time": time,
+            "questions": questions_list,
+            "image": image_url or "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800",
+            "created_at": datetime.now().isoformat()
+        }
+
+        # Also store in-memory for backward compatibility
+        live_quizzes.append(quiz_item)
+        logger.info(f"Live Quiz Created in DB: {title}")
+
+        # [AUDIT] Log quiz assignment
+        log_action("ASSIGN_QUIZ", title, f"Assigned quiz ({difficulty}, {time})")
+
+        # Broadcast to all connected clients
+        await manager.broadcast({
+            "type": "QUIZ_POSTED",
+            "data": quiz_item
+        })
+
+        return {"status": "success", "data": quiz_item}
+
+    except Exception as e:
+        logger.error(f"Error creating live quiz: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to create quiz: {str(e)}")
 
 @app.delete("/live-quizzes/{quiz_id}")
-async def delete_live_quiz(quiz_id: str):
-    """Delete a live quiz"""
+async def delete_live_quiz_endpoint(quiz_id: str, db: Session = Depends(get_db)):
+    """Delete a live quiz - from DATABASE and CDN"""
     global live_quizzes
+
+    # Get image URL before deletion for CDN cleanup
+    image_url = None
+    try:
+        db_quiz = db_ops.get_live_quiz_by_id(db, quiz_id)
+        if db_quiz:
+            image_url = db_quiz.image
+    except:
+        pass
+
+    # Also check in-memory
+    if not image_url:
+        for q in live_quizzes:
+            if q.get("id") == quiz_id:
+                image_url = q.get("image")
+                break
+
+    # Delete from CDN if image is stored there
+    if image_url and cdn_service.CDN_ENABLED and cdn_service.R2_PUBLIC_URL:
+        try:
+            if cdn_service.R2_PUBLIC_URL in image_url:
+                object_key = image_url.replace(cdn_service.R2_PUBLIC_URL, "").lstrip("/")
+                cdn_service.delete_from_cdn(object_key)
+                logger.info(f"Deleted quiz image from CDN: {object_key}")
+        except Exception as e:
+            logger.error(f"Error deleting quiz image from CDN: {e}")
+
+    # Delete from database
+    db_ops.delete_live_quiz(db, quiz_id)
+
+    # Also delete from in-memory
     initial_len = len(live_quizzes)
     live_quizzes = [q for q in live_quizzes if q.get("id") != quiz_id]
-    
-    if len(live_quizzes) < initial_len:
-        logger.info(f"Live Quiz Deleted: {quiz_id}")
-        return {"status": "success"}
-    
-    raise HTTPException(status_code=404, detail="Quiz not found")
+
+    logger.info(f"Live Quiz Deleted: {quiz_id}")
+    return {"status": "success"}
 
 @app.post("/quiz/submit")
 async def submit_quiz(
@@ -4427,26 +4958,78 @@ async def mark_notification_read(notif_id: str):
     return {"status": "error", "message": "Not found"}
 
 @app.get("/path/nodes")
-async def get_path_nodes(user_email: str = "user"):
+async def get_path_nodes(user_email: str = "user", db: Session = Depends(get_db)):
     """
     Returns ordered learning path nodes with user-specific status (completed, active, locked).
     IMPORTANT: This endpoint only returns CAREER PROGRESSION nodes.
     Self-Learning nodes are served via /learning-paths/content/self_learning
-    """
-    # Get user info for access control
-    user = users_store.get(user_email, {})
-    user_role = user.get("role", "Waffler")
     
-    # Filter path nodes - ONLY CAREER PROGRESSION (not self_learning)
-    raw_nodes = [
-        item for item in content_store 
-        if item.get("isPathNode", False) and item.get("learning_path_type", "career_progression") != "self_learning"
-    ]
+    Now fetches from DATABASE for fresh data on newly uploaded courses.
+    """
+    # Get user info for access control (check DB first, then in-memory)
+    db_user = db_ops.get_user_by_email(db, user_email)
+    if db_user:
+        user_role = db_user.role or "Waffler"
+    else:
+        user = users_store.get(user_email, {})
+        user_role = user.get("role", "Waffler")
+    
+    # Fetch CAREER PROGRESSION nodes from DATABASE (ensures fresh data)
+    raw_nodes = []
+    try:
+        from sqlalchemy import or_
+        # Fetch CAREER PROGRESSION content only (excludes self_learning)
+        db_content = db.query(DBContent).filter(
+            or_(
+                DBContent.learning_path_type == "career_progression",
+                DBContent.learning_path_type == None,
+                DBContent.learning_path_type == ""
+            )
+        ).order_by(DBContent.timestamp).all()
+        
+        for item in db_content:
+            raw_nodes.append({
+                "id": item.id,
+                "title": item.title,
+                "description": item.description or "",
+                "videoUrl": item.video_url or item.file_url or "",
+                "authorRole": "Store Manager",
+                "timestamp": item.timestamp.isoformat() if item.timestamp else datetime.now().isoformat(),
+                "isPathNode": item.is_path_node or False,
+                "skippable": False,
+                "xp": 50,
+                "transcript": item.transcript or "",
+                "quiz": item.quiz,
+                "bucket": item.bucket,
+                "learning_path_type": item.learning_path_type or "career_progression",
+            })
+    except Exception as e:
+        logger.error(f"Error fetching path nodes from DB: {e}")
+        # Fallback to in-memory content_store
+        raw_nodes = [
+            item for item in content_store 
+            if item.get("isPathNode", False) and item.get("learning_path_type", "career_progression") != "self_learning"
+        ]
+    
     # Sort by timestamp (oldest first = linear order)
     raw_nodes.sort(key=lambda x: x.get("timestamp", ""))
     
-    # Apply access control filtering (ONLY if access rules exist for this role)
-    access_rules = access_control_store.get(user_role)
+    # Apply access control filtering - check DATABASE for rules first
+    access_rules = None
+    try:
+        db_access_rule = db_ops.get_access_rule_by_level(db, user_role)
+        if db_access_rule:
+            access_rules = {
+                "accessible_buckets": db_access_rule.accessible_buckets or [],
+                "accessible_courses": db_access_rule.accessible_courses or [],
+                "max_courses_visible": db_access_rule.max_courses_visible or -1
+            }
+    except Exception as e:
+        logger.error(f"Error fetching access rules from DB: {e}")
+    
+    # Fallback to in-memory store
+    if not access_rules:
+        access_rules = access_control_store.get(user_role)
     
     if access_rules:
         # User has restricted access based on curriculum hierarchy
@@ -4462,8 +5045,7 @@ async def get_path_nodes(user_email: str = "user"):
             # Access rules:
             # 1. Course is explicitly in accessible_courses list
             # 2. Course's bucket is in accessible_buckets list
-            # 3. Course has NO bucket (uncategorized) - visible to all for flexibility
-            if course_id in accessible_courses or bucket_id in accessible_buckets or bucket_id is None:
+            if course_id in accessible_courses or bucket_id in accessible_buckets:
                 filtered_nodes.append(node)
         
         # Apply max visible limit if set (only if we have filtered content)
@@ -4478,8 +5060,16 @@ async def get_path_nodes(user_email: str = "user"):
             raw_nodes = filtered_nodes
     # else: user has full access (not in access_control_store means all access)
     
-    # Get user's completed course IDs
-    user_completed_ids = {c["course_id"] for c in course_completions if c["user_email"] == user_email}
+    # Get user's completed course IDs from DATABASE
+    user_completed_ids = set()
+    try:
+        user_completed_ids = db_ops.get_user_completed_course_ids(db, user_email)
+        completed_node_ids = db_ops.get_user_completed_node_ids(db, user_email)
+        user_completed_ids = user_completed_ids.union(completed_node_ids)
+    except Exception as e:
+        logger.error(f"Error fetching completions from DB: {e}")
+        # Fallback to in-memory
+        user_completed_ids = {c["course_id"] for c in course_completions if c["user_email"] == user_email}
     
     # [FIX] Also check user_node_progress for completions (from robust learning path)
     if user_email in user_node_progress:
@@ -4514,152 +5104,41 @@ async def get_path_nodes(user_email: str = "user"):
 # ==========================================
 
 @app.get("/learning-paths/self-learning-status/{user_email}")
-async def get_self_learning_status(user_email: str):
-    """Get user's self-learning completion status"""
-    user = users_store.get(user_email, {})
-    self_learning_completed = user.get("self_learning_completed", False)
-    
-    # Calculate self-learning progress
-    self_learning_courses = [c for c in content_store if c.get("isPathNode", False) and c.get("learning_path_type") == "self_learning"]
-    total_self_learning = len(self_learning_courses)
-    
-    # Get user's completed self-learning courses
-    user_completed_ids = {c["course_id"] for c in course_completions if c["user_email"] == user_email}
-    completed_self_learning = sum(1 for c in self_learning_courses if c.get("id") in user_completed_ids)
-    
-    progress_percent = (completed_self_learning / total_self_learning * 100) if total_self_learning > 0 else 100
-    
-    return {
-        "user_email": user_email,
-        "self_learning_completed": self_learning_completed,
-        "self_learning_progress": round(progress_percent, 1),
-        "completed_courses": completed_self_learning,
-        "total_courses": total_self_learning,
-        "career_path_unlocked": self_learning_completed or progress_percent >= 100
-    }
+async def get_self_learning_status(user_email: str, db: Session = Depends(get_db)):
+    """Get user's self-learning completion status - OPTIMIZED with DB queries"""
+    return db_ops.get_self_learning_status(db, user_email)
 
 @app.post("/learning-paths/complete-self-learning/{user_email}")
-async def complete_self_learning(user_email: str):
+async def complete_self_learning(user_email: str, db: Session = Depends(get_db)):
     """Mark user's self-learning as completed (called when all self-learning courses are done)"""
-    if user_email in users_store:
-        users_store[user_email]["self_learning_completed"] = True
+    # Update in database
+    user = db_ops.get_user_by_email(db, user_email)
+    if user:
+        user.self_learning_completed = True
+        db.commit()
         logger.info(f"User {user_email} completed self-learning path")
-        
+
         # Broadcast event
         await manager.broadcast({
             "type": "SELF_LEARNING_COMPLETED",
             "data": {"user_email": user_email}
         })
-        
+
         return {"status": "success", "message": "Self-learning completed, career progression unlocked!"}
-    
+
     return {"status": "error", "message": "User not found"}
 
 @app.get("/learning-paths/content/{path_type}")
-async def get_learning_path_content(path_type: str, user_email: str = "user"):
+async def get_learning_path_content_endpoint(path_type: str, user_email: str = "user", db: Session = Depends(get_db)):
     """
-    Get courses for a specific learning path type.
+    Get courses for a specific learning path type - OPTIMIZED with DB queries.
     path_type: 'self_learning' or 'career_progression'
     """
     # Validate path type
     if path_type not in ["self_learning", "career_progression"]:
         raise HTTPException(status_code=400, detail="Invalid path type. Use 'self_learning' or 'career_progression'")
-    
-    # Get user info
-    user = users_store.get(user_email, {})
-    self_learning_completed = user.get("self_learning_completed", False)
-    
-    # Filter courses by path type
-    if path_type == "self_learning":
-        # Self learning: MUST have learning_path_type == "self_learning"
-        filtered_courses = [
-            c for c in content_store 
-            if c.get("isPathNode", False) and c.get("learning_path_type") == "self_learning"
-        ]
-    else:
-        # Career progression: learning_path_type == "career_progression" or legacy (None/"")
-        filtered_courses = [
-            c for c in content_store 
-            if c.get("isPathNode", False) and c.get("learning_path_type", "career_progression") != "self_learning"
-        ]
-        
-        # APPLY ACCESS CONTROL FILTERING for career progression (curriculum hierarchy)
-        user_role = user.get("role", "Waffler")
-        access_rules = access_control_store.get(user_role)
-        
-        if access_rules:
-            # User has restricted access
-            accessible_buckets = access_rules.get("accessible_buckets", [])
-            accessible_courses = access_rules.get("accessible_courses", [])
-            max_visible = access_rules.get("max_courses_visible", -1)
-            
-            # Store original count before filtering
-            original_count = len(filtered_courses)
-            
-            # Filter to only accessible courses
-            # Allow: explicit courses, matching buckets, or uncategorized content (bucket=None)
-            filtered_courses = [
-                c for c in filtered_courses
-                if c.get("id") in accessible_courses or c.get("bucket") in accessible_buckets or c.get("bucket") is None
-            ]
-            
-            # Apply max visible limit if set and we have content
-            if max_visible > 0 and len(filtered_courses) > 0:
-                filtered_courses = filtered_courses[:max_visible]
-            
-            # FALLBACK: If filtering resulted in empty, show all (avoid empty state)
-            if len(filtered_courses) == 0 and original_count > 0:
-                logger.warning(f"Access control for {user_role} in career_progression resulted in empty. Showing all.")
-                # Refetch without access filter
-                filtered_courses = [
-                    c for c in content_store 
-                    if c.get("isPathNode", False) and c.get("learning_path_type", "career_progression") != "self_learning"
-                ]
-    
-    # Sort by timestamp (oldest first = linear order)
-    filtered_courses.sort(key=lambda x: x.get("timestamp", ""))
-    
-    # Get user's completed course IDs
-    user_completed_ids = {c["course_id"] for c in course_completions if c["user_email"] == user_email}
-    
-    # Check user_node_progress for completions too
-    if user_email in user_node_progress:
-        for nid, progress_data in user_node_progress[user_email].items():
-            if progress_data.get("completed", False):
-                user_completed_ids.add(nid)
-    
-    # Build response with status
-    response_nodes = []
-    found_active = False
-    
-    for node in filtered_courses:
-        node_resp = node.copy()
-        node_id = node_resp.get("id")
-        
-        if node_id in user_completed_ids:
-            node_resp["status"] = "completed"
-        elif not found_active:
-            node_resp["status"] = "active"
-            found_active = True
-        else:
-            node_resp["status"] = "locked"
-        
-        response_nodes.append(node_resp)
-    
-    # Calculate path completion
-    completed_count = sum(1 for n in response_nodes if n.get("status") == "completed")
-    total_count = len(response_nodes)
-    
-    return {
-        "path_type": path_type,
-        "courses": response_nodes,
-        "total_courses": total_count,
-        "completed_courses": completed_count,
-        "progress_percent": round((completed_count / total_count * 100) if total_count > 0 else 0, 1),
-        # For career path, check if it should be locked
-        "is_locked": path_type == "career_progression" and not self_learning_completed,
-        "lock_message": "Complete Self-Learning to unlock Career Progression" if (path_type == "career_progression" and not self_learning_completed) else None
-    }
+
+    return db_ops.get_learning_path_content(db, path_type, user_email)
 
 # --- HYGIENE CHECK ENDPOINTS ---
 
@@ -5356,11 +5835,11 @@ async def send_notification_endpoint(
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db)
 ):
-    """Send a notification to all users. Supports optional image/video upload."""
+    """Send a notification to all users. Supports optional image/video upload to CDN."""
     try:
         notification_id = str(uuid.uuid4())
 
-        # Handle file upload if present
+        # Handle file upload if present - upload to CDN
         media_url = None
         if file and file.filename:
             file_extension = file.filename.split('.')[-1].lower()
@@ -5371,8 +5850,25 @@ async def send_notification_endpoint(
                 content = await file.read()
                 f.write(content)
 
-            media_url = f"{BASE_URL}/uploads/{file_name}"
-            logger.info(f"Notification media uploaded: {media_url}")
+            # Upload to Cloudflare R2 CDN
+            if cdn_service.CDN_ENABLED:
+                cdn_object_key = f"notifications/{file_name}"
+                content_type = cdn_service.get_content_type(file_name)
+                cdn_url = cdn_service.upload_to_cdn(file_path, cdn_object_key, content_type)
+                if cdn_url:
+                    media_url = cdn_url
+                    logger.info(f"Notification media uploaded to CDN: {cdn_url}")
+                    # Delete local file after successful CDN upload
+                    try:
+                        os.remove(file_path)
+                    except:
+                        pass
+                else:
+                    media_url = f"{BASE_URL}/uploads/{file_name}"
+                    logger.warning("CDN upload failed for notification, using local storage")
+            else:
+                media_url = f"{BASE_URL}/uploads/{file_name}"
+                logger.info(f"Notification media uploaded locally: {media_url}")
 
         # Create notification in DATABASE
         notification_data = {
@@ -7946,57 +8442,7 @@ async def track_completion(
         logger.error(traceback.format_exc())
         return {"status": "error", "message": str(e)}
 
-@app.get("/user/level-progress/{user_email}")
-async def get_user_level_progress(user_email: str):
-    """Get detailed progress towards next level"""
-    try:
-        # Ensure user exists in users_store
-        if user_email not in users_store:
-            users_store[user_email] = {
-                "email": user_email,
-                "role": "Waffler",
-                "created_at": datetime.now().isoformat()
-            }
-            
-        user_data = users_store.get(user_email)
-        current_role = user_data.get("role", "Waffler")
-
-        
-        # Define Hierarchy
-        HIERARCHY = ['Waffler', 'Silver Waffler', 'Gold Waffler', 'Shift Manager', 'Assistant Store Manager']
-        
-        # Get requirements for CURRENT level
-        role_rules = access_control_store.get(current_role, {})
-        required_course_ids = role_rules.get("accessible_courses", [])
-        
-        # Get user completions
-        user_completed_ids = [c["course_id"] for c in course_completions if c["user_email"] == user_email]
-        
-        # Count how many required courses are done
-        completed_count = sum(1 for cid in required_course_ids if cid in user_completed_ids)
-        total_required = len(required_course_ids)
-        
-        next_level = None
-        if current_role in HIERARCHY:
-            idx = HIERARCHY.index(current_role)
-            if idx < len(HIERARCHY) - 1:
-                next_level = HIERARCHY[idx + 1]
-        
-        # Get total global completed nodes for display
-        total_completed_nodes = len(set(user_completed_ids))
-        
-        return {
-            "current_level": current_role,
-            "next_level": next_level,
-            "nodes_completed_in_level": completed_count,
-            "nodes_required_in_level": total_required,
-            "completed_nodes": total_completed_nodes, # Total global
-            "nodes_remaining": max(0, total_required - completed_count),
-            "progress_percent": int((completed_count / total_required * 100)) if total_required > 0 else 100
-        }
-    except Exception as e:
-        logger.error(f"Level progress error: {e}")
-        return {"error": str(e)}
+# Duplicate endpoint removed - now uses database queries at line 2344
 
 
 # ==========================================
@@ -8955,14 +9401,54 @@ class ConsequenceRequest(BaseModel):
 
 
 @app.get("/simulations")
-async def get_all_simulations():
-    """Get all available simulations."""
-    return simulations_store
+async def get_all_simulations(db: Session = Depends(get_db)):
+    """Get all available simulations - from DATABASE."""
+    # Get from database
+    db_simulations = db_ops.get_all_simulations(db, active_only=True)
+    result = []
+    for sim in db_simulations:
+        result.append({
+            "id": sim.id,
+            "title": sim.title,
+            "description": sim.description,
+            "category": sim.category,
+            "difficulty": sim.difficulty,
+            "duration": sim.duration,
+            "thumbnail": sim.thumbnail,
+            "nodes": sim.nodes or [],
+            "createdAt": sim.created_at.isoformat() if sim.created_at else None,
+            "updatedAt": sim.updated_at.isoformat() if sim.updated_at else None
+        })
+
+    # Merge with in-memory for backward compatibility
+    existing_ids = {s["id"] for s in result}
+    for sim in simulations_store:
+        if sim.get("id") not in existing_ids:
+            result.append(sim)
+
+    return result
 
 
 @app.get("/simulation/{simulation_id}")
-async def get_simulation(simulation_id: str):
-    """Get a specific simulation by ID."""
+async def get_simulation(simulation_id: str, db: Session = Depends(get_db)):
+    """Get a specific simulation by ID - from DATABASE."""
+    # Try database first
+    db_sim = db_ops.get_simulation_by_id(db, simulation_id)
+    if db_sim:
+        return {
+            "id": db_sim.id,
+            "title": db_sim.title,
+            "description": db_sim.description,
+            "category": db_sim.category,
+            "difficulty": db_sim.difficulty,
+            "duration": db_sim.duration,
+            "thumbnail": db_sim.thumbnail,
+            "nodes": db_sim.nodes or [],
+            "createdAt": db_sim.created_at.isoformat() if db_sim.created_at else None,
+            "updatedAt": db_sim.updated_at.isoformat() if db_sim.updated_at else None
+        }
+
+    # Fallback to in-memory
     for sim in simulations_store:
         if sim["id"] == simulation_id:
             return sim
@@ -8970,37 +9456,111 @@ async def get_simulation(simulation_id: str):
 
 
 @app.post("/simulation/save")
-async def save_simulation(simulation: SimulationData):
-    """Create or update a simulation."""
-    sim_dict = simulation.dict()
-    
-    # Check if exists (update) or new (create)
-    existing_idx = None
-    for i, sim in enumerate(simulations_store):
-        if sim["id"] == simulation.id:
-            existing_idx = i
-            break
-    
-    if existing_idx is not None:
-        # Update existing
-        sim_dict["updatedAt"] = datetime.now().isoformat()
-        sim_dict["createdAt"] = simulations_store[existing_idx].get("createdAt", datetime.now().isoformat())
-        simulations_store[existing_idx] = sim_dict
-        logger.info(f"Simulation updated: {simulation.title}")
-    else:
-        # Create new
-        sim_dict["createdAt"] = datetime.now().isoformat()
-        sim_dict["updatedAt"] = datetime.now().isoformat()
-        simulations_store.append(sim_dict)
-        logger.info(f"Simulation created: {simulation.title}")
-    
-    return {"success": True, "id": simulation.id}
+async def save_simulation(simulation: SimulationData, db: Session = Depends(get_db)):
+    """Create or update a simulation - SAVES TO DATABASE."""
+    try:
+        sim_dict = simulation.dict()
+
+        # Check if exists in database
+        existing_sim = db_ops.get_simulation_by_id(db, simulation.id)
+
+        if existing_sim:
+            # Update existing in database - use correct field names from SimulationData model
+            updates = {
+                "title": simulation.title,
+                "description": simulation.description,
+                "category": simulation.category,
+                "difficulty": simulation.difficulty,
+                "duration": simulation.estimatedTime,  # Map estimatedTime to duration
+                "thumbnail": simulation.thumbnailUrl,  # Map thumbnailUrl to thumbnail
+                "nodes": simulation.nodes
+            }
+            db_ops.update_simulation(db, simulation.id, updates)
+            logger.info(f"Simulation updated in DB: {simulation.title}")
+        else:
+            # Create new in database - use correct field names from SimulationData model
+            sim_data = {
+                "id": simulation.id,
+                "title": simulation.title,
+                "description": simulation.description,
+                "category": simulation.category,
+                "difficulty": simulation.difficulty,
+                "duration": simulation.estimatedTime,  # Map estimatedTime to duration
+                "thumbnail": simulation.thumbnailUrl,  # Map thumbnailUrl to thumbnail
+                "nodes": simulation.nodes
+            }
+            db_ops.create_simulation(db, sim_data)
+            logger.info(f"Simulation created in DB: {simulation.title}")
+
+        # Also update in-memory for backward compatibility
+        existing_idx = None
+        for i, sim in enumerate(simulations_store):
+            if sim["id"] == simulation.id:
+                existing_idx = i
+                break
+
+        if existing_idx is not None:
+            sim_dict["updatedAt"] = datetime.now().isoformat()
+            sim_dict["createdAt"] = simulations_store[existing_idx].get("createdAt", datetime.now().isoformat())
+            simulations_store[existing_idx] = sim_dict
+        else:
+            sim_dict["createdAt"] = datetime.now().isoformat()
+            sim_dict["updatedAt"] = datetime.now().isoformat()
+            simulations_store.append(sim_dict)
+
+        return {"success": True, "id": simulation.id}
+
+    except Exception as e:
+        logger.error(f"Error saving simulation: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to save simulation: {str(e)}")
 
 
 @app.delete("/simulation/{simulation_id}")
-async def delete_simulation(simulation_id: str):
-    """Delete a simulation."""
+async def delete_simulation_endpoint(simulation_id: str, db: Session = Depends(get_db)):
+    """Delete a simulation - from DATABASE and CDN (including all node videos)."""
     global simulations_store
+
+    # Get simulation before deletion to find all video URLs for CDN cleanup
+    video_urls_to_delete = []
+    try:
+        db_sim = db_ops.get_simulation_by_id(db, simulation_id)
+        if db_sim and db_sim.nodes:
+            # Extract video URLs from all nodes
+            for node in db_sim.nodes:
+                if isinstance(node, dict):
+                    video_url = node.get("videoUrl") or node.get("video_url")
+                    if video_url:
+                        video_urls_to_delete.append(video_url)
+    except Exception as e:
+        logger.error(f"Error getting simulation for CDN cleanup: {e}")
+
+    # Also check in-memory
+    for sim in simulations_store:
+        if sim.get("id") == simulation_id:
+            nodes = sim.get("nodes", [])
+            for node in nodes:
+                if isinstance(node, dict):
+                    video_url = node.get("videoUrl") or node.get("video_url")
+                    if video_url and video_url not in video_urls_to_delete:
+                        video_urls_to_delete.append(video_url)
+            break
+
+    # Delete all videos from CDN
+    if cdn_service.CDN_ENABLED and cdn_service.R2_PUBLIC_URL:
+        for video_url in video_urls_to_delete:
+            try:
+                if cdn_service.R2_PUBLIC_URL in video_url:
+                    object_key = video_url.replace(cdn_service.R2_PUBLIC_URL, "").lstrip("/")
+                    cdn_service.delete_from_cdn(object_key)
+                    logger.info(f"Deleted simulation video from CDN: {object_key}")
+            except Exception as e:
+                logger.error(f"Error deleting simulation video from CDN: {e}")
+
+    # Delete from database
+    db_ops.delete_simulation(db, simulation_id)
+
+    # Also delete from in-memory
     simulations_store = [s for s in simulations_store if s["id"] != simulation_id]
     logger.info(f"Simulation deleted: {simulation_id}")
     return {"success": True}
@@ -9008,21 +9568,41 @@ async def delete_simulation(simulation_id: str):
 
 @app.post("/simulation/upload-video")
 async def upload_simulation_video(video: UploadFile = File(...)):
-    """Upload a video clip for a simulation step."""
+    """Upload a video clip for a simulation step to Cloudflare R2 CDN."""
     try:
         # Generate unique filename
         file_ext = video.filename.split(".")[-1] if "." in video.filename else "mp4"
         unique_filename = f"sim_video_{uuid.uuid4()}.{file_ext}"
         file_path = os.path.join(UPLOAD_DIR, unique_filename)
-        
-        # Save file
+
+        # Save file temporarily
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(video.file, buffer)
-        
-        video_url = f"{BASE_URL}/uploads/{unique_filename}"
-        logger.info(f"Simulation video uploaded: {unique_filename}")
-        
-        return {"success": True, "url": video_url, "filename": unique_filename}
+
+        # Upload to Cloudflare R2 CDN
+        video_url = None
+        cdn_object_key = f"simulations/{unique_filename}"
+
+        if cdn_service.CDN_ENABLED:
+            content_type = cdn_service.get_content_type(unique_filename)
+            cdn_url = cdn_service.upload_to_cdn(file_path, cdn_object_key, content_type)
+            if cdn_url:
+                video_url = cdn_url
+                logger.info(f"Simulation video uploaded to CDN: {cdn_url}")
+                # Delete local file after successful CDN upload
+                try:
+                    os.remove(file_path)
+                    logger.info(f"Deleted local file after CDN upload: {file_path}")
+                except Exception as del_err:
+                    logger.warning(f"Could not delete local file: {del_err}")
+            else:
+                logger.warning("CDN upload failed, falling back to local storage")
+                video_url = f"{BASE_URL}/uploads/{unique_filename}"
+        else:
+            video_url = f"{BASE_URL}/uploads/{unique_filename}"
+            logger.info(f"Simulation video uploaded locally: {unique_filename}")
+
+        return {"success": True, "url": video_url, "filename": unique_filename, "cdn_key": cdn_object_key}
     except Exception as e:
         logger.error(f"Video upload error: {e}")
         return {"success": False, "error": str(e)}
@@ -9193,43 +9773,58 @@ store_analytics: List[dict] = []  # {store_id, store_name, completion_%, avg_sco
 employee_analytics: List[dict] = []  # {user_email, name, role, store, completion_%, avg_score, skills, risk_status}
 
 @app.get("/analytics/dashboard")
-async def get_analytics_dashboard():
-    """Main analytics dashboard with overview metrics"""
-    total_stores = len(set([e.get("store", "Unknown") for e in users_store.values() if e.get("role") != "Super Admin"]))
-    total_employees = len([u for u in users_store.values() if not u.get("is_superadmin")])
-    
-    # Calculate completion rates
-    total_completions = len(course_completions)
-    total_courses = len(content_store)
+async def get_analytics_dashboard(db: Session = Depends(get_db)):
+    """Main analytics dashboard with overview metrics - OPTIMIZED with DB queries"""
+    # Use optimized database queries instead of in-memory iteration
+    stats = db_ops.get_dashboard_stats(db)
+
+    total_stores = stats['total_stores']
+    total_employees = stats['total_users']
+    total_completions = stats['total_completions']
+    total_courses = stats['total_courses']
+    avg_quiz_score = stats['avg_quiz_score']
+    total_assessments = stats['total_assessments']
+    passed_assessments = stats['passed_assessments']
+
+    # Calculate completion rate
     avg_completion = (total_completions / max(total_employees * total_courses, 1)) * 100 if total_courses > 0 else 0
-    
-    # Calculate average quiz score
-    quiz_scores = [s.get("score", 0) for s in quiz_submissions]
-    avg_quiz_score = sum(quiz_scores) / len(quiz_scores) if quiz_scores else 0
-    
-    # Compliance score (from assessment submissions)
-    passing_assessments = len([a for a in assessment_submissions if a.get("passed")])
-    total_assessments = len(assessment_submissions)
-    compliance_score = (passing_assessments / total_assessments * 100) if total_assessments > 0 else 100
-    
+
+    # Compliance score
+    compliance_score = (passed_assessments / total_assessments * 100) if total_assessments > 0 else 100
+
     # Customer satisfaction (simulated based on training)
     customer_satisfaction = min(100, 75 + (avg_completion / 10))
-    
-    # Training completion trend (last 30 days)
+
+    # Training completion trend (last 30 days) - optimized single query
+    trend_results = db_ops.get_completion_trend(db, days=30)
+
+    # Fill in missing days with 0 completions
     from datetime import datetime, timedelta
-    today = datetime.now()
+    today = datetime.now().date()
+    trend_dict = {r['date']: r['count'] for r in trend_results}
     trend_data = []
     for i in range(30, 0, -1):
         date = today - timedelta(days=i)
-        date_str = date.strftime("%Y-%m-%d")
-        completions_on_date = len([c for c in course_completions if c.get("completed_at", "").startswith(date_str)])
-        trend_data.append({"date": date_str, "completions": completions_on_date})
-    
-    # Risk summary
-    high_risk_stores = len([s for s in store_analytics if s.get("risk_level") == "red"])
-    employees_needing_retraining = len([e for e in employee_analytics if e.get("risk_status") == "red"])
-    fully_compliant_stores = len([s for s in store_analytics if s.get("risk_level") == "green"])
-    
+        date_str = str(date)
+        trend_data.append({"date": date_str, "completions": trend_dict.get(date_str, 0)})
+
+    # Risk summary - calculated from store analytics
+    store_data = db_ops.get_store_analytics(db)
+    high_risk_stores = 0
+    fully_compliant_stores = 0
+    employees_needing_retraining = 0
+
+    for store in store_data:
+        user_count = store.get('user_count', 0)
+        completion_count = store.get('completion_count', 0)
+        completion_pct = (completion_count / max(user_count * total_courses, 1)) * 100 if total_courses > 0 else 0
+
+        if completion_pct < 30:
+            high_risk_stores += 1
+            employees_needing_retraining += user_count
+        elif completion_pct >= 60:
+            fully_compliant_stores += 1
+
     return {
         "overview": {
             "total_stores": total_stores,
@@ -9249,89 +9844,25 @@ async def get_analytics_dashboard():
 
 
 @app.get("/analytics/stores")
-async def get_store_performance():
-    """Store-wise performance analytics"""
-    from collections import defaultdict
-    
-    store_data = defaultdict(lambda: {
-        "store_name": "",
-        "completion_percent": 0,
-        "avg_quiz_score": 0,
-        "hygiene_score": 100,
-        "risk_level": "green",
-        "employee_count": 0,
-        "total_courses": 0,
-        "completed_courses": 0
-    })
-    
-    # Aggregate by store
-    for user_email, user in users_store.items():
-        if user.get("is_superadmin"):
-            continue
-        
-        store = user.get("store", "Unassigned")
-        store_data[store]["store_name"] = store
-        store_data[store]["employee_count"] += 1
-        
-        # Get user's completions
-        user_completions = [c for c in course_completions if c.get("user_email") == user_email]
-        store_data[store]["completed_courses"] += len(user_completions)
-        
-        # Quiz scores
-        user_quiz_scores = [s.get("score", 0) for s in quiz_submissions if s.get("user_name") == user.get("name")]
-        if user_quiz_scores:
-            store_data[store]["avg_quiz_score"] += sum(user_quiz_scores) / len(user_quiz_scores)
-    
-    # Calculate percentages and risk
-    stores_list = []
-    for store_id, data in store_data.items():
-        if data["employee_count"] > 0:
-            data["avg_quiz_score"] = round(data["avg_quiz_score"] / data["employee_count"], 1)
-            
-            total_expected = data["employee_count"] * len(content_store)
-            data["completion_percent"] = round((data["completed_courses"] / total_expected * 100) if total_expected > 0 else 0, 1)
-            
-            # Risk calculation
-            if data["completion_percent"] < 30 or data["avg_quiz_score"] < 50:
-                data["risk_level"] = "red"
-            elif data["completion_percent"] < 60 or data["avg_quiz_score"] < 70:
-                data["risk_level"] = "yellow"
-            else:
-                data["risk_level"] = "green"
-            
-            stores_list.append({"store_id": store_id, **data})
-    
-    return stores_list
+async def get_store_performance(db: Session = Depends(get_db)):
+    """Store-wise performance analytics - OPTIMIZED with DB queries"""
+    return db_ops.get_store_performance_data(db)
 
 
 @app.get("/analytics/stores/{store_name}")
-async def get_store_detail(store_name: str):
-    """Detailed store analytics with tabs"""
-    store_employees = [
-        {
-            "email": email,
-            "name": user.get("name"),
-            "role": user.get("role"),
-            "completion_percent": len([c for c in course_completions if c.get("user_email") == email]) / max(len(content_store), 1) * 100,
-            "avg_score": sum([s.get("score", 0) for s in quiz_submissions if s.get("user_name") == user.get("name")]) / max(len([s for s in quiz_submissions if s.get("user_name") == user.get("name")]), 1)
-        }
-        for email, user in users_store.items()
-        if user.get("store") == store_name and not user.get("is_superadmin")
-    ]
-    
-    # Calculate store-level metrics
-    total_completion = sum([e["completion_percent"] for e in store_employees]) / len(store_employees) if store_employees else 0
-    avg_score = sum([e["avg_score"] for e in store_employees]) / len(store_employees) if store_employees else 0
-    
+async def get_store_detail_endpoint(store_name: str, db: Session = Depends(get_db)):
+    """Detailed store analytics with tabs - OPTIMIZED with DB queries"""
+    store_data = db_ops.get_store_detail(db, store_name)
+
     return {
         "overview": {
             "store_name": store_name,
-            "completion_percent": round(total_completion, 1),
-            "avg_quiz_score": round(avg_score, 1),
+            "completion_percent": store_data["total_completion"],
+            "avg_quiz_score": store_data["avg_score"],
             "compliance_percent": 95.0,  # Simulated
             "customer_complaints_reduction": 25  # Simulated correlation
         },
-        "employees": store_employees,
+        "employees": store_data["employees"],
         "hygiene": {
             "sop_compliance": 92.0,
             "audit_ready": True,
@@ -9345,20 +9876,36 @@ async def get_store_detail(store_name: str):
 
 
 @app.get("/analytics/employees")
-async def get_employee_performance():
-    """Employee-wise performance analytics"""
+async def get_employee_performance(db: Session = Depends(get_db)):
+    """Employee-wise performance analytics - OPTIMIZED with DB queries"""
+    from sqlalchemy import func
+
+    # Get total courses
+    total_courses = db.query(func.count(DBContent.id)).scalar() or 1
+
+    # Get all non-superadmin users
+    users = db.query(DBUser).filter(DBUser.is_superadmin == False).all()
+
     employees_list = []
-    
-    for user_email, user in users_store.items():
-        if user.get("is_superadmin"):
-            continue
-        
-        user_completions = [c for c in course_completions if c.get("user_email") == user_email]
-        completion_percent = (len(user_completions) / max(len(content_store), 1)) * 100
-        
-        user_quiz_attempts = [s for s in quiz_submissions if s.get("user_name") == user.get("name")]
-        avg_score = sum([s.get("score", 0) for s in user_quiz_attempts]) / len(user_quiz_attempts) if user_quiz_attempts else 0
-        
+    for user in users:
+        # Get completion count
+        completion_count = db.query(func.count(DBCourseCompletion.id)).filter(
+            DBCourseCompletion.user_email == user.email
+        ).scalar() or 0
+
+        # Get quiz stats
+        from models import QuizSubmission
+        quiz_stats = db.query(
+            func.count(QuizSubmission.id),
+            func.avg(QuizSubmission.score)
+        ).filter(
+            QuizSubmission.user_email == user.email
+        ).first()
+
+        avg_score = round(float(quiz_stats[1]), 1) if quiz_stats and quiz_stats[1] else 0
+
+        completion_percent = (completion_count / total_courses) * 100
+
         # Risk status
         if completion_percent < 30 or avg_score < 50:
             risk_status = "red"
@@ -9366,56 +9913,68 @@ async def get_employee_performance():
             risk_status = "yellow"
         else:
             risk_status = "green"
-        
+
         employees_list.append({
-            "email": user_email,
-            "name": user.get("name"),
-            "role": user.get("role"),
-            "store": user.get("store", "Unassigned"),
+            "email": user.email,
+            "name": user.name,
+            "role": user.role,
+            "store": user.store or "Unassigned",
             "completion_percent": round(completion_percent, 1),
-            "avg_score": round(avg_score, 1),
+            "avg_score": avg_score,
             "risk_status": risk_status
         })
-    
+
     return employees_list
 
 
 @app.get("/analytics/employees/{user_email}")
-async def get_employee_detail(user_email: str):
-    """Detailed employee analytics with tabs"""
-    user = users_store.get(user_email)
+async def get_employee_detail(user_email: str, db: Session = Depends(get_db)):
+    """Detailed employee analytics with tabs - OPTIMIZED with DB queries"""
+    from sqlalchemy import func
+
+    # Get user from database
+    user = db_ops.get_user_by_email(db, user_email)
     if not user:
         raise HTTPException(status_code=404, detail="Employee not found")
-    
-    user_completions = [c for c in course_completions if c.get("user_email") == user_email]
-    user_quizzes = [s for s in quiz_submissions if s.get("user_name") == user.get("name")]
-    
-    # Calculate skill scores (from course completions and quiz scores)
+
+    # Get user analytics in one call
+    analytics = db_ops.get_user_analytics(db, user_email)
+
+    # Get total courses
+    from models import QuizSubmission
+    total_courses = db.query(func.count(DBContent.id)).scalar() or 0
+
+    # Get quiz stats
+    quiz_count = analytics.get('quiz_count', 0)
+    avg_quiz_score = analytics.get('avg_quiz_score', 0)
+
+    # Calculate completion count
+    completion_count = analytics.get('completion_count', 0)
+
+    # Calculate skill scores (simulated based on completions)
+    completion_pct = (completion_count / total_courses * 100) if total_courses > 0 else 0
     skill_scores = {
-        "product_knowledge": 75.0,
-        "hygiene": 88.0,
-        "pos": 92.0,
-        "customer_handling": 82.0,
-        "speed_of_service": 78.0
+        "product_knowledge": min(100, 50 + completion_pct / 2),
+        "hygiene": min(100, 60 + completion_pct / 3),
+        "pos": min(100, 70 + completion_pct / 4),
+        "customer_handling": min(100, 55 + completion_pct / 2.5),
+        "speed_of_service": min(100, 50 + completion_pct / 2)
     }
-    
-    # Learning streak
-    learning_streak = len(set([c.get("completed_at", "")[:10] for c in user_completions]))
-    
+
     # Weak topics from quiz analysis
-    weak_topics = ["Coffee Grinding", "Milk Texturing"] if len(user_quizzes) > 0 else []
-    
+    weak_topics = ["Coffee Grinding", "Milk Texturing"] if quiz_count > 0 else []
+
     return {
         "training": {
-            "assigned_courses": len(content_store),
-            "completed_courses": len(user_completions),
-            "pending_courses": len(content_store) - len(user_completions),
-            "learning_streak": learning_streak,
-            "xp_earned": sum([c.get("score", 0) * 10 for c in user_completions])
+            "assigned_courses": total_courses,
+            "completed_courses": completion_count,
+            "pending_courses": max(0, total_courses - completion_count),
+            "learning_streak": min(completion_count, 7),  # Simplified streak
+            "xp_earned": completion_count * 100
         },
         "quizzes": {
-            "attempts": len(user_quizzes),
-            "avg_score": sum([q.get("score", 0) for q in user_quizzes]) / len(user_quizzes) if user_quizzes else 0,
+            "attempts": quiz_count,
+            "avg_score": avg_quiz_score,
             "improvement_trend": "+12%",
             "weak_topics": weak_topics
         },
@@ -10495,29 +11054,6 @@ async def duplicate_content(content_id: str):
     return {"status": "success", "content": duplicate}
 
 
-@app.delete("/content/{content_id}")
-async def delete_content(content_id: str):
-    """Delete a content item"""
-    original_len = len(content_store)
-    content_store[:] = [c for c in content_store if c.get("id") != content_id]
-    
-    if len(content_store) == original_len:
-        raise HTTPException(status_code=404, detail="Content not found")
-    
-    # Add audit log
-    audit_logs.insert(0, {
-        "id": len(audit_logs) + 1,
-        "timestamp": datetime.now().isoformat(),
-        "admin_email": "admin",
-        "action": "DELETE_CONTENT",
-        "target": content_id,
-        "details": "Content deleted",
-        "ip_address": "0.0.0.0"
-    })
-    
-    return {"status": "success", "message": "Content deleted"}
-
-
 # ==========================================
 # PHASE 2: CERTIFICATION MANAGER ENDPOINTS
 # ==========================================
@@ -11419,15 +11955,94 @@ async def update_api_content(
 
 
 @app.delete("/api/content/{content_id}")
-async def delete_api_content(content_id: str):
-    """Delete content from library"""
-    original_len = len(content_store)
-    content_store[:] = [c for c in content_store if c.get("id") != content_id]
+async def delete_api_content(content_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """
+    Delete content from library - FAST version
+    Returns immediately after database deletion, runs cleanup in background
+    """
+    global content_store, resource_store
     
-    if len(content_store) == original_len:
-        raise HTTPException(status_code=404, detail="Content not found")
-    
-    return {"status": "success", "message": "Content deleted"}
+    try:
+        video_url = None
+        cdn_object_key = None
+        deleted_from_db = False
+
+        # 1. Quick lookup for CDN key and URL (single DB query)
+        try:
+            db_content = db_ops.get_content_by_id(db, content_id)
+            if db_content:
+                video_url = db_content.video_url or db_content.file_url
+                if db_content.extra_data and isinstance(db_content.extra_data, dict):
+                    cdn_object_key = db_content.extra_data.get("cdn_object_key")
+        except Exception as e:
+            logger.error(f"[API Delete] Error finding content: {e}")
+
+        # 2. Delete from database FIRST (critical operation - synchronous)
+        try:
+            deleted_from_db = db_ops.delete_content(db, content_id) or False
+            db_ops.delete_resource(db, content_id)  # Also try resource table
+        except Exception as e:
+            logger.error(f"[API Delete] DB delete error: {e}")
+
+        # 3. Delete from in-memory stores immediately (fast)
+        initial_content_len = len(content_store)
+        content_store[:] = [item for item in content_store if item.get("id") != content_id]
+        deleted_from_memory = len(content_store) < initial_content_len
+        
+        resource_store[:] = [item for item in resource_store if item.get("id") != content_id]
+
+        # Check if we deleted anything
+        if not deleted_from_db and not deleted_from_memory:
+            raise HTTPException(status_code=404, detail="Content not found")
+
+        # 4. Schedule background cleanup tasks (non-blocking)
+        def background_cleanup():
+            """Run slow cleanup operations in background"""
+            # CDN deletion
+            if cdn_service.CDN_ENABLED and (cdn_object_key or video_url):
+                try:
+                    object_key = cdn_object_key
+                    if not object_key and video_url and cdn_service.R2_PUBLIC_URL:
+                        if cdn_service.R2_PUBLIC_URL in video_url:
+                            object_key = video_url.replace(cdn_service.R2_PUBLIC_URL, "").lstrip("/")
+                    if object_key:
+                        cdn_service.delete_from_cdn(object_key)
+                        logger.info(f"[BG] Deleted from CDN: {object_key}")
+                except Exception as e:
+                    logger.error(f"[BG] CDN delete error: {e}")
+            
+            # Local file deletion
+            if video_url and "/uploads/" in video_url:
+                try:
+                    filename = video_url.split("/uploads/")[-1]
+                    file_path = os.path.join(UPLOAD_DIR, filename)
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                        logger.info(f"[BG] Deleted local file: {file_path}")
+                except Exception as e:
+                    logger.error(f"[BG] Local file delete error: {e}")
+            
+            # RAG cleanup
+            try:
+                rag_service.clear_rag_for_course(content_id)
+            except Exception as e:
+                logger.error(f"[BG] RAG clear error: {e}")
+            
+            logger.info(f"[BG] Background cleanup completed for: {content_id}")
+
+        background_tasks.add_task(background_cleanup)
+        
+        logger.info(f"[API Delete] Content deleted: {content_id} (cleanup scheduled)")
+        log_action("DELETE_CONTENT", content_id, "Content deleted from library")
+        
+        return {"status": "success", "message": "Content deleted successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[API Delete] Error: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete content: {str(e)}")
 
 
 @app.put("/api/content/{content_id}/category")
@@ -12215,6 +12830,10 @@ if __name__ == "__main__":
     # Load progression levels from database (or init defaults)
     logger.info("Loading progression levels from database...")
     load_levels_from_db()
+    
+    # Load access rules from database (curriculum hierarchy assignments)
+    logger.info("Loading access rules from database...")
+    load_access_rules_from_db()
     
     logger.info(f"Starting BW LMS Backend on {HOST}:{PORT}")
     uvicorn.run(app, host=HOST, port=PORT)

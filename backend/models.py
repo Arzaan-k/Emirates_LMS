@@ -50,7 +50,9 @@ class UserNodeProgress(Base):
     completed = Column(Boolean, default=False)
     progress_percent = Column(Float, default=0.0)
     time_spent_seconds = Column(Integer, default=0)
+    last_position = Column(Float, default=0.0)  # Video position in seconds
     last_accessed = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     quiz_attempts = Column(Integer, default=0)
     quiz_best_score = Column(Float, default=0.0)
     extra_data = Column(JSON, default={})
@@ -580,4 +582,71 @@ class AccessRule(Base):
 
     __table_args__ = (
         Index('idx_access_rule_level', 'level_name'),
+    )
+
+
+# ==========================================
+# SIMULATION MODELS
+# ==========================================
+
+class Simulation(Base):
+    """First-person simulation/scenario store"""
+    __tablename__ = "simulations"
+
+    id = Column(String(255), primary_key=True)
+    title = Column(String(500), nullable=False)
+    description = Column(Text)
+    category = Column(String(255))
+    difficulty = Column(String(50))
+    duration = Column(String(100))
+    thumbnail = Column(String(1000))
+    nodes = Column(JSON, default=[])  # Array of simulation nodes/steps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by = Column(String(255))
+    is_active = Column(Boolean, default=True)
+
+    __table_args__ = (
+        Index('idx_simulation_category', 'category'),
+        Index('idx_simulation_active', 'is_active'),
+    )
+
+
+class SimulationProgress(Base):
+    """User progress through simulations"""
+    __tablename__ = "simulation_progress"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_email = Column(String(255), nullable=False, index=True)
+    simulation_id = Column(String(255), ForeignKey('simulations.id'), nullable=False)
+    current_node_id = Column(String(255))
+    completed = Column(Boolean, default=False)
+    score = Column(Float, default=0.0)
+    time_spent_seconds = Column(Integer, default=0)
+    choices_made = Column(JSON, default=[])  # Track user's choices
+    completed_at = Column(DateTime)
+    started_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_sim_progress_user', 'user_email'),
+        Index('idx_sim_progress_sim', 'simulation_id'),
+    )
+
+
+class LiveQuiz(Base):
+    """Live/Topic quizzes for quick assessments"""
+    __tablename__ = "live_quizzes"
+
+    id = Column(String(255), primary_key=True)
+    title = Column(String(500), nullable=False)
+    difficulty = Column(String(50))
+    time_limit = Column(String(100))
+    image = Column(String(1000))
+    questions = Column(JSON, default=[])
+    created_at = Column(DateTime, default=datetime.utcnow)
+    created_by = Column(String(255))
+    is_active = Column(Boolean, default=True)
+
+    __table_args__ = (
+        Index('idx_live_quiz_active', 'is_active'),
     )

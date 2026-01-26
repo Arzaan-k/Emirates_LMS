@@ -28,7 +28,7 @@
       "package": "com.gajjoshi.LMS_BW"
     },
     "web": {
-      "favicon": "./favicon.ico"
+      "favicon": "./assets/BW_Logo.png"
     },
     "plugins": [
       "expo-secure-store",
