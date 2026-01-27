@@ -422,6 +422,32 @@ async def get_resource_categories():
     ]
 
 
+# In-memory resource categories store (for dynamic categories created by users)
+_resource_categories_store = []
+
+
+@router.post("/resources/all/category")
+async def create_resource_category(
+    name: str = Form(...),
+    icon: str = Form("folder"),
+    color1: str = Form("#6366F1"),
+    color2: str = Form("#4338CA")
+):
+    """
+    Create a new resource category.
+    """
+    new_cat = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "icon": icon,
+        "color": [color1, color2],
+        "bg": "#F3F4F6"
+    }
+    _resource_categories_store.append(new_cat)
+    logger.info(f"Resource category created: {name}")
+    return {"status": "success", "category": new_cat}
+
+
 @router.post("/resources")
 async def upload_resource(
     background_tasks: BackgroundTasks,

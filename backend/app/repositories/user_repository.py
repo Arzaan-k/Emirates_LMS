@@ -71,6 +71,7 @@ class UserRepository(BaseRepository[User]):
         self,
         store: Optional[str] = None,
         role: Optional[str] = None,
+        search: Optional[str] = None,
     ) -> int:
         """Count non-admin users with filters."""
         query = self.db.query(func.count(User.id)).filter(User.is_superadmin == False)
@@ -79,6 +80,14 @@ class UserRepository(BaseRepository[User]):
             query = query.filter(User.store == store)
         if role:
             query = query.filter(User.role == role)
+        if search:
+            search_term = f"%{search}%"
+            query = query.filter(
+                or_(
+                    User.email.ilike(search_term),
+                    User.name.ilike(search_term)
+                )
+            )
 
         return query.scalar() or 0
 

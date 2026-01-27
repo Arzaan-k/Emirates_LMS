@@ -193,7 +193,7 @@ const CreateUser = ({
 
     const fetchStores = async () => {
         try {
-            const response = await fetch(`${API_URL}/stores`);
+            const response = await fetch(`${API_URL}/api/v1/users/stores/all`);
             const data = await response.json();
             if (Array.isArray(data)) {
                 setStores(data);

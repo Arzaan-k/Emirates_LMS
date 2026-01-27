@@ -392,12 +392,11 @@ export default function ManagerDashboard({ route, navigation }) {
 
             // Use the universal resource upload endpoint
             // It will handle adding to Knowledge Base AND optionally to Learning Path
-            const response = await fetch(`${API_URL}/upload`, {
+            const response = await fetch(`${API_URL}/api/v1/content`, {
                 method: 'POST',
                 body: formData,
                 headers: {
                     'Accept': 'application/json',
-                    'Content-Type': 'multipart/form-data',
                 },
             });
 
@@ -566,15 +565,15 @@ export default function ManagerDashboard({ route, navigation }) {
                 type: aiQuizFile.mimeType || 'application/octet-stream'
             });
 
-            const response = await fetch(`${API_URL}/generate-quiz-from-content`, {
+            const response = await fetch(`${API_URL}/api/v1/quizzes/generate/from-content`, {
                 method: 'POST',
                 body: formData
             });
 
             const result = await response.json();
-            if (result.status === 'success' && result.data?.questions) {
+            if (result.status === 'success' && result.questions) {
                 // Fill the form with generated questions for manual editing
-                const generatedQuestions = result.data.questions.map(q => ({
+                const generatedQuestions = result.questions.map(q => ({
                     question: q.question || '',
                     options: q.options?.map(o => typeof o === 'string' ? o : o.text) || ['', '', '', ''],
                     correct: q.correctIndex || q.correct || 0
@@ -717,14 +716,14 @@ export default function ManagerDashboard({ route, navigation }) {
 
     const handleAssignQuiz = async () => {
         try {
-            await fetch(`${API_URL}/notify`, {
+            const formData = new FormData();
+            formData.append('title', 'New Quiz Assigned!');
+            formData.append('message', `Manager ${name} assigned '${role === 'Store Manager' ? 'Espresso Calibration' : 'Safety Drill'}' quiz.`);
+            formData.append('type', 'quiz');
+
+            await fetch(`${API_URL}/api/v1/notifications/send`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    title: "New Quiz Assigned!",
-                    message: `Manager ${name} assigned '${role === 'Store Manager' ? 'Espresso Calibration' : 'Safety Drill'}' quiz.`,
-                    type: "quiz"
-                })
+                body: formData
             });
             Alert.alert("Assigned", "Quiz notification sent to all staff!");
         } catch (e) {
@@ -800,10 +799,10 @@ export default function ManagerDashboard({ route, navigation }) {
 
     const handleGenerateQuiz = async (transcript) => {
         try {
-            const response = await fetch(`${API_URL}/ai/generate_quiz`, {
+            const response = await fetch(`${API_URL}/api/v1/quizzes/generate/from-topic`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ transcript })
+                body: JSON.stringify({ topic: transcript, num_questions: 5 })
             });
             const data = await response.json();
             return data;

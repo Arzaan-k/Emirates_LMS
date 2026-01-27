@@ -41,7 +41,7 @@ export default function Hierarchy({ navigation, route }) {
 
     const fetchHierarchy = async () => {
         try {
-            const res = await fetch(`${API_URL}/admin/hierarchy`);
+            const res = await fetch(`${API_URL}/api/v1/levels/hierarchy`);
             const data = await res.json();
             if (Array.isArray(data) && data.length > 0) {
                 // Add bg color based on color if not present

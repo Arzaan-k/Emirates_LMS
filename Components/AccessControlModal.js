@@ -45,7 +45,7 @@ export default function AccessControlModal({ visible, onClose }) {
         setLoading(true);
         try {
             // 1. Fetch Dynamic Levels from backend
-            const levelsRes = await fetch(`${API_URL}/api/v1/levels`);
+            const levelsRes = await fetch(`${API_URL}/api/v1/levels/`);
             const levelsData = await levelsRes.json();
             const levels = levelsData.levels || [];
 
@@ -59,7 +59,7 @@ export default function AccessControlModal({ visible, onClose }) {
             setBuckets(bucketData || []);
 
             // 3. Fetch All Courses - Career Progression courses for curriculum assignment
-            const courseRes = await fetch(`${API_URL}/api/v1/content`);
+            const courseRes = await fetch(`${API_URL}/api/v1/content/`);
             const courseData = await courseRes.json();
             const careerProgressionCourses = (courseData || []).filter(c => {
                 const pathType = c.learning_path_type || 'career_progression';
@@ -69,7 +69,7 @@ export default function AccessControlModal({ visible, onClose }) {
             setAllCourses(careerProgressionCourses);
 
             // 4. Fetch Access Rules
-            const rulesRes = await fetch(`${API_URL}/api/v1/users/privileges/all`);
+            const rulesRes = await fetch(`${API_URL}/api/v1/levels/access-rules`);
             const rulesData = await rulesRes.json();
 
             // Initialize staged assignments from existing rules (by level name)
@@ -146,8 +146,8 @@ export default function AccessControlModal({ visible, onClose }) {
             formData.append('accessible_buckets', JSON.stringify(existingRules.accessible_buckets || []));
             formData.append('max_courses_visible', String(existingRules.max_courses_visible || -1));
 
-            const res = await fetch(`${API_URL}/api/v1/users/privileges/all/${level.name}`, {
-                method: 'POST',
+            const res = await fetch(`${API_URL}/api/v1/levels/access-rules/${level.name}`, {
+                method: 'PUT',
                 body: formData
             });
 

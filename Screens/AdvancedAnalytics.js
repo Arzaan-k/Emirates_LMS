@@ -93,7 +93,7 @@ const AnalyticsDashboard = ({ onNavigate }) => {
                 // Fallback logic kept from previous step
                 const usersRes = await fetch(`${API_URL}/api/v1/users/list?limit=1000`);
                 const usersData = await usersRes.json();
-                const storesRes = await fetch(`${API_URL}/stores/summary`);
+                const storesRes = await fetch(`${API_URL}/api/v1/users/stores/summary`);
                 const storesData = await storesRes.json();
 
                 setData({
@@ -351,7 +351,7 @@ const StorePerformance = () => {
             if (Array.isArray(json) && json.length > 0) {
                 setStores(json);
             } else {
-                res = await fetch(`${API_URL}/stores/summary`);
+                res = await fetch(`${API_URL}/api/v1/users/stores/summary`);
                 json = await res.json();
                 if (Array.isArray(json)) {
                     setStores(json.map((s, i) => ({
@@ -513,7 +513,7 @@ const HygieneCompliance = () => {
             const json = await res.json();
             if (json.summary) setData(json);
             else {
-                const stores = await (await fetch(`${API_URL}/stores/summary`)).json();
+                const stores = await (await fetch(`${API_URL}/api/v1/users/stores/summary`)).json();
                 setData({
                     summary: { fully_compliant_stores: stores.length, stores_needing_attention: 0, critical_risk_stores: 0 },
                     stores: stores.map(s => ({ store_name: s.name, sop_compliance: 95, audit_ready: true, risk_level: 'green' }))
@@ -583,7 +583,7 @@ const ReportsExport = () => {
     useEffect(() => { fetchReportData(); }, []);
     const fetchReportData = async () => {
         try {
-            const [usersRes, storesRes] = await Promise.all([fetch(`${API_URL}/api/v1/users/list?limit=1000`), fetch(`${API_URL}/stores/summary`)]);
+            const [usersRes, storesRes] = await Promise.all([fetch(`${API_URL}/api/v1/users/list?limit=1000`), fetch(`${API_URL}/api/v1/users/stores/summary`)]);
             setReportData({ users: (await usersRes.json()).users || [], stores: (await storesRes.json()) || [] });
         } catch (e) {
             console.error(e);

@@ -24,7 +24,7 @@ router = APIRouter(prefix="/users", tags=["Users"])
 # USER CRUD ENDPOINTS
 # ==========================================
 
-@router.get("/", response_model=List[Dict[str, Any]])
+@router.get("/", response_model=Dict[str, Any])
 async def list_users(
     page: int = 1,
     limit: int = 50,
@@ -48,13 +48,25 @@ async def list_users(
     )
     
     # Remove passwords from response
-    result = []
+    user_list = []
     for user in users:
         user_dict = user.to_dict() if hasattr(user, 'to_dict') else dict(user)
         user_dict.pop('password', None)
-        result.append(user_dict)
+        user_list.append(user_dict)
+        
+    # Get total count for pagination
+    total = service.get_user_count(
+        store=store if store else None,
+        role=role if role else None,
+        search=search if search else None
+    )
     
-    return result
+    return {
+        "users": user_list,
+        "total": total,
+        "page": page,
+        "total_pages": (total + limit - 1) // limit if limit > 0 else 1
+    }
 
 
 # ==========================================
@@ -121,7 +133,7 @@ async def update_user_alias(
         logger.info(f"User updated via alias: {email}")
         user_dict = user.to_dict() if hasattr(user, 'to_dict') else dict(user)
         user_dict.pop('password', None)
-        return user_dict
+        return {"status": "success", "user": user_dict}
     except Exception as e:
         logger.error(f"User update failed: {e}")
         raise
@@ -166,98 +178,64 @@ async def create_user(
         logger.info(f"User created: {user_data['email']}")
         user_dict = user.to_dict() if hasattr(user, 'to_dict') else dict(user)
         user_dict.pop('password', None)
-        return user_dict
+        return {"status": "success", "user": user_dict}
     except Exception as e:
         logger.error(f"User creation failed: {e}")
         raise
 
 
-@router.get("/{email}")
-async def get_user(
-    email: str,
-    db: Session = Depends(get_db)
-):
-    """
-    Returns a specific user by email (without password).
-    """
-    service = UserService(db)
-    user = service.get_user_by_email(email)
-    
-    user_dict = user.to_dict() if hasattr(user, 'to_dict') else dict(user)
-    user_dict.pop('password', None)
-    return user_dict
 
-
-@router.get("/{email}/self-learning-status")
-async def get_user_self_learning_status(
-    email: str,
-    db: Session = Depends(get_db)
-):
-    """
-    Get self learning status for user.
-    """
-    service = UserService(db)
-    return service.get_self_learning_status(email)
-
-
-@router.put("/{email}")
-async def update_user(
-    email: str,
-    data: Dict[str, Any],
-    db: Session = Depends(get_db)
-):
-    """
-    Updates an existing user's privileges, role, and store assignment.
-    """
-    service = UserService(db)
-    
-    updates = {}
-    if "name" in data:
-        updates["name"] = data["name"]
-    if "role" in data:
-        updates["role"] = data["role"]
-    if "category" in data:
-        updates["category"] = data["category"]
-    if "store" in data:
-        updates["store"] = data["store"]
-    if "privileges" in data:
-        updates["privileges"] = data["privileges"]
-    if "has_admin_access" in data:
-        updates["has_admin_access"] = data["has_admin_access"]
-    
-    try:
-        user = service.update_user(email, updates)
-        logger.info(f"User updated: {email}")
-        user_dict = user.to_dict() if hasattr(user, 'to_dict') else dict(user)
-        user_dict.pop('password', None)
-        return user_dict
-    except Exception as e:
-        logger.error(f"User update failed: {e}")
-        raise
-
-
-@router.delete("/{email}")
-async def delete_user(
-    email: str,
-    db: Session = Depends(get_db),
-    current_user: Dict[str, Any] = Depends(require_admin)
-):
-    """
-    Delete a user (admin only).
-    """
-    service = UserService(db)
-    try:
-        service.delete_user(email)
-        logger.info(f"User deleted: {email}")
-        return {"message": f"User {email} deleted successfully"}
-    except Exception as e:
-        logger.error(f"User deletion failed: {e}")
-        raise
 
 
 # ==========================================
 # USER PRIVILEGES ENDPOINTS
 # ==========================================
+
+@router.get("/privileges")
+async def get_privileges_alias():
+    """
+    Alias for /users/privileges/all - returns list as array (backward compatibility).
+    """
+    from app.services.user_service import ALL_PRIVILEGES
+
+    PRIVILEGE_ICONS = {
+        "team_list": "users",
+        "reports": "bar-chart-2",
+        "assign_quiz": "check-square",
+        "audits": "shield",
+        "upload_training": "upload-cloud",
+        "bulk_upload": "database",
+        "post_news": "bell",
+        "post_quiz": "edit-3",
+        "create_user": "user-plus",
+        "live_tracking": "map-pin",
+        "proctored_assessment": "monitor",
+        "proctored_create_manage": "settings",
+        "proctored_view_results": "file-text",
+        "view_analytics": "trending-up",
+        "send_notification": "send",
+        "access_control": "lock",
+        "manage_buckets": "folder-plus",
+        "schedule_meeting": "video",
+        "crm_tickets": "tag",
+        "manage_simulations": "play-circle",
+        "manage_learning_path": "git-merge",
+        "scheduled_exams": "calendar",
+        "exam_reports": "file-text",
+        "support_library": "book-open",
+        "view_audit_logs": "clipboard",
+    }
+
+    # Return as array directly (what frontend expects)
+    return [
+        {
+            "id": priv,
+            "name": priv.replace("_", " ").title(),
+            "icon": PRIVILEGE_ICONS.get(priv, "check")
+        }
+        for priv in ALL_PRIVILEGES
+    ]
+
 
 @router.get("/privileges/all")
 async def get_all_privileges():
@@ -332,36 +310,47 @@ async def update_user_privileges(
 # USER CATEGORIES ENDPOINTS
 # ==========================================
 
+# In-memory store for dynamic categories
+_user_categories_store = [
+    {"id": "1", "name": "Super Admin", "description": "Full access to everything", "color": "#9333EA"},
+    {"id": "2", "name": "Manager", "description": "Store manager with admin access", "color": "#2563EB"},
+    {"id": "3", "name": "Supervisor", "description": "Team supervisor with limited admin", "color": "#10B981"},
+    {"id": "4", "name": "Employee", "description": "Regular employee access", "color": "#F59E0B"},
+]
+
+
+@router.get("/categories")
+async def get_user_categories_alias():
+    """
+    Returns list of all user categories (array directly for frontend compatibility).
+    """
+    return _user_categories_store
+
+
 @router.get("/categories/all")
 async def get_user_categories():
     """
     Returns list of all user categories.
     """
-    return [
-        {"id": "1", "name": "Super Admin", "description": "Full access to everything", "color": "#9333EA"},
-        {"id": "2", "name": "Manager", "description": "Store manager with admin access", "color": "#2563EB"},
-        {"id": "3", "name": "Supervisor", "description": "Team supervisor with limited admin", "color": "#10B981"},
-        {"id": "4", "name": "Employee", "description": "Regular employee access", "color": "#F59E0B"},
-    ]
+    return _user_categories_store
 
 
 @router.post("/categories")
 async def create_user_category(
-    data: Dict[str, Any],
-    current_user: Dict[str, Any] = Depends(require_admin)
+    data: Dict[str, Any]
 ):
     """
-    Creates a new user category (Admin only).
+    Creates a new user category.
     """
-    # Category creation would require database storage
-    # For now, return the new category
     import uuid
-    return {
+    new_category = {
         "id": str(uuid.uuid4())[:8],
         "name": data.get("name"),
         "description": data.get("description", ""),
         "color": data.get("color", "#6B7280")
     }
+    _user_categories_store.append(new_category)
+    return {"status": "success", "category": new_category}
 
 
 # ==========================================
@@ -497,3 +486,89 @@ async def get_bulk_upload_template():
             "Password will be hashed automatically"
         ]
     }
+
+# ==========================================
+# USER CRUD BY EMAIL (MOVED TO END TO AVOID SHADOWING)
+# ==========================================
+
+@router.get("/{email}")
+async def get_user(
+    email: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Returns a specific user by email (without password).
+    """
+    service = UserService(db)
+    user = service.get_user_by_email(email)
+    
+    user_dict = user.to_dict() if hasattr(user, 'to_dict') else dict(user)
+    user_dict.pop('password', None)
+    return user_dict
+
+
+@router.get("/{email}/self-learning-status")
+async def get_user_self_learning_status(
+    email: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get self learning status for user.
+    """
+    service = UserService(db)
+    return service.get_self_learning_status(email)
+
+
+@router.put("/{email}")
+async def update_user(
+    email: str,
+    data: Dict[str, Any],
+    db: Session = Depends(get_db)
+):
+    """
+    Updates an existing user's privileges, role, and store assignment.
+    """
+    service = UserService(db)
+    
+    updates = {}
+    if "name" in data:
+        updates["name"] = data["name"]
+    if "role" in data:
+        updates["role"] = data["role"]
+    if "category" in data:
+        updates["category"] = data["category"]
+    if "store" in data:
+        updates["store"] = data["store"]
+    if "privileges" in data:
+        updates["privileges"] = data["privileges"]
+    if "has_admin_access" in data:
+        updates["has_admin_access"] = data["has_admin_access"]
+    
+    try:
+        user = service.update_user(email, updates)
+        logger.info(f"User updated: {email}")
+        user_dict = user.to_dict() if hasattr(user, 'to_dict') else dict(user)
+        user_dict.pop('password', None)
+        return {"status": "success", "user": user_dict}
+    except Exception as e:
+        logger.error(f"User update failed: {e}")
+        raise
+
+
+@router.delete("/{email}")
+async def delete_user(
+    email: str,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """
+    Delete a user (admin only).
+    """
+    service = UserService(db)
+    try:
+        service.delete_user(email)
+        logger.info(f"User deleted: {email}")
+        return {"message": f"User {email} deleted successfully"}
+    except Exception as e:
+        logger.error(f"User deletion failed: {e}")
+        raise

@@ -512,7 +512,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                 formData.append('difficulty', aiDifficulty);
                 formData.append('preview_only', 'true'); // We just want questions, not to save the quiz
 
-                response = await fetch(`${API_URL}/generate-quiz-from-content`, {
+                response = await fetch(`${API_URL}/api/v1/quizzes/generate/from-content`, {
                     method: 'POST',
                     body: formData
                 });

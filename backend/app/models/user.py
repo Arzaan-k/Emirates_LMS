@@ -77,17 +77,25 @@ class User(Base):
 
     def to_dict(self):
         """Convert to dictionary for API responses."""
+        # Ensure privileges is always a list, never null
+        privileges = self.privileges if isinstance(self.privileges, list) else []
+
+        # If user is superadmin, automatically grant all privileges for frontend compatibility
+        if self.is_superadmin:
+            from app.services.user_service import ALL_PRIVILEGES
+            privileges = ALL_PRIVILEGES
+
         return {
             "id": self.id,
             "email": self.email,
             "name": self.name,
             "role": self.role,
             "category": self.category,
-            "privileges": self.privileges or [],
-            "is_superadmin": self.is_superadmin,
-            "has_admin_access": self.has_admin_access,
+            "privileges": privileges,
+            "is_superadmin": self.is_superadmin or False,
+            "has_admin_access": self.has_admin_access or False,
             "store": self.store,
-            "self_learning_completed": self.self_learning_completed,
+            "self_learning_completed": self.self_learning_completed or False,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

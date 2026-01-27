@@ -44,18 +44,18 @@ async def lifespan(app: FastAPI):
     """
     # Startup
     logger.info("Starting BW LMS Backend...")
-    
+
     # Create database tables
     try:
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables created/verified")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
-    
+
     # Ensure upload directory exists
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     logger.info(f"Upload directory: {settings.UPLOAD_DIR}")
-    
+
     # Initialize FFmpeg path
     try:
         import imageio_ffmpeg
@@ -66,11 +66,11 @@ async def lifespan(app: FastAPI):
         logger.info(f"FFmpeg configured: {ffmpeg_dir}")
     except Exception as e:
         logger.warning(f"FFmpeg configuration failed: {e}")
-    
+
     logger.info(f"Server starting at {settings.BASE_URL}")
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down BW LMS Backend...")
 
@@ -144,10 +144,10 @@ async def health_check():
         db_status = "connected"
     except Exception as e:
         db_status = f"error: {str(e)[:50]}"
-    
+
     ai_status = "configured" if os.environ.get("GROQ_API_KEY") else "not_configured"
     cdn_status = "configured" if os.environ.get("R2_ACCOUNT_ID") else "not_configured"
-    
+
     return {
         "status": "healthy" if db_status == "connected" else "degraded",
         "timestamp": datetime.utcnow().isoformat(),
@@ -197,12 +197,12 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     port = int(os.environ.get("PORT", 8000))
     host = "0.0.0.0"
-    
+
     logger.info(f"Starting server on {host}:{port}")
-    
+
     uvicorn.run(
         "main:app",
         host=host,

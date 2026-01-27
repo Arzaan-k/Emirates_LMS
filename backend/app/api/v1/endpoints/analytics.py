@@ -560,12 +560,130 @@ async def get_skill_gaps_analysis(db: Session = Depends(get_db)):
     Get company-wide skill gap analysis.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
     repo = AnalyticsRepository(db)
-    
+
     try:
         analysis = repo.get_company_skill_gaps()
         return analysis
     except Exception as e:
         logger.error(f"Skill gaps analysis fetch failed: {e}")
         return {}
+
+
+@router.get("/detailed-report/{user_email}")
+async def get_user_detailed_report(
+    user_email: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get aggregated data for detailed employee report.
+    Includes profile, activity log, completions, quizzes, and attendance.
+    """
+    from app.repositories.user_repository import UserRepository
+    from app.repositories.analytics_repository import AnalyticsRepository
+
+    user_repo = UserRepository(db)
+    analytics_repo = AnalyticsRepository(db)
+
+    # 1. Get user profile
+    user = user_repo.get_by_email(user_email)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # 2. Get learning profile and stats
+    try:
+        profile = analytics_repo.get_user_learning_profile(user_email)
+    except:
+        profile = {"skill_scores": {}, "total_xp": 0, "courses_completed": 0}
+
+    # 3. Get completions from database
+    completions = []
+    try:
+        from app.models.tracking import CourseCompletion
+        db_completions = db.query(CourseCompletion).filter(
+            CourseCompletion.user_email == user_email
+        ).order_by(CourseCompletion.completed_at.desc()).limit(50).all()
+        completions = [c.to_dict() if hasattr(c, 'to_dict') else {"course_id": c.course_id, "score": c.score} for c in db_completions]
+    except Exception as e:
+        logger.error(f"Error fetching completions: {e}")
+
+    # 4. Get quiz submissions
+    quizzes = []
+    try:
+        from app.models.quiz import QuizSubmission
+        db_quizzes = db.query(QuizSubmission).filter(
+            QuizSubmission.user_email == user_email
+        ).order_by(QuizSubmission.submitted_at.desc()).limit(50).all()
+        quizzes = [q.to_dict() if hasattr(q, 'to_dict') else {"quiz_id": q.quiz_id, "score": q.score} for q in db_quizzes]
+    except Exception as e:
+        logger.error(f"Error fetching quiz submissions: {e}")
+
+    # 5. Get attendance records
+    attendance = []
+    try:
+        from app.models.tracking import AttendanceRecord
+        db_attendance = db.query(AttendanceRecord).filter(
+            AttendanceRecord.user_email == user_email
+        ).order_by(AttendanceRecord.punch_in.desc()).limit(30).all()
+        attendance = [a.to_dict() if hasattr(a, 'to_dict') else {"punch_in": str(a.punch_in)} for a in db_attendance]
+    except Exception as e:
+        logger.error(f"Error fetching attendance: {e}")
+
+    # Calculate stats
+    total_xp = profile.get("total_xp", 0)
+    avg_quiz_score = 0
+    if quizzes:
+        scores = [q.get("score", 0) for q in quizzes if q.get("score") is not None]
+        if scores:
+            avg_quiz_score = sum(scores) / len(scores)
+
+    # Count unique days present
+    days_present = len(set([
+        a.get("punch_in", "").split("T")[0]
+        for a in attendance
+        if a.get("punch_in")
+    ]))
+
+    return {
+        "user_profile": {
+            "name": user.name,
+            "email": user.email,
+            "role": user.role,
+            "store": user.store,
+            "joined": user.created_at.isoformat() if hasattr(user, 'created_at') and user.created_at else None
+        },
+        "stats": {
+            "total_logins": 0,  # Would need activity log tracking
+            "courses_completed": len(completions),
+            "quizzes_taken": len(quizzes),
+            "days_present": days_present,
+            "last_active": completions[0].get("completed_at") if completions else None
+        },
+        "recent_activity": completions[:20],
+        "performance_metrics": {
+            "avg_quiz_score": round(avg_quiz_score, 1),
+            "total_xp": total_xp
+        }
+    }
+
+
+@router.get("/stores")
+async def get_stores():
+    """
+    Returns list of all stores for employee assignment.
+    """
+    return [
+        {"id": "1", "name": "HQ", "city": "Mumbai", "region": "West"},
+        {"id": "2", "name": "Mumbai Central", "city": "Mumbai", "region": "West"},
+        {"id": "3", "name": "Mumbai Andheri", "city": "Mumbai", "region": "West"},
+        {"id": "4", "name": "Delhi CP", "city": "Delhi", "region": "North"},
+        {"id": "5", "name": "Delhi Saket", "city": "Delhi", "region": "North"},
+        {"id": "6", "name": "Delhi Gurgaon", "city": "Gurgaon", "region": "North"},
+        {"id": "7", "name": "Bangalore Indiranagar", "city": "Bangalore", "region": "South"},
+        {"id": "8", "name": "Bangalore Koramangala", "city": "Bangalore", "region": "South"},
+        {"id": "9", "name": "Chennai Anna Nagar", "city": "Chennai", "region": "South"},
+        {"id": "10", "name": "Hyderabad Jubilee Hills", "city": "Hyderabad", "region": "South"},
+        {"id": "11", "name": "Pune FC Road", "city": "Pune", "region": "West"},
+        {"id": "12", "name": "Kolkata Park Street", "city": "Kolkata", "region": "East"},
+    ]

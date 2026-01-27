@@ -383,45 +383,45 @@ async def create_audit_checklist(
 
 @router.post("/audits/submit")
 async def submit_audit(
-    checklist_id: str = Form(...),
+    user_email: str = Form(...),
+    user_name: str = Form(...),
     store: str = Form(...),
-    auditor_email: str = Form(...),
-    auditor_name: str = Form(...),
-    responses: str = Form(...),
-    notes: str = Form(""),
-    images: str = Form("[]"),
+    category: str = Form(...),
+    checklist_items: str = Form(...),
+    checked_items: str = Form(...),
 ):
     """
     Submit an audit for a store.
+    Matches the old backend format for frontend compatibility.
     """
     try:
-        responses_dict = json.loads(responses)
-        images_list = json.loads(images)
+        items_list = json.loads(checklist_items)
+        checked_dict = json.loads(checked_items)
     except:
-        raise HTTPException(status_code=400, detail="Invalid format")
-    
-    # Calculate score
-    total_items = len(responses_dict)
-    completed_items = sum(1 for v in responses_dict.values() if v)
-    score = (completed_items / total_items * 100) if total_items > 0 else 0
-    
+        raise HTTPException(status_code=400, detail="Invalid JSON format")
+
+    # Calculate completion rate
+    total_items = len(items_list)
+    checked_count = sum(1 for key, val in checked_dict.items() if val and key.startswith(category))
+    completion_rate = round((checked_count / total_items) * 100) if total_items > 0 else 0
+
     submission = {
-        "id": f"audit_{uuid.uuid4().hex[:8]}",
-        "checklist_id": checklist_id,
+        "id": str(uuid.uuid4()),
+        "user_email": user_email,
+        "user_name": user_name,
         "store": store,
-        "auditor_email": auditor_email,
-        "auditor_name": auditor_name,
-        "responses": responses_dict,
-        "notes": notes,
-        "images": images_list,
-        "score": round(score, 1),
+        "category": category,
+        "checklist_items": items_list,
+        "checked_items": checked_dict,
+        "completion_rate": completion_rate,
         "submitted_at": datetime.utcnow().isoformat(),
+        "status": "completed"
     }
-    
+
     audit_submissions.append(submission)
-    logger.info(f"Audit submitted: {submission['id']}")
-    
-    return submission
+    logger.info(f"Audit submitted: {submission['id']} - {category} - {completion_rate}%")
+
+    return {"status": "success", "submission": submission}
 
 
 @router.get("/audits/submissions")

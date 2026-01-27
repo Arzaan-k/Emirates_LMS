@@ -324,7 +324,7 @@ export default function Recommendations({ navigation }) {
     const fetchRecommendations = async () => {
         try {
             setError(null);
-            const response = await fetch(`${API_URL}/recommendations/generate/${userEmail}?limit=5`);
+            const response = await fetch(`${API_URL}/api/v1/analytics/recommendations/${userEmail}?limit=5`);
             const data = await response.json();
 
             if (data.status === "success") {
@@ -344,7 +344,7 @@ export default function Recommendations({ navigation }) {
 
     const fetchProfile = async () => {
         try {
-            const response = await fetch(`${API_URL}/recommendations/profile/${userEmail}`);
+            const response = await fetch(`${API_URL}/api/v1/analytics/profile/${userEmail}`);
             const data = await response.json();
 
             if (data.status === "success") {
@@ -382,7 +382,7 @@ export default function Recommendations({ navigation }) {
             formData.append("content_type", "course");
             formData.append("metadata", JSON.stringify({ from_recommendation: true }));
 
-            await fetch(`${API_URL}/recommendations/track-interaction`, {
+            await fetch(`${API_URL}/api/v1/analytics/track/interaction`, {
                 method: "POST",
                 body: formData,
             });

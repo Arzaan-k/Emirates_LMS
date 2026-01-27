@@ -425,6 +425,7 @@ async def generate_quiz_from_content(
         
         if preview_only.lower() == "true":
             return {
+                "status": "success",
                 "title": title,
                 "questions": questions,
                 "preview": True
@@ -442,9 +443,9 @@ async def generate_quiz_from_content(
         
         quiz = quiz_service.create_quiz(quiz_data)
         logger.info(f"AI quiz generated: {quiz_data['id']}")
-        
-        return quiz.to_dict() if hasattr(quiz, 'to_dict') else dict(quiz)
-        
+
+        return {"status": "success", "quiz": quiz.to_dict() if hasattr(quiz, 'to_dict') else dict(quiz), "questions": questions}
+
     except Exception as e:
         logger.error(f"Quiz generation failed: {e}")
         raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
@@ -452,24 +453,35 @@ async def generate_quiz_from_content(
 
 @router.post("/generate/from-topic")
 async def generate_quiz_from_topic(
-    topic: str = Form(...),
+    data: Optional[Dict[str, Any]] = None,
+    topic: Optional[str] = Form(None),
     num_questions: int = Form(5),
     difficulty: str = Form("Medium"),
     db: Session = Depends(get_db)
 ):
     """
     Generate a quiz from a topic using AI.
+    Accepts both JSON body and Form data.
     """
+    # Handle JSON body if provided
+    if data:
+        topic = data.get("topic", topic)
+        num_questions = data.get("num_questions", num_questions)
+        difficulty = data.get("difficulty", difficulty)
+
+    if not topic:
+        raise HTTPException(status_code=400, detail="Topic is required")
+
     ai_service = AIService()
     quiz_service = QuizService(db)
-    
+
     try:
         questions = await ai_service.generate_quiz_from_text(
             text=f"Generate quiz questions about: {topic}",
             num_questions=num_questions,
             difficulty=difficulty
         )
-        
+
         quiz_data = {
             "id": f"quiz_{uuid.uuid4().hex[:8]}",
             "title": f"Quiz: {topic}",
@@ -478,12 +490,12 @@ async def generate_quiz_from_topic(
             "difficulty": difficulty,
             "source": "ai_generated",
         }
-        
+
         quiz = quiz_service.create_quiz(quiz_data)
         logger.info(f"Topic quiz generated: {quiz_data['id']}")
-        
-        return quiz.to_dict() if hasattr(quiz, 'to_dict') else dict(quiz)
-        
+
+        return {"status": "success", "quiz": quiz.to_dict() if hasattr(quiz, 'to_dict') else dict(quiz), "questions": questions}
+
     except Exception as e:
         logger.error(f"Topic quiz generation failed: {e}")
         raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")

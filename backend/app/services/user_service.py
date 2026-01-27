@@ -319,9 +319,14 @@ class UserService:
             search=search
         )
 
-    def get_user_count(self, store: Optional[str] = None) -> int:
+    def get_user_count(
+        self,
+        store: Optional[str] = None,
+        role: Optional[str] = None,
+        search: Optional[str] = None
+    ) -> int:
         """Get count of users."""
-        return self.user_repo.count_non_admin_users(store=store)
+        return self.user_repo.count_non_admin_users(store=store, role=role, search=search)
 
     # ===========================================
     # PASSWORD MANAGEMENT

@@ -32,7 +32,7 @@ const Analytics = ({ navigation }) => {
     const fetchUserActivity = async () => {
         try {
             setLoading(true);
-            const response = await fetch(`${API_URL}/reports/user-activity`);
+            const response = await fetch(`${API_URL}/api/v1/analytics/dashboard`);
             const data = await response.json();
             setUserActivity(data);
         } catch (error) {

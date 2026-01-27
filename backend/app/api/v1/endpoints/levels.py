@@ -46,17 +46,17 @@ async def get_levels(db: Session = Depends(get_db)):
         levels = repo.get_all_levels()
         
         if not levels:
-            return DEFAULT_HIERARCHY
+            return {"levels": DEFAULT_HIERARCHY}
         
         result = []
         for level in levels:
             level_dict = level.to_dict() if hasattr(level, 'to_dict') else dict(level)
             result.append(level_dict)
         
-        return sorted(result, key=lambda x: x.get("order", 0))
+        return {"levels": sorted(result, key=lambda x: x.get("order", 0))}
     except Exception as e:
         logger.error(f"Levels fetch failed: {e}")
-        return DEFAULT_HIERARCHY
+        return {"levels": DEFAULT_HIERARCHY}
 
 
 @router.post("/")
@@ -423,7 +423,8 @@ async def update_role_access(
     try:
         rule = repo.update_rule(role_name, rule_data)
         logger.info(f"Access rule updated for: {role_name}")
-        return rule.to_dict() if hasattr(rule, 'to_dict') else rule_data
+        rule_dict = rule.to_dict() if hasattr(rule, 'to_dict') else rule_data
+        return {"status": "success", "rule": rule_dict}
     except Exception as e:
         logger.error(f"Access rule update failed: {e}")
         raise

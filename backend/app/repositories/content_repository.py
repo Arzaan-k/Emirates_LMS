@@ -218,7 +218,8 @@ class AccessRuleRepository(BaseRepository[AccessRule]):
             level_name, 
             rule_data.get('accessible_courses', []), 
             rule_data.get('accessible_buckets', []),
-            rule_data.get('max_courses_visible', -1)
+            rule_data.get('max_courses_visible', -1),
+            rule_data.get('prerequisites', [])
         )
 
     def upsert_rule(
@@ -226,15 +227,19 @@ class AccessRuleRepository(BaseRepository[AccessRule]):
         level_name: str,
         courses: List[str],
         buckets: List[str],
-        max_visible: int = -1
+        max_visible: int = -1,
+        prerequisites: List[str] = None
     ) -> AccessRule:
         """Create or update access rule."""
         rule = self.get_by_level(level_name)
+        if prerequisites is None:
+            prerequisites = []
 
         if rule:
             rule.accessible_courses = courses
             rule.accessible_buckets = buckets
             rule.max_courses_visible = max_visible
+            rule.prerequisites = prerequisites
             rule.updated_at = datetime.utcnow()
             self.db.commit()
             self.db.refresh(rule)
@@ -245,6 +250,7 @@ class AccessRuleRepository(BaseRepository[AccessRule]):
                 "accessible_courses": courses,
                 "accessible_buckets": buckets,
                 "max_courses_visible": max_visible,
+                "prerequisites": prerequisites
             })
 
     def add_course_to_level(self, level_name: str, course_id: str) -> bool:
