@@ -18,6 +18,7 @@ from app.config.settings import settings
 from app.core.dependencies import get_current_user
 from app.repositories.notification_repository import NotificationRepository, NewsFeedRepository
 from app.repositories.crm_repository import CRMRepository
+from app.core.websocket import manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
@@ -128,7 +129,23 @@ async def send_notification(
     try:
         notification = repo.create_notification(notification_data)
         logger.info(f"Notification sent: {notification_data['id']}")
-        return notification.to_dict() if hasattr(notification, 'to_dict') else notification_data
+
+        notification_dict = notification.to_dict() if hasattr(notification, 'to_dict') else notification_data
+
+        # Frontend expects status field
+        if isinstance(notification_dict, dict):
+            notification_dict['status'] = 'success'
+
+        # Broadcast notification to all connected WebSocket clients
+        notification_type = "CRUCIAL_NOTIFICATION" if type == "crucial" else "NOTIFICATION"
+        await manager.broadcast_notification(
+            notification_type=notification_type,
+            data=notification_dict,
+            title=title,
+            message=message
+        )
+
+        return notification_dict
     except Exception as e:
         logger.error(f"Notification creation failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to create notification")
@@ -285,7 +302,19 @@ async def create_news(
     try:
         news = repo.create_news(news_data)
         logger.info(f"News created: {news_data['id']}")
-        return news.to_dict() if hasattr(news, 'to_dict') else news_data
+
+        response = news.to_dict() if hasattr(news, 'to_dict') else news_data
+        response["status"] = "success"
+
+        # Broadcast news post to all connected clients
+        await manager.broadcast_notification(
+            notification_type="NEWS_POSTED",
+            data=response,
+            title=f"📰 {title}",
+            message=f"New announcement from {author}"
+        )
+
+        return response
     except Exception as e:
         logger.error(f"News creation failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to create news")
@@ -305,7 +334,7 @@ async def delete_news(
         success = repo.delete_news(news_id)
         if success:
             logger.info(f"News deleted: {news_id}")
-            return {"message": f"News {news_id} deleted"}
+            return {"status": "success", "message": f"News {news_id} deleted"}
         raise HTTPException(status_code=404, detail="News not found")
     except HTTPException:
         raise

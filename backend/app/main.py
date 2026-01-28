@@ -10,7 +10,7 @@ import logging
 from datetime import datetime
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
@@ -22,6 +22,7 @@ from app.config.settings import settings
 from app.config.database import engine, Base, get_db
 from app.api.v1.router import api_router
 from app.core.middleware import setup_middleware, limiter
+from app.core.websocket import manager
 
 
 # Configure logging
@@ -166,6 +167,77 @@ async def health_check():
 
 # Include all API v1 endpoints - this is the ONLY API router
 app.include_router(api_router, prefix="/api/v1")
+
+
+# ==========================================
+# WEBSOCKET ENDPOINT
+# ==========================================
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket, token: str = None):
+    """
+    WebSocket endpoint for real-time bidirectional communication.
+    Supports real-time updates for:
+    - Meeting notifications (scheduled, participant joined, ended)
+    - CRM task assignments and completions
+    - Content uploads and updates
+    - General notifications
+    - Quiz assignments
+    - News posts
+    - Exam scheduling and attendance
+
+    Args:
+        websocket: WebSocket connection
+        token: Optional JWT token for authentication (query parameter)
+    """
+    user_email = None
+
+    # Optional: Authenticate using token query parameter
+    if token:
+        try:
+            from app.services.auth_service import AuthService
+            payload = AuthService.verify_token(token)
+            user_email = payload.get("email")
+        except Exception as e:
+            logger.warning(f"WebSocket authentication failed: {e}")
+            # Continue without authentication - allow anonymous connections
+
+    await manager.connect(websocket, user_email)
+    logger.info(f"WebSocket client connected. Active connections: {manager.get_active_connection_count()}, User: {user_email or 'anonymous'}")
+
+    try:
+        while True:
+            # Keep connection alive by listening for messages
+            # Client can send ping messages, we just acknowledge them
+            data = await websocket.receive_text()
+
+            # Optional: Handle client messages (e.g., ping/pong)
+            if data == "ping":
+                await websocket.send_text("pong")
+
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+        logger.info(f"WebSocket client disconnected. Active connections: {manager.get_active_connection_count()}")
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        manager.disconnect(websocket)
+
+
+# ==========================================
+# WEBSOCKET STATUS ENDPOINT
+# ==========================================
+
+@app.get("/ws/status")
+async def websocket_status():
+    """
+    Get WebSocket connection statistics.
+    Shows active connection count and connection details.
+    """
+    return {
+        "active_connections": manager.get_active_connection_count(),
+        "connections": manager.get_connection_info(),
+        "timestamp": datetime.utcnow().isoformat()
+    }
 
 
 # ==========================================

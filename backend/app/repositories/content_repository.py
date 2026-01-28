@@ -37,8 +37,9 @@ class ContentRepository(BaseRepository[Content]):
         ).order_by(Content.timestamp).all()
 
     def get_career_progression_content(self) -> List[Content]:
-        """Get all career progression content."""
+        """Get all career progression content that are path nodes."""
         return self.db.query(Content).filter(
+            Content.is_path_node == True,
             or_(
                 Content.learning_path_type == "career_progression",
                 Content.learning_path_type == None,

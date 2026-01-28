@@ -125,7 +125,7 @@ const CreateUser = ({
     // Fetch dynamic progression levels for Display Role
     const fetchDisplayRoles = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/v1/levels`);
+            const response = await fetch(`${API_URL}/api/v1/levels/`);
             const data = await response.json();
             if (data.levels && Array.isArray(data.levels)) {
                 // Sort by order and extract names
@@ -148,7 +148,7 @@ const CreateUser = ({
             // Get current max order
             const maxOrder = displayRoles.length;
 
-            const response = await fetch(`${API_URL}/api/v1/levels`, {
+            const response = await fetch(`${API_URL}/api/v1/levels/`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

@@ -84,7 +84,7 @@ export default function LevelManagementModal({ visible, onClose }) {
         setLoading(true);
         try {
             const headers = await getAuthHeaders();
-            const response = await fetch(`${API_URL}/api/v1/levels`, { headers });
+            const response = await fetch(`${API_URL}/api/v1/levels/`, { headers });
             const data = await response.json();
             setLevels(data.levels || []);
         } catch (error) {
@@ -149,7 +149,7 @@ export default function LevelManagementModal({ visible, onClose }) {
         setSaving(true);
         try {
             const headers = await getAuthHeaders();
-            const response = await fetch(`${API_URL}/api/v1/levels`, {
+            const response = await fetch(`${API_URL}/api/v1/levels/`, {
                 method: 'POST',
                 headers,
                 body: JSON.stringify(newLevel),

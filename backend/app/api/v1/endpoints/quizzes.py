@@ -140,7 +140,10 @@ async def create_quiz(
     try:
         quiz = service.create_quiz(quiz_data)
         logger.info(f"Quiz created: {quiz_data['id']}")
-        return quiz.to_dict() if hasattr(quiz, 'to_dict') else dict(quiz)
+        
+        response = quiz.to_dict() if hasattr(quiz, 'to_dict') else dict(quiz)
+        response["status"] = "success"
+        return response
     except Exception as e:
         logger.error(f"Quiz creation failed: {e}")
         raise
@@ -176,7 +179,10 @@ async def update_quiz(
     try:
         quiz = service.update_quiz(quiz_id, updates)
         logger.info(f"Quiz updated: {quiz_id}")
-        return quiz.to_dict() if hasattr(quiz, 'to_dict') else dict(quiz)
+        
+        response = quiz.to_dict() if hasattr(quiz, 'to_dict') else dict(quiz)
+        response["status"] = "success"
+        return response
     except Exception as e:
         logger.error(f"Quiz update failed: {e}")
         raise
@@ -195,7 +201,7 @@ async def delete_quiz(
     try:
         service.delete_quiz(quiz_id)
         logger.info(f"Quiz deleted: {quiz_id}")
-        return {"message": f"Quiz {quiz_id} deleted successfully"}
+        return {"status": "success", "message": f"Quiz {quiz_id} deleted successfully"}
     except Exception as e:
         logger.error(f"Quiz deletion failed: {e}")
         raise
@@ -336,7 +342,10 @@ async def create_live_quiz(
     try:
         quiz = service.create_live_quiz(quiz_data)
         logger.info(f"Live quiz created: {quiz_data['id']}")
-        return quiz.to_dict() if hasattr(quiz, 'to_dict') else dict(quiz)
+        
+        response = quiz.to_dict() if hasattr(quiz, 'to_dict') else dict(quiz)
+        response["status"] = "success"
+        return response
     except Exception as e:
         logger.error(f"Live quiz creation failed: {e}")
         raise
@@ -355,7 +364,7 @@ async def delete_live_quiz(
     try:
         service.delete_live_quiz(quiz_id)
         logger.info(f"Live quiz deleted: {quiz_id}")
-        return {"message": f"Live quiz {quiz_id} deleted successfully"}
+        return {"status": "success", "message": f"Live quiz {quiz_id} deleted successfully"}
     except Exception as e:
         logger.error(f"Live quiz deletion failed: {e}")
         raise

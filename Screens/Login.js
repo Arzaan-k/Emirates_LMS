@@ -154,7 +154,10 @@ export default function Login({ navigation }) {
                 const AsyncStorage = require('@react-native-async-storage/async-storage').default;
                 await AsyncStorage.setItem('userProfile', JSON.stringify(user));
                 await AsyncStorage.setItem('userEmail', user.email);
-                console.log('[Login] Saved user profile to AsyncStorage:', user.email);
+                if (data.access_token) {
+                    await AsyncStorage.setItem('userToken', data.access_token);
+                }
+                console.log('[Login] Saved user profile and token to AsyncStorage:', user.email);
 
                 // Determine destination based on role/access
                 if (user.has_admin_access || user.is_superadmin || user.role === 'Store Manager') {

@@ -135,3 +135,50 @@ class CRMTaskAssignment(Base):
             "assigned_at": self.assigned_at.isoformat() if self.assigned_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
         }
+
+
+class AuditSubmission(Base):
+    """
+    Store Audit Submissions.
+    Tracks compliance checks for stores.
+    """
+    __tablename__ = "audit_submissions"
+
+    id = Column(String(255), primary_key=True)
+    user_email = Column(String(255), nullable=False)
+    user_name = Column(String(255))
+    store = Column(String(255))
+    category = Column(String(100)) # e.g., 'safety', 'cleanliness'
+    checklist_items = Column(JSON, default=[]) # Snapshot of items at time of audit
+    checked_items = Column(JSON, default={}) # Key-value pairs of checked items
+    completion_rate = Column(Integer, default=0)
+    submitted_at = Column(DateTime, default=datetime.utcnow)
+    status = Column(String(50), default="completed")
+
+    __table_args__ = (
+        Index('idx_audit_user', 'user_email'),
+        Index('idx_audit_store', 'store'),
+        Index('idx_audit_category', 'category'),
+        Index('idx_audit_submitted', 'submitted_at'),
+    )
+
+    def __repr__(self):
+        return f"<AuditSubmission {self.id}: {self.store} - {self.category}>"
+
+    def to_dict(self):
+        """Convert to dictionary for API responses."""
+        # Derive category name for convenience if needed, or frontend handles it
+        # Simple mapping for common IDs if frontend expects it, or just return raw
+        return {
+            "id": self.id,
+            "user_email": self.user_email,
+            "user_name": self.user_name,
+            "store": self.store,
+            "category": self.category,
+            "category_name": self.category.title() if self.category else "", # Simple fallback
+            "checklist_items": self.checklist_items or [],
+            "checked_items": self.checked_items or {},
+            "completion_rate": self.completion_rate,
+            "submitted_at": (self.submitted_at.isoformat() + "Z") if self.submitted_at else None,
+            "status": self.status,
+        }

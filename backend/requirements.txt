@@ -57,3 +57,4 @@ python-magic==0.4.27;sys_platform!='win32'
 # openai-whisper==20231117      # Replaced by Groq Whisper API
 # torch                         # No longer needed
 # ==========================================
+PyPDF2

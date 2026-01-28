@@ -59,18 +59,26 @@ export default function LiveTrackingScreen({ navigation }) {
         try {
             const res = await fetch(`${API_URL}/api/v1/tracking/location/all`);
             const data = await res.json();
-            setLocations(data);
+
+            // FIX: Map backend `user_name` to frontend `name` and provide fallback
+            // This prevents "Cannot read property 'split' of undefined"
+            const safeData = data.map(loc => ({
+                ...loc,
+                name: loc.user_name || loc.user_email || 'Unknown User'
+            }));
+
+            setLocations(safeData);
 
             // Center map on first active location
-            if (data.length > 0 && data[0].latitude) {
+            if (safeData.length > 0 && safeData[0].latitude) {
                 setRegion({
-                    latitude: data[0].latitude,
-                    longitude: data[0].longitude,
+                    latitude: safeData[0].latitude,
+                    longitude: safeData[0].longitude,
                     zoom: 13,
                 });
                 // Update markers in WebView if map is ready
                 if (mapReady && webViewRef.current) {
-                    updateMarkersInWebView(data);
+                    updateMarkersInWebView(safeData);
                 }
             }
         } catch (err) {
@@ -93,7 +101,7 @@ export default function LiveTrackingScreen({ navigation }) {
         if (webViewRef.current) {
             const script = `
                 centerMap(${loc.latitude}, ${loc.longitude}, 16);
-                highlightMarker('${loc.user_id}');
+                highlightMarker('${loc.user_email}');
                 true;
             `;
             webViewRef.current.injectJavaScript(script);
@@ -218,7 +226,7 @@ export default function LiveTrackingScreen({ navigation }) {
 
             // Get initials from name
             function getInitials(name) {
-                return name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+                return (name || 'U').charAt(0).toUpperCase();
             }
 
             // Update all markers (Employees)
@@ -242,7 +250,7 @@ export default function LiveTrackingScreen({ navigation }) {
                             .bindPopup(popup)
                             .addTo(map);
                         
-                        markers[loc.user_id] = marker;
+                        markers[loc.user_email] = marker;
                     }
                 });
 
@@ -379,7 +387,7 @@ export default function LiveTrackingScreen({ navigation }) {
                                 { backgroundColor: selectedEmployee.active ? '#10B981' : '#9CA3AF' }
                             ]}>
                                 <Text style={styles.selectedAvatarText}>
-                                    {selectedEmployee.name.split(' ').map(n => n[0]).join('')}
+                                    {(selectedEmployee.name || 'U').charAt(0).toUpperCase()}
                                 </Text>
                             </View>
                             <View style={styles.selectedInfo}>
@@ -413,16 +421,15 @@ export default function LiveTrackingScreen({ navigation }) {
                     >
                         {locations.map((loc, index) => (
                             <TouchableOpacity
-                                key={loc.user_id}
+                                key={loc.id || loc.user_email}
                                 onPress={() => centerOnEmployee(loc)}
                                 activeOpacity={0.8}
                             >
-                                <Animated.View
-                                    entering={FadeInDown.delay(index * 100)}
+                                <View
                                     style={[
                                         styles.employeeCard,
                                         !loc.active && styles.employeeCardInactive,
-                                        selectedEmployee?.user_id === loc.user_id && styles.employeeCardSelected
+                                        selectedEmployee?.user_email === loc.user_email && styles.employeeCardSelected
                                     ]}
                                 >
                                     <View style={[
@@ -434,7 +441,7 @@ export default function LiveTrackingScreen({ navigation }) {
                                             { backgroundColor: loc.active ? '#10B981' : '#9CA3AF' }
                                         ]}>
                                             <Text style={styles.avatarText}>
-                                                {loc.name.split(' ').map(n => n[0]).join('')}
+                                                {(loc.name || 'U').charAt(0).toUpperCase()}
                                             </Text>
                                         </View>
                                     </View>
@@ -459,7 +466,7 @@ export default function LiveTrackingScreen({ navigation }) {
                                             {new Date(loc.timestamp).toLocaleTimeString()}
                                         </Text>
                                     </View>
-                                </Animated.View>
+                                </View>
                             </TouchableOpacity>
                         ))}
                     </ScrollView>
@@ -730,13 +737,17 @@ const styles = StyleSheet.create({
         shadowRadius: 8,
         elevation: 4,
         marginRight: 12,
+        minHeight: 140,
+        borderWidth: 2, // [FIX] layout stability
+        borderColor: 'transparent',
     },
     employeeCardInactive: {
         shadowColor: "#9CA3AF",
-        opacity: 0.7,
+        shadowColor: "#9CA3AF",
+        // opacity: 0.7, // [FIX] Removed opacity as it may cause blank rendering on Android
     },
     employeeCardSelected: {
-        borderWidth: 2,
+        // borderWidth: 2, // inherited from base
         borderColor: '#F59E0B',
         shadowColor: "#F59E0B",
     },

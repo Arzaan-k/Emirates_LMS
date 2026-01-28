@@ -50,9 +50,12 @@ export default function ContentLibraryModal({ visible, onClose }) {
     const fetchContent = async () => {
         setLoading(true);
         try {
-            const response = await fetch(`${API_URL}/api/content-library`);
+            const response = await fetch(`${API_URL}/api/v1/content/library/all`);
             const data = await response.json();
-            if (data.categories) {
+            // The endpoint returns buckets with items, so map it to categories format
+            if (Array.isArray(data)) {
+                setContentCategories(data);
+            } else if (data.categories) {
                 setContentCategories(data.categories);
             }
         } catch (error) {
@@ -66,9 +69,11 @@ export default function ContentLibraryModal({ visible, onClose }) {
 
     const fetchBuckets = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/buckets`);
+            const response = await fetch(`${API_URL}/api/v1/content/buckets/all`);
             const data = await response.json();
-            if (data.buckets) {
+            if (Array.isArray(data)) {
+                setAvailableBuckets(data);
+            } else if (data.buckets) {
                 setAvailableBuckets(data.buckets);
             }
         } catch (error) {
@@ -87,7 +92,7 @@ export default function ContentLibraryModal({ visible, onClose }) {
                     style: "destructive",
                     onPress: async () => {
                         try {
-                            const response = await fetch(`${API_URL}/api/content/${item.id}`, {
+                            const response = await fetch(`${API_URL}/api/v1/content/${item.id}`, {
                                 method: 'DELETE',
                             });
                             const result = await response.json();
@@ -125,7 +130,7 @@ export default function ContentLibraryModal({ visible, onClose }) {
             formData.append('description', editDescription);
             if (editBucketId) formData.append('bucket_id', editBucketId);
 
-            const response = await fetch(`${API_URL}/api/content/${selectedContent.id}`, {
+            const response = await fetch(`${API_URL}/api/v1/content/${selectedContent.id}`, {
                 method: 'PUT',
                 body: formData,
             });

@@ -78,7 +78,8 @@ async def ask_ai_get(
     Ask AI context-aware questions (GET method for compatibility).
     """
     if not question:
-        raise HTTPException(status_code=400, detail="Question query parameter is required")
+        # Return friendly message instead of error when no question provided
+        return {"answer": "Please ask me a question about your courses!"}
         
     content_service = ContentService(db)
     ai_service = AIService()

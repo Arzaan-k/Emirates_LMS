@@ -336,22 +336,75 @@ class ContentService:
     def update_bucket(self, bucket_id: str, updates: Dict[str, Any]) -> CourseBucket:
         """Update a bucket."""
         bucket = self.get_bucket_by_id(bucket_id)
+        old_name = bucket.name  # Capture OLD name before update
 
         for key, value in updates.items():
             if hasattr(bucket, key) and value is not None:
                 setattr(bucket, key, value)
 
         bucket.updated_at = datetime.utcnow()
+        
+        # Check if name changed to update associated content
+        new_name = updates.get("name")
+        
+        if new_name and new_name != old_name:
+            from app.models.content import Content
+            # Update all content associated with this bucket
+            self.db.query(Content).filter(Content.bucket_id == bucket_id).update({Content.bucket: new_name})
+            # Also catch content that might check by name (legacy)
+            self.db.query(Content).filter(Content.bucket == old_name).update({Content.bucket: new_name})
+        
         self.db.commit()
         self.db.refresh(bucket)
 
         return bucket
 
     def delete_bucket(self, bucket_id: str) -> bool:
-        """Delete a bucket."""
+        """
+        Delete a bucket and reassign all its content to 'Uncategorized'.
+        This ensures content doesn't become orphaned when buckets are deleted.
+        """
+        from app.models.content import Content
+
+        # Get the bucket being deleted
         bucket = self.get_bucket_by_id(bucket_id)
+        bucket_name = bucket.name
+
+        # Find or create "Uncategorized" bucket
+        uncategorized_bucket = self.bucket_repo.get_first_by_filter({"name": "Uncategorized"})
+        if not uncategorized_bucket:
+            # Create Uncategorized bucket if it doesn't exist
+            uncategorized_data = {
+                "id": "uncategorized",
+                "name": "Uncategorized",
+                "description": "Content without a specific category",
+                "color": "#808080",
+                "icon": "folder",
+                "order_index": 9999
+            }
+            uncategorized_bucket = self.bucket_repo.create(uncategorized_data)
+            logger.info("Created 'Uncategorized' bucket for orphaned content")
+
+        # Reassign all content from the deleted bucket to "Uncategorized"
+        # Update by bucket name (for backward compatibility)
+        content_by_name = self.db.query(Content).filter(Content.bucket == bucket_name).all()
+        for content in content_by_name:
+            content.bucket = uncategorized_bucket.name
+            content.bucket_id = uncategorized_bucket.id
+            logger.info(f"Reassigned content '{content.title}' to Uncategorized (matched by name)")
+
+        # Update by bucket_id (for proper foreign key relationship)
+        content_by_id = self.db.query(Content).filter(Content.bucket_id == bucket_id).all()
+        for content in content_by_id:
+            content.bucket = uncategorized_bucket.name
+            content.bucket_id = uncategorized_bucket.id
+            logger.info(f"Reassigned content '{content.title}' to Uncategorized (matched by ID)")
+
+        # Now delete the bucket
         self.db.delete(bucket)
         self.db.commit()
+
+        logger.info(f"Deleted bucket '{bucket_name}' and reassigned {len(content_by_name) + len(content_by_id)} content items to Uncategorized")
         return True
 
     def get_all_buckets(self) -> List[CourseBucket]:

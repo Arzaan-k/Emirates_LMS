@@ -374,8 +374,8 @@ export default function ManagerDashboard({ route, navigation }) {
             formData.append('title', resTitle);
             formData.append('category', resCategory);
             formData.append('description', resDesc);
-            formData.append('isPathNode', String(isPathNode)); // RESTORED
-            formData.append('learning_path_type', learningPathType); // NEW: Add learning path type
+            formData.append('is_path_node', String(isPathNode)); // FIX: Changed from 'isPathNode' to 'is_path_node' to match backend
+            formData.append('learning_path_type', learningPathType);
 
             // REQUIRED FIELDS fix for 422 Error
             formData.append('authorRole', role || 'Manager');
@@ -392,7 +392,7 @@ export default function ManagerDashboard({ route, navigation }) {
 
             // Use the universal resource upload endpoint
             // It will handle adding to Knowledge Base AND optionally to Learning Path
-            const response = await fetch(`${API_URL}/api/v1/content`, {
+            const response = await fetch(`${API_URL}/api/v1/content/`, {
                 method: 'POST',
                 body: formData,
                 headers: {

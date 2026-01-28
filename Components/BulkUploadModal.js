@@ -112,10 +112,10 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                     formData.append('title', file.name.replace(/\.[^/.]+$/, "")); // Remove extension
                     formData.append('description', "Bulk Uploaded Content");
                     formData.append('category', bucketName); // Use bucket NAME, not ID
-                    formData.append('isPathNode', String(isPathNode));
+                    formData.append('is_path_node', String(isPathNode));
                     formData.append('learning_path_type', learningPathType);
                     if (selectedBucket) {
-                        formData.append('bucket', bucketName); // Use bucket NAME here too
+                        formData.append('bucket', selectedBucket); // Use bucket ID here
                     }
                     formData.append('file', {
                         uri: file.uri,
@@ -129,7 +129,8 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
 
                     console.log(`[Upload] Attempt ${attempt}/${maxRetries} for ${file.name} to bucket: ${bucketName}`);
 
-                    const response = await fetch(`${API_URL}/api/v1/content/resources/all/upload`, {
+                    // Use universal upload endpoint
+                    const response = await fetch(`${API_URL}/api/v1/content/`, {
                         method: 'POST',
                         body: formData,
                         signal: controller.signal,

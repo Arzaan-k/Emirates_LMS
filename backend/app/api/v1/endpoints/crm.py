@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.config.database import get_db
 from app.core.dependencies import get_current_user, require_admin
+from app.core.websocket import manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/crm", tags=["CRM"])
@@ -240,13 +241,29 @@ async def assign_crm_task(
         # Assign ticket
         ticket_id = selected_ticket.id if hasattr(selected_ticket, 'id') else selected_ticket.get('id')
         assignment = repo.assign_ticket(ticket_id, user_email, user_name)
-        
+
         logger.info(f"CRM task assigned: {ticket_id} -> {user_email}")
-        
+
+        assignment_dict = assignment.to_dict() if hasattr(assignment, 'to_dict') else dict(assignment)
+        ticket_dict = selected_ticket.to_dict() if hasattr(selected_ticket, 'to_dict') else dict(selected_ticket)
+
+        # Broadcast CRM task assignment notification
+        await manager.broadcast_notification(
+            notification_type="CRM_TASK_ASSIGNED",
+            data={
+                "assignment": assignment_dict,
+                "ticket": ticket_dict,
+                "user_email": user_email,
+                "user_name": user_name
+            },
+            title="CRM Task Assigned",
+            message=f"New CRM task assigned to {user_name}"
+        )
+
         return {
             "success": True,
             "message": "CRM task assigned successfully",
-            "task": assignment.to_dict() if hasattr(assignment, 'to_dict') else dict(assignment)
+            "task": assignment_dict
         }
     
     except Exception as e:
@@ -303,13 +320,27 @@ async def complete_crm_task(
     try:
         result = repo.complete_task(task_id, resolution)
         logger.info(f"CRM task completed: {task_id}")
-        
+
+        result_dict = result.to_dict() if hasattr(result, 'to_dict') else dict(result)
+        user_email = result_dict.get("assigned_to", "")
+
+        # Broadcast CRM task completion notification
+        await manager.broadcast_notification(
+            notification_type="CRM_TASK_COMPLETED",
+            data={
+                "task_id": task_id,
+                "user_email": user_email,
+                "xp_earned": 50,
+                "resolution": resolution
+            }
+        )
+
         # Award XP would be handled here
         return {
             "success": True,
             "message": "Task completed successfully",
             "xp_earned": 50,
-            "task": result.to_dict() if hasattr(result, 'to_dict') else dict(result)
+            "task": result_dict
         }
     except Exception as e:
         logger.error(f"CRM task completion failed: {e}")
@@ -389,11 +420,16 @@ async def submit_audit(
     category: str = Form(...),
     checklist_items: str = Form(...),
     checked_items: str = Form(...),
+    db: Session = Depends(get_db)
 ):
     """
     Submit an audit for a store.
     Matches the old backend format for frontend compatibility.
     """
+    from app.repositories.crm_repository import CRMRepository
+    
+    repo = CRMRepository(db)
+
     try:
         items_list = json.loads(checklist_items)
         checked_dict = json.loads(checked_items)
@@ -405,7 +441,7 @@ async def submit_audit(
     checked_count = sum(1 for key, val in checked_dict.items() if val and key.startswith(category))
     completion_rate = round((checked_count / total_items) * 100) if total_items > 0 else 0
 
-    submission = {
+    submission_data = {
         "id": str(uuid.uuid4()),
         "user_email": user_email,
         "user_name": user_name,
@@ -418,32 +454,82 @@ async def submit_audit(
         "status": "completed"
     }
 
-    audit_submissions.append(submission)
-    logger.info(f"Audit submitted: {submission['id']} - {category} - {completion_rate}%")
-
-    return {"status": "success", "submission": submission}
+    try:
+        audit = repo.submit_audit(submission_data)
+        logger.info(f"Audit submitted: {submission_data['id']} - {category} - {completion_rate}%")
+        
+        # Convert to dict for response
+        submission_dict = audit.to_dict() if hasattr(audit, 'to_dict') else dict(audit)
+        return {"status": "success", "submission": submission_dict}
+    except Exception as e:
+        logger.error(f"Audit submission failed: {e}")
+        raise
 
 
 @router.get("/audits/submissions")
 async def get_audit_submissions(
     store: str = None,
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """
     Get audit submissions, optionally filtered by store.
     """
-    if store:
-        return [s for s in audit_submissions if s.get("store") == store]
-    return audit_submissions
+    from app.repositories.crm_repository import CRMRepository
+    
+    repo = CRMRepository(db)
+    
+    try:
+        audits = repo.get_audits(store)
+        result = []
+        for audit in audits:
+            audit_dict = audit.to_dict() if hasattr(audit, 'to_dict') else dict(audit)
+            result.append(audit_dict)
+            
+        # Calculate stats for frontend (as it expects {audits: [], total_count: ...})
+        # If the frontend expects just a list, we return list.
+        # But looking at AuditsScreen.js: `data.audits` and `data.avg_completion_rate`.
+        # So we need to match that format!
+        
+        total_count = len(result)
+        avg_completion = sum(a.get('completion_rate', 0) for a in result) / total_count if total_count > 0 else 0
+        
+        return {
+            "audits": result,
+            "total_count": total_count,
+            "avg_completion_rate": round(avg_completion),
+            "category_stats": {} # Implement if needed
+        }
+    except Exception as e:
+        logger.error(f"Audit fetch failed: {e}")
+        return {
+            "audits": [],
+            "total_count": 0,
+            "avg_completion_rate": 0
+        }
 
 
 @router.get("/audits/submissions/{submission_id}")
-async def get_audit_submission(submission_id: str):
+async def get_audit_submission(submission_id: str, db: Session = Depends(get_db)):
     """
     Get a specific audit submission.
     """
-    for submission in audit_submissions:
-        if submission.get("id") == submission_id:
-            return submission
+    from app.repositories.crm_repository import CRMRepository
     
-    raise HTTPException(status_code=404, detail="Audit submission not found")
+    # We don't have get_by_id exposed in CRMRepo wrapper yet, let's just use audit_repo direct
+    # or implement it. For now, let's assume get_audits returns all and filter (inefficient but safe)
+    # OR better, use the base repository method if possible.
+    # Actually, let's just use the repo's db session directly or add a method.
+    repo = CRMRepository(db)
+    
+    try:
+        # Utilizing the underlying repository
+        audit = repo.audit_repo.get_by_id(submission_id)
+        if not audit:
+            raise HTTPException(status_code=404, detail="Audit submission not found")
+        return audit.to_dict() if hasattr(audit, 'to_dict') else dict(audit)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Audit fetch failed: {e}")
+        raise HTTPException(status_code=404, detail="Audit not found")

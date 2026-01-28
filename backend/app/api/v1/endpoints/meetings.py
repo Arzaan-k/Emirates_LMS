@@ -16,6 +16,7 @@ from app.config.database import get_db
 from app.core.dependencies import get_current_user
 from app.repositories.meeting_repository import MeetingRepository
 from app.repositories.tracking_repository import AttendanceRepository, LocationTrackingRepository
+from app.core.websocket import manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/meetings", tags=["Meetings"])
@@ -25,7 +26,7 @@ router = APIRouter(prefix="/meetings", tags=["Meetings"])
 # MEETING CRUD ENDPOINTS
 # ==========================================
 
-@router.get("/")
+@router.get("")
 async def get_meetings(db: Session = Depends(get_db)):
     """
     Get all upcoming and ongoing meetings.
@@ -64,7 +65,7 @@ async def get_meeting(meeting_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Failed to fetch meeting")
 
 
-@router.post("/")
+@router.post("")
 async def create_meeting(
     title: str = Form(...),
     description: str = Form(""),
@@ -110,7 +111,20 @@ async def create_meeting(
     try:
         meeting = repo.create_meeting(meeting_data)
         logger.info(f"Meeting created: {meeting_id}")
-        return meeting.to_dict() if hasattr(meeting, 'to_dict') else meeting_data
+
+        meeting_dict = meeting.to_dict() if hasattr(meeting, 'to_dict') else meeting_data
+        if isinstance(meeting_dict, dict):
+            meeting_dict['status'] = 'success'
+
+        # Broadcast meeting notification to all connected clients
+        await manager.broadcast_notification(
+            notification_type="MEETING_SCHEDULED",
+            data=meeting_dict,
+            title=f"📅 Meeting: {title}",
+            message=f"{host_name} scheduled a meeting for {scheduled_at[:16].replace('T', ' at ')}. Tap to join when it starts."
+        )
+
+        return meeting_dict
     except Exception as e:
         logger.error(f"Meeting creation failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to create meeting")
@@ -134,7 +148,19 @@ async def join_meeting(
             raise HTTPException(status_code=404, detail="Meeting not found")
 
         logger.info(f"User joined meeting: {user_email} -> {meeting_id}")
-        return result.to_dict() if hasattr(result, 'to_dict') else result
+
+        result_dict = result.to_dict() if hasattr(result, 'to_dict') else result
+
+        # Broadcast participant joined event
+        await manager.broadcast_notification(
+            notification_type="MEETING_PARTICIPANT_JOINED",
+            data={
+                "meeting_id": meeting_id,
+                "participant": {"user_email": user_email, "user_name": user_name}
+            }
+        )
+
+        return result_dict
     except HTTPException:
         raise
     except Exception as e:
@@ -180,7 +206,19 @@ async def end_meeting(meeting_id: str, db: Session = Depends(get_db)):
             raise HTTPException(status_code=404, detail="Meeting not found")
 
         logger.info(f"Meeting ended: {meeting_id}")
-        return result.to_dict() if hasattr(result, 'to_dict') else result
+
+        result_dict = result.to_dict() if hasattr(result, 'to_dict') else result
+
+        # Broadcast meeting ended event
+        await manager.broadcast_notification(
+            notification_type="MEETING_ENDED",
+            data={
+                "meeting_id": meeting_id,
+                "title": result_dict.get("title", "Meeting")
+            }
+        )
+
+        return result_dict
     except HTTPException:
         raise
     except Exception as e:

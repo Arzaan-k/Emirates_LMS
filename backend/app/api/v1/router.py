@@ -154,17 +154,42 @@ async def get_audit_logs(
     """
     from app.config.database import get_db
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
     try:
         db = next(get_db())
         repo = AnalyticsRepository(db)
         logs = repo.get_audit_logs(action_type)
-        
+
         result = []
         for log in logs:
             log_dict = log.to_dict() if hasattr(log, 'to_dict') else dict(log)
             result.append(log_dict)
-        
+
+        return result
+    except Exception as e:
+        return []
+
+
+# Backward compatibility alias for old frontend endpoint
+@api_router.get("/scheduled-exams/user/{user_email}")
+async def get_user_scheduled_exams_alias(user_email: str):
+    """
+    DEPRECATED: Backward compatibility alias for /assessments/scheduled/user/{email}
+    Frontend should be updated to use the new endpoint.
+    """
+    from app.config.database import get_db
+    from app.services.assessment_service import AssessmentService
+
+    try:
+        db = next(get_db())
+        service = AssessmentService(db)
+        exams = service.get_scheduled_exams_for_user(user_email)
+
+        result = []
+        for exam in exams:
+            exam_dict = exam.to_dict() if hasattr(exam, 'to_dict') else dict(exam)
+            result.append(exam_dict)
+
         return result
     except Exception as e:
         return []

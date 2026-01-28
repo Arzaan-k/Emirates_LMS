@@ -209,7 +209,7 @@ async def update_location(
         raise HTTPException(status_code=400, detail="user_email is required")
     
     location_data = {
-        "id": str(uuid.uuid4()),
+        # "id": str(uuid.uuid4()),  # Removed: ID is Integer and auto-incremented
         "user_email": user_email,
         "latitude": float(latitude),
         "longitude": float(longitude),

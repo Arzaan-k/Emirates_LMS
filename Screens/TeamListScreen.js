@@ -79,7 +79,7 @@ const TeamListScreen = ({ navigation, route }) => {
     // Fetch dynamic levels from backend
     const fetchLevels = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/v1/levels`);
+            const response = await fetch(`${API_URL}/api/v1/levels/`);
             const data = await response.json();
             if (data.levels && Array.isArray(data.levels)) {
                 // Sort by order and extract names

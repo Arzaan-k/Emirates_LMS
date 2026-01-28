@@ -20,6 +20,7 @@ from app.core.auth import verify_token
 from app.services.content_service import ContentService
 from app.services.cdn_service import CDNService
 from app.services.ai_service import AIService
+from app.core.websocket import manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/content", tags=["Content"])
@@ -92,16 +93,50 @@ async def get_path_nodes_api(
 ):
     """
     Returns ordered learning path nodes with user-specific status.
-    This endpoint only returns CAREER PROGRESSION nodes.
+    This endpoint only returns CAREER PROGRESSION nodes where is_path_node=True.
     """
     service = ContentService(db)
-    
+
     try:
         result = service.get_learning_path_content("career_progression", user_email)
+        logger.info(f"Path nodes returned: {len(result.get('courses', []))} courses")
         return result
     except Exception as e:
         logger.error(f"Path nodes fetch failed: {e}")
         raise
+
+
+@router.get("/debug/path-nodes-raw")
+async def get_path_nodes_debug(db: Session = Depends(get_db)):
+    """
+    DEBUG ENDPOINT: Returns ALL content with is_path_node status for debugging.
+    Shows exactly what's in the database to help diagnose filtering issues.
+    """
+    from app.models.content import Content
+
+    try:
+        all_content = db.query(Content).order_by(Content.created_at.desc()).limit(20).all()
+
+        result = []
+        for content in all_content:
+            result.append({
+                "id": content.id,
+                "title": content.title,
+                "is_path_node": content.is_path_node,
+                "is_path_node_type": type(content.is_path_node).__name__,
+                "learning_path_type": content.learning_path_type,
+                "bucket": content.bucket,
+                "created_at": content.created_at.isoformat() if content.created_at else None
+            })
+
+        return {
+            "total_content": len(result),
+            "content": result,
+            "note": "This shows the raw database values for debugging"
+        }
+    except Exception as e:
+        logger.error(f"Debug endpoint failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/")
@@ -141,41 +176,80 @@ async def upload_content(
     # Save file locally first
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     local_path = os.path.join(settings.UPLOAD_DIR, f"{content_id}{ext}")
+
+    # Resolve bucket name if ID is provided
+    # Frontend sends bucket ID, we need to store both bucket name and ID
+    bucket_name = bucket
+    bucket_id_val = bucket if bucket else None
+
+    if bucket:
+        try:
+            # Try to get bucket object to resolve name
+            bucket_obj = service.get_bucket_by_id(bucket)
+            bucket_name = bucket_obj.name
+            bucket_id_val = bucket_obj.id
+            logger.info(f"Resolved bucket: ID={bucket_id_val}, Name={bucket_name}")
+        except Exception as e:
+            # If lookup fails, treat bucket as both name and ID (backward compatibility)
+            logger.warning(f"Could not resolve bucket '{bucket}': {e}. Using as-is.")
+            bucket_name = bucket
+            bucket_id_val = bucket
     
     try:
         content_bytes = await file.read()
         with open(local_path, "wb") as f:
             f.write(content_bytes)
-        
+
         # Upload to CDN
         video_url = None
         if cdn_service.enabled:
             cdn_key = f"content/{content_id}{ext}"
-            cdn_url = cdn_service.upload_file(content_bytes, cdn_key, file.content_type)
-            if cdn_url:
-                video_url = cdn_url
-        
+            cdn_result = cdn_service.upload_file(content_bytes, cdn_key, file.content_type)
+            if cdn_result:
+                # Handle both dict (from R2) and possibly str (if implementation changes)
+                if isinstance(cdn_result, dict):
+                    video_url = cdn_result.get("url")
+                else:
+                    video_url = str(cdn_result)
+
         if not video_url:
             video_url = f"{settings.BASE_URL}/uploads/{content_id}{ext}"
-        
+
+        # Convert is_path_node string to boolean
+        is_path_node_bool = is_path_node.lower() == "true"
+
+        logger.info(f"[UPLOAD DEBUG] Title={title}, isPathNode_raw={is_path_node}, isPathNode_bool={is_path_node_bool}, learning_path_type={learning_path_type}, bucket={bucket_name}")
+
         # Create content record
         content_data = {
             "id": content_id,
             "title": title,
             "description": description,
-            "bucket": bucket,
+            "bucket": bucket_name,
+            "bucket_id": bucket_id_val,
             "resource_type": resource_type,
             "video_url": video_url,
             "file_url": video_url,
-            "is_path_node": is_path_node.lower() == "true",
+            "is_path_node": is_path_node_bool,
             "learning_path_type": learning_path_type,
             "timestamp": datetime.utcnow(),
         }
-        
+
         content = service.create_content(content_data)
-        logger.info(f"Content created: {content_id}")
-        
-        return content.to_dict() if hasattr(content, 'to_dict') else dict(content)
+        logger.info(f"Content created: {content_id}, is_path_node stored as: {content.is_path_node}")
+
+        response = content.to_dict() if hasattr(content, 'to_dict') else dict(content)
+        response["status"] = "success"
+
+        # Broadcast new content notification to all connected clients
+        await manager.broadcast_notification(
+            notification_type="NEW_CONTENT",
+            data=response,
+            title="New Content Available",
+            message=f"New {resource_type.lower()} uploaded: {title}"
+        )
+
+        return response
         
     except Exception as e:
         logger.error(f"Content upload failed: {e}")
@@ -209,13 +283,14 @@ async def update_content(
     description: Optional[str] = Form(None),
     skippable: Optional[str] = Form(None),
     quiz: Optional[str] = Form(None),
+    bucket_id: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     """
-    Update content metadata.
+    Update content metadata including title, description, and category/bucket.
     """
     service = ContentService(db)
-    
+
     updates = {}
     if title is not None:
         updates["title"] = title
@@ -228,14 +303,74 @@ async def update_content(
             updates["quiz"] = json.loads(quiz)
         except:
             updates["quiz"] = None
-    
+
+    # Handle bucket/category update
+    if bucket_id is not None:
+        if bucket_id == "uncategorized":
+            updates["bucket"] = "Uncategorized"
+            updates["bucket_id"] = "uncategorized"
+        else:
+            # Resolve bucket name from ID
+            try:
+                bucket = service.get_bucket_by_id(bucket_id)
+                updates["bucket"] = bucket.name
+                updates["bucket_id"] = bucket.id
+                logger.info(f"Updating content bucket: {bucket_id} -> {bucket.name}")
+            except Exception as e:
+                logger.warning(f"Could not resolve bucket '{bucket_id}': {e}. Using as-is.")
+                updates["bucket"] = bucket_id
+                updates["bucket_id"] = bucket_id
+
     try:
         content = service.update_content(item_id, updates)
         logger.info(f"Content updated: {item_id}")
-        return content.to_dict() if hasattr(content, 'to_dict') else dict(content)
+
+        result = content.to_dict() if hasattr(content, 'to_dict') else dict(content)
+        if isinstance(result, dict):
+            result['status'] = 'success'
+        return result
     except Exception as e:
         logger.error(f"Content update failed: {e}")
         raise
+
+
+@router.put("/{item_id}/category")
+async def update_content_category(
+    item_id: str,
+    bucket_id: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Specific endpoint to update content category/bucket.
+    Legacy support for frontend.
+    """
+    service = ContentService(db)
+    
+    updates = {}
+    if bucket_id == "uncategorized":
+         updates["bucket"] = "Uncategorized"
+         updates["bucket_id"] = "uncategorized"
+    else:
+         try:
+             bucket = service.get_bucket_by_id(bucket_id)
+             updates["bucket"] = bucket.name
+             updates["bucket_id"] = bucket.id
+         except Exception as e:
+             logger.warning(f"Could not resolve bucket '{bucket_id}' in category update. Using as-is.")
+             updates["bucket"] = bucket_id
+             updates["bucket_id"] = bucket_id
+
+    try:
+        content = service.update_content(item_id, updates)
+        logger.info(f"Content category updated: {item_id} -> {bucket_id}")
+        
+        result = content.to_dict() if hasattr(content, 'to_dict') else dict(content)
+        if isinstance(result, dict):
+             result['status'] = 'success'
+        return result
+    except Exception as e:
+        logger.error(f"Content category update failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update category")
 
 
 @router.delete("/{item_id}")
@@ -279,7 +414,7 @@ async def delete_content(
         service.delete_content(item_id)
         logger.info(f"Content deleted: {item_id}")
         
-        return {"message": f"Content {item_id} deleted successfully"}
+        return {"status": "success", "message": f"Content {item_id} deleted successfully"}
         
     except Exception as e:
         logger.error(f"Content deletion failed: {e}")
@@ -330,7 +465,10 @@ async def create_course_bucket(
     try:
         bucket = service.create_bucket(bucket_data)
         logger.info(f"Bucket created: {bucket_data['id']}")
-        return bucket.to_dict() if hasattr(bucket, 'to_dict') else dict(bucket)
+        
+        response = bucket.to_dict() if hasattr(bucket, 'to_dict') else dict(bucket)
+        response["status"] = "success"
+        return response
     except Exception as e:
         logger.error(f"Bucket creation failed: {e}")
         raise
@@ -363,7 +501,10 @@ async def update_course_bucket(
     try:
         bucket = service.update_bucket(bucket_id, updates)
         logger.info(f"Bucket updated: {bucket_id}")
-        return bucket.to_dict() if hasattr(bucket, 'to_dict') else dict(bucket)
+        
+        response = bucket.to_dict() if hasattr(bucket, 'to_dict') else dict(bucket)
+        response["status"] = "success"
+        return response
     except Exception as e:
         logger.error(f"Bucket update failed: {e}")
         raise
@@ -382,7 +523,7 @@ async def delete_course_bucket(
     try:
         service.delete_bucket(bucket_id)
         logger.info(f"Bucket deleted: {bucket_id}")
-        return {"message": f"Bucket {bucket_id} deleted successfully"}
+        return {"status": "success", "message": f"Bucket {bucket_id} deleted successfully"}
     except Exception as e:
         logger.error(f"Bucket deletion failed: {e}")
         raise
@@ -508,7 +649,10 @@ async def upload_resource(
         resource = service.create_resource(resource_data)
         logger.info(f"Resource created: {resource_id}")
         
-        return resource.to_dict() if hasattr(resource, 'to_dict') else dict(resource)
+        result = resource.to_dict() if hasattr(resource, 'to_dict') else dict(resource)
+        if isinstance(result, dict):
+            result['status'] = 'success'
+        return result
         
     except Exception as e:
         logger.error(f"Resource upload failed: {e}")

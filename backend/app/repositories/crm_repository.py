@@ -9,7 +9,26 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.repositories.base import BaseRepository
-from app.models.crm import CRMTicket, CRMTaskAssignment
+from app.models.crm import CRMTicket, CRMTaskAssignment, AuditSubmission
+
+
+class AuditSubmissionRepository(BaseRepository[AuditSubmission]):
+    """Repository for AuditSubmission operations."""
+
+    def __init__(self, db: Session):
+        super().__init__(db, AuditSubmission)
+
+    def get_by_store(self, store: str) -> List[AuditSubmission]:
+        """Get audits by store."""
+        return self.db.query(AuditSubmission).filter(
+            AuditSubmission.store == store
+        ).order_by(AuditSubmission.submitted_at.desc()).all()
+    
+    def get_by_user(self, user_email: str) -> List[AuditSubmission]:
+        """Get audits by user."""
+        return self.db.query(AuditSubmission).filter(
+            AuditSubmission.user_email == user_email
+        ).order_by(AuditSubmission.submitted_at.desc()).all()
 
 
 class CRMTicketRepository(BaseRepository[CRMTicket]):
@@ -184,6 +203,7 @@ class CRMRepository:
         self.db = db
         self.ticket_repo = CRMTicketRepository(db)
         self.task_repo = CRMTaskAssignmentRepository(db)
+        self.audit_repo = AuditSubmissionRepository(db)
 
     def get_all_tickets(self) -> List[CRMTicket]:
         """Get all tickets."""
@@ -229,4 +249,14 @@ class CRMRepository:
     def complete_task(self, task_id: str, resolution: str) -> CRMTaskAssignment:
         """Complete a task."""
         return self.task_repo.complete_task(task_id, resolution, xp_earned=50)
+
+    def get_audits(self, store: Optional[str] = None) -> List[AuditSubmission]:
+        """Get audits, optionally filtered by store."""
+        if store:
+            return self.audit_repo.get_by_store(store)
+        return self.audit_repo.get_all()
+
+    def submit_audit(self, audit_data: dict) -> AuditSubmission:
+        """Submit a new audit."""
+        return self.audit_repo.create(audit_data)
 

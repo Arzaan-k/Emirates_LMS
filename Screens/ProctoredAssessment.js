@@ -1498,7 +1498,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                                 <Text style={styles.aiSectionTitle}>Upload Document</Text>
                             </View>
                             <Text style={styles.aiSectionDesc}>
-                                Upload PDFs, images, Word docs, Excel files, or text files
+                                Upload PDF, images, Word docs, or text files
                             </Text>
 
                             {aiDocumentFile ? (

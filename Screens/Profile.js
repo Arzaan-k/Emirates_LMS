@@ -394,7 +394,7 @@ export default function Profile({ navigation, route }) {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            user_id: userProfile.email,
+                            user_email: userProfile.email,
                             latitude,
                             longitude,
                             timestamp
@@ -428,7 +428,7 @@ export default function Profile({ navigation, route }) {
             await fetch(`${API_URL}/api/v1/tracking/location/stop`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_id: userProfile.email })
+                body: JSON.stringify({ user_email: userProfile.email })
             });
         } catch (error) {
             console.error('Stop tracking error:', error);
@@ -456,7 +456,7 @@ export default function Profile({ navigation, route }) {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    user_id: userProfile.email,
+                    user_email: userProfile.email,
                     timestamp: now.toISOString()
                 })
             });
@@ -484,7 +484,7 @@ export default function Profile({ navigation, route }) {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    user_id: userProfile.email,
+                    user_email: userProfile.email,
                     timestamp: now.toISOString()
                 })
             });

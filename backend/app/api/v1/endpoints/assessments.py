@@ -11,6 +11,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Form, File, UploadFile, HTTPException
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
 from app.config.database import get_db
 from app.core.dependencies import get_current_user, require_admin
@@ -74,14 +75,18 @@ async def get_proctored_assessment(
     return assessment.to_dict() if hasattr(assessment, 'to_dict') else dict(assessment)
 
 
+class ProctoredAssessmentCreate(BaseModel):
+    title: str
+    description: Optional[str] = ""
+    questions: List[Dict[str, Any]]
+    time_limit_minutes: Optional[int] = 30
+    passing_score: Optional[int] = 70
+    created_by: Optional[str] = "Admin"
+    ai_generated: Optional[bool] = False
+
 @router.post("/proctored")
 async def create_proctored_assessment(
-    title: str = Form(...),
-    description: str = Form(""),
-    questions: str = Form(...),  # JSON array
-    time_limit_minutes: int = Form(30),
-    passing_score: int = Form(70),
-    created_by: str = Form("Admin"),
+    assessment_in: ProctoredAssessmentCreate,
     db: Session = Depends(get_db)
 ):
     """
@@ -89,26 +94,29 @@ async def create_proctored_assessment(
     """
     service = AssessmentService(db)
     
-    try:
-        questions_list = json.loads(questions)
-    except:
-        raise HTTPException(status_code=400, detail="Invalid questions format")
+    # questions is already a list from Pydantic validation
     
     assessment_data = {
         "id": f"assessment_{uuid.uuid4().hex[:8]}",
-        "title": title,
-        "description": description,
-        "questions": questions_list,
-        "time_limit_minutes": time_limit_minutes,
-        "passing_score": passing_score,
-        "created_by": created_by,
-        "total_questions": len(questions_list),
+        "title": assessment_in.title,
+        "description": assessment_in.description,
+        "questions": assessment_in.questions,
+        "time_limit_minutes": assessment_in.time_limit_minutes,
+        "passing_score": assessment_in.passing_score,
+        "created_by": assessment_in.created_by,
+        "total_questions": len(assessment_in.questions),
     }
     
     try:
         assessment = service.create_assessment(assessment_data)
         logger.info(f"Assessment created: {assessment_data['id']}")
-        return assessment.to_dict() if hasattr(assessment, 'to_dict') else dict(assessment)
+        
+        result = assessment.to_dict() if hasattr(assessment, 'to_dict') else dict(assessment)
+        # Frontend expects status field
+        if isinstance(result, dict):
+            result['status'] = 'success'
+            
+        return result
     except Exception as e:
         logger.error(f"Assessment creation failed: {e}")
         raise
@@ -168,7 +176,10 @@ async def bulk_upload_assessment_questions(
         assessment = service.create_assessment(assessment_data)
         logger.info(f"Assessment created from file: {assessment_data['id']}")
         
-        return assessment.to_dict() if hasattr(assessment, 'to_dict') else dict(assessment)
+        result = assessment.to_dict() if hasattr(assessment, 'to_dict') else dict(assessment)
+        if isinstance(result, dict):
+            result['status'] = 'success'
+        return result
         
     except Exception as e:
         logger.error(f"Bulk assessment upload failed: {e}")
@@ -216,7 +227,10 @@ async def ai_generate_assessment_questions(
         assessment = service.create_assessment(assessment_data)
         logger.info(f"AI-generated assessment created: {assessment_data['id']}")
         
-        return assessment.to_dict() if hasattr(assessment, 'to_dict') else dict(assessment)
+        result = assessment.to_dict() if hasattr(assessment, 'to_dict') else dict(assessment)
+        if isinstance(result, dict):
+            result['status'] = 'success'
+        return result
         
     except Exception as e:
         logger.error(f"AI assessment generation failed: {e}")
@@ -236,9 +250,46 @@ async def toggle_assessment_active(
     try:
         assessment = service.toggle_assessment_status(assessment_id)
         logger.info(f"Assessment toggled: {assessment_id}")
-        return assessment.to_dict() if hasattr(assessment, 'to_dict') else dict(assessment)
+        
+        result = assessment.to_dict() if hasattr(assessment, 'to_dict') else dict(assessment)
+        if isinstance(result, dict):
+            result['status'] = 'success'
+        return result
     except Exception as e:
         logger.error(f"Assessment toggle failed: {e}")
+        raise
+
+
+@router.put("/proctored/{assessment_id}")
+async def update_proctored_assessment(
+    assessment_id: str,
+    assessment_in: ProctoredAssessmentCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    Update a proctored assessment.
+    """
+    service = AssessmentService(db)
+    
+    update_data = {
+        "title": assessment_in.title,
+        "description": assessment_in.description,
+        "questions": assessment_in.questions,
+        "time_limit_minutes": assessment_in.time_limit_minutes,
+        "passing_score": assessment_in.passing_score,
+        "created_by": assessment_in.created_by,
+    }
+    
+    try:
+        assessment = service.update_assessment(assessment_id, update_data)
+        logger.info(f"Assessment updated: {assessment_id}")
+        
+        result = assessment.to_dict() if hasattr(assessment, 'to_dict') else dict(assessment)
+        if isinstance(result, dict):
+            result['status'] = 'success'
+        return result
+    except Exception as e:
+        logger.error(f"Assessment update failed: {e}")
         raise
 
 
@@ -255,7 +306,10 @@ async def delete_proctored_assessment(
     try:
         service.delete_assessment(assessment_id)
         logger.info(f"Assessment deleted: {assessment_id}")
-        return {"message": f"Assessment {assessment_id} deleted successfully"}
+        return {
+            "status": "success", 
+            "message": f"Assessment {assessment_id} deleted successfully"
+        }
     except Exception as e:
         logger.error(f"Assessment deletion failed: {e}")
         raise

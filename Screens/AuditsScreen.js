@@ -17,6 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 import API_URL from '../config';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
 
@@ -197,7 +198,12 @@ const AuditsScreen = ({ navigation, route }) => {
             if (selectedEmployee) url += `&user_email=${encodeURIComponent(selectedEmployee)}`;
             if (selectedHistoryCategory) url += `&category=${encodeURIComponent(selectedHistoryCategory)}`;
 
-            const response = await fetch(url);
+            const token = await AsyncStorage.getItem('userToken');
+            const response = await fetch(url, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
             const data = await response.json();
             setHistoryData(data.audits || []);
             setHistoryStats({
