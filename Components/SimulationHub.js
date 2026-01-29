@@ -27,7 +27,7 @@ export default function SimulationHub({ onClose }) {
 
     const fetchHistory = async () => {
         try {
-            const res = await fetch(`${API_URL}/ai/simulation/history`);
+            const res = await fetch(`${API_URL}/api/v1/roleplay/history`);
             const data = await res.json();
             setHistory(data);
         } catch (e) {

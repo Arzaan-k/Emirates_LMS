@@ -36,7 +36,7 @@ export default function SimulationAdminManager({ onClose }) {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-            const res = await fetch(`${API_URL}/simulations`, {
+            const res = await fetch(`${API_URL}/api/v1/simulations/`, {
                 signal: controller.signal
             });
             clearTimeout(timeoutId);

@@ -2242,7 +2242,7 @@ export default function Home() {
       {activeTool && !showTwin && (
         <View style={{ flex: 1, zIndex: 9999, backgroundColor: '#FFF' }}>
           {activeTool === 'roleplay' && <SimulationHub onClose={() => setActiveTool(null)} />}
-          {activeTool === 'videosim' && <InteractiveSimulationHub onClose={() => setActiveTool(null)} />}
+          {activeTool === 'videosim' && <InteractiveSimulationHub onClose={() => setActiveTool(null)} userProfile={userProfile} />}
           {activeTool === 'scanner' && <AIScanner onClose={() => setActiveTool(null)} />}
           {activeTool === 'flashcards' && <AIFlashcards onClose={() => setActiveTool(null)} />}
         </View>

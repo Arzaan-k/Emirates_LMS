@@ -34,7 +34,7 @@ export default function UpcomingExamsCard({ userEmail, onStartExam, refreshKey }
         if (!userEmail) return;
         setLoading(true);
         try {
-            const url = `${API_URL}/scheduled-exams/user/${encodeURIComponent(userEmail)}`;
+            const url = `${API_URL}/api/v1/assessments/scheduled/user/${encodeURIComponent(userEmail)}`;
             const res = await fetch(url);
             const data = await res.json();
 
@@ -65,17 +65,17 @@ export default function UpcomingExamsCard({ userEmail, onStartExam, refreshKey }
             const formData = new FormData();
             formData.append('user_email', userEmail);
 
-            const res = await fetch(`${API_URL}/scheduled-exams/${exam.id}/start`, {
+            const res = await fetch(`${API_URL}/api/v1/assessments/scheduled/${exam.id}/start`, {
                 method: 'POST',
                 body: formData
             });
 
             const data = await res.json();
 
-            if (data.status === 'success') {
+            if (res.ok && (data.started_exam || data.status === 'success')) {
                 // Pass exam data to parent for proctored exam screen
                 if (onStartExam) {
-                    onStartExam(data.exam, data.start_time);
+                    onStartExam(data.exam || exam, data.start_time);
                 }
             } else {
                 Alert.alert('Error', data.detail || 'Failed to start exam');

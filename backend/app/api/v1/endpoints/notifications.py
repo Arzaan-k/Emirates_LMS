@@ -28,7 +28,7 @@ router = APIRouter(prefix="/notifications", tags=["Notifications"])
 # NOTIFICATION ENDPOINTS
 # ==========================================
 
-@router.get("/")
+@router.get("")
 async def get_notifications(
     user_id: Optional[str] = "user",
     db: Session = Depends(get_db)
@@ -75,7 +75,7 @@ async def get_crucial_notifications(
         return None
 
 
-@router.post("/")
+@router.post("")
 async def send_notification(
     title: str = Form(...),
     message: str = Form(...),
@@ -396,6 +396,7 @@ async def create_support_ticket(
         "customer_email": user_email,
         "subject": subject,
         "description": message,
+        "message": message, # Populate legacy column
         "priority": priority,
         "status": "open",
         "created_at": datetime.utcnow(),

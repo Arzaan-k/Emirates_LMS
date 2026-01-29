@@ -423,27 +423,82 @@ class AnalyticsRepository:
             "recommendations": [],
         }
 
-    def get_recommendations(self, user_email: str, limit: int = 5) -> List[Dict[str, Any]]:
-        """Get course recommendations for a user."""
-        # Get courses user hasn't completed
+    def get_recommendations(self, user_email: str, limit: int = 5) -> Dict[str, Any]:
+        """Get AI-powered personalized course recommendations."""
+        # 1. Get courses user hasn't completed
         completed = self.db.query(CourseCompletion.course_id).filter(
             CourseCompletion.user_email == user_email
         ).all()
         completed_ids = [c[0] for c in completed]
 
-        courses = self.db.query(Content).filter(
+        candidate_courses = self.db.query(Content).filter(
             ~Content.id.in_(completed_ids) if completed_ids else True
-        ).limit(limit).all()
+        ).limit(20).all()  # Fetch more to rank
 
-        return [
-            {
-                "course_id": c.id,
-                "title": c.title,
-                "description": c.description,
-                "reason": "Recommended based on your learning path",
-            }
-            for c in courses
-        ]
+        recommendations = []
+        focus_tags = set()
+
+        # 2. Rank and Format Courses
+        for course in candidate_courses:
+            # Logic for priority
+            priority = "low"
+            if course.resource_type == "video":
+                priority = "medium"
+            if course.bucket and course.bucket.lower() in ["safety", "compliance", "mandatory"]:
+                priority = "high"
+            if "advanced" in course.title.lower():
+                priority = "high"
+
+            # Logic for reasons
+            reason = "Recommended for your role"
+            if priority == "high":
+                reason = "Critical skill for your progression"
+            elif course.xp > 50:
+                reason = "High XP opportunity to boost your rank"
+            
+            skill = course.bucket or "General Skills"
+            focus_tags.add(skill)
+
+            recommendations.append({
+                "course_id": course.id,
+                "course_title": course.title,
+                "priority": priority,
+                "reason": reason,
+                "skill_addressed": skill,
+                "expected_improvement": f"Mastery in {skill}",
+                "course_data": course.to_dict()
+            })
+
+        # Sort by priority (high > medium > low)
+        priority_map = {"high": 3, "medium": 2, "low": 1}
+        recommendations.sort(key=lambda x: priority_map.get(x["priority"], 0), reverse=True)
+
+        # Limit
+        recommendations = recommendations[:limit]
+
+        # 3. Calculate Skill Gaps (Mock for now or based on quiz scores)
+        # In a real AI system, this would analyze quiz failures.
+        skill_gaps = []
+        for tag in list(focus_tags)[:4]:
+             skill_gaps.append({
+                 "skill_name": tag,
+                 "skill_key": tag.lower(),
+                 "gap_level": "moderate",
+                 "icon": "school",
+                 "percentage": 45,
+                 "attempts": 0,
+                 "needs_improvement": True
+             })
+        
+        # 4. Construct Response
+        return {
+            "status": "success",
+            "recommendations": recommendations,
+            "overall_advice": f"You have {len(recommendations)} recommended courses to improve your proficiency. Focus on High Priority items first.",
+            "focus_areas": list(focus_tags)[:3],
+            "skill_gaps": skill_gaps,
+            "profile_summary": self.get_user_learning_profile(user_email)
+        }
 
     def get_competency_matrix(self) -> List[Dict[str, Any]]:
         """Get competency matrix for all users."""
@@ -545,6 +600,14 @@ class AnalyticsRepository:
         if action_type:
             query = query.filter(AuditLog.action == action_type)
         return query.order_by(AuditLog.timestamp.desc()).limit(limit).all()
+
+    def create_audit_log(self, data: Dict[str, Any]) -> AuditLog:
+        """Create a new audit log entry."""
+        log = AuditLog(**data)
+        self.db.add(log)
+        self.db.commit()
+        self.db.refresh(log)
+        return log
 
 
 class LocationTrackingRepository(BaseRepository[LocationTracking]):

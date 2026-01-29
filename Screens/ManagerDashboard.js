@@ -44,6 +44,7 @@ import ScheduleExamModal from '../Components/ScheduleExamModal'; // [NEW] Schedu
 import ExamAttendanceModal from '../Components/ExamAttendanceModal'; // [NEW] Exam Attendance
 import ScheduledExamsListModal from '../Components/ScheduledExamsListModal'; // [NEW] Scheduled Exams List
 import ExamHistoryModal from '../Components/ExamHistoryModal'; // [NEW] Exam History
+import RoleplayHistoryModal from '../Components/RoleplayHistoryModal'; // [NEW] Roleplay History
 
 
 
@@ -274,7 +275,7 @@ export default function ManagerDashboard({ route, navigation }) {
             const res = await fetch(`${API_URL}/api/v1/ai/ask`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query })
+                body: JSON.stringify({ question: query })
             });
             const data = await res.json();
 

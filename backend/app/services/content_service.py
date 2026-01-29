@@ -151,24 +151,60 @@ class ContentService:
         # Get user
         user = self.user_repo.get_by_email(user_email)
         self_learning_completed = user.self_learning_completed if user else False
-        user_role = user.role if user else "Waffler"
-
-        # Get courses for path type
-        if path_type == "self_learning":
-            courses = self.content_repo.get_self_learning_content()
-        else:
-            courses = self.content_repo.get_career_progression_content()
-
+        
         # Get user's completed courses
         user_completed_courses = self.completion_repo.get_user_completed_course_ids(user_email)
         user_completed_nodes = self.progress_repo.get_user_completed_nodes(user_email)
         all_completed = user_completed_courses.union(user_completed_nodes)
 
+        final_courses_list = []
+
+        if path_type == "self_learning":
+            # Self Learning: Simple list ordered by timestamp (as retrieved from repo)
+            courses = self.content_repo.get_self_learning_content()
+            final_courses_list = courses
+        else:
+            # Career Progression: Ordered by Levels -> Access Rules
+            # 1. Get all levels in order (Waffler -> Silver -> Gold)
+            levels = self.level_repo.get_all_ordered()
+            
+            # 2. Get all access rules
+            rules = self.access_rule_repo.get_all_rules_dict()
+            
+            # 3. Get all potential career content mapped by ID
+            all_content_list = self.content_repo.get_career_progression_content()
+            content_map = {c.id: c for c in all_content_list}
+            
+            ordered_content = []
+            seen_ids = set()
+
+            # 4. Iterate levels and collect courses defined in access controls
+            for level in levels:
+                rule = rules.get(level.name)
+                if not rule:
+                    continue
+                
+                # Get course IDs assigned to this level
+                level_course_ids = rule.get("accessible_courses", [])
+                
+                for cid in level_course_ids:
+                    # Only add if it exists in content repo and hasn't been added yet
+                    # logic: prevent duplicates if course assigned to multiple levels (shouldn't happen but safety)
+                    if cid in content_map and cid not in seen_ids:
+                        course = content_map[cid]
+                        # Verify it is actually a career progression node (double check)
+                        # The repository query already does filter, but ensuring strictness
+                        if course.learning_path_type != "self_learning":
+                           ordered_content.append(course)
+                           seen_ids.add(cid)
+            
+            final_courses_list = ordered_content
+
         # Build response with status
         response_nodes = []
         found_active = False
 
-        for course in courses:
+        for course in final_courses_list:
             node_resp = {
                 "id": course.id,
                 "title": course.title,
@@ -312,6 +348,25 @@ class ContentService:
         """Get all completions for a user."""
         completions = self.completion_repo.get_by_user(user_email)
         return [c.to_dict() for c in completions]
+
+    def update_node_progress(
+        self,
+        user_email: str,
+        node_id: str,
+        progress_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Update node progress (partial)."""
+        progress = self.progress_repo.upsert_progress(user_email, node_id, progress_data)
+        
+        # Check if 100% complete, if so record formal completion
+        if progress_data.get("progress_percent", 0) >= 100 or progress_data.get("completed"):
+            self.record_course_completion(
+                user_email, 
+                node_id, 
+                time_spent_seconds=progress_data.get("time_spent_seconds", 0)
+            )
+            
+        return progress.to_dict() if hasattr(progress, 'to_dict') else dict(progress)
 
     # ===========================================
     # COURSE BUCKETS

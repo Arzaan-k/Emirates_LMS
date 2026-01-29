@@ -458,6 +458,8 @@ export default function CoursePath(props) {
         'Assistant Store Manager': 'store'
     };
 
+    const [hierarchy, setHierarchy] = useState(HIERARCHY);
+
     // Reload when learningPathType changes
     useEffect(() => {
         loadCoursePath();
@@ -465,6 +467,8 @@ export default function CoursePath(props) {
             checkAdvancementEligibility();
         }
     }, [learningPathType]);
+    // ...
+
 
     // Check if user is eligible for role advancement exam
     const checkAdvancementEligibility = async () => {
@@ -499,82 +503,57 @@ export default function CoursePath(props) {
 
     const loadCoursePath = async () => {
         try {
-            // 1. Fetch User Progress
-            const progressRes = await fetch(`${API_URL}/api/v1/levels/user/${userEmail}/progress`);
-            const progressData = await progressRes.json();
-            setUserProgress(progressData);
+            // 1. Common: User Progress (needed for header)
+            const progressPromise = fetch(`${API_URL}/api/v1/levels/user/${userEmail}/progress`).catch(e => ({ json: () => ({}) }));
 
-            // 2. Fetch Access Rules (Curriculum)
-            const rulesRes = await fetch(`${API_URL}/api/v1/users/privileges/all`);
-            const rulesData = await rulesRes.json();
-
-            // 3. Fetch Courses for the specific learning path type
-            const learningPathRes = await fetch(`${API_URL}/api/v1/content/learning-paths/${learningPathType}?user_email=${userEmail}`);
-            const learningPathData = await learningPathRes.json();
-
-            // If the path is locked, show empty state or handle accordingly
-            if (learningPathData.is_locked) {
-                setLevels([]);
-                return;
-            }
-
-            // 4. Get courses from the learning path endpoint (already has status)
-            const pathCourses = learningPathData.courses || [];
-
-            // Get completed IDs from the response
-            const completedIds = new Set(
-                pathCourses.filter(c => c.status === 'completed').map(c => c.id)
-            );
-
-            // Also fetch from general path/nodes for backward compatibility
-            const statusRes = await fetch(`${API_URL}/api/v1/content/path-nodes?user_email=${userEmail}&t=${Date.now()}`);
-            const statusData = await statusRes.json();
-            (statusData.courses || []).filter(c => c.status === 'completed').forEach(c => {
-                completedIds.add(c.id || c.videoUrl);
-            });
-
-            // 5. Construct the Ordered Path with SEQUENTIAL UNLOCKING + SMART LEVEL DETECTION
-            // [FIX] Strict Level Mode: Advancement only via Exam.
-
-            // For SELF-LEARNING path: Use simple sequential structure with SEQUENTIAL UNLOCKING
+            // =========================================================
+            //  MODE A: SELF LEARNING (Fast Load)
+            // =========================================================
             if (learningPathType === 'self_learning') {
-                // Build a simple sequential path from the courses
-                // Sort by timestamp ascending (oldest first = start of path, newest = end)
-                const sortedCourses = [...pathCourses].sort((a, b) =>
+                const [progressRes, learningPathRes] = await Promise.all([
+                    progressPromise,
+                    fetch(`${API_URL}/api/v1/content/learning-paths/self_learning?user_email=${userEmail}`).catch(e => ({ json: () => ({}) }))
+                ]);
+
+                const progressData = await progressRes.json();
+                const learningPathData = await learningPathRes.json();
+
+                setUserProgress(progressData);
+
+                const pathCourses = learningPathData.courses || [];
+
+                if (learningPathData.is_locked) {
+                    setLevels([]);
+                    return;
+                }
+
+                // Filter & Sort
+                const relevantCourses = pathCourses.filter(c =>
+                    c.learning_path_type === 'self_learning' ||
+                    (!c.learning_path_type && c.bucket === 'Self Learning')
+                );
+                const sortedCourses = [...relevantCourses].sort((a, b) =>
                     new Date(a.timestamp || 0) - new Date(b.timestamp || 0)
                 );
 
-                let foundFirstIncomplete = false; // Track sequential unlocking
-
+                let foundFirstIncomplete = false;
                 let builtPath = sortedCourses.map((course, index) => {
                     const isCompleted = course.status === 'completed';
-
-                    // SEQUENTIAL UNLOCKING LOGIC:
-                    // - First node is always unlocked (active)
-                    // - Subsequent nodes are locked until prior node is completed
                     let status = 'locked';
-
                     if (isCompleted) {
                         status = 'completed';
                     } else if (index === 0) {
-                        // First node: always active if not completed
                         status = 'active';
                         foundFirstIncomplete = true;
                     } else {
-                        // Check if previous node is completed
                         const previousCourse = sortedCourses[index - 1];
-                        const isPreviousCompleted = previousCourse?.status === 'completed';
-
-                        if (isPreviousCompleted && !foundFirstIncomplete) {
-                            // Previous node completed, this is the next active node
+                        if (previousCourse?.status === 'completed' && !foundFirstIncomplete) {
                             status = 'active';
                             foundFirstIncomplete = true;
                         } else {
-                            // Previous not completed OR we already found first incomplete
                             status = 'locked';
                         }
                     }
-
                     return {
                         ...course,
                         status: status,
@@ -584,18 +563,13 @@ export default function CoursePath(props) {
                     };
                 });
 
-                // If all self-learning courses are completed, notify parent
+                // Auto-complete logic
                 const allCompleted = builtPath.length > 0 && builtPath.every(c => c.status === 'completed');
                 if (allCompleted && onComplete) {
-                    // Mark self-learning as complete on the backend
                     try {
-                        await fetch(`${API_URL}/api/v1/content/learning-paths/complete-self-learning/${userEmail}`, {
-                            method: 'POST'
-                        });
-                        onComplete(); // Refresh parent status
-                    } catch (e) {
-                        console.log("Error completing self-learning:", e);
-                    }
+                        await fetch(`${API_URL}/api/v1/content/learning-paths/complete-self-learning/${userEmail}`, { method: 'POST' });
+                        onComplete();
+                    } catch (e) { }
                 }
 
                 setLevels(builtPath);
@@ -603,139 +577,154 @@ export default function CoursePath(props) {
                 return;
             }
 
-            // For CAREER PROGRESSION path: Use existing hierarchy-based logic
-            // Defines where the "visual" car is. 
-            // Primarily follow the API Role, but check completions to see if we satisfy current level requirements.
-            const apiLevelIdx = HIERARCHY.indexOf(progressData.current_level || 'Waffler');
-            const userLevelIdx = apiLevelIdx >= 0 ? apiLevelIdx : 0;
-            const userLevel = HIERARCHY[userLevelIdx];
+            // =========================================================
+            //  MODE B: CAREER PROGRESSION (Full Hierarchy)
+            // =========================================================
 
-            console.log(`User Level: ${userLevel} (${userLevelIdx})`);
+            const [levelsRes, progressRes, rulesRes, learningPathRes, statusRes] = await Promise.all([
+                fetch(`${API_URL}/api/v1/levels/`).catch(e => ({ json: () => ({ levels: [] }) })),
+                progressPromise,
+                fetch(`${API_URL}/api/v1/users/privileges/all`).catch(e => ({ json: () => ({}) })),
+                fetch(`${API_URL}/api/v1/content/learning-paths/career_progression?user_email=${userEmail}`).catch(e => ({ json: () => ({}) })),
+                fetch(`${API_URL}/api/v1/content/path-nodes?user_email=${userEmail}&t=${Date.now()}`).catch(e => ({ json: () => ({ courses: [] }) }))
+            ]);
 
-            // Now build the path with the correct level
+            const [levelsData, progressData, rulesData, learningPathData, statusData] = await Promise.all([
+                levelsRes.json(),
+                progressRes.json(),
+                rulesRes.json(),
+                learningPathRes.json(),
+                statusRes.json()
+            ]);
+
+            // Process Hierarchy
+            let dynamicHierarchy = levelsData.levels || [];
+            let hierarchyNames = dynamicHierarchy.map(l => l.name).filter(n => n !== 'Self Learning' && n !== 'General');
+            if (hierarchyNames.length === 0) hierarchyNames = HIERARCHY;
+            setHierarchy(hierarchyNames);
+            setUserProgress(progressData);
+
+            if (learningPathData.is_locked) {
+                setLevels([]);
+                return;
+            }
+
+            const pathCourses = learningPathData.courses || [];
+            // Merge completions
+            const completedIds = new Set(
+                pathCourses.filter(c => c.status === 'completed').map(c => c.id)
+            );
+            (statusData.courses || []).filter(c => c.status === 'completed').forEach(c => {
+                completedIds.add(c.id || c.videoUrl);
+            });
+
+            // Build Career Path
+            const userLevel = progressData.current_level || 'Waffler';
+            // Robust Index Finding: Exact -> Lowercase -> Default
+            let userLevelIdx = hierarchyNames.indexOf(userLevel);
+            if (userLevelIdx === -1) userLevelIdx = hierarchyNames.findIndex(h => h.toLowerCase() === userLevel.toLowerCase());
+            if (userLevelIdx === -1) userLevelIdx = 0;
+
             let builtPath = [];
             let cumulativeIndex = 0;
-            let foundFirstIncomplete = false; // Track if we've found the first incomplete node
+            let foundFirstIncomplete = false;
 
-            HIERARCHY.forEach((levelName) => {
-                const levelRules = rulesData[levelName] || {};
+            hierarchyNames.forEach((levelName) => {
+                // ROBUST RULE LOOKUP: Exact name -> Lowercase name
+                // This fixes the "Blank Interface" if cases mismatch (e.g. Waffler vs waffler)
+                const levelRules = rulesData[levelName] || rulesData[levelName.toLowerCase()] || {};
                 const courseIds = levelRules.accessible_courses || [];
 
-                // Find course objects from pathCourses (career progression courses)
-                const levelCourses = courseIds.map(id => pathCourses.find(c => c.id === id)).filter(Boolean);
+                // Filter Courses
+                const levelCourses = courseIds.map(id => pathCourses.find(c => c.id === id))
+                    .filter(c => c && c.learning_path_type !== 'self_learning');
 
-                // Determine Level Status relative to User
-                const thisLevelIdx = HIERARCHY.indexOf(levelName);
-
-                const isPastLevel = userLevelIdx > thisLevelIdx;
-                const isCurrentLevel = userLevelIdx === thisLevelIdx;
-                const isFutureLevel = userLevelIdx < thisLevelIdx;
-
-                // Track completions for THIS level to decide on Exam Node
                 const levelTotal = levelCourses.length;
                 let levelCompletedCount = 0;
+
+                const thisLevelIdx = hierarchyNames.indexOf(levelName);
+                const isPastLevel = userLevelIdx > thisLevelIdx;
+                const isCurrentLevel = userLevelIdx === thisLevelIdx;
+                // const isFutureLevel = userLevelIdx < thisLevelIdx;
 
                 levelCourses.forEach((course) => {
                     const isCompleted = completedIds.has(course.id);
                     if (isCompleted) levelCompletedCount++;
 
                     let status = "locked";
-
-                    if (isCompleted) {
-                        status = "completed";
-                    } else if (isFutureLevel) {
-                        status = "locked";
-                    } else if (isPastLevel) {
-                        // Past level but course incomplete? (Rare if rigorous, but possible if rules changed)
-                        // Show as completed or unlocked? 
-                        // If user is promoted, assume past stuff is "done" or accessible.
-                        status = "completed";
-                    } else if (isCurrentLevel) {
-                        // Past or current level - apply sequential logic
+                    // Only unlock if current or past level
+                    if (isCompleted) status = "completed";
+                    else if (isPastLevel) status = "completed"; // Assume passed levels are accessible/done
+                    else if (isCurrentLevel) {
                         if (!foundFirstIncomplete) {
                             status = "active";
                             foundFirstIncomplete = true;
-                        } else {
-                            status = "locked";
                         }
                     }
 
                     builtPath.push({
                         ...course,
-                        icon: ICONS[cumulativeIndex % ICONS.length], // Assign random icon
+                        icon: ICONS[cumulativeIndex % ICONS.length],
                         status: status,
-                        levelContext: levelName, // To show markers
+                        levelContext: levelName,
                         isFirstInLevel: builtPath.length === 0 || builtPath[builtPath.length - 1].levelContext !== levelName
                     });
                     cumulativeIndex++;
                 });
 
-                // [NEW] INJECT EXAM NODE
-                // If this level has courses, and we are either (At Level & All Done) OR (Past Level)
+                // Exam Node
                 if (levelTotal > 0) {
                     const allLevelCoursesDone = levelCompletedCount >= levelTotal;
-
                     if (allLevelCoursesDone) {
-                        // Determine Exam Status
                         let examStatus = "locked";
-                        if (isPastLevel) {
-                            examStatus = "completed";
-                        } else if (isCurrentLevel) {
-                            // If all courses done, Exam is ACTIVE (Next Step)
-                            // If we haven't found an active node yet (meaning all courses just marked completed above), this is it.
+                        if (isPastLevel) examStatus = "completed";
+                        else if (isCurrentLevel) {
+                            // If all courses done, exam is next
+                            // If foundFirstIncomplete is false (all courses were complete), then exam is active
+                            // If foundFirstIncomplete was set true by a course, then exam is inactive?
+                            // WAIT: If allLevelCoursesDone is TRUE, then all course loops set 'completed'.
+                            // foundFirstIncomplete would still be FALSE (because no course set it to active, they were all completed).
+                            // So Exam becomes active here.
                             if (!foundFirstIncomplete) {
                                 examStatus = "active";
                                 foundFirstIncomplete = true;
                             } else {
-                                // If we already found an active node (e.g. valid course), theoretically exam shouldn't be reachable yet,
-                                // but 'allLevelCoursesDone' says otherwise.
-                                // Actually 'foundFirstIncomplete' becomes true when we hit the first non-complete course.
-                                // If 'allLevelCoursesDone', foundFirstIncomplete is still false (from course loop).
+                                // If a course was found active (incomplete), we shouldn't be here?
+                                // Actually, levelCompletedCount < levelTotal if any course is incomplete.
+                                // So allLevelCoursesDone is False.
+                                // So this block is skipped.
+                                // So this else is unreachable safely.
                                 examStatus = "active";
-                                foundFirstIncomplete = true;
                             }
                         }
 
                         builtPath.push({
                             id: `exam-${levelName}`,
                             title: `${levelName} Assessment`,
-                            desc: `Proctored exam to advance from ${levelName}.`,
+                            desc: `Assesment for ${levelName}.`,
                             icon: "shield-star",
                             status: examStatus,
                             type: "EXAM",
                             levelContext: levelName,
                             isFirstInLevel: false,
-                            roleTarget: levelName // Metadata
+                            roleTarget: levelName
                         });
                         cumulativeIndex++;
                     }
                 }
             });
 
-            // FALLBACK logic - use pathCourses if builtPath is empty
-            if (builtPath.length === 0 && pathCourses.length > 0) {
-                // Use pathCourses directly as fallback
-                builtPath = pathCourses.map((course, index) => ({
-                    ...course,
-                    icon: ICONS[index % ICONS.length],
-                    levelContext: 'General',
-                    isFirstInLevel: index === 0
-                }));
-            }
-
-
-            // Update userProgress headers
             setUserProgress(prev => ({
                 ...prev,
                 current_level: userLevel,
-                next_level: userLevelIdx < HIERARCHY.length - 1 ? HIERARCHY[userLevelIdx + 1] : null
+                next_level: userLevelIdx < hierarchyNames.length - 1 ? hierarchyNames[userLevelIdx + 1] : null
             }));
 
             setLevels(builtPath);
             updateCarPosition(builtPath);
 
         } catch (error) {
-            console.error("Error loading course path:", error);
+            console.error("Error loading path:", error);
         }
     };
 
@@ -752,8 +741,8 @@ export default function CoursePath(props) {
                 };
 
                 // Determine if this milestone is "reached" (User is at or past this level)
-                const userLvlIdx = HIERARCHY.indexOf(userProgress?.current_level || 'Waffler');
-                const thisLvlIdx = HIERARCHY.indexOf(levelName);
+                const userLvlIdx = hierarchy.indexOf(userProgress?.current_level || 'Waffler');
+                const thisLvlIdx = hierarchy.indexOf(levelName);
                 const isReached = userLvlIdx >= thisLvlIdx;
 
                 return (

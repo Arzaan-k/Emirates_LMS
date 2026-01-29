@@ -6,9 +6,15 @@ Business logic for AI-powered features using Groq API
 import logging
 import json
 import re
+import os
+import subprocess
 from typing import Any, Dict, List, Optional
 
 from groq import Groq
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 from app.config.settings import settings
 from app.core.exceptions import ExternalServiceError
@@ -23,36 +29,106 @@ class AIService:
         self.client = Groq(api_key=settings.GROQ_API_KEY)
         self.model = settings.GROQ_MODEL
         self.whisper_model = settings.GROQ_WHISPER_MODEL
+        
+        self.openai_client = None
+        if settings.OPENAI_API_KEY and OpenAI:
+            self.openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
     # ===========================================
     # TRANSCRIPTION
     # ===========================================
 
+    # ===========================================
+    # TRANSCRIPTION
+    # ===========================================
+
+    def _compress_audio(self, input_path: str) -> str:
+        """
+        Compress audio to <25MB for Groq Whisper.
+        Uses ffmpeg to downsample to 32k mono.
+        """
+        try:
+            filename = os.path.basename(input_path)
+            basename, _ = os.path.splitext(filename)
+            output_path = os.path.join(os.path.dirname(input_path), f"compressed_{basename}.mp3")
+            
+            # 32k bitrate, mono channel, 16kHz sample rate (Whisper optimal)
+            command = [
+                'ffmpeg', '-y', 
+                '-i', input_path,
+                '-map', '0:a:0',       # Use first audio stream
+                '-b:a', '32k',         # 32k bitrate
+                '-ac', '1',            # Mono
+                '-ar', '16000',        # 16kHz
+                output_path
+            ]
+            
+            logger.info(f"Compressing audio: {input_path} -> {output_path}")
+            subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return output_path
+        except Exception as e:
+            logger.error(f"Audio compression failed: {e}")
+            return input_path  # Return original if compression fails
+
     def transcribe_audio(self, audio_file_path: str) -> str:
         """
         Transcribe audio file using Groq's Whisper.
-
-        Args:
-            audio_file_path: Path to the audio file
-
-        Returns:
-            Transcribed text
+        Handles large files by compressing first if needed.
         """
+        file_to_process = audio_file_path
+        compressed = False
+        
         try:
-            with open(audio_file_path, "rb") as audio_file:
+            # Check file size (limit is 25MB)
+            file_size_mb = os.path.getsize(audio_file_path) / (1024 * 1024)
+            if file_size_mb > 24:
+                logger.info(f"File too large ({file_size_mb:.2f}MB). Compressing...")
+                file_to_process = self._compress_audio(audio_file_path)
+                compressed = (file_to_process != audio_file_path)
+            
+            with open(file_to_process, "rb") as audio_file:
                 response = self.client.audio.transcriptions.create(
                     model=self.whisper_model,
                     file=audio_file,
                     response_format="text",
                 )
+            
+            # Cleanup compressed file
+            if compressed and os.path.exists(file_to_process):
+                os.remove(file_to_process)
+                
             return response
         except Exception as e:
             logger.error(f"Transcription error: {e}")
+            # Ensure cleanup
+            if compressed and os.path.exists(file_to_process):
+                os.remove(file_to_process)
+                
             raise ExternalServiceError(
                 service="Groq Whisper",
                 detail="Failed to transcribe audio",
                 original_error=str(e)
             )
+
+    # ===========================================
+    # EMBEDDINGS
+    # ===========================================
+
+    def generate_embedding(self, text: str) -> List[float]:
+        """Generate embedding using OpenAI."""
+        if not self.openai_client:
+            logger.warning("OpenAI client not initialized (missing API key). Skipping embedding.")
+            return []
+
+        try:
+            response = self.openai_client.embeddings.create(
+                input=text[:8191],  # Limit for text-embedding-3-small
+                model="text-embedding-3-small"
+            )
+            return response.data[0].embedding
+        except Exception as e:
+            logger.error(f"Embedding generation error: {e}")
+            return []
 
     # ===========================================
     # QUIZ GENERATION

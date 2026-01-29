@@ -17,6 +17,7 @@ from app.repositories.assessment_repository import (
     ScheduledExamRepository,
     ExamAttendanceRepository,
 )
+from app.repositories.user_repository import UserRepository  # Added import
 from app.models.assessment import (
     ProcturedAssessment,
     AssessmentSubmission,
@@ -36,6 +37,66 @@ class AssessmentService:
         self.submission_repo = AssessmentSubmissionRepository(db)
         self.exam_repo = ScheduledExamRepository(db)
         self.attendance_repo = ExamAttendanceRepository(db)
+        self.user_repo = UserRepository(db)  # Added user repo
+
+    # ===========================================
+    # PROCTORED ASSESSMENTS
+    # ===========================================
+    
+
+
+    def get_exam_attendance(self, exam_id: str) -> List[ExamAttendance]:
+        """Get all attendance records for an exam, ensuring all assigned users are included."""
+        # Sync assigned users with attendance table
+        exam = self.get_scheduled_exam_by_id(exam_id)
+        assigned_users = exam.assigned_users or []
+        
+        existing_attendance = self.attendance_repo.get_by_exam(exam_id)
+        existing_emails = {a.user_email for a in existing_attendance}
+        
+        # 1. Update existing "Unknown" names
+        for rec in existing_attendance:
+            if rec.user_name == "Unknown":
+                user_obj = self.user_repo.get_by_email(rec.user_email)
+                if user_obj and user_obj.name:
+                    rec.user_name = user_obj.name
+                    # Save the update
+                    self.db.add(rec)
+        
+        # 2. Add new records
+        new_records = []
+        for user in assigned_users:
+            # Handle both string emails and object format from frontend
+            email = user.get('email') if isinstance(user, dict) else str(user)
+            name = user.get('name') if isinstance(user, dict) else "Unknown"
+            
+            # If name is still unknown, try to look up
+            if name == "Unknown":
+                user_obj = self.user_repo.get_by_email(email)
+                if user_obj and user_obj.name:
+                    name = user_obj.name
+
+            if email not in existing_emails:
+                # Create default attendance record
+                record_data = {
+                    "id": str(uuid.uuid4()),
+                    "exam_id": exam_id,
+                    "user_email": email,
+                    "user_name": name,
+                    "marked_present": False,
+                    "started_exam": False,
+                    "completed": False,
+                    "passed": False
+                }
+                new_record = self.attendance_repo.create(record_data)
+                new_records.append(new_record)
+        
+        # Commit any name updates or new records
+        if new_records or any(rec.user_name != "Unknown" for rec in existing_attendance):
+             self.db.commit()
+
+        # Always return fresh list
+        return self.attendance_repo.get_by_exam(exam_id)
 
     # ===========================================
     # PROCTORED ASSESSMENTS
@@ -329,6 +390,34 @@ class AssessmentService:
 
         return attendance
 
+    def mark_user_present(
+        self,
+        exam_id: str,
+        user_email: str,
+        marked_by: str
+    ) -> ExamAttendance:
+        """Mark a user as present (alias for mark_attendance with auto-name resolution)."""
+        # Try to find existing record to get name
+        existing = self.attendance_repo.get_by_exam_and_user(exam_id, user_email)
+        user_name = existing.user_name if existing else "Unknown"
+        
+        # If unknown and we have access to user repo, we could fetch it. 
+        # But for now, if record exists, name is there.
+        
+        return self.mark_attendance(exam_id, user_email, user_name, marked_by)
+
+    def mark_user_absent(
+        self,
+        exam_id: str,
+        user_email: str,
+        marked_by: str
+    ) -> Optional[ExamAttendance]:
+        """Mark a user as absent."""
+        self.get_scheduled_exam_by_id(exam_id)
+        attendance = self.attendance_repo.mark_absent(exam_id, user_email, marked_by)
+        logger.info(f"Marked absent: {user_email} for exam {exam_id}")
+        return attendance
+
     def start_exam_for_user(self, exam_id: str, user_email: str) -> ExamAttendance:
         """Mark that a user has started the exam."""
         # Verify user is marked present
@@ -392,33 +481,93 @@ class AssessmentService:
             "time_taken_seconds": time_taken_seconds,
         }
 
-    def get_exam_attendance(self, exam_id: str) -> List[ExamAttendance]:
-        """Get all attendance records for an exam."""
-        return self.attendance_repo.get_by_exam(exam_id)
+
 
     def get_exam_stats(self, exam_id: str) -> Dict[str, Any]:
-        """Get statistics for a scheduled exam."""
+        """Get statistics for a scheduled exam using DB aggregation."""
+        # Ensure sync happens once (lazy check)
+        # self.get_exam_attendance(exam_id) # OPTIONAL: Un-comment if sync ensures accurate 'total'
+        # But for pure speed, we assume sync happened at some point or we just report what's in DB.
+        # User wants "Faster". Syncing is slow (loop).
+        # We will skip Sync for just "getting stats". Sync happens on "View".
+        
         exam = self.get_scheduled_exam_by_id(exam_id)
-        attendance = self.attendance_repo.get_by_exam(exam_id)
-
+        
+        # Get aggregated stats in one query
+        agg = self.attendance_repo.get_aggregated_stats(exam_id)
+        
+        # Use total from exam assignment if available, else from attendance count
         total_assigned = len(exam.assigned_users or [])
-        present_count = self.attendance_repo.get_present_count(exam_id)
-        completed_count = self.attendance_repo.get_completed_count(exam_id)
-
-        # Calculate pass rate among completed
-        passed = sum(1 for a in attendance if a.completed and a.passed)
-        avg_score = sum(a.score or 0 for a in attendance if a.completed)
-        if completed_count > 0:
-            avg_score = avg_score / completed_count
-
+        # If attendance records exist, use that total. (agg['total'])
+        # But agg['total'] might be 0 if not synced.
+        # So total_assigned is safer from exam object.
+        
+        present = agg['present']
+        completed = agg['completed']
+        passed = agg['passed']
+        absent = agg['absent']
+        avg_score = agg['avg_score']
+        
         return {
             "total_assigned": total_assigned,
-            "present_count": present_count,
-            "completed_count": completed_count,
+            "present_count": present,
+            "marked_present": present,
+            "marked_absent": absent,
+            "completed_count": completed,
+            "completed": completed,
             "passed_count": passed,
-            "failed_count": completed_count - passed,
-            "attendance_rate": round((present_count / total_assigned * 100) if total_assigned > 0 else 0, 1),
-            "completion_rate": round((completed_count / present_count * 100) if present_count > 0 else 0, 1),
-            "pass_rate": round((passed / completed_count * 100) if completed_count > 0 else 0, 1),
+            "failed_count": completed - passed,
+            "attendance_rate": round((present / total_assigned * 100) if total_assigned > 0 else 0, 1),
+            "completion_rate": round((completed / present * 100) if present > 0 else 0, 1),
+            "pass_rate": round((passed / completed * 100) if completed > 0 else 0, 1),
             "average_score": round(avg_score, 1),
+            "avg_score": round(avg_score, 1),
+        }
+
+    def get_exam_report(self, exam_id: str) -> Dict[str, Any]:
+        """Generate full report for an exam."""
+        exam = self.get_scheduled_exam_by_id(exam_id)
+        
+        # Get synced attendance list for the attendees table
+        attendance_list = self.get_exam_attendance(exam_id)
+        
+        # Get stats via DB aggregation (User requested "Database Only")
+        stats = self.get_exam_stats(exam_id)
+        
+        # Helper to safely format date
+        def safe_iso(val):
+            if hasattr(val, 'isoformat'):
+                return val.isoformat()
+            return val
+
+        # Format exam data
+        exam_data = {
+            "id": exam.id,
+            "title": exam.title,
+            "status": exam.status,
+            "exam_date": safe_iso(exam.exam_date),
+            "exam_time": exam.exam_time,
+            "location": exam.location,
+            "supervisor_name": exam.supervisor_name,
+            "passing_score": exam.passing_score
+        }
+        
+        # Serialize attendance
+        attendance_data = [
+            {
+                "user_name": a.user_name,
+                "user_email": a.user_email,
+                "marked_present": a.marked_present,
+                "completed": a.completed,
+                "score": a.score,
+                "passed": a.passed,
+                "completion_time": safe_iso(a.completion_time)
+            }
+            for a in attendance_list
+        ]
+        
+        return {
+            "exam": exam_data,
+            "statistics": stats,
+            "attendees": attendance_data
         }

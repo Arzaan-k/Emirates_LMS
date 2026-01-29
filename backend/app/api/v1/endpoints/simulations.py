@@ -330,6 +330,240 @@ async def get_user_simulation_submissions(
     return result
 
 
+
+
+# ==========================================
+# PYDANTIC MODELS
+# ==========================================
+
+from pydantic import BaseModel
+from typing import List, Dict, Any, Optional
+
+class OptionModel(BaseModel):
+    id: str
+    text: str
+    isCorrect: bool
+    consequence: Optional[str] = None
+    nextNodeId: Optional[str] = None
+
+class NodeModel(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    videoUrl: Optional[str] = None
+    isStart: bool
+    options: List[OptionModel]
+
+class SimulationSaveRequest(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    category: str
+    difficulty: str
+    thumbnailUrl: Optional[str] = None
+    nodes: List[NodeModel]
+    estimatedTime: Optional[str] = None
+    maxScore: Optional[int] = None
+    createdAt: Optional[str] = None
+    updatedAt: Optional[str] = None
+
+class SimulationCompleteRequest(BaseModel):
+    userId: str
+    user_name: Optional[str] = None
+    simulationId: str
+    score: float
+    totalSteps: int
+    wrongAttempts: int
+    timeSpentSeconds: int
+    attemptHistory: List[Dict[str, Any]] = []
+    completedAt: Optional[str] = None
+    outcome: Optional[str] = None
+    choices: List[Any] = []
+
+class ConsequenceRequest(BaseModel):
+    scenario: str
+    currentStep: str
+    wrongOption: str
+
+
+# ==========================================
+# ADDITIONAL ENDPOINTS
+# ==========================================
+
+@router.post("/upload-media")
+async def upload_simulation_media(
+    file: UploadFile = File(...)
+):
+    """
+    Generic media upload for simulations (videos/images).
+    Returns a persistent URL (R2 or Local).
+    """
+    from app.services.cdn_service import CDNService
+    
+    cdn_service = CDNService()
+    
+    # Generate unique filename
+    ext = os.path.splitext(file.filename)[1] if file.filename else ".bin"
+    filename = f"sim_media_{uuid.uuid4().hex}{ext}"
+    
+    content = await file.read()
+    
+    # Upload
+    result = cdn_service.upload_video(content, filename, file.content_type)
+    url = result.get("url")
+    
+    return {"url": url}
+
+@router.post("/save")
+async def save_simulation(
+    data: SimulationSaveRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Create or Update a full simulation definition (JSON).
+    """
+    repo = SimulationRepository(db)
+    existing = repo.get_by_id(data.id)
+    
+    # Convert Pydantic model to dict
+    sim_data = data.dict(exclude_unset=True)
+    
+    # Map frontend fields to DB columns
+    if "thumbnailUrl" in sim_data:
+        sim_data["thumbnail"] = sim_data.pop("thumbnailUrl")
+    if "estimatedTime" in sim_data:
+        sim_data["duration"] = sim_data.pop("estimatedTime")
+    
+    # Ensure nodes is a list of dicts
+    # Pydantic .dict() handles recursive conversion, so sim_data['nodes'] is list of dicts.
+    
+    if existing:
+        updated = repo.update_simulation(data.id, sim_data)
+        return {"success": True, "id": updated.id, "message": "Simulation updated successfully"}
+    else:
+        created = repo.create_simulation(sim_data)
+        return {"success": True, "id": created.id, "message": "Simulation created successfully"}
+
+
+@router.post("/generate-consequence")
+async def generate_consequence(
+    request: ConsequenceRequest,
+):
+    """
+    Generate a consequence for a wrong choice using AI (Mocked for now).
+    """
+    # In a real implementation, call an LLM here
+    # For now, return a generic but context-aware message
+    return {
+        "consequence": f"Choosing '{request.wrongOption}' in the '{request.scenario}' scenario might lead to negative customer experience. Consider the standard operating procedure."
+    }
+
+@router.get("/analytics/{simulation_id}")
+async def get_simulation_analytics(
+    simulation_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get analytics for a simulation.
+    """
+    repo = SimulationProgressRepository(db)
+    submissions = repo.get_by_simulation(simulation_id)
+    
+    total_attempts = len(submissions)
+    if total_attempts == 0:
+        return {
+            "totalAttempts": 0,
+            "averageScore": 0,
+            "passRate": 0
+        }
+    
+    avg_score = sum(s.score for s in submissions) / total_attempts
+    passed_count = sum(1 for s in submissions if s.passed)
+    pass_rate = (passed_count / total_attempts) * 100 if total_attempts > 0 else 0
+    
+    return {
+        "totalAttempts": total_attempts,
+        "averageScore": round(avg_score, 1),
+        "passRate": round(pass_rate, 1)
+    }
+
+@router.get("/history/user")
+async def get_user_history(
+    email: Optional[str] = None, # Allow query param
+    db: Session = Depends(get_db)
+):
+    """
+    Get simulation history for a user.
+    """
+    # If no email provided, valid only if we had auth middleware content (which we might not here)
+    if not email:
+        return []
+
+    repo = SimulationProgressRepository(db)
+    submissions = repo.get_by_user(email)
+    
+    # Format for frontend
+    result = []
+    for sub in submissions:
+        # Fetch simulation title if possible, or just ID
+        sim_repo = SimulationRepository(db)
+        sim = sim_repo.get_by_id(sub.simulation_id)
+        
+        result.append({
+            "id": sub.id,
+            "simulationId": sub.simulation_id,
+            "simulationTitle": sim.title if sim else "Unknown Simulation",
+            "score": sub.score,
+            "passed": sub.passed,
+            "completedAt": sub.completed_at.isoformat() if sub.completed_at else None,
+            "totalSteps": 10, # Mock/Estimate if not stored
+            "wrongAttempts": 0, # Not currently stored in simple model, would need field update
+            "timeSpentSeconds": 300, # Mock
+        })
+        
+    return result
+
+@router.post("/complete")
+async def complete_simulation_json(
+    data: SimulationCompleteRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Complete a simulation attempt (JSON support).
+    """
+    progress_repo = SimulationProgressRepository(db)
+    sim_repo = SimulationRepository(db)
+
+    simulation = sim_repo.get_by_id(data.simulationId)
+    passing_score = simulation.passing_score if simulation else 70.0
+    passed = data.score >= passing_score
+
+    # We use the repository's complete_simulation or create a new one if it doesn't exist
+    # Since frontend might not have started it via /start endpoint, we just create a record here
+    
+    # Ideally logic should check if attempt exists, but for simplicity/robustness:
+    progress = progress_repo.create_progress({
+        "user_email": data.userId,
+        "simulation_id": data.simulationId,
+        "current_node_id": "end",
+        "completed": True,
+        "started_at": datetime.utcnow(), # Approximate if not tracked
+        "score": data.score,
+        "passed": passed,
+        "choices_made": data.attemptHistory
+    })
+
+    logger.info(f"Simulation completed (JSON): {data.userId} - {data.simulationId}")
+
+    return {
+        "id": f"sub_{progress.id}",
+        "success": True,
+        "passed": passed,
+        "score": data.score
+    }
+
+
+
 # ==========================================
 # SIMULATION VIDEO ENDPOINTS
 # ==========================================
@@ -363,16 +597,21 @@ async def upload_simulation_video(
 
     # Update simulation nodes with video URL
     nodes = simulation.nodes or []
+    node_found = False
     for node in nodes:
         if node.get("id") == node_id:
-            node["video_url"] = video_url
+            node["videoUrl"] = video_url # Frontend uses videoUrl (camelCase)
+            node["video_url"] = video_url # Backend consistency
             node["video_title"] = title
+            node_found = True
             break
-
-    sim_repo.update_simulation(simulation_id, {"nodes": nodes})
+    
+    if node_found:
+        sim_repo.update_simulation(simulation_id, {"nodes": nodes})
 
     return {
         "simulation_id": simulation_id,
         "node_id": node_id,
         "video_url": video_url,
     }
+

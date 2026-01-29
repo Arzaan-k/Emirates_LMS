@@ -53,6 +53,14 @@ class ProcturedAssessment(Base):
 
     def to_dict(self):
         """Convert to dictionary for API responses."""
+        # Helper to safely format datetime values
+        def safe_iso(val):
+            if val is None:
+                return None
+            if hasattr(val, 'isoformat'):
+                return val.isoformat()
+            return val
+
         return {
             "id": self.id,
             "title": self.title,
@@ -66,7 +74,8 @@ class ProcturedAssessment(Base):
             "allow_retake": self.allow_retake,
             "max_attempts": self.max_attempts,
             "created_by": self.created_by,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": safe_iso(self.created_at),
+            "updated_at": safe_iso(self.updated_at),
         }
 
 
@@ -114,6 +123,14 @@ class AssessmentSubmission(Base):
 
     def to_dict(self):
         """Convert to dictionary for API responses."""
+        # Helper to safely format datetime values
+        def safe_iso(val):
+            if val is None:
+                return None
+            if hasattr(val, 'isoformat'):
+                return val.isoformat()
+            return val
+
         return {
             "id": self.id,
             "assessment_id": self.assessment_id,
@@ -128,7 +145,8 @@ class AssessmentSubmission(Base):
             "violations": self.violations,
             "integrity_status": self.integrity_status,
             "integrity_score": self.integrity_score,
-            "submitted_at": self.submitted_at.isoformat() if self.submitted_at else None,
+            "submitted_at": safe_iso(self.submitted_at),
+            "started_at": safe_iso(self.started_at),
             "attempt_number": self.attempt_number,
         }
 
@@ -178,12 +196,21 @@ class ScheduledExam(Base):
 
     def to_dict(self):
         """Convert to dictionary for API responses."""
+        # Helper to safely format datetime values
+        def safe_iso(val):
+            if val is None:
+                return None
+            if hasattr(val, 'isoformat'):
+                return val.isoformat()
+            return val
+
         return {
             "id": self.id,
             "title": self.title,
             "description": self.description,
             "exam_date": self.exam_date,
             "exam_time": self.exam_time,
+            "exam_datetime": safe_iso(self.exam_datetime),
             "location": self.location,
             "shift": self.shift,
             "supervisor_email": self.supervisor_email,
@@ -194,7 +221,8 @@ class ScheduledExam(Base):
             "passing_score": self.passing_score,
             "status": self.status,
             "created_by": self.created_by,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": safe_iso(self.created_at),
+            "updated_at": safe_iso(self.updated_at),
         }
 
 
@@ -234,6 +262,14 @@ class ExamAttendance(Base):
 
     def to_dict(self):
         """Convert to dictionary for API responses."""
+        # Helper to safely format datetime values
+        def safe_iso(val):
+            if val is None:
+                return None
+            if hasattr(val, 'isoformat'):
+                return val.isoformat()
+            return val
+
         return {
             "id": self.id,
             "exam_id": self.exam_id,
@@ -241,10 +277,11 @@ class ExamAttendance(Base):
             "user_name": self.user_name,
             "marked_present": self.marked_present,
             "marked_by": self.marked_by,
-            "marked_at": self.marked_at.isoformat() if self.marked_at else None,
+            "marked_at": safe_iso(self.marked_at),
             "started_exam": self.started_exam,
-            "start_time": self.start_time.isoformat() if self.start_time else None,
+            "start_time": safe_iso(self.start_time),
             "completed": self.completed,
+            "completion_time": safe_iso(self.completion_time),
             "submission_id": self.submission_id,
             "score": self.score,
             "passed": self.passed,

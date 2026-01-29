@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Form, File, UploadFile, HTTPException, Header, BackgroundTasks
 from sqlalchemy.orm import Session
 
-from app.config.database import get_db
+from app.config.database import get_db, get_db_context
 from app.config.settings import settings
 from app.core.dependencies import get_current_user, require_admin
 from app.core.auth import verify_token
@@ -248,6 +248,10 @@ async def upload_content(
             title="New Content Available",
             message=f"New {resource_type.lower()} uploaded: {title}"
         )
+
+        # Trigger background transcription for Audio/Video
+        if resource_type in ["Video", "Audio"]:
+            background_tasks.add_task(generate_transcript_task, content_id, local_path)
 
         return response
         
@@ -702,6 +706,38 @@ async def complete_self_learning(
         raise
 
 
+@router.post("/learning-paths/progress/{item_id}")
+async def update_content_progress(
+    item_id: str,
+    user_email: str = Form(...),
+    progress_percent: float = Form(...),
+    last_position: float = Form(0.0),
+    time_spent_seconds: int = Form(0),
+    completed: bool = Form(False),
+    db: Session = Depends(get_db)
+):
+    """
+    Update progress for a specific content node (video/course).
+    Saves progress to database to persist user state.
+    """
+    service = ContentService(db)
+    
+    progress_data = {
+        "progress_percent": progress_percent,
+        "last_position": last_position,
+        "time_spent_seconds": time_spent_seconds,
+        "completed": completed
+    }
+    
+    try:
+        result = service.update_node_progress(user_email, item_id, progress_data)
+        return {"status": "success", "progress": result}
+    except Exception as e:
+        logger.error(f"Progress update failed for {item_id}: {e}")
+        # Don't fail the request significantly as this is often a background ping
+        return {"status": "error", "message": str(e)}
+
+
 # ==========================================
 # CONTENT LIBRARY API
 # ==========================================
@@ -732,3 +768,76 @@ async def get_content_library(db: Session = Depends(get_db)):
         )
     
     return list(grouped.values())
+# ==========================================
+# BACKGROUND TASKS
+# ==========================================
+
+def generate_transcript_task(content_id: str, local_path: str):
+    """
+    Background task to generate transcript, quiz, and embeddings.
+    Run as sync function to be executed in threadpool.
+    """
+    ai_service = AIService()
+    
+    try:
+        logger.info(f"Starting background processing for {content_id}...")
+        
+        # 1. Transcribe
+        transcript = ai_service.transcribe_audio(local_path)
+        
+        if transcript:
+            with get_db_context() as db:
+                service = ContentService(db)
+                content = service.get_content_by_id(content_id)
+                if content:
+                    content.transcript = transcript
+                    
+                    # 2. Generate Quiz
+                    try:
+                        quiz_questions = ai_service.generate_quiz_from_transcript(
+                            transcript, num_questions=5, difficulty="medium"
+                        )
+                        content.quiz = quiz_questions
+                        logger.info(f"Quiz generated for {content_id}")
+                    except Exception as qe:
+                        logger.error(f"Quiz generation failed for {content_id}: {qe}")
+
+                    # 3. Generate Embedding
+                    try:
+                        embedding = ai_service.generate_embedding(transcript)
+                        if embedding:
+                            # Store in extra_data since we lack a specific column
+                            if not content.extra_data:
+                                content.extra_data = {}
+                            # Ensure existing extra_data is dict
+                            elif isinstance(content.extra_data, str):
+                                try:
+                                    import json
+                                    content.extra_data = json.loads(content.extra_data)
+                                except:
+                                    content.extra_data = {}
+                                    
+                            content.extra_data['embedding'] = embedding
+                            # Force update JSON column
+                            from sqlalchemy.orm.attributes import flag_modified
+                            flag_modified(content, "extra_data")
+                            
+                            logger.info(f"Embedding generated for {content_id} (Size: {len(embedding)})")
+                    except Exception as ee:
+                         logger.error(f"Embedding generation failed for {content_id}: {ee}")
+
+                    content.updated_at = datetime.utcnow()
+                    db.commit()
+                    logger.info(f"Content processing complete for {content_id}")
+                else:
+                    logger.warning(f"Content {content_id} not found for update")
+    except Exception as e:
+        logger.error(f"Background processing failed for {content_id}: {e}")
+    finally:
+        # Cleanup local file if CDN is enabled or processing complete
+        try:
+            if os.path.exists(local_path):
+                os.remove(local_path)
+                logger.info(f"Cleaned up local file: {local_path}")
+        except Exception as e:
+            logger.warning(f"Failed to cleanup local file {local_path}: {e}")

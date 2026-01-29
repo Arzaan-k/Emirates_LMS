@@ -31,7 +31,7 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
     const fetchExams = async () => {
         setLoading(true);
         try {
-            const res = await fetch(`${API_URL}/scheduled-exams`);
+            const res = await fetch(`${API_URL}/api/v1/assessments/scheduled`);
             const data = await res.json();
 
             if (Array.isArray(data)) {

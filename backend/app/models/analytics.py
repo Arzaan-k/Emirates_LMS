@@ -24,22 +24,22 @@ class AuditLog(Base):
     user_name = Column(String(255))
     action = Column(String(255), nullable=False)  # CREATE_USER, LOGIN, UPLOAD_CONTENT, etc.
     target = Column(String(500))  # What was affected (user email, content ID, etc.)
-    target_type = Column(String(100))  # user, content, quiz, assessment, etc.
+    # target_type = Column(String(100))  # REMOVED: Column missing in DB
     details = Column(Text)  # Additional context
     ip_address = Column(String(100))
     user_agent = Column(String(500))
-    request_id = Column(String(100))  # For tracing
-    status = Column(String(50))  # success, failure, error
-    error_message = Column(Text)
-    duration_ms = Column(Integer)  # How long the action took
-    extra_data = Column(Text)  # JSON string for additional data
+    # request_id = Column(String(100))  # REMOVED: Column missing in DB
+    # status = Column(String(50))  # REMOVED: Column missing in DB
+    # error_message = Column(Text)  # REMOVED: Column missing in DB
+    # duration_ms = Column(Integer)  # REMOVED: Column missing in DB
+    # extra_data = Column(Text)  # REMOVED: Column missing in DB
 
     __table_args__ = (
         Index('idx_audit_user', 'user_email'),
         Index('idx_audit_action', 'action'),
         Index('idx_audit_timestamp', 'timestamp'),
-        Index('idx_audit_target_type', 'target_type'),
-        Index('idx_audit_status', 'status'),
+        # Index('idx_audit_target_type', 'target_type'),
+        # Index('idx_audit_status', 'status'),
     )
 
     def __repr__(self):
@@ -54,9 +54,9 @@ class AuditLog(Base):
             "user_name": self.user_name,
             "action": self.action,
             "target": self.target,
-            "target_type": self.target_type,
+            # "target_type": self.target_type,
             "details": self.details,
             "ip_address": self.ip_address,
-            "status": self.status,
-            "error_message": self.error_message,
+            # "status": self.status,
+            # "error_message": self.error_message,
         }

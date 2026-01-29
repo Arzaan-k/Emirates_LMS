@@ -504,6 +504,37 @@ export default function SimulationFlowBuilder({ existingSimulation, onSave, onCl
         });
     }, []);
 
+    const uploadMedia = async (uri, type = 'video') => {
+        try {
+            const formData = new FormData();
+            const filename = uri.split('/').pop();
+            // Simple mime type logic
+            let mimeType = type === 'video' ? 'video/mp4' : 'image/jpeg';
+            if (filename.endsWith('.png')) mimeType = 'image/png';
+            if (filename.endsWith('.mov')) mimeType = 'video/quicktime';
+
+            formData.append('file', {
+                uri: uri,
+                name: filename,
+                type: mimeType
+            });
+
+            // Note: In React Native with FormData, do NOT set Content-Type header manually
+            const res = await fetch(`${API_URL}/api/v1/simulations/upload-media`, {
+                method: 'POST',
+                body: formData,
+            });
+
+            const data = await res.json();
+            if (data.url) return data.url;
+            throw new Error('No URL returned from server');
+        } catch (e) {
+            console.error("Upload failed:", e);
+            Alert.alert("Upload Failed", "Could not upload media to server. Check connection.");
+            return null;
+        }
+    };
+
     const handleUploadVideo = async (nodeId) => {
         try {
             const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -514,14 +545,17 @@ export default function SimulationFlowBuilder({ existingSimulation, onSave, onCl
 
             const result = await ImagePicker.launchImageLibraryAsync({
                 mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-                allowsEditing: false,
+                allowsEditing: false, // Videos hard to edit in native picker sometimes
                 quality: 1,
             });
 
             if (!result.canceled && result.assets[0]) {
-                const videoUri = result.assets[0].uri;
-                // Use local URI directly for now
-                updateNode(nodeId, { videoUrl: videoUri });
+                Alert.alert('Uploading', 'Uploading video to server...');
+                const remoteUrl = await uploadMedia(result.assets[0].uri, 'video');
+                if (remoteUrl) {
+                    updateNode(nodeId, { videoUrl: remoteUrl });
+                    Alert.alert('Success', 'Video uploaded successfully');
+                }
             }
         } catch (error) {
             console.error('Video pick error:', error);
@@ -545,7 +579,11 @@ export default function SimulationFlowBuilder({ existingSimulation, onSave, onCl
             });
 
             if (!result.canceled && result.assets[0]) {
-                setThumbnailUrl(result.assets[0].uri);
+                Alert.alert('Uploading', 'Uploading thumbnail...');
+                const remoteUrl = await uploadMedia(result.assets[0].uri, 'image');
+                if (remoteUrl) {
+                    setThumbnailUrl(remoteUrl);
+                }
             }
         } catch (error) {
             Alert.alert('Error', 'Failed to pick image');

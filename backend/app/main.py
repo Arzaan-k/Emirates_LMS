@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config.settings import settings
 from app.config.database import engine, Base, get_db
-from app.api.v1.router import api_router
+from app.api.v1.router import api_router, support_router
 from app.core.middleware import setup_middleware, limiter
 from app.core.websocket import manager
 
@@ -166,7 +166,20 @@ async def health_check():
 # ==========================================
 
 # Include all API v1 endpoints - this is the ONLY API router
+# Include all API v1 endpoints - this is the ONLY API router
+# Include all API v1 endpoints - this is the ONLY API router
 app.include_router(api_router, prefix="/api/v1")
+
+# Include support aliases at root level for backward compatibility
+# Frontend calls /support/... directly instead of /api/v1/support/...
+app.include_router(support_router, prefix="")
+
+# Include API router at /api for legacy frontend calls (missing v1)
+# Frontend calls /api/content/... instead of /api/v1/content/...
+app.include_router(api_router, prefix="/api")
+
+
+
 
 
 # ==========================================

@@ -29,6 +29,7 @@ class CRMTicket(Base):
     customer_phone = Column(String(100))
     subject = Column(String(500), nullable=False)
     description = Column(Text, nullable=False)
+    message = Column(Text, nullable=True) # Legacy column, kept for compatibility
     priority = Column(String(50), default="medium")  # low, medium, high, urgent
     status = Column(String(100), default="open")  # open, in_progress, resolved, closed
     created_at = Column(DateTime, default=datetime.utcnow)

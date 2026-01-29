@@ -85,7 +85,7 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
 
     const fetchStores = async () => {
         try {
-            const res = await fetch(`${API_URL}/stores`);
+            const res = await fetch(`${API_URL}/api/v1/analytics/stores`);
             const data = await res.json();
             if (Array.isArray(data)) setAllStores(data);
         } catch (e) {
@@ -136,31 +136,25 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
             formData.append('num_questions', aiNumQuestions);
             formData.append('difficulty', aiDifficulty);
 
-            const res = await fetch(`${API_URL}/scheduled-exams/temp/generate-questions`, {
+            const res = await fetch(`${API_URL}/api/v1/assessments/generate-questions`, {
                 method: 'POST',
                 body: formData
             });
 
-            // Fallback to direct generation endpoint
-            const directRes = await fetch(`${API_URL}/generate-quiz-from-topic`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    topic: aiTopic,
-                    num_questions: parseInt(aiNumQuestions),
-                    difficulty: aiDifficulty
-                })
-            });
+            if (res.ok) {
+                const data = await res.json();
+                // Check for data.questions (direct list or nested)
+                const qList = Array.isArray(data) ? data : (data.questions || []);
 
-            if (directRes.ok) {
-                const data = await directRes.json();
-                if (data.questions) {
-                    setQuestions(data.questions);
-                    Alert.alert('Success', `Generated ${data.questions.length} questions!`);
+                if (qList.length > 0) {
+                    setQuestions(qList);
+                    Alert.alert('Success', `Generated ${qList.length} questions!`);
+                } else {
+                    Alert.alert('Note', 'AI generated no questions. Please try a different topic.');
                 }
             } else {
                 // Manual fallback
-                Alert.alert('Note', 'AI generation not available. Please add questions manually.');
+                Alert.alert('Note', 'AI generation failed. Please add questions manually.');
             }
         } catch (e) {
             console.error('Error generating questions:', e);
@@ -230,14 +224,14 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
             formData.append('passing_score', passingScore);
             formData.append('created_by', userProfile?.email || 'admin');
 
-            const res = await fetch(`${API_URL}/scheduled-exams`, {
+            const res = await fetch(`${API_URL}/api/v1/assessments/scheduled`, {
                 method: 'POST',
                 body: formData
             });
 
             const data = await res.json();
 
-            if (data.status === 'success') {
+            if (res.ok && (data.id || data.status === 'success')) {
                 Alert.alert('Success', `Exam "${title}" scheduled successfully! Notifications sent to ${selectedUsers.length} users.`);
                 resetForm();
                 onClose();

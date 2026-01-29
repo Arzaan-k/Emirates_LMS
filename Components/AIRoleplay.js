@@ -164,7 +164,7 @@ export default function AIRoleplay({ onClose, scenario }) {
             formData.append('history', JSON.stringify(chat));
             if (scenario) formData.append('scenario', scenario.id); // Future use
 
-            const response = await fetch(`${API_URL}/ai/roleplay/voice`, {
+            const response = await fetch(`${API_URL}/api/v1/roleplay/voice`, {
                 method: 'POST',
                 body: formData,
                 headers: {
@@ -231,7 +231,7 @@ export default function AIRoleplay({ onClose, scenario }) {
 
         try {
             // SEND TO BACKEND
-            const response = await fetch(`${API_URL}/ai/roleplay`, {
+            const response = await fetch(`${API_URL}/api/v1/roleplay`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -354,7 +354,7 @@ export default function AIRoleplay({ onClose, scenario }) {
             if (!scenario) return;
             setIsProcessing(true);
             try {
-                const response = await fetch(`${API_URL}/ai/roleplay/start`, {
+                const response = await fetch(`${API_URL}/api/v1/roleplay/start`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ scenario_id: scenario.id })

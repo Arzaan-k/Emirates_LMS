@@ -246,6 +246,22 @@ async def submit_quiz(
         raise
 
 
+@router.post("/submit")
+async def submit_quiz_alias(
+    quiz_id: str = Form(...),
+    user_name: str = Form(...),
+    user_email: str = Form(None),
+    answers: str = Form(...),
+    time_taken_seconds: int = Form(0),
+    db: Session = Depends(get_db)
+):
+    """
+    Alias for /{quiz_id}/submit to handle direct POSTs.
+    Forward compatibility for frontend calling /submit directly.
+    """
+    return await submit_quiz(quiz_id, user_name, user_email, answers, time_taken_seconds, db)
+
+
 @router.get("/{quiz_id}/submissions")
 async def get_quiz_submissions(
     quiz_id: str,

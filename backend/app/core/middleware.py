@@ -202,6 +202,74 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
 # SETUP FUNCTION
 # ===========================================
 
+class DatabaseAuditMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware to log modification actions (POST, PUT, DELETE, PATCH) to the database.
+    Captures user info from token and saves to audit_logs table.
+    """
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        response = await call_next(request)
+        
+        # Only log success actions that modify data
+        if response.status_code < 400 and request.method in ["POST", "PUT", "DELETE", "PATCH"]:
+            # Run in background to avoid blocking response? 
+            # Ideally BackgroundTasks, but middleware restrictions apply.
+            # We'll do it synchronously here for reliability as per user request ("each and every log").
+            try:
+                 # Extract user info
+                 user_email = "system"
+                 user_name = "System"
+                 auth_header = request.headers.get("Authorization")
+                 
+                 if auth_header and auth_header.startswith("Bearer "):
+                     try:
+                         # Dynamic imports to avoid circular dependencies
+                         from app.core.auth import verify_token
+                         token = auth_header.replace("Bearer ", "")
+                         payload = verify_token(token, "access")
+                         if payload:
+                             user_email = payload.get("sub", "unknown")
+                             user_name = payload.get("name", user_email)
+                     except Exception:
+                         pass # Invalid token, treat as system/anonymous
+                 
+                 # Prepare log data matching the EXISTING database schema
+                 # (avoiding missing column errors for target_type, status, request_id)
+                 status_code = response.status_code
+                 req_id = getattr(request.state, 'request_id', 'unknown')
+                 
+                 log_data = {
+                     "user_email": user_email,
+                     "user_name": user_name,
+                     "action": f"{request.method} {request.url.path}",
+                     "target": str(request.url.path),
+                     # "target_type": "api_endpoint", # Column missing in DB
+                     "details": f"Status: {status_code} | RequestID: {req_id} | Type: api_endpoint",
+                     "ip_address": request.client.host if request.client else "unknown",
+                     "user_agent": request.headers.get("user-agent", "unknown"),
+                     "timestamp": datetime.utcnow(),
+                     # "status": "success", # Column missing in DB
+                     # "request_id": req_id # Column missing in DB
+                 }
+                 
+                 # Save to DB
+                 from app.config.database import SessionLocal
+                 from app.repositories.analytics_repository import AnalyticsRepository
+                 
+                 db = SessionLocal()
+                 try:
+                     repo = AnalyticsRepository(db)
+                     repo.create_audit_log(log_data)
+                 finally:
+                     db.close()
+                     
+            except Exception as e:
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to write audit log: {e}")
+                
+        return response
+
+
 def setup_middleware(app: FastAPI) -> None:
     """
     Setup all middleware for the FastAPI application.
@@ -232,8 +300,14 @@ def setup_middleware(app: FastAPI) -> None:
     # 4. Error handling (catches exceptions from downstream middleware)
     app.add_middleware(ErrorHandlingMiddleware)
 
-    # 5. Request logging (outermost - logs everything)
+    # 5. Database Audit Logging (logs State-Changing actions)
+    app.add_middleware(DatabaseAuditMiddleware)
+
+    # 6. Request logging (outermost - logs everything)
     app.add_middleware(RequestLoggingMiddleware)
+
+
+
 
     # 6. Rate limiting
     app.state.limiter = limiter

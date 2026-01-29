@@ -150,7 +150,7 @@ const HistoryItem = ({ item, index }) => {
 };
 
 // --- MAIN HUB COMPONENT ---
-export default function InteractiveSimulationHub({ onClose }) {
+export default function InteractiveSimulationHub({ onClose, userProfile }) {
     const [view, setView] = useState('browse'); // browse, playing, history
     const [simulations, setSimulations] = useState([]);
     const [history, setHistory] = useState([]);
@@ -175,7 +175,7 @@ export default function InteractiveSimulationHub({ onClose }) {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-            const res = await fetch(`${API_URL}/simulations`, {
+            const res = await fetch(`${API_URL}/api/v1/simulations/`, {
                 signal: controller.signal
             });
             clearTimeout(timeoutId);
@@ -192,10 +192,11 @@ export default function InteractiveSimulationHub({ onClose }) {
     };
 
     const fetchHistory = async () => {
+        if (!userProfile?.email) return;
         try {
-            const res = await fetch(`${API_URL}/api/v1/simulations/history/user`);
+            const res = await fetch(`${API_URL}/api/v1/simulations/history/user?email=${encodeURIComponent(userProfile.email)}`);
             const data = await res.json();
-            setHistory(data);
+            setHistory(Array.isArray(data) ? data : []);
         } catch (e) {
             console.error('Failed to fetch history:', e);
             setHistory([]);
@@ -224,6 +225,7 @@ export default function InteractiveSimulationHub({ onClose }) {
             <InteractiveSimulation
                 simulation={selectedSimulation}
                 onClose={handleSimulationComplete}
+                userId={userProfile?.email}
             />
         );
     }

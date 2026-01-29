@@ -687,3 +687,30 @@ async def get_stores():
         {"id": "11", "name": "Pune FC Road", "city": "Pune", "region": "West"},
         {"id": "12", "name": "Kolkata Park Street", "city": "Kolkata", "region": "East"},
     ]
+
+
+# ==========================================
+# SYSTEM AUDIT LOGS
+# ==========================================
+
+@router.get("/audit-logs")
+async def get_audit_logs(
+    limit: int = 100,
+    action: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Get system audit logs.
+    """
+    from app.repositories.analytics_repository import AnalyticsRepository
+    from app.schemas.analytics import AuditLogResponse
+
+    repo = AnalyticsRepository(db)
+    
+    try:
+        logs = repo.get_audit_logs(action_type=action, limit=limit)
+        # Convert to list of dicts, ensuring compatibility with schema
+        return [log.to_dict() for log in logs]
+    except Exception as e:
+        logger.error(f"Audit logs fetch failed: {e}")
+        return []

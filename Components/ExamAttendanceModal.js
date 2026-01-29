@@ -31,11 +31,18 @@ export default function ExamAttendanceModal({ visible, onClose, exam, userProfil
     const fetchAttendance = async () => {
         setLoading(true);
         try {
-            const res = await fetch(`${API_URL}/scheduled-exams/${exam.id}/attendance`);
+            const res = await fetch(`${API_URL}/api/v1/assessments/scheduled/${exam.id}/attendance`);
             const data = await res.json();
-            setAttendance(data);
+
+            if (res.ok && Array.isArray(data)) {
+                setAttendance(data);
+            } else {
+                console.warn("[ExamAttendance] Unexpected response:", data);
+                setAttendance([]);
+            }
         } catch (e) {
             console.error('Error fetching attendance:', e);
+            setAttendance([]);
         }
         setLoading(false);
     };
@@ -47,13 +54,15 @@ export default function ExamAttendanceModal({ visible, onClose, exam, userProfil
             formData.append('user_email', userEmail);
             formData.append('marked_by', userProfile?.email || 'supervisor');
 
-            const res = await fetch(`${API_URL}/scheduled-exams/${exam.id}/mark-present`, {
+            const res = await fetch(`${API_URL}/api/v1/assessments/scheduled/${exam.id}/mark-present`, {
                 method: 'POST',
                 body: formData
             });
 
             const data = await res.json();
-            if (data.status === 'success') {
+
+            // Backend returns the updated record directly, or we check for HTTP success
+            if (res.ok && (data.marked_present || data.status === 'success')) {
                 Alert.alert('Success', 'User marked as present. They can now start the exam.');
                 fetchAttendance();
             } else {
@@ -72,13 +81,13 @@ export default function ExamAttendanceModal({ visible, onClose, exam, userProfil
             formData.append('user_email', userEmail);
             formData.append('marked_by', userProfile?.email || 'supervisor');
 
-            const res = await fetch(`${API_URL}/scheduled-exams/${exam.id}/mark-absent`, {
+            const res = await fetch(`${API_URL}/api/v1/assessments/scheduled/${exam.id}/mark-absent`, {
                 method: 'POST',
                 body: formData
             });
 
             const data = await res.json();
-            if (data.status === 'success') {
+            if (res.ok) {
                 Alert.alert('Marked Absent', 'User has been marked as absent.');
                 fetchAttendance();
             }

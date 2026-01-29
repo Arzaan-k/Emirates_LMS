@@ -5,7 +5,8 @@ Data access layer for assessment-related operations
 
 from typing import Any, Dict, List, Optional
 from datetime import datetime
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, case
+
 from sqlalchemy.orm import Session
 
 from app.repositories.base import BaseRepository
@@ -194,6 +195,23 @@ class ExamAttendanceRepository(BaseRepository[ExamAttendance]):
                 "marked_at": datetime.utcnow(),
             })
 
+    def mark_absent(
+        self,
+        exam_id: str,
+        user_email: str,
+        marked_by: str
+    ) -> Optional[ExamAttendance]:
+        """Mark user as absent for exam."""
+        attendance = self.get_by_exam_and_user(exam_id, user_email)
+
+        if attendance:
+            attendance.marked_present = False
+            attendance.marked_by = marked_by
+            attendance.marked_at = datetime.utcnow()
+            self.db.commit()
+            self.db.refresh(attendance)
+        return attendance
+
     def start_exam(self, exam_id: str, user_email: str) -> Optional[ExamAttendance]:
         """Mark that user started the exam."""
         attendance = self.get_by_exam_and_user(exam_id, user_email)
@@ -224,12 +242,38 @@ class ExamAttendanceRepository(BaseRepository[ExamAttendance]):
             self.db.refresh(attendance)
         return attendance
 
-    def get_present_count(self, exam_id: str) -> int:
-        """Get count of users marked present for an exam."""
+    def get_completed_count(self, exam_id: str) -> int:
+        """Get count of users who completed an exam."""
         return self.db.query(func.count(ExamAttendance.id)).filter(
             ExamAttendance.exam_id == exam_id,
-            ExamAttendance.marked_present == True
+            ExamAttendance.completed == True
         ).scalar() or 0
+
+    def get_aggregated_stats(self, exam_id: str) -> Dict[str, Any]:
+        """Get all exam stats in a single DB query."""
+        stats = self.db.query(
+            func.count(ExamAttendance.id).label('total'),
+            func.sum(case((ExamAttendance.marked_present == True, 1), else_=0)).label('present'),
+            func.sum(case((and_(ExamAttendance.marked_present == False, ExamAttendance.marked_by != None), 1), else_=0)).label('absent'),
+            func.sum(case((ExamAttendance.completed == True, 1), else_=0)).label('completed'),
+            func.sum(case((and_(ExamAttendance.completed == True, ExamAttendance.passed == True), 1), else_=0)).label('passed'),
+            func.avg(case((ExamAttendance.completed == True, ExamAttendance.score), else_=None)).label('avg_score')
+        ).filter(ExamAttendance.exam_id == exam_id).first()
+
+        if not stats:
+            return {
+                "total": 0, "present": 0, "absent": 0, 
+                "completed": 0, "passed": 0, "avg_score": 0
+            }
+
+        return {
+            "total": stats.total or 0,
+            "present": stats.present or 0,
+            "absent": stats.absent or 0,
+            "completed": stats.completed or 0,
+            "passed": stats.passed or 0,
+            "avg_score": float(stats.avg_score or 0)
+        }
 
     def get_completed_count(self, exam_id: str) -> int:
         """Get count of users who completed the exam."""

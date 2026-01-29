@@ -34,7 +34,7 @@ export default function ExamHistoryModal({ visible, onClose }) {
     const fetchExams = async () => {
         setLoading(true);
         try {
-            const res = await fetch(`${API_URL}/scheduled-exams/all/with-stats`);
+            const res = await fetch(`${API_URL}/api/v1/assessments/scheduled`);
             const data = await res.json();
             if (Array.isArray(data)) {
                 setExams(data);
@@ -48,7 +48,7 @@ export default function ExamHistoryModal({ visible, onClose }) {
     const fetchExamReport = async (examId) => {
         setLoadingReport(true);
         try {
-            const res = await fetch(`${API_URL}/scheduled-exams/${examId}/report`);
+            const res = await fetch(`${API_URL}/api/v1/assessments/scheduled/${examId}/report`);
             const data = await res.json();
             setExamReport(data);
         } catch (e) {

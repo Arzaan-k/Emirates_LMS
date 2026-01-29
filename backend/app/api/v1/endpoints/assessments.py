@@ -237,6 +237,34 @@ async def ai_generate_assessment_questions(
         raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
 
 
+@router.post("/generate-questions")
+async def generate_questions_only(
+    topic: str = Form(""),
+    content: str = Form(""),
+    num_questions: int = Form(10),
+    difficulty: str = Form("Medium"),
+    db: Session = Depends(get_db)
+):
+    """
+    Generate questions only (without creating an assessment entity).
+    Useful for previews or wizard steps.
+    """
+    ai_service = AIService()
+    
+    try:
+        source = content if content else topic
+        questions = await ai_service.generate_quiz_from_text(
+            text=source,
+            num_questions=num_questions,
+            difficulty=difficulty
+        )
+        return {"questions": questions}
+    except Exception as e:
+        logger.error(f"Question generation failed: {e}")
+        # Return empty list or 500? Frontend handles errors.
+        raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
+
+
 @router.put("/proctored/{assessment_id}/toggle")
 async def toggle_assessment_active(
     assessment_id: str,
@@ -432,6 +460,25 @@ async def get_scheduled_exams(db: Session = Depends(get_db)):
     result = []
     for exam in exams:
         exam_dict = exam.to_dict() if hasattr(exam, 'to_dict') else dict(exam)
+        
+        # Inject stats for Admin View (ExamHistoryModal)
+        try:
+            stats = service.get_exam_stats(exam.id)
+            # Alias present_count to marked_present for frontend compatibility
+            stats["marked_present"] = stats.get("present_count", 0)
+            stats["completed"] = stats.get("completed_count", 0)
+            stats["avg_score"] = stats.get("average_score", 0)
+            exam_dict["stats"] = stats
+        except Exception:
+            # Fallback if stats fail
+            exam_dict["stats"] = {
+                "total_assigned": len(exam.assigned_users or []),
+                "present_count": 0,
+                "marked_present": 0,
+                "completed": 0,
+                "avg_score": 0
+            }
+            
         result.append(exam_dict)
     
     return result

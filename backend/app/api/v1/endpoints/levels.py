@@ -552,6 +552,21 @@ async def get_role_exam(user_email: str, db: Session = Depends(get_db)):
     user = service.get_user_by_email(user_email)
     current_role = user.role
     
+    # Dynamic Target Role
+    from app.repositories.content_repository import ProgressionLevelRepository
+    level_repo = ProgressionLevelRepository(db)
+    all_levels = level_repo.get_all_ordered()
+    
+    target_role = "Next Level"
+    current_idx = -1
+    for idx, lvl in enumerate(all_levels):
+         if lvl.name == current_role:
+             current_idx = idx
+             break
+    
+    if current_idx != -1 and current_idx < len(all_levels) - 1:
+        target_role = all_levels[current_idx + 1].name
+
     # Simple Mock Exam
     return {
         "status": "success",
@@ -560,7 +575,7 @@ async def get_role_exam(user_email: str, db: Session = Depends(get_db)):
             "time_limit_minutes": 15,
             "max_violations": 3,
             "current_role": current_role,
-            "target_role": "Next Level", # In real app, calculate this
+            "target_role": target_role,
             "questions": [
                 {
                     "question": "What is the primary responsibility of your new role?",
@@ -625,16 +640,30 @@ async def submit_role_exam(
              user = service.get_user_by_email(user_email)
              current_role = user.role
              
-             role_order = ["Waffler", "Silver Waffler", "Gold Waffler", "Shift Manager", "Assistant Store Manager", "Store Manager"]
-             try:
-                 idx = role_order.index(current_role)
-                 if idx < len(role_order) - 1:
-                     new_role = role_order[idx + 1]
-                     service.promote_user(user_email, new_role)
-                 else:
-                     new_role = current_role
-             except:
-                 new_role = current_role
+             # Dynamic Role Calculation
+             from app.repositories.content_repository import ProgressionLevelRepository
+             level_repo = ProgressionLevelRepository(db)
+             all_levels = level_repo.get_all_ordered()
+             
+             # Find current index
+             current_idx = -1
+             for idx, lvl in enumerate(all_levels):
+                 if lvl.name == current_role:  # Assuming role matches name, or use lvl.role
+                     current_idx = idx
+                     break
+            
+             # Fallback if name/role mismatch (try matching role field)
+             if current_idx == -1:
+                  for idx, lvl in enumerate(all_levels):
+                     if hasattr(lvl, 'role') and lvl.role == current_role: # Check if 'role' field exists
+                         current_idx = idx
+                         break
+             
+             if current_idx != -1 and current_idx < len(all_levels) - 1:
+                 new_role = all_levels[current_idx + 1].name
+                 service.promote_user(user_email, new_role)
+             else:
+                 new_role = current_role # Already at top
         else:
             new_role = None
 
