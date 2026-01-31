@@ -236,14 +236,79 @@ async def get_privileges_alias():
         for priv in ALL_PRIVILEGES
     ]
 
-
 @router.get("/privileges/all")
-async def get_all_privileges():
+async def get_all_privileges(db: Session = Depends(get_db)):
     """
-    Returns list of all available privileges for user creation.
+    Returns ACCESS CONTROL RULES for each level (used by frontend for career progression).
+    This endpoint returns a dictionary like:
+    { "Waffler": { "accessible_courses": [...], "accessible_buckets": [...] }, ... }
+    
+    Note: This is NOT user privileges - those are at /privileges endpoint.
+    Frontend expects this format for building the career hierarchy view.
+    
+    FALLBACK: If no access rules exist, returns ALL career progression courses
+    assigned to the first level (Waffler) to ensure content is visible.
+    """
+    from app.repositories.content_repository import AccessRuleRepository, ContentRepository, ProgressionLevelRepository
+    from app.models.content import Content
+    
+    try:
+        repo = AccessRuleRepository(db)
+        rules = repo.get_all_rules_dict()
+        
+        # If no rules exist, create a fallback with all career content assigned to each level
+        if not rules:
+            logger.info("No access rules in database, generating fallback with all career courses")
+            
+            # Get all career progression courses
+            content_repo = ContentRepository(db)
+            career_courses = db.query(Content).filter(
+                Content.is_path_node == True,
+                Content.learning_path_type != "self_learning"
+            ).order_by(Content.timestamp).all()
+            
+            all_course_ids = [c.id for c in career_courses]
+            
+            # Get available levels from database or use defaults
+            level_repo = ProgressionLevelRepository(db)
+            levels = level_repo.get_all_levels()
+            
+            if levels:
+                level_names = [l.name for l in sorted(levels, key=lambda x: x.order or 0)]
+            else:
+                # Default hierarchy
+                level_names = [
+                    "Waffler", "Silver Waffler", "Gold Waffler", 
+                    "Shift Manager", "Assistant Store Manager", "Store Manager"
+                ]
+            
+            # Assign all courses to each level (so all are visible regardless of user level)
+            # This ensures content is visible when no rules are configured
+            for level_name in level_names:
+                rules[level_name] = {
+                    "accessible_courses": all_course_ids,
+                    "accessible_buckets": [],
+                    "max_courses_visible": -1
+                }
+            
+            logger.info(f"Fallback access rules created for {len(level_names)} levels with {len(all_course_ids)} courses")
+        
+        # Return directly as dict (format frontend expects)
+        return rules
+    except Exception as e:
+        logger.error(f"Access rules fetch failed: {e}")
+        return {}
+
+
+@router.get("/privileges/list")
+async def get_privileges_list():
+    """
+    Returns list of all available privileges for user creation/management.
+    This is the actual privilege definitions (not access rules).
+    Added for backward compatibility with admin panel functionality.
     """
     from app.services.user_service import ALL_PRIVILEGES
-    
+
     PRIVILEGE_ICONS = {
         "team_list": "users",
         "reports": "bar-chart-2",
@@ -271,7 +336,7 @@ async def get_all_privileges():
         "support_library": "book-open",
         "view_audit_logs": "clipboard",
     }
-    
+
     return {
         "privileges": [
             {
@@ -282,7 +347,6 @@ async def get_all_privileges():
             for priv in ALL_PRIVILEGES
         ]
     }
-
 
 @router.put("/{email}/privileges")
 async def update_user_privileges(

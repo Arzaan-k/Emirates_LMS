@@ -24,6 +24,7 @@ from app.repositories.user_repository import (
     UserRepository,
 )
 from app.models.content import Content, CourseBucket, Resource
+from app.services.cache_service import cache, invalidate_content_cache
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,9 @@ class ContentService:
 
         content = self.content_repo.create(content_data)
         logger.info(f"Created content: {content.id} - {content.title}")
+        
+        # Invalidate cache
+        invalidate_content_cache()
 
         return content
 
@@ -147,86 +151,83 @@ class ContentService:
         path_type: str,
         user_email: str
     ) -> Dict[str, Any]:
-        """Get content for a learning path with user progress."""
-        # Get user
+        """
+        Get content for a learning path with user progress.
+        Replicates exact logic from old monolithic backend.
+        
+        path_type: 'self_learning' or 'career_progression'
+        """
+        # Get user info
         user = self.user_repo.get_by_email(user_email)
         self_learning_completed = user.self_learning_completed if user else False
+        user_role = user.role if user else "Waffler"
         
-        # Get user's completed courses
+        # Get user's completed courses (user-specific, not cached)
         user_completed_courses = self.completion_repo.get_user_completed_course_ids(user_email)
         user_completed_nodes = self.progress_repo.get_user_completed_nodes(user_email)
         all_completed = user_completed_courses.union(user_completed_nodes)
 
-        final_courses_list = []
+        filtered_courses = []
 
         if path_type == "self_learning":
-            # Self Learning: Simple list ordered by timestamp (as retrieved from repo)
-            courses = self.content_repo.get_self_learning_content()
-            final_courses_list = courses
+            # Self learning: MUST have learning_path_type == "self_learning"
+            filtered_courses = self.content_repo.get_self_learning_content()
         else:
-            # Career Progression: Ordered by Levels -> Access Rules
-            # 1. Get all levels in order (Waffler -> Silver -> Gold)
-            levels = self.level_repo.get_all_ordered()
-            
-            # 2. Get all access rules
-            rules = self.access_rule_repo.get_all_rules_dict()
-            
-            # 3. Get all potential career content mapped by ID
-            all_content_list = self.content_repo.get_career_progression_content()
-            content_map = {c.id: c for c in all_content_list}
-            
-            ordered_content = []
-            seen_ids = set()
+            # Career progression must always return the full ordered path so the UI can render
+            # every node and simply mark future nodes as locked.
+            filtered_courses = self.content_repo.get_career_progression_content()
 
-            # 4. Iterate levels and collect courses defined in access controls
-            for level in levels:
-                rule = rules.get(level.name)
-                if not rule:
-                    continue
-                
-                # Get course IDs assigned to this level
-                level_course_ids = rule.get("accessible_courses", [])
-                
-                for cid in level_course_ids:
-                    # Only add if it exists in content repo and hasn't been added yet
-                    # logic: prevent duplicates if course assigned to multiple levels (shouldn't happen but safety)
-                    if cid in content_map and cid not in seen_ids:
-                        course = content_map[cid]
-                        # Verify it is actually a career progression node (double check)
-                        # The repository query already does filter, but ensuring strictness
-                        if course.learning_path_type != "self_learning":
-                           ordered_content.append(course)
-                           seen_ids.add(cid)
-            
-            final_courses_list = ordered_content
+        # Sort nodes in a stable linear order. Prefer explicit order_index if present.
+        filtered_courses.sort(
+            key=lambda x: (
+                getattr(x, "order_index", 0) or 0,
+                x.timestamp or datetime.min,
+            )
+        )
 
         # Build response with status
         response_nodes = []
         found_active = False
 
-        for course in final_courses_list:
+        for course in filtered_courses:
+            # Build full node response with both snake_case and camelCase
             node_resp = {
+                # Core identifiers
                 "id": course.id,
                 "title": course.title,
                 "description": course.description,
                 "bucket": course.bucket,
-                # Snake_case (original)
+                
+                # Snake_case (backend standard)
                 "video_url": course.video_url,
                 "audio_url": getattr(course, 'audio_url', None),
+                "file_url": course.file_url,
+                "thumbnail": course.thumbnail,
                 "thumbnail_url": course.thumbnail,
                 "learning_path_type": course.learning_path_type,
                 "is_path_node": course.is_path_node,
-                # CamelCase (frontend compatibility)
+                "resource_type": course.resource_type,
+                "transcript": course.transcript,
+                "quiz": course.quiz,
+                "skippable": course.skippable,
+                
+                # CamelCase (frontend compatibility - matches old backend format)
                 "videoUrl": course.video_url,
                 "audioUrl": getattr(course, 'audio_url', None),
+                "fileUrl": course.file_url,
                 "thumbnailUrl": course.thumbnail,
                 "learningPathType": course.learning_path_type,
                 "isPathNode": course.is_path_node,
+                "resourceType": course.resource_type,
+                
+                # Other fields
                 "duration": course.duration,
-                "xp": course.xp,
+                "xp": course.xp or 50,
                 "timestamp": course.timestamp.isoformat() if course.timestamp else None,
+                "authorRole": "Store Manager",  # Default from old backend
             }
 
+            # Determine status: completed, active, or locked
             if course.id in all_completed:
                 node_resp["status"] = "completed"
             elif not found_active:
@@ -241,7 +242,7 @@ class ContentService:
         completed_count = sum(1 for n in response_nodes if n.get("status") == "completed")
         total_count = len(response_nodes)
 
-        # Determine if path is locked
+        # Determine if path is locked (career path locked until self-learning complete)
         is_locked = path_type == "career_progression" and not self_learning_completed
 
         return {
