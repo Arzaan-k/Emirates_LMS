@@ -21,7 +21,6 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Audio } from 'expo-av';
 import API_URL from '../config';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { height, width } = Dimensions.get("window");
 
@@ -50,7 +49,7 @@ export default function AIChatBot() {
     const [messages, setMessages] = useState([
         {
             id: 1,
-            text: "Hello! I'm your BWC AI Training Assistant 🧇\n\nI can ONLY answer questions about your LMS training materials:\n• Courses & learning paths you have access to\n• SOPs & standard procedures\n• Recipes & preparation guides\n• Equipment & safety protocols\n\nNote: I cannot answer general knowledge questions - only training content!",
+            text: "Hello! I'm your BWC AI Assistant 🧇\n\nI can help you with:\n• Training courses & learning paths\n• SOPs & recipes\n• Equipment & safety protocols\n• Store operations\n\nAsk me anything!",
             sender: "ai",
             status: "done",
         },
@@ -71,7 +70,7 @@ export default function AIChatBot() {
 
     const fetchSuggestedQuestions = async () => {
         try {
-            const res = await fetch(`${API_URL}/api/v1/ai/ask`);
+            const res = await fetch(`${API_URL}/ai/suggested-questions`);
             const data = await res.json();
             if (data.suggestions && data.suggestions.length > 0) {
                 setSuggestedQuestions(data.suggestions);
@@ -135,9 +134,6 @@ export default function AIChatBot() {
         setAiState("thinking");
 
         try {
-            // Get auth token for role-based access
-            const token = await AsyncStorage.getItem('userToken');
-
             // Build history for context
             const historyForAPI = messages.slice(-10).map(m => ({
                 text: m.text,
@@ -148,14 +144,8 @@ export default function AIChatBot() {
             formData.append('message', text.trim());
             formData.append('history', JSON.stringify(historyForAPI));
 
-            const headers = {};
-            if (token) {
-                headers['Authorization'] = `Bearer ${token}`;
-            }
-
-            const response = await fetch(`${API_URL}/api/v1/ai/ask`, {
+            const response = await fetch(`${API_URL}/ai/chatbot`, {
                 method: 'POST',
-                headers: headers,
                 body: formData,
             });
 
@@ -238,9 +228,6 @@ export default function AIChatBot() {
 
     const handleVoiceUpload = async (uri) => {
         try {
-            // Get auth token for role-based access
-            const token = await AsyncStorage.getItem('userToken');
-
             const formData = new FormData();
             formData.append('file', {
                 uri: uri,
@@ -248,14 +235,9 @@ export default function AIChatBot() {
                 name: 'voice_query.m4a'
             });
 
-            const headers = { 'Content-Type': 'multipart/form-data' };
-            if (token) {
-                headers['Authorization'] = `Bearer ${token}`;
-            }
-
             const res = await fetch(`${API_URL}/ai/voice_query`, {
                 method: 'POST',
-                headers: headers,
+                headers: { 'Content-Type': 'multipart/form-data' },
                 body: formData
             });
 

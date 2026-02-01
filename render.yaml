@@ -1,22 +1,49 @@
-# Render Blueprint for LMS Backend Deployment
-# https://render.com/docs/blueprint-spec
+# Render Blueprint for BWC LMS
+# https://render.com/docs/application-specification
 
 services:
+  # Backend Web Service
   - type: web
     name: newlms-backend
     runtime: python
-    region: oregon  # or singapore for closer to India
-    plan: free  # Change to 'starter' ($7/mo) for production
+    rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: cd backend && uvicorn server:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    
+    # Environment Variables
     envVars:
       - key: PYTHON_VERSION
-        value: "3.11.9"
+        value: 3.11.4
+      - key: DATABASE_URL
+        fromDatabase:
+          name: newlms-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DOMAIN
+        value: main
+      - key: ENVIRONMENT
+        value: production
+      # AI Keys (Must be added in Render Dashboard)
       - key: GROQ_API_KEY
-        sync: false  # Set manually in Render dashboard for security
+        sync: false
       - key: ELEVENLABS_API_KEY
-        sync: false  # Set manually in Render dashboard for security
+        sync: false
       - key: ELEVENLABS_VOICE_ID
         value: "3AMU7jXQuQa3oRvRqUmb"
-    healthCheckPath: /
+      - key: HUGGINGFACE_API_KEY
+        sync: false
+
+    # Service Settings
+    plan: free # Change to 'starter' for persistent uptime
+    region: singapore # Closer to India
+    healthCheckPath: /health
     autoDeploy: true
+
+# Managed PostgreSQL Database
+databases:
+  - name: newlms-db
+    databaseName: newlms
+    user: newlms_user
+    plan: free # Ephemeral, upgrading to paid recommended for production data persistence
+    region: singapore

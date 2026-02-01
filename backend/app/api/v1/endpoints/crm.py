@@ -198,6 +198,7 @@ async def delete_crm_ticket(
 # ==========================================
 
 @router.post("/tasks/assign")
+@router.post("/assign-task")  # Backward compatibility alias
 async def assign_crm_task(
     user_email: str = Form(...),
     user_name: str = Form(...),

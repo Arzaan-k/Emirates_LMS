@@ -30,7 +30,7 @@ router = APIRouter(prefix="/content", tags=["Content"])
 # CONTENT CRUD ENDPOINTS
 # ==========================================
 
-@router.get("/")
+@router.get("")
 async def get_content(
     db: Session = Depends(get_db),
     authorization: Optional[str] = Header(None)
@@ -416,6 +416,29 @@ async def delete_content(
         
         # Delete from database
         service.delete_content(item_id)
+        
+        # CLEANUP: Remove from any Access Rules to prevent 'ghost courses'
+        try:
+            from app.repositories.content_repository import AccessRuleRepository
+            access_repo = AccessRuleRepository(db)
+            all_rules = access_repo.get_all_rules()
+            
+            cleaned_count = 0
+            for rule in all_rules:
+                if rule.accessible_courses and item_id in rule.accessible_courses:
+                    # Create new list without the deleted item
+                    new_courses = [c for c in rule.accessible_courses if c != item_id]
+                    rule.accessible_courses = new_courses
+                    cleaned_count += 1
+            
+            if cleaned_count > 0:
+                db.commit()
+                logger.info(f"Removed deleted content {item_id} from {cleaned_count} access rules")
+                
+        except Exception as cleanup_error:
+            logger.error(f"Failed to cleanup access rules for {item_id}: {cleanup_error}")
+            # Don't fail the main request, just log error
+            
         logger.info(f"Content deleted: {item_id}")
         
         return {"status": "success", "message": f"Content {item_id} deleted successfully"}

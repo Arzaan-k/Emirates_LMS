@@ -67,9 +67,23 @@ export default function SimulationAdminManager({ onClose }) {
         }
     };
 
-    const handleEdit = (simulation) => {
-        setEditingSimulation(simulation);
-        setShowBuilder(true);
+    const handleEdit = async (simulation) => {
+        // Fetch full simulation data (including nodes) before editing
+        try {
+            setIsLoading(true);
+            const res = await fetch(`${API_URL}/api/v1/simulations/${simulation.id}`);
+            const fullSimulation = await res.json();
+            setEditingSimulation(fullSimulation);
+            setShowBuilder(true);
+        } catch (e) {
+            console.error('Failed to fetch simulation details:', e);
+            // Fallback to existing data (may not have nodes)
+            Alert.alert('Warning', 'Could not load full simulation data. Some steps may be missing.');
+            setEditingSimulation(simulation);
+            setShowBuilder(true);
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     const handleDelete = async (simulationId, title) => {
@@ -195,7 +209,7 @@ export default function SimulationAdminManager({ onClose }) {
                                 <View style={styles.analyticsRow}>
                                     <View style={styles.analyticsItem}>
                                         <Feather name="layers" size={14} color="#9CA3AF" />
-                                        <Text style={styles.analyticsText}>{item.nodes?.length || 0} steps</Text>
+                                        <Text style={styles.analyticsText}>{item.steps || item.total_branches || 0} steps</Text>
                                     </View>
                                     <View style={styles.analyticsItem}>
                                         <Feather name="users" size={14} color="#9CA3AF" />

@@ -82,14 +82,24 @@ class QuizSubmission(Base):
 
     id = Column(String(255), primary_key=True)
     quiz_id = Column(String(255), ForeignKey('quizzes.id'), nullable=False)
-    quiz_title = Column(String(500))  # Denormalized for quick access
+    # quiz_title = Column(String(500))  # REMOVED: Column missing in DB, using property instead
+    
+    @property
+    def quiz_title(self):
+        return self.quiz.title if self.quiz else "Unknown Quiz"
+
     user_name = Column(String(255), nullable=False)
     user_email = Column(String(255), ForeignKey('users.email'))
     answers = Column(JSON, nullable=False)  # Array of answer indices
-    correct_answers = Column(JSON)  # Array of correct answer indices
     score = Column(Float, nullable=False)
-    score_percent = Column(Float)
-    passed = Column(Boolean)
+    # passed = Column(Boolean) # REMOVED: Missing in DB, using property
+    
+    @property
+    def passed(self):
+        if self.quiz and self.quiz.passing_score is not None:
+             return self.score >= self.quiz.passing_score
+        return self.score >= 70.0  # Default passing score if undefined
+
     time_taken_seconds = Column(Integer)
     submitted_at = Column(DateTime, default=datetime.utcnow)
     attempt_number = Column(Integer, default=1)
@@ -117,7 +127,7 @@ class QuizSubmission(Base):
             "user_name": self.user_name,
             "user_email": self.user_email,
             "score": self.score,
-            "score_percent": self.score_percent,
+            "score_percent": self.score,
             "passed": self.passed,
             "time_taken_seconds": self.time_taken_seconds,
             "submitted_at": self.submitted_at.isoformat() if self.submitted_at else None,

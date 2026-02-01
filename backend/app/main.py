@@ -21,9 +21,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config.settings import settings
 from app.config.database import engine, Base, get_db
-from app.api.v1.router import api_router, support_router
+from app.api.v1.router import api_router, support_router, ai_compat_router
+from app.api.v1.endpoints import learning_path
 from app.core.middleware import setup_middleware, limiter
 from app.core.websocket import manager
+
+# Import models to ensure they are registered with Base.metadata before create_all
+from app.models import (
+    user, content, assessment, quiz, crm,
+    notification, meeting, tracking, simulation, analytics
+)
 
 
 # Configure logging
@@ -59,6 +66,13 @@ async def lifespan(app: FastAPI):
         logger.info("Database tables created/verified")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
+
+    # Check for in-memory database (Data Loss Risk)
+    db_url = str(settings.DATABASE_URL)
+    if "sqlite" in db_url and (":memory:" in db_url or "mode=memory" in db_url):
+        logger.warning("⚠️ CRITICAL: Application is using an IN-MEMORY database. All data (including simulations) will be lost on server restart!")
+        logger.warning("Please configure a persistent PostgreSQL or SQLite file in your .env > DATABASE_URL")
+
 
     # Ensure upload directory exists
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
@@ -177,13 +191,129 @@ app.include_router(api_router, prefix="/api/v1")
 # Include support aliases at root level for backward compatibility
 # Frontend calls /support/... directly instead of /api/v1/support/...
 app.include_router(support_router, prefix="")
+app.include_router(ai_compat_router, prefix="")
+# Include learning path at root level for backward compatibility
+# Frontend calls /learning-path/... directly instead of /api/v1/learning-path/...
+app.include_router(learning_path.router, prefix="")
 
 # Include API router at /api for legacy frontend calls (missing v1)
 # Frontend calls /api/content/... instead of /api/v1/content/...
 app.include_router(api_router, prefix="/api")
 
 
+# ==========================================
+# RECOMMENDATIONS ENDPOINT (ROOT LEVEL ALIAS)
+# ==========================================
+# Frontend calls /recommendations/track-completion directly
+# This is an alias to handle old API structure
 
+from fastapi import Form
+from typing import Optional
+from app.models.tracking import CourseCompletion
+from app.models.user import User
+import uuid
+
+@app.post("/recommendations/track-completion")
+async def track_completion_alias(
+    user_email: str = Form(...),
+    course_id: str = Form(...),
+    course_title: str = Form(""),
+    bucket: Optional[str] = Form(None),
+    xp_earned: int = Form(50),
+    score: int = Form(0),
+    max_score: int = Form(100),
+    time_spent_seconds: int = Form(0),
+    quiz_correct: int = Form(0),
+    quiz_total: int = Form(0),
+    db: Session = Depends(get_db)
+):
+    """
+    Track course/module completion and award XP.
+    Root-level alias for backward compatibility with frontend.
+    """
+    try:
+        # Get or create user
+        user = db.query(User).filter(User.email == user_email).first()
+        if not user:
+            logger.warning(f"User not found for track-completion: {user_email}")
+            return {"status": "error", "message": "User not found"}
+
+        # Check if already completed (avoid duplicates)
+        existing_completion = db.query(CourseCompletion).filter(
+            CourseCompletion.user_email == user_email,
+            CourseCompletion.course_id == course_id
+        ).first()
+
+        if existing_completion:
+            logger.info(f"Course {course_id} already completed by {user_email}")
+            return {
+                "status": "success",
+                "message": "Already completed",
+                "xp_earned": 0,
+                "total_xp": 0,
+                "level_up": False,
+                "new_level": None
+            }
+
+        # Calculate XP with skill matching bonus
+        actual_xp = int(xp_earned)
+        bucket_lower = (bucket or "").lower()
+        title_lower = (course_title or "").lower()
+        
+        # Simple skill matching for bonus XP
+        skill_keywords = ["product", "customer", "hygiene", "safety", "operation", "leadership"]
+        skill_matched = any(kw in bucket_lower or kw in title_lower for kw in skill_keywords)
+        if skill_matched:
+            actual_xp += 10  # Skill matching bonus
+
+        # Create completion record
+        completion = CourseCompletion(
+            id=str(uuid.uuid4()),
+            user_email=user_email,
+            course_id=course_id,
+            course_title=course_title or f"Course {course_id}",
+            bucket=bucket,
+            score=score,
+            score_percent=(score / max_score * 100) if max_score > 0 else 0,
+            time_spent_seconds=time_spent_seconds,
+            quiz_correct=quiz_correct,
+            quiz_total=quiz_total,
+            xp_earned=actual_xp,
+            completed_at=datetime.utcnow()
+        )
+        db.add(completion)
+
+        # Count total completions
+        completion_count = db.query(CourseCompletion).filter(
+            CourseCompletion.user_email == user_email
+        ).count()
+
+        total_xp = (completion_count + 1) * 50  # Approximate total
+
+        db.commit()
+
+        logger.info(f"Module completion tracked for {user_email}: {course_title} +{actual_xp} XP")
+
+        return {
+            "status": "success",
+            "xp_earned": actual_xp,
+            "total_xp": total_xp,
+            "message": f"Module completed! +{actual_xp} XP",
+            "level_up": False,
+            "new_level": None,
+            "courses_completed": completion_count + 1
+        }
+
+    except Exception as e:
+        logger.error(f"Track completion error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {
+            "status": "success",
+            "message": "Tracked with warnings",
+            "xp_earned": xp_earned,
+            "level_up": False
+        }
 
 
 # ==========================================

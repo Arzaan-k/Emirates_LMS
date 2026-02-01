@@ -155,18 +155,52 @@ class ContentService:
         """
         Get content for a learning path with user progress.
         Replicates exact logic from old monolithic backend.
-        
+
         path_type: 'self_learning' or 'career_progression'
         """
-        # Get user info
+        # Get user info - use optional to avoid exceptions on non-existent users
         user = self.user_repo.get_by_email(user_email)
         self_learning_completed = user.self_learning_completed if user else False
-        user_role = user.role if user else "Waffler"
-        
-        # Get user's completed courses (user-specific, not cached)
-        user_completed_courses = self.completion_repo.get_user_completed_course_ids(user_email)
-        user_completed_nodes = self.progress_repo.get_user_completed_nodes(user_email)
-        all_completed = user_completed_courses.union(user_completed_nodes)
+
+        # Optimized: Get all completion data in a single combined query using UNION
+        # This reduces 3 DB round trips to 1
+        try:
+            from app.models.video_progress import VideoProgress
+            from app.models.tracking import CourseCompletion
+            from app.models.user import UserNodeProgress
+            from sqlalchemy import union_all, select
+
+            # Build union query for all completion sources
+            q1 = select(CourseCompletion.course_id.label('node_id')).where(
+                CourseCompletion.user_email == user_email
+            )
+            q2 = select(UserNodeProgress.node_id.label('node_id')).where(
+                UserNodeProgress.user_email == user_email,
+                UserNodeProgress.completed == True
+            )
+            q3 = select(VideoProgress.node_id.label('node_id')).where(
+                VideoProgress.user_email == user_email,
+                VideoProgress.completed == True
+            )
+
+            # Execute combined query
+            combined_query = union_all(q1, q2, q3)
+            results = self.db.execute(combined_query).fetchall()
+            all_completed = {r[0] for r in results if r[0]}
+
+        except Exception as e:
+            # Fallback to original sequential queries if union fails
+            logger.warning(f"Optimized completion query failed, using fallback: {e}")
+            user_completed_courses = self.completion_repo.get_user_completed_course_ids(user_email)
+            user_completed_nodes = self.progress_repo.get_user_completed_nodes(user_email)
+
+            from app.models.video_progress import VideoProgress
+            video_completed = self.db.query(VideoProgress.node_id).filter(
+                VideoProgress.user_email == user_email,
+                VideoProgress.completed == True
+            ).all()
+            video_completed_ids = {r[0] for r in video_completed}
+            all_completed = user_completed_courses.union(user_completed_nodes).union(video_completed_ids)
 
         filtered_courses = []
 

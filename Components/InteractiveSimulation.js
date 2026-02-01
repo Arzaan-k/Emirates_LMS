@@ -316,28 +316,36 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
             setWrongAttempts(prev => prev + 1);
             setScore(prev => Math.max(0, prev - 10)); // Penalty
 
-            // Generate or use provided consequence
-            if (option.consequence) {
+            // Use provided consequence or generate via Groq API (fast)
+            if (option.consequence && option.consequence.trim()) {
                 setWrongConsequence(option.consequence);
+                setShowWrongModal(true);
             } else {
-                // Generate AI consequence
-                try {
-                    const res = await fetch(`${API_URL}/api/v1/simulations/generate-consequence`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            scenario: simulation.title,
-                            currentStep: currentNode.title,
-                            wrongOption: option.text,
-                        }),
+                // Generate consequence via fast Groq API
+                setWrongConsequence('Analyzing your choice...');
+                setShowWrongModal(true);
+
+                // Fire off API call - don't await to keep UI responsive
+                fetch(`${API_URL}/api/v1/simulations/generate-consequence`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        scenario: simulation.title || 'Training Simulation',
+                        currentStep: currentNode.title || 'Current Step',
+                        wrongOption: option.text || 'Selected Option',
+                    }),
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.consequence) {
+                            setWrongConsequence(data.consequence);
+                        }
+                    })
+                    .catch(err => {
+                        console.error('[Simulation] Consequence API error:', err);
+                        // Keep analyzing message visible - it's better than nothing
                     });
-                    const data = await res.json();
-                    setWrongConsequence(data.consequence || 'This action could lead to problems. Think carefully!');
-                } catch (e) {
-                    setWrongConsequence('This is not the right choice. Consider the proper procedure and try again.');
-                }
             }
-            setShowWrongModal(true);
         }
     };
 
@@ -621,13 +629,13 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
                                     ))}
                                 </ScrollView>
 
-                                {/* Replay hint */}
-                                {stepsCompleted > 0 && (
+                                {/* Replay hint - REMOVED */}
+                                {/* {stepsCompleted > 0 && (
                                     <TouchableOpacity style={styles.replayHint} onPress={handleReplayVideo}>
                                         <MaterialCommunityIcons name="replay" size={16} color="rgba(255,255,255,0.6)" />
                                         <Text style={styles.replayHintText}>Replay Video</Text>
                                     </TouchableOpacity>
-                                )}
+                                )} */}
                             </BlurView>
                         </Animated.View>
                     )}

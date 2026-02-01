@@ -61,7 +61,8 @@ class Simulation(Base):
             "duration": self.duration,
             "duration_minutes": self.duration_minutes,
             "thumbnail": self.thumbnail,
-            "nodes": self.nodes,
+            "thumbnailUrl": self.thumbnail,  # Frontend expects camelCase
+            "nodes": self.nodes or [],
             "start_node_id": self.start_node_id,
             "is_active": self.is_active,
             "total_branches": self.total_branches,

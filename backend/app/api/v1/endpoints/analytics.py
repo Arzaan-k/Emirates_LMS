@@ -4,8 +4,8 @@ Dashboard, reports, employee/store performance, leaderboards
 """
 
 import logging
-from typing import Dict, Any, Optional, List
-from datetime import datetime
+from typing import Dict, Any, Optional, List, Tuple
+from datetime import datetime, date, timedelta
 
 from fastapi import APIRouter, Depends, Form, HTTPException
 from sqlalchemy.orm import Session
@@ -15,6 +15,21 @@ from app.core.dependencies import get_current_user, require_admin
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
+
+
+def _month_date_range(year: int, month: int) -> Tuple[datetime, datetime]:
+    start = datetime(year, month, 1)
+    if month == 12:
+        end = datetime(year + 1, 1, 1)
+    else:
+        end = datetime(year, month + 1, 1)
+    return start, end
+
+
+def _day_date_range(d: date) -> Tuple[datetime, datetime]:
+    start = datetime(d.year, d.month, d.day)
+    end = start + timedelta(days=1)
+    return start, end
 
 
 # ==========================================
@@ -44,6 +59,447 @@ async def get_analytics_dashboard(db: Session = Depends(get_db)):
             "avg_score": 0,
             "total_xp": 0,
         }
+
+
+# ==========================================
+# CALENDAR INSIGHTS (PER-USER)
+# ==========================================
+
+
+@router.get("/calendar/month")
+def get_calendar_month(
+    user_email: str,
+    year: int,
+    month: int,
+    db: Session = Depends(get_db),
+):
+    from collections import defaultdict
+
+    from app.models.video_progress import VideoProgress
+    from app.models.quiz import QuizSubmission
+    from app.models.tracking import CourseCompletion, AttendanceRecord
+    from app.models.assessment import AssessmentSubmission
+    from app.models.simulation import SimulationProgress
+    from app.models.crm import AuditSubmission
+
+    if month < 1 or month > 12:
+        raise HTTPException(status_code=400, detail="Invalid month")
+
+    start_dt, end_dt = _month_date_range(year, month)
+
+    daily = defaultdict(lambda: {
+        "videos": 0,
+        "videos_completed": 0,
+        "quizzes": 0,
+        "assessments": 0,
+        "simulations": 0,
+        "simulations_completed": 0,
+        "audits": 0,
+        "completions": 0,
+        "focus_seconds": 0,
+        "avg_score": None,
+        "topSkill": None,
+        "attendance_minutes": 0,
+    })
+
+    try:
+        completions = db.query(CourseCompletion).filter(
+            CourseCompletion.user_email == user_email,
+            CourseCompletion.completed_at >= start_dt,
+            CourseCompletion.completed_at < end_dt,
+        ).all()
+        for c in completions:
+            d = c.completed_at.date().day
+            daily[d]["completions"] += 1
+            daily[d]["focus_seconds"] += int(c.time_spent_seconds or 0)
+
+        quizzes = db.query(QuizSubmission).filter(
+            QuizSubmission.user_email == user_email,
+            QuizSubmission.submitted_at >= start_dt,
+            QuizSubmission.submitted_at < end_dt,
+        ).all()
+        for q in quizzes:
+            d = q.submitted_at.date().day
+            daily[d]["quizzes"] += 1
+            daily[d]["focus_seconds"] += int(q.time_taken_seconds or 0)
+
+        assessments = db.query(AssessmentSubmission).filter(
+            AssessmentSubmission.user_email == user_email,
+            AssessmentSubmission.submitted_at >= start_dt,
+            AssessmentSubmission.submitted_at < end_dt,
+        ).all()
+        for a in assessments:
+            d = a.submitted_at.date().day
+            daily[d]["assessments"] += 1
+            daily[d]["focus_seconds"] += int(a.time_taken_seconds or 0)
+
+        # VideoProgress doesn't store explicit time spent; use progress updates as "videos" activity,
+        # and completed_at as true completion signal.
+        video_updates = db.query(VideoProgress).filter(
+            VideoProgress.user_email == user_email,
+            VideoProgress.updated_at >= start_dt,
+            VideoProgress.updated_at < end_dt,
+            VideoProgress.video_watched_percent > 0,
+        ).all()
+        for v in video_updates:
+            d = v.updated_at.date().day
+            daily[d]["videos"] += 1
+
+        video_completed = db.query(VideoProgress).filter(
+            VideoProgress.user_email == user_email,
+            VideoProgress.completed == True,
+            VideoProgress.completed_at != None,
+            VideoProgress.completed_at >= start_dt,
+            VideoProgress.completed_at < end_dt,
+        ).all()
+        for v in video_completed:
+            d = v.completed_at.date().day
+            daily[d]["videos_completed"] += 1
+
+        attendance = db.query(AttendanceRecord).filter(
+            AttendanceRecord.user_email == user_email,
+            AttendanceRecord.punch_in >= start_dt,
+            AttendanceRecord.punch_in < end_dt,
+        ).all()
+        for a in attendance:
+            d = a.punch_in.date().day
+            daily[d]["attendance_minutes"] += int(a.duration_minutes or 0)
+
+        sim_started = db.query(SimulationProgress).filter(
+            SimulationProgress.user_email == user_email,
+            SimulationProgress.started_at >= start_dt,
+            SimulationProgress.started_at < end_dt,
+        ).all()
+        for s in sim_started:
+            d = s.started_at.date().day
+            daily[d]["simulations"] += 1
+            daily[d]["focus_seconds"] += int(s.time_spent_seconds or 0)
+
+        sim_completed = db.query(SimulationProgress).filter(
+            SimulationProgress.user_email == user_email,
+            SimulationProgress.completed == True,
+            SimulationProgress.completed_at != None,
+            SimulationProgress.completed_at >= start_dt,
+            SimulationProgress.completed_at < end_dt,
+        ).all()
+        for s in sim_completed:
+            d = s.completed_at.date().day
+            daily[d]["simulations_completed"] += 1
+
+        audits = db.query(AuditSubmission).filter(
+            AuditSubmission.user_email == user_email,
+            AuditSubmission.submitted_at >= start_dt,
+            AuditSubmission.submitted_at < end_dt,
+        ).all()
+        for a in audits:
+            try:
+                day_num = a.submitted_at.date().day
+            except Exception:
+                continue
+            daily[day_num]["audits"] += 1
+    except Exception as e:
+        logger.error(f"Calendar month fetch failed: {e}")
+        return {"days": {}}
+
+    # Compute avg_score and topSkill per day
+    score_acc = defaultdict(list)
+    bucket_acc = defaultdict(list)
+    for c in completions:
+        d = c.completed_at.date().day
+        if c.score_percent is not None:
+            score_acc[d].append(float(c.score_percent))
+        if c.bucket:
+            bucket_acc[d].append(c.bucket)
+    for q in quizzes:
+        d = q.submitted_at.date().day
+        if q.score is not None:
+            score_acc[d].append(float(q.score))
+    for a in assessments:
+        d = a.submitted_at.date().day
+        if a.score_percent is not None:
+            score_acc[d].append(float(a.score_percent))
+
+    for s in sim_completed:
+        if s.completed_at is None:
+            continue
+        d = s.completed_at.date().day
+        if s.score is not None:
+            score_acc[d].append(float(s.score))
+
+    for d, scores in score_acc.items():
+        if scores:
+            daily[d]["avg_score"] = round(sum(scores) / len(scores))
+    for d, buckets in bucket_acc.items():
+        if buckets:
+            # most common
+            daily[d]["topSkill"] = max(set(buckets), key=buckets.count)
+
+    days_out: Dict[str, Any] = {}
+    for d, stats in daily.items():
+        intensity = min(
+            5,
+            (stats["videos"] > 0)
+            + (stats["quizzes"] > 0)
+            + (stats["completions"] > 0)
+            + (stats["assessments"] > 0)
+            + (stats["simulations"] > 0)
+            + (stats["audits"] > 0)
+            + (stats["attendance_minutes"] > 0),
+        )
+        days_out[str(d)] = {
+            "videos": stats["videos"],
+            "quizzes": stats["quizzes"],
+            "assessments": stats["assessments"],
+            "simulations": stats["simulations"],
+            "audits": stats["audits"],
+            "completions": stats["completions"],
+            "focus_seconds": stats["focus_seconds"],
+            "focus_minutes": int((stats["focus_seconds"] or 0) // 60),
+            "avg_score": stats["avg_score"],
+            "topSkill": stats["topSkill"] or "General",
+            "attendance_minutes": stats["attendance_minutes"],
+            "intensity": intensity,
+        }
+
+    return {
+        "year": year,
+        "month": month,
+        "user_email": user_email,
+        "days": days_out,
+    }
+
+
+@router.get("/calendar/day")
+def get_calendar_day(
+    user_email: str,
+    day: str,
+    db: Session = Depends(get_db),
+):
+    from app.models.video_progress import VideoProgress
+    from app.models.quiz import QuizSubmission
+    from app.models.tracking import CourseCompletion, AttendanceRecord
+    from app.models.assessment import AssessmentSubmission
+
+    try:
+        d = date.fromisoformat(day)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid day; expected YYYY-MM-DD")
+
+    start_dt, end_dt = _day_date_range(d)
+
+    try:
+        completions = db.query(CourseCompletion).filter(
+            CourseCompletion.user_email == user_email,
+            CourseCompletion.completed_at >= start_dt,
+            CourseCompletion.completed_at < end_dt,
+        ).order_by(CourseCompletion.completed_at.desc()).all()
+
+        quizzes = db.query(QuizSubmission).filter(
+            QuizSubmission.user_email == user_email,
+            QuizSubmission.submitted_at >= start_dt,
+            QuizSubmission.submitted_at < end_dt,
+        ).order_by(QuizSubmission.submitted_at.desc()).all()
+
+        assessments = db.query(AssessmentSubmission).filter(
+            AssessmentSubmission.user_email == user_email,
+            AssessmentSubmission.submitted_at >= start_dt,
+            AssessmentSubmission.submitted_at < end_dt,
+        ).order_by(AssessmentSubmission.submitted_at.desc()).all()
+
+        video_updates = db.query(VideoProgress).filter(
+            VideoProgress.user_email == user_email,
+            VideoProgress.updated_at >= start_dt,
+            VideoProgress.updated_at < end_dt,
+            VideoProgress.video_watched_percent > 0,
+        ).order_by(VideoProgress.updated_at.desc()).all()
+
+        attendance = db.query(AttendanceRecord).filter(
+            AttendanceRecord.user_email == user_email,
+            AttendanceRecord.punch_in >= start_dt,
+            AttendanceRecord.punch_in < end_dt,
+        ).order_by(AttendanceRecord.punch_in.desc()).all()
+
+        sim_started = db.query(SimulationProgress).filter(
+            SimulationProgress.user_email == user_email,
+            SimulationProgress.started_at >= start_dt,
+            SimulationProgress.started_at < end_dt,
+        ).order_by(SimulationProgress.started_at.desc()).all()
+
+        sim_completed = db.query(SimulationProgress).filter(
+            SimulationProgress.user_email == user_email,
+            SimulationProgress.completed == True,
+            SimulationProgress.completed_at != None,
+            SimulationProgress.completed_at >= start_dt,
+            SimulationProgress.completed_at < end_dt,
+        ).order_by(SimulationProgress.completed_at.desc()).all()
+
+        audits = db.query(AuditSubmission).filter(
+            AuditSubmission.user_email == user_email,
+            AuditSubmission.submitted_at >= start_dt,
+            AuditSubmission.submitted_at < end_dt,
+        ).order_by(AuditSubmission.submitted_at.desc()).all()
+
+    except Exception as e:
+        logger.error(f"Calendar day fetch failed: {e}")
+        return {
+            "day": day,
+            "user_email": user_email,
+            "summary": {
+                "videos": 0,
+                "quizzes": 0,
+                "assessments": 0,
+                "simulations": 0,
+                "audits": 0,
+                "completions": 0,
+                "focus_seconds": 0,
+                "focus_minutes": 0,
+                "avg_score": None,
+                "topSkill": "General",
+            },
+            "items": {
+                "videos": [],
+                "quizzes": [],
+                "assessments": [],
+                "simulations": [],
+                "audits": [],
+                "completions": [],
+                "attendance": [],
+                "timeline": [],
+            },
+        }
+
+    focus_seconds = 0
+    focus_seconds += sum(int(c.time_spent_seconds or 0) for c in completions)
+    focus_seconds += sum(int(q.time_taken_seconds or 0) for q in quizzes)
+    focus_seconds += sum(int(a.time_taken_seconds or 0) for a in assessments)
+    focus_seconds += sum(int(s.time_spent_seconds or 0) for s in sim_started)
+
+    scores: List[float] = []
+    scores += [float(c.score_percent) for c in completions if c.score_percent is not None]
+    scores += [float(q.score) for q in quizzes if q.score is not None]
+    scores += [float(a.score_percent) for a in assessments if a.score_percent is not None]
+    scores += [float(s.score) for s in sim_completed if s.score is not None]
+    avg_score = round(sum(scores) / len(scores)) if scores else None
+
+    buckets = [c.bucket for c in completions if c.bucket]
+    top_skill = max(set(buckets), key=buckets.count) if buckets else "General"
+
+    def _ts(val: Any) -> Optional[str]:
+        if val is None:
+            return None
+        try:
+            return val.isoformat()
+        except Exception:
+            try:
+                return str(val)
+            except Exception:
+                return None
+
+    timeline: List[Dict[str, Any]] = []
+    for v in video_updates:
+        timeline.append({
+            "type": "video",
+            "ts": _ts(v.updated_at),
+            "title": "Video Progress",
+            "meta": {"node_id": v.node_id, "watched_percent": v.video_watched_percent, "completed": v.completed},
+        })
+    for q in quizzes:
+        timeline.append({
+            "type": "quiz",
+            "ts": _ts(q.submitted_at),
+            "title": q.quiz_title,
+            "meta": {"score_percent": q.score, "passed": q.passed, "time_taken_seconds": q.time_taken_seconds},
+        })
+    for a in assessments:
+        timeline.append({
+            "type": "assessment",
+            "ts": _ts(a.submitted_at),
+            "title": a.assessment_title or "Assessment",
+            "meta": {"score_percent": a.score_percent, "passed": a.passed, "time_taken_seconds": a.time_taken_seconds},
+        })
+    for c in completions:
+        timeline.append({
+            "type": "completion",
+            "ts": _ts(c.completed_at),
+            "title": c.course_title or "Course Completed",
+            "meta": {"score_percent": c.score_percent, "xp_earned": c.xp_earned, "time_spent_seconds": c.time_spent_seconds},
+        })
+    for s in sim_started:
+        timeline.append({
+            "type": "simulation",
+            "ts": _ts(s.started_at),
+            "title": "Simulation Started",
+            "meta": {"simulation_id": s.simulation_id, "score": s.score, "completed": s.completed, "time_spent_seconds": s.time_spent_seconds},
+        })
+    for s in sim_completed:
+        timeline.append({
+            "type": "simulation",
+            "ts": _ts(s.completed_at),
+            "title": "Simulation Completed",
+            "meta": {"simulation_id": s.simulation_id, "score": s.score, "passed": s.passed, "time_spent_seconds": s.time_spent_seconds},
+        })
+    for a in audits:
+        timeline.append({
+            "type": "audit",
+            "ts": _ts(a.submitted_at),
+            "title": "Hygiene Audit",
+            "meta": {"category": a.category, "store": a.store, "completion_rate": a.completion_rate},
+        })
+    for a in attendance:
+        timeline.append({
+            "type": "attendance",
+            "ts": _ts(a.punch_in),
+            "title": "Punch In",
+            "meta": {"store": a.store, "duration_minutes": a.duration_minutes, "status": a.status},
+        })
+        if a.punch_out:
+            timeline.append({
+                "type": "attendance",
+                "ts": _ts(a.punch_out),
+                "title": "Punch Out",
+                "meta": {"store": a.store, "duration_minutes": a.duration_minutes, "status": a.status},
+            })
+
+    def _sort_key(item: Dict[str, Any]):
+        t = item.get("ts")
+        return t or ""
+    timeline = sorted(timeline, key=_sort_key)
+
+    return {
+        "day": day,
+        "user_email": user_email,
+        "summary": {
+            "videos": len(video_updates),
+            "quizzes": len(quizzes),
+            "assessments": len(assessments),
+            "simulations": len(sim_started),
+            "audits": len(audits),
+            "completions": len(completions),
+            "focus_seconds": focus_seconds,
+            "focus_minutes": int(focus_seconds // 60),
+            "avg_score": avg_score,
+            "topSkill": top_skill,
+            "attendance_minutes": sum(int(a.duration_minutes or 0) for a in attendance),
+        },
+        "items": {
+            "videos": [
+                {
+                    "node_id": v.node_id,
+                    "watched_percent": v.video_watched_percent,
+                    "completed": v.completed,
+                    "updated_at": v.updated_at.isoformat() if v.updated_at else None,
+                }
+                for v in video_updates
+            ],
+            "quizzes": [q.to_dict() for q in quizzes],
+            "assessments": [a.to_dict() for a in assessments],
+            "simulations": [s.to_dict() for s in sim_started],
+            "audits": [a.to_dict() for a in audits],
+            "completions": [c.to_dict() for c in completions],
+            "attendance": [a.to_dict() for a in attendance],
+            "timeline": timeline,
+        },
+    }
 
 
 @router.get("/store-performance")

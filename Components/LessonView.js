@@ -377,8 +377,12 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
             const result = await response.json();
 
             // Update local state with server's confirmed percentage
+            // CRITICAL FIX: Also update highestServerPercent to prevent progress falling back
             if (result.progress?.video_watched_percent) {
-                setVideoProgress(result.progress.video_watched_percent);
+                const serverPercent = result.progress.video_watched_percent;
+                setVideoProgress(serverPercent);
+                // Sync highest with server's value (server always returns max)
+                highestServerPercent.current = Math.max(highestServerPercent.current, serverPercent);
             }
             return result;
         } catch (err) {
@@ -502,9 +506,11 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
                 const isFirstCheckpoint = checkpoint === checkpoint33;
                 const segmentLabel = isFirstCheckpoint ? "0-33%" : "33-66%";
 
-                // Check if quiz exists or generate new one
-                let quiz = midVideoQuizzes.find(q => Math.abs(q.trigger_time_seconds - checkpoint) < 10);
+                // Check if quiz exists locally first (pre-fetched from database)
+                // Use 15 second tolerance to match backend caching
+                let quiz = midVideoQuizzes.find(q => Math.abs(q.trigger_time_seconds - checkpoint) < 15);
                 if (!quiz) {
+                    // Quiz not in local cache - backend will check database FIRST before generating
                     quiz = await generateMidVideoQuiz(checkpoint);
                 }
 

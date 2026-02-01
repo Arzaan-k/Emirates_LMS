@@ -10,7 +10,7 @@ import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Form, File, UploadFile, HTTPException
+from fastapi import APIRouter, Depends, Form, File, UploadFile, HTTPException, Header
 from sqlalchemy.orm import Session
 
 from app.config.database import get_db
@@ -25,25 +25,75 @@ router = APIRouter(prefix="/simulations", tags=["Simulations"])
 # ==========================================
 
 @router.get("/")
-async def get_simulations(db: Session = Depends(get_db)):
+def get_simulations(
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
     """
-    Get all interactive simulations.
+    Get simulations.
+    - Admins/Managers: Get ALL (Active + Inactive)
+    - Users: Get Active only
+    - Does not return full 'nodes' array to save bandwidth
     """
-    repo = SimulationRepository(db)
-    simulations = repo.get_active_simulations()
+    try:
+        # Import verifying logic locally to avoid potential circular imports
+        from app.core.auth import verify_token
 
-    result = []
-    for sim in simulations:
-        sim_dict = sim.to_dict() if hasattr(sim, 'to_dict') else {
-            "id": sim.id,
-            "title": sim.title,
-            "description": sim.description,
-            "thumbnail": sim.thumbnail,
-            "is_active": sim.is_active,
-        }
-        result.append(sim_dict)
+        repo = SimulationRepository(db)
+        is_admin = False
 
-    return result
+        # Check auth
+        if authorization:
+            try:
+                token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
+                payload = verify_token(token, "access")
+                if payload:
+                    role = payload.get("role", "")
+                    if role in ["Admin", "Manager", "SuperAdmin"]:
+                        is_admin = True
+            except Exception as e:
+                logger.warning(f"Auth check failed in get_simulations: {e}")
+
+        start_time = datetime.utcnow()
+        if is_admin:
+            simulations = repo.get_all_simulations()
+        else:
+            simulations = repo.get_active_simulations()
+
+        load_time = (datetime.utcnow() - start_time).total_seconds()
+        logger.info(f"Loaded {len(simulations)} simulations in {load_time:.3f}s (is_admin={is_admin})")
+
+        # Build response without 'nodes' to reduce payload size
+        result = []
+        for sim in simulations:
+            try:
+                nodes_count = int(sim.total_branches or 0)
+            except Exception:
+                nodes_count = 0
+            result.append({
+                "id": sim.id,
+                "title": sim.title,
+                "description": sim.description,
+                "category": sim.category,
+                "difficulty": sim.difficulty,
+                "duration": sim.duration,
+                "thumbnail": sim.thumbnail,
+                "thumbnailUrl": sim.thumbnail,  # Frontend expects camelCase
+                "is_active": sim.is_active,
+                "steps": nodes_count,
+                "total_branches": nodes_count,
+                "max_score": sim.max_score,
+                "created_at": sim.created_at.isoformat() if sim.created_at else None,
+                # 'nodes' omitted - fetched separately via GET /{id}
+            })
+
+        return result
+
+    except Exception as e:
+        import traceback
+        logger.error(f"Error in get_simulations: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/{simulation_id}")
@@ -94,6 +144,17 @@ async def create_simulation(
         "thumbnail": thumbnail_url,
         "is_active": True,
     }
+
+    # Derive start node and step count so list views don't show 0 steps
+    try:
+        if isinstance(scenario_data, list):
+            simulation_data["total_branches"] = len(scenario_data)
+            for node in scenario_data:
+                if isinstance(node, dict) and node.get("isStart") is True:
+                    simulation_data["start_node_id"] = node.get("id")
+                    break
+    except Exception as e:
+        logger.warning(f"Could not derive start_node_id/total_branches for new simulation: {e}")
 
     simulation = repo.create_simulation(simulation_data)
     logger.info(f"Simulation created: {simulation.id}")
@@ -365,6 +426,7 @@ class SimulationSaveRequest(BaseModel):
     nodes: List[NodeModel]
     estimatedTime: Optional[str] = None
     maxScore: Optional[int] = None
+    isActive: Optional[bool] = True
     createdAt: Optional[str] = None
     updatedAt: Optional[str] = None
 
@@ -426,8 +488,8 @@ async def save_simulation(
     repo = SimulationRepository(db)
     existing = repo.get_by_id(data.id)
     
-    # Convert Pydantic model to dict
-    sim_data = data.dict(exclude_unset=True)
+    # Convert Pydantic model to dict (INCLUDE all fields to avoid missing keys in JSON)
+    sim_data = data.dict()
     
     # Map frontend fields (camelCase) to DB columns (snake_case)
     if "thumbnailUrl" in sim_data:
@@ -436,15 +498,26 @@ async def save_simulation(
         sim_data["duration"] = sim_data.pop("estimatedTime")
     if "maxScore" in sim_data:
         sim_data["max_score"] = sim_data.pop("maxScore")
+    if "isActive" in sim_data:
+        sim_data["is_active"] = sim_data.pop("isActive")
     
     # Remove fields that are not in the database model or are auto-generated
     fields_to_remove = ["createdAt", "updatedAt"]
     for field in fields_to_remove:
         sim_data.pop(field, None)
     
-    # Ensure nodes is a list of dicts
-    # Pydantic .dict() handles recursive conversion, so sim_data['nodes'] is list of dicts.
-    
+    # Logic to set start_node_id based on 'isStart' flag
+    if "nodes" in sim_data and isinstance(sim_data["nodes"], list):
+        for node in sim_data["nodes"]:
+            if node.get("isStart") is True:
+                sim_data["start_node_id"] = node.get("id")
+                break
+        
+        # Also update total_branches count
+        sim_data["total_branches"] = len(sim_data["nodes"])
+        
+        logger.info(f"Saving simulation {data.id} with {len(sim_data['nodes'])} nodes. Start Node: {sim_data.get('start_node_id')}")
+
     if existing:
         updated = repo.update_simulation(data.id, sim_data)
         return {"success": True, "id": updated.id, "message": "Simulation updated successfully"}
@@ -458,13 +531,37 @@ async def generate_consequence(
     request: ConsequenceRequest,
 ):
     """
-    Generate a consequence for a wrong choice using AI (Mocked for now).
+    Generate a consequence for a wrong choice using Groq AI (fast inference).
+    Uses llama-3.1-8b-instant model with minimal tokens for instant response.
     """
-    # In a real implementation, call an LLM here
-    # For now, return a generic but context-aware message
-    return {
-        "consequence": f"Choosing '{request.wrongOption}' in the '{request.scenario}' scenario might lead to negative customer experience. Consider the standard operating procedure."
-    }
+    from groq import Groq
+    from app.config.settings import settings
+
+    # Initialize Groq client
+    client = Groq(api_key=settings.GROQ_API_KEY)
+
+    # Optimized prompt for fast, concise consequence generation
+    prompt = f"""Generate a brief (2-3 sentences max) consequence for making a wrong choice in a workplace training simulation.
+
+Scenario: {request.scenario}
+Current Step: {request.currentStep}
+Wrong Choice: {request.wrongOption}
+
+Explain what could go wrong. Be specific and educational. Keep it short."""
+
+    # Use 70B parameter model as requested - still fast on Groq infrastructure
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",  # 70B parameter model
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=80,  # Keep response short for speed
+        temperature=0.7,
+        stream=False,
+    )
+
+    consequence = response.choices[0].message.content.strip()
+    logger.info(f"Generated consequence via Groq for '{request.wrongOption}'")
+
+    return {"consequence": consequence}
 
 @router.get("/analytics/{simulation_id}")
 async def get_simulation_analytics(

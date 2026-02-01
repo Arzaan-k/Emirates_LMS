@@ -10,6 +10,7 @@ import {
     FlatList,
     ActivityIndicator,
     StatusBar,
+    Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
@@ -58,7 +59,7 @@ const SimulationCard = ({ simulation, onStart, index }) => {
                     {/* Duration Badge */}
                     <View style={styles.durationBadge}>
                         <Feather name="clock" size={12} color="#FFF" />
-                        <Text style={styles.durationText}>{simulation.estimatedTime || '5 min'}</Text>
+                        <Text style={styles.durationText}>{simulation.duration || simulation.estimatedTime || '5 min'}</Text>
                     </View>
 
                     {/* Play Button Overlay */}
@@ -92,11 +93,11 @@ const SimulationCard = ({ simulation, onStart, index }) => {
                     <View style={styles.cardMeta}>
                         <View style={styles.metaItem}>
                             <MaterialCommunityIcons name="movie-open-outline" size={14} color="#9CA3AF" />
-                            <Text style={styles.metaText}>{simulation.nodes?.length || 0} steps</Text>
+                            <Text style={styles.metaText}>{simulation.steps || simulation.total_branches || 0} steps</Text>
                         </View>
                         <View style={styles.metaItem}>
                             <MaterialCommunityIcons name="star-outline" size={14} color="#9CA3AF" />
-                            <Text style={styles.metaText}>{simulation.maxScore || (simulation.nodes?.length || 0) * 10} pts</Text>
+                            <Text style={styles.metaText}>{simulation.max_score || simulation.maxScore || (simulation.steps || 0) * 10} pts</Text>
                         </View>
                     </View>
                 </View>
@@ -203,9 +204,29 @@ export default function InteractiveSimulationHub({ onClose, userProfile }) {
         }
     };
 
-    const handleStartSimulation = (simulation) => {
-        setSelectedSimulation(simulation);
-        setView('playing');
+    const handleStartSimulation = async (simulation) => {
+        // Fetch full simulation data (including nodes) before starting
+        try {
+            setIsLoading(true);
+            const res = await fetch(`${API_URL}/api/v1/simulations/${simulation.id}`);
+            const fullSimulation = await res.json();
+
+            // Verify we have nodes
+            if (!fullSimulation.nodes || fullSimulation.nodes.length === 0) {
+                console.error('Simulation has no steps/nodes:', fullSimulation);
+                Alert.alert('Error', 'This simulation has no steps. Please contact an administrator.');
+                setIsLoading(false);
+                return;
+            }
+
+            setSelectedSimulation(fullSimulation);
+            setView('playing');
+        } catch (e) {
+            console.error('Failed to fetch simulation details:', e);
+            Alert.alert('Error', 'Could not load simulation. Please try again.');
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     const handleSimulationComplete = () => {

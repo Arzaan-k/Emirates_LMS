@@ -410,6 +410,25 @@ async def update_role_access(
     try:
         courses_list = json.loads(accessible_courses)
         buckets_list = json.loads(accessible_buckets)
+        
+        # VALIDATION: Filter out any course IDs that don't exist in the database
+        # This prevents 'ghost courses' from persisting if frontend is out of sync
+        if courses_list:
+            from app.models.content import Content
+            valid_ids_result = db.query(Content.id).filter(Content.id.in_(courses_list)).all()
+            valid_ids = {r[0] for r in valid_ids_result}
+            
+            original_count = len(courses_list)
+            # Keep order but filter validity
+            valid_courses_list = [c_id for c_id in courses_list if c_id in valid_ids]
+            
+            if len(valid_courses_list) < original_count:
+                logger.warning(
+                    f"Access Rule Update ({role_name}): Removed {original_count - len(valid_courses_list)} "
+                    f"ghost/invalid course IDs that don't exist in Content table."
+                )
+                courses_list = valid_courses_list
+                
     except:
         raise HTTPException(status_code=400, detail="Invalid JSON format")
     
@@ -546,11 +565,15 @@ async def generate_role_exam(
 async def get_role_exam(user_email: str, db: Session = Depends(get_db)):
     """
     Get the generated role advancement exam.
+    Dynamically generates questions based on the content of the user's current level courses.
     """
     from app.services.user_service import UserService
+    from app.repositories.content_repository import AccessRuleRepository, ContentRepository
+    from app.services.ai_service import AIService
+    
     service = UserService(db)
     user = service.get_user_by_email(user_email)
-    current_role = user.role
+    current_role = user.role or "Waffler"
     
     # Dynamic Target Role
     from app.repositories.content_repository import ProgressionLevelRepository
@@ -567,36 +590,63 @@ async def get_role_exam(user_email: str, db: Session = Depends(get_db)):
     if current_idx != -1 and current_idx < len(all_levels) - 1:
         target_role = all_levels[current_idx + 1].name
 
-    # Simple Mock Exam
+    # Fetch content for current role's access rules
+    access_repo = AccessRuleRepository(db)
+    content_repo = ContentRepository(db)
+    
+    access_rule = access_repo.get_by_level(current_role)
+    course_ids = access_rule.accessible_courses if access_rule else []
+    
+    content_text = ""
+    if course_ids:
+        # Get content items
+        courses = content_repo.get_content_by_ids(course_ids)
+        # Aggregate text (Title + Description + Transcript if available)
+        for course in courses:
+            content_text += f"\n\nTopic: {course.title}\n"
+            content_text += f"Description: {course.description}\n"
+            if course.transcript:
+                 content_text += f"Content: {course.transcript[:2000]}...\n" # Limit transcript to 2k chars per course
+    
+    # Generate Questions via AI
+    ai_service = AIService()
+    questions = []
+    
+    try:
+        if content_text.strip():
+            logger.info(f"Generating exam for {user_email} based on {len(course_ids)} courses.")
+            questions = ai_service.generate_quiz_from_transcript(content_text, num_questions=10, difficulty="medium")
+        else:
+            logger.warning(f"No content found for {current_role}, generating generic exam.")
+            questions = ai_service.generate_quiz_from_topic(f"{current_role} Responsibilities and Skills", num_questions=10)
+    except Exception as e:
+        logger.error(f"Exam generation failed: {e}")
+        # Fallback to topic generation
+        questions = ai_service.generate_quiz_from_topic(current_role, num_questions=5)
+
+    # Ensure we return valid metadata for the frontend
+    total_questions = len(questions) or 10
+    passing_percent = 70
+    time_limit = 15 # minutes
+    
     return {
         "status": "success",
         "exam": {
             "exam_id": f"exam_{uuid.uuid4().hex[:8]}",
-            "time_limit_minutes": 15,
+            "time_limit_minutes": time_limit,
+            "duration_minutes": time_limit, # Duplicate for frontend compatibility
             "max_violations": 3,
             "current_role": current_role,
             "target_role": target_role,
-            "questions": [
-                {
-                    "question": "What is the primary responsibility of your new role?",
-                    "options": ["Leadership", "Stocking", "Cleaning", "None"],
-                    "correctIndex": 0
-                },
-                {
-                    "question": "How do you handle a customer complaint?",
-                    "options": ["Ignore it", "Listen and Solve", "Argue", "Redirect"],
-                    "correctIndex": 1
-                },
-                {
-                    "question": "Safety protocols are important because:",
-                    "options": ["They look good", "They protect everyone", "No reason", "Optional"],
-                    "correctIndex": 1
-                }
-            ],
-            "pass_percent": 60,
-            "proctored": True
+            "questions": questions,
+            "total_questions": total_questions,
+            "question_count": total_questions,
+            "passing_score": passing_percent,
+            "passing_percentage": passing_percent,
+            "min_passing_score": passing_percent
         }
     }
+
 
 
 @router.post("/role-advancement/submit-exam")

@@ -464,8 +464,23 @@ class UserService:
         return self.progress_repo.get_user_completed_nodes(user_email)
 
     def get_user_completed_courses(self, user_email: str) -> Set[str]:
-        """Get set of completed course IDs for a user."""
-        return self.completion_repo.get_user_completed_course_ids(user_email)
+        """Get set of completed course IDs for a user from ALL sources."""
+        # Get from course_completions table
+        from_completions = self.completion_repo.get_user_completed_course_ids(user_email)
+        
+        # Get from user_node_progress table  
+        from_node_progress = self.progress_repo.get_user_completed_nodes(user_email)
+        
+        # ALSO check video_progress table (this is where VideoProgressService marks completion)
+        from app.models.video_progress import VideoProgress
+        video_completed = self.db.query(VideoProgress.node_id).filter(
+            VideoProgress.user_email == user_email,
+            VideoProgress.completed == True
+        ).all()
+        from_video_progress = {r[0] for r in video_completed}
+        
+        # Combine all sources
+        return from_completions.union(from_node_progress).union(from_video_progress)
 
     def get_user_completions(self, user_email: str) -> List:
         """Get all completion records for a user."""
@@ -536,11 +551,11 @@ class UserService:
 
         current_role = user.role or "Waffler"
 
-        # Get access rules for current role
+        # Use access rules for current level - these are the courses assigned by admin
         access_rule = self.access_rule_repo.get_by_level(current_role)
         required_courses = access_rule.accessible_courses if access_rule else []
 
-        # Get user's completed courses
+        # Get user's completed courses (from ALL sources: course_completions, user_node_progress, video_progress)
         user_completed = self.get_user_completed_courses(user_email)
 
         # Count completed required courses
@@ -597,7 +612,12 @@ class UserService:
         return self.user_repo.get_user_count_by_store()
 
     def check_role_advancement_eligibility(self, user_email: str) -> Dict[str, Any]:
-        """Check if user is eligible for role advancement."""
+        """
+        Check if user is eligible for role advancement.
+        
+        Eligibility is based on completing all courses assigned to the user's current level
+        via access rules (configured in admin panel).
+        """
         user = self.get_user_by_email_optional(user_email)
         
         if not user:
@@ -624,20 +644,31 @@ class UserService:
         
         next_role = ROLE_HIERARCHY[level_index + 1]
         
-        # Get progress data
-        progress = self.get_user_level_progress(user_email)
-        completed = progress.get("nodes_completed_in_level", 0)
-        required = progress.get("nodes_required_in_level", 0)
+        # Get courses assigned to current level via access rules (admin panel config)
+        access_rule = self.access_rule_repo.get_by_level(current_role)
+        required_courses = set(access_rule.accessible_courses) if access_rule else set()
+        
+        # Get user's completed courses from ALL sources
+        user_completed = self.get_user_completed_courses(user_email)
+        
+        # Count completed required courses
+        completed_required = required_courses.intersection(user_completed)
+        incomplete_required = required_courses - user_completed
+        
+        completed = len(completed_required)
+        total = len(required_courses)
         
         requirements_met = []
         requirements_pending = []
         
-        if completed >= required and required > 0:
-            requirements_met.append(f"Completed {completed}/{required} required courses")
-        else:
-            requirements_pending.append(f"Complete {required - completed} more courses")
+        if completed >= total and total > 0:
+            requirements_met.append(f"Completed all {total} required courses")
+        elif incomplete_required:
+            remaining = len(incomplete_required)
+            requirements_pending.append(f"Complete {remaining} more courses")
         
-        eligible = len(requirements_pending) == 0 and required > 0
+        # Eligible if ALL required courses for current level are completed
+        eligible = len(incomplete_required) == 0 and total > 0
         
         return {
             "eligible": eligible,
@@ -645,5 +676,9 @@ class UserService:
             "next_role": next_role,
             "requirements_met": requirements_met,
             "requirements_pending": requirements_pending,
-            "progress_percent": progress.get("progress_percent", 0)
+            "progress_percent": int((completed / total * 100)) if total > 0 else 100,
+            "completed_courses": completed,
+            "total_courses": total,
+            "required_course_ids": list(required_courses),
+            "completed_course_ids": list(completed_required)
         }

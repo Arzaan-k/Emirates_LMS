@@ -269,6 +269,7 @@ export default function Login({ navigation }) {
                     </TouchableOpacity>
 
                     {/* DEMO CREDENTIALS HINT */}
+                    {/* DEMO CREDENTIALS HINT - HIDDEN
                     <View style={styles.hintBox}>
                         <Feather name="info" size={14} color="#6B7280" />
                         <Text style={styles.hintText}>
@@ -277,6 +278,7 @@ export default function Login({ navigation }) {
                             user / user@123 (Employee)
                         </Text>
                     </View>
+                    */}
                 </BlurView>
             </KeyboardAvoidingView>
         </View>

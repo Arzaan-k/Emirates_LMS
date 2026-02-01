@@ -34,6 +34,12 @@ def get_engine_args():
     if "sslmode" not in settings.DATABASE_URL:
         connect_args["sslmode"] = "require"
 
+    # Add connection timeout for Neon PostgreSQL (serverless)
+    # This prevents hanging connections on cold starts
+    connect_args["connect_timeout"] = 10  # 10 seconds connection timeout
+    # NOTE: Do NOT set connect_args["options"] here - it conflicts with Neon's endpoint ID
+    # Statement timeout is set via event handler instead (see set_statement_timeout below)
+
     if settings.USE_SERVERLESS:
         # Serverless: No connection pooling (each request gets a new connection)
         return {
@@ -42,14 +48,14 @@ def get_engine_args():
             "echo": settings.DEBUG,
         }
     else:
-        # Production: Connection pooling
+        # Production: Connection pooling optimized for Neon PostgreSQL
         return {
             "poolclass": QueuePool,
             "pool_size": settings.DB_POOL_SIZE,
             "max_overflow": settings.DB_MAX_OVERFLOW,
             "pool_timeout": settings.DB_POOL_TIMEOUT,
             "pool_pre_ping": True,  # Verify connections before use
-            "pool_recycle": 1800,   # Recycle connections after 30 minutes
+            "pool_recycle": 300,    # Recycle connections after 5 minutes (Neon closes idle connections)
             "connect_args": connect_args,
             "echo": settings.DEBUG,
         }
@@ -76,23 +82,16 @@ SessionLocal = sessionmaker(
 # ===========================================
 
 @event.listens_for(engine, "connect")
-def set_search_path(dbapi_connection, connection_record):
-    """Set search path on new connections."""
+def set_connection_options(dbapi_connection, connection_record):
+    """Set search path and statement timeout on new connections."""
     cursor = dbapi_connection.cursor()
     cursor.execute("SET search_path TO public")
+    cursor.execute("SET statement_timeout = '30s'")  # 30 second query timeout
     cursor.close()
 
 
-@event.listens_for(engine, "checkout")
-def ping_connection(dbapi_connection, connection_record, connection_proxy):
-    """Ping connection on checkout to ensure it's still valid."""
-    try:
-        cursor = dbapi_connection.cursor()
-        cursor.execute("SELECT 1")
-        cursor.close()
-    except Exception:
-        # Connection is invalid, let SQLAlchemy create a new one
-        raise Exception("Connection is invalid")
+# NOTE: Removed manual ping_connection handler as pool_pre_ping=True handles this
+# The manual handler was causing additional latency on every request
 
 
 # ===========================================
