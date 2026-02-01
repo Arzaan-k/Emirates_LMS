@@ -72,7 +72,7 @@ async def create_quiz_alias(
 
 # NOTE: /live routes must be defined BEFORE /{quiz_id} to avoid route conflicts
 @router.get("/live")
-async def get_live_quizzes_main(db: Session = Depends(get_db)):
+def get_live_quizzes_main(db: Session = Depends(get_db)):
     """
     Get all live topic quizzes.
     """

@@ -8,18 +8,21 @@ import json
 import re
 import os
 import subprocess
+import requests
 from typing import Any, Dict, List, Optional
 
 from groq import Groq
-try:
-    from openai import OpenAI
-except ImportError:
-    OpenAI = None
 
 from app.config.settings import settings
 from app.core.exceptions import ExternalServiceError
 
 logger = logging.getLogger(__name__)
+
+# HuggingFace Free Inference API Configuration
+# Using BAAI/bge-small-en-v1.5 - lightweight, fast, free, high quality
+# This model works correctly with HuggingFace's feature-extraction API
+HUGGINGFACE_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
+HUGGINGFACE_API_URL = f"https://router.huggingface.co/hf-inference/models/{HUGGINGFACE_EMBEDDING_MODEL}"
 
 
 class AIService:
@@ -29,10 +32,9 @@ class AIService:
         self.client = Groq(api_key=settings.GROQ_API_KEY)
         self.model = settings.GROQ_MODEL
         self.whisper_model = settings.GROQ_WHISPER_MODEL
-        
-        self.openai_client = None
-        if settings.OPENAI_API_KEY and OpenAI:
-            self.openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
+
+        # HuggingFace API token for free embeddings (no billing required)
+        self.hf_token = getattr(settings, 'HUGGINGFACE_API_KEY', None) or os.environ.get('HUGGINGFACE_API_KEY', None)
 
     # ===========================================
     # TRANSCRIPTION
@@ -111,21 +113,81 @@ class AIService:
             )
 
     # ===========================================
-    # EMBEDDINGS
+    # EMBEDDINGS (Using HuggingFace Free Inference API)
     # ===========================================
 
     def generate_embedding(self, text: str) -> List[float]:
-        """Generate embedding using OpenAI."""
-        if not self.openai_client:
-            logger.warning("OpenAI client not initialized (missing API key). Skipping embedding.")
+        """
+        Generate embedding using HuggingFace's free Inference API.
+        Uses sentence-transformers/all-MiniLM-L6-v2 model:
+        - FREE with HuggingFace token (no billing required)
+        - Lightweight (22M parameters)
+        - Fast cloud inference
+        - 384-dimensional embeddings
+        - Good quality for semantic search
+        """
+        if not text or not text.strip():
+            logger.warning("Empty text provided for embedding. Skipping.")
+            return []
+
+        if not self.hf_token:
+            logger.warning("HuggingFace API token not configured. Skipping embedding generation.")
+            logger.info("Set HUGGINGFACE_API_KEY in environment to enable embeddings.")
             return []
 
         try:
-            response = self.openai_client.embeddings.create(
-                input=text[:8191],  # Limit for text-embedding-3-small
-                model="text-embedding-3-small"
+            # Prepare headers with authentication
+            headers = {
+                "Authorization": f"Bearer {self.hf_token}",
+                "Content-Type": "application/json"
+            }
+
+            # Truncate text to avoid issues (MiniLM handles up to 256 tokens well)
+            # Approximate: 1 token ≈ 4 characters, so ~1000 chars is safe
+            truncated_text = text[:2000].strip()
+
+            # Make request to HuggingFace Inference API
+            response = requests.post(
+                HUGGINGFACE_API_URL,
+                headers=headers,
+                json={"inputs": truncated_text, "options": {"wait_for_model": True}},
+                timeout=30
             )
-            return response.data[0].embedding
+
+            if response.status_code == 200:
+                embedding = response.json()
+                # The API returns a list of embeddings (one per input)
+                # For sentence-transformers, we get a single embedding vector
+                if isinstance(embedding, list) and len(embedding) > 0:
+                    # Handle nested list structure from HuggingFace
+                    if isinstance(embedding[0], list):
+                        # Mean pooling across tokens for token-level embeddings
+                        import numpy as np
+                        embedding_array = np.array(embedding)
+                        pooled = np.mean(embedding_array, axis=0).tolist()
+                        logger.debug(f"Generated embedding with {len(pooled)} dimensions (pooled)")
+                        return pooled
+                    else:
+                        logger.debug(f"Generated embedding with {len(embedding)} dimensions")
+                        return embedding
+                else:
+                    logger.warning(f"Unexpected embedding format: {type(embedding)}")
+                    return []
+
+            elif response.status_code == 503:
+                # Model is loading, wait and retry
+                logger.info("HuggingFace model loading, retrying in 5 seconds...")
+                import time
+                time.sleep(5)
+                return self.generate_embedding(text)  # Retry once
+
+            else:
+                logger.error(f"HuggingFace API error: {response.status_code} - {response.text[:200]}")
+                return []
+
+        except requests.exceptions.Timeout:
+            logger.error("HuggingFace API timeout")
+            return []
         except Exception as e:
             logger.error(f"Embedding generation error: {e}")
             return []

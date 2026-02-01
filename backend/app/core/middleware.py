@@ -75,8 +75,22 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         )
 
         # Process request
+        response = None
         try:
             response = await call_next(request)
+        except RuntimeError as e:
+            # Handle "No response returned" specifically
+            if "No response returned" in str(e):
+                process_time = time.time() - start_time
+                logger.warning(
+                    f"[{request_id}] {request.method} {request.url.path} "
+                    f"- No response returned, returning 500 ({process_time:.3f}s)"
+                )
+                return JSONResponse(
+                    status_code=500,
+                    content={"detail": "Request processing failed", "request_id": request_id}
+                )
+            raise
         except Exception as e:
             # Log unhandled exceptions
             process_time = time.time() - start_time
@@ -84,7 +98,22 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                 f"[{request_id}] {request.method} {request.url.path} "
                 f"- ERROR: {str(e)} ({process_time:.3f}s)"
             )
-            raise
+            return JSONResponse(
+                status_code=500,
+                content={"detail": "Internal server error", "request_id": request_id}
+            )
+
+        # Safety check for None response
+        if response is None:
+            process_time = time.time() - start_time
+            logger.warning(
+                f"[{request_id}] {request.method} {request.url.path} "
+                f"- Response was None, returning 500 ({process_time:.3f}s)"
+            )
+            return JSONResponse(
+                status_code=500,
+                content={"detail": "No response generated", "request_id": request_id}
+            )
 
         # Calculate processing time
         process_time = time.time() - start_time

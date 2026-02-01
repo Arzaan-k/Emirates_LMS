@@ -93,6 +93,7 @@ class Content(Base):
 class CourseBucket(Base):
     """
     Course categories/buckets for organizing content.
+    Also serves as skill categories for AI recommendations.
     """
     __tablename__ = "course_buckets"
 
@@ -101,6 +102,7 @@ class CourseBucket(Base):
     description = Column(Text)
     color = Column(String(50))
     icon = Column(String(100))
+    keywords = Column(JSON, default=list)  # Keywords for matching courses to this category
     order_index = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -122,6 +124,7 @@ class CourseBucket(Base):
             "description": self.description,
             "color": self.color,
             "icon": self.icon,
+            "keywords": self.keywords or [],
             "order_index": self.order_index,
             "is_active": self.is_active,
             "created_at": self.created_at.isoformat() if self.created_at else None,

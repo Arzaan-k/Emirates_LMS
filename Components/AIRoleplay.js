@@ -147,6 +147,14 @@ export default function AIRoleplay({ onClose, scenario }) {
         }
     };
 
+    // Helper to map scenario ID to backend context
+    const getContext = () => {
+        if (!scenario) return 'cold_waffle';
+        if (scenario.id === 'confused') return 'payment_trouble';
+        if (scenario.id === 'happy') return 'positive_feedback';
+        return 'cold_waffle'; // Default/Angry
+    };
+
     const handleSendWithAudio = async (uri) => {
         setIsProcessing(true);
         // Optimistic UI for voice
@@ -162,7 +170,7 @@ export default function AIRoleplay({ onClose, scenario }) {
                 name: 'upload.m4a'
             });
             formData.append('history', JSON.stringify(chat));
-            if (scenario) formData.append('scenario', scenario.id); // Future use
+            formData.append('context', getContext()); // Pass Context
 
             const response = await fetch(`${API_URL}/api/v1/roleplay/voice`, {
                 method: 'POST',
@@ -236,7 +244,8 @@ export default function AIRoleplay({ onClose, scenario }) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     user_text: newMsg.text,
-                    history: chat
+                    history: chat,
+                    context: getContext() // Pass Context
                 })
             });
 

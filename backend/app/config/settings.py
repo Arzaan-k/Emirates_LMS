@@ -85,7 +85,14 @@ class Settings(BaseSettings):
     ELEVENLABS_VOICE_ID: str = Field(default="3AMU7jXQuQa3oRvRqUmb", env="ELEVENLABS_VOICE_ID")
 
     # ===========================================
-    # OPENAI (Optional - for RAG embeddings)
+    # HUGGINGFACE (Free embeddings - no billing required)
+    # ===========================================
+    # Optional: Adding a token helps with rate limits but is NOT required
+    # Get free token at: https://huggingface.co/settings/tokens
+    HUGGINGFACE_API_KEY: Optional[str] = Field(default=None, env="HUGGINGFACE_API_KEY")
+
+    # ===========================================
+    # OPENAI (DEPRECATED - replaced with HuggingFace free embeddings)
     # ===========================================
     OPENAI_API_KEY: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
 

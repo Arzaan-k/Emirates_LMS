@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python -c:*)"
+      "Bash(python -c:*)",
+      "Bash(python test_embeddings.py:*)",
+      "Bash(alembic upgrade:*)",
+      "Bash(alembic heads:*)"
     ]
   }
 }

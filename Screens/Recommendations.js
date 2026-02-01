@@ -26,6 +26,7 @@ import Animated, {
     withTiming
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import API_URL from "../config";
 
 const { width, height } = Dimensions.get("window");
@@ -68,7 +69,7 @@ const SkillGapCard = ({ skill, index, onPress }) => {
                     end={{ x: 1, y: 1 }}
                 >
                     <View style={[styles.skillIconContainer, { backgroundColor: colors[0] + "30" }]}>
-                        <MaterialCommunityIcons name={skill.icon} size={24} color={colors[0]} />
+                        <MaterialCommunityIcons name={skill.icon || "school"} size={24} color={colors[0]} />
                     </View>
                     <View style={styles.skillInfo}>
                         <Text style={styles.skillName}>{skill.skill_name}</Text>
@@ -317,14 +318,49 @@ export default function Recommendations({ navigation }) {
     const [focusAreas, setFocusAreas] = useState([]);
     const [activeTab, setActiveTab] = useState("recommendations"); // recommendations, skills
     const [error, setError] = useState(null);
+    const [userEmail, setUserEmail] = useState(null);
 
-    // User email - In production, get from auth context
-    const userEmail = "user"; // Replace with actual user email from context
+    // Get user email from AsyncStorage on mount
+    useEffect(() => {
+        const getUserEmail = async () => {
+            try {
+                // Try to get stored user profile
+                const storedProfile = await AsyncStorage.getItem('userProfile');
+                if (storedProfile) {
+                    const profile = JSON.parse(storedProfile);
+                    if (profile.email) {
+                        console.log('[Recommendations] Got user email from profile:', profile.email);
+                        setUserEmail(profile.email);
+                        return;
+                    }
+                }
+
+                // Fallback: Try userEmail key directly
+                const storedEmail = await AsyncStorage.getItem('userEmail');
+                if (storedEmail) {
+                    console.log('[Recommendations] Got user email from userEmail key:', storedEmail);
+                    setUserEmail(storedEmail);
+                    return;
+                }
+
+                // Last resort: use default
+                console.log('[Recommendations] No user email found, using default');
+                setUserEmail('user');
+            } catch (e) {
+                console.error('[Recommendations] Error getting user email:', e);
+                setUserEmail('user');
+            }
+        };
+        getUserEmail();
+    }, []);
 
     const fetchRecommendations = async () => {
+        if (!userEmail) return;
+
         try {
             setError(null);
-            const response = await fetch(`${API_URL}/api/v1/analytics/recommendations/${userEmail}?limit=5`);
+            console.log(`[Recommendations] Fetching for user: ${userEmail}`);
+            const response = await fetch(`${API_URL}/api/v1/analytics/recommendations/${encodeURIComponent(userEmail)}?limit=5`);
             const data = await response.json();
 
             if (data.status === "success") {
@@ -343,8 +379,10 @@ export default function Recommendations({ navigation }) {
     };
 
     const fetchProfile = async () => {
+        if (!userEmail) return;
+
         try {
-            const response = await fetch(`${API_URL}/api/v1/analytics/profile/${userEmail}`);
+            const response = await fetch(`${API_URL}/api/v1/analytics/profile/${encodeURIComponent(userEmail)}`);
             const data = await response.json();
 
             if (data.status === "success") {
@@ -357,6 +395,8 @@ export default function Recommendations({ navigation }) {
     };
 
     const loadData = async () => {
+        if (!userEmail) return;
+
         setLoading(true);
         await Promise.all([fetchRecommendations(), fetchProfile()]);
         setLoading(false);
@@ -366,11 +406,14 @@ export default function Recommendations({ navigation }) {
         setRefreshing(true);
         await loadData();
         setRefreshing(false);
-    }, []);
+    }, [userEmail]);
 
+    // Load data when userEmail becomes available
     useEffect(() => {
-        loadData();
-    }, []);
+        if (userEmail) {
+            loadData();
+        }
+    }, [userEmail]);
 
     const handleStartCourse = async (course) => {
         // Track interaction

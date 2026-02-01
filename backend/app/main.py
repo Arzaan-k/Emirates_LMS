@@ -10,7 +10,8 @@ import logging
 from datetime import datetime
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect, Depends
+from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
@@ -138,14 +139,13 @@ async def root():
 
 
 @app.get("/health")
-async def health_check():
+async def health_check(db: Session = Depends(get_db)):
     """
     Health check endpoint for monitoring and load balancers.
     Checks database connectivity and AI services.
     """
     db_status = "unknown"
     try:
-        db = next(get_db())
         from sqlalchemy import text
         db.execute(text("SELECT 1"))
         db_status = "connected"
@@ -171,8 +171,6 @@ async def health_check():
 # INCLUDE API ROUTER
 # ==========================================
 
-# Include all API v1 endpoints - this is the ONLY API router
-# Include all API v1 endpoints - this is the ONLY API router
 # Include all API v1 endpoints - this is the ONLY API router
 app.include_router(api_router, prefix="/api/v1")
 

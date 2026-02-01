@@ -29,7 +29,7 @@ router = APIRouter(prefix="/notifications", tags=["Notifications"])
 # ==========================================
 
 @router.get("")
-async def get_notifications(
+def get_notifications(
     user_id: Optional[str] = "user",
     db: Session = Depends(get_db)
 ):
@@ -56,7 +56,7 @@ async def get_notifications(
 
 
 @router.get("/crucial")
-async def get_crucial_notifications(
+def get_crucial_notifications(
     user_id: str = "user",
     db: Session = Depends(get_db)
 ):

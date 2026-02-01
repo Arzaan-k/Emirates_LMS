@@ -25,6 +25,7 @@ from app.repositories.user_repository import (
 )
 from app.models.content import Content, CourseBucket, Resource
 from app.services.cache_service import cache, invalidate_content_cache
+from app.repositories.analytics_repository import invalidate_skill_categories_cache
 
 logger = logging.getLogger(__name__)
 
@@ -380,6 +381,10 @@ class ContentService:
 
         bucket = self.bucket_repo.create(bucket_data)
         logger.info(f"Created bucket: {bucket.id}")
+        
+        # Invalidate skill categories cache since buckets are used as skill categories
+        invalidate_skill_categories_cache()
+        
         return bucket
 
     def get_bucket_by_id(self, bucket_id: str) -> CourseBucket:
@@ -412,6 +417,9 @@ class ContentService:
         
         self.db.commit()
         self.db.refresh(bucket)
+        
+        # Invalidate skill categories cache since buckets are used as skill categories
+        invalidate_skill_categories_cache()
 
         return bucket
 
@@ -459,6 +467,9 @@ class ContentService:
         # Now delete the bucket
         self.db.delete(bucket)
         self.db.commit()
+        
+        # Invalidate skill categories cache since buckets are used as skill categories
+        invalidate_skill_categories_cache()
 
         logger.info(f"Deleted bucket '{bucket_name}' and reassigned {len(content_by_name) + len(content_by_id)} content items to Uncategorized")
         return True

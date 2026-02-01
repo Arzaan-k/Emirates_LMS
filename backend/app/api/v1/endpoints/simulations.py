@@ -3,6 +3,7 @@ Simulations Endpoints
 Interactive simulations, branching scenarios - Database backed
 """
 
+import os
 import uuid
 import json
 import logging
@@ -428,11 +429,18 @@ async def save_simulation(
     # Convert Pydantic model to dict
     sim_data = data.dict(exclude_unset=True)
     
-    # Map frontend fields to DB columns
+    # Map frontend fields (camelCase) to DB columns (snake_case)
     if "thumbnailUrl" in sim_data:
         sim_data["thumbnail"] = sim_data.pop("thumbnailUrl")
     if "estimatedTime" in sim_data:
         sim_data["duration"] = sim_data.pop("estimatedTime")
+    if "maxScore" in sim_data:
+        sim_data["max_score"] = sim_data.pop("maxScore")
+    
+    # Remove fields that are not in the database model or are auto-generated
+    fields_to_remove = ["createdAt", "updatedAt"]
+    for field in fields_to_remove:
+        sim_data.pop(field, None)
     
     # Ensure nodes is a list of dicts
     # Pydantic .dict() handles recursive conversion, so sim_data['nodes'] is list of dicts.

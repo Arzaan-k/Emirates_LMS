@@ -87,7 +87,7 @@ async def get_all_content_api(
 
 # NOTE: /path-nodes must be defined BEFORE /{item_id} to avoid route conflicts
 @router.get("/path-nodes")
-async def get_path_nodes_api(
+def get_path_nodes_api(
     user_email: str = "user",
     db: Session = Depends(get_db)
 ):

@@ -189,6 +189,15 @@ class AssessmentService:
         breach_log: List[Dict] = None
     ) -> AssessmentSubmission:
         """Submit an assessment and calculate score."""
+        # Validate user exists (FK constraint on assessment_submissions.user_email)
+        user = self.user_repo.get_by_email(user_email)
+        if not user:
+            raise BusinessLogicError(
+                detail="User not found. Please login again or ensure the user exists before submitting.",
+                error_code="USER_NOT_FOUND",
+                data={"user_email": user_email},
+            )
+
         assessment = self.get_assessment_by_id(assessment_id)
 
         # Check if assessment is active

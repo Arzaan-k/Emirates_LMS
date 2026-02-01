@@ -45,7 +45,7 @@ api_router.include_router(roleplay.router)
 
 # Health check endpoint at root level
 @api_router.get("/health")
-async def health_check():
+async def health_check(db: Session = Depends(__import__("app.config.database", fromlist=["get_db"]).get_db)):
     """
     Health check endpoint for monitoring and load balancers.
     """
@@ -55,9 +55,7 @@ async def health_check():
     # Check database connectivity
     db_status = "unknown"
     try:
-        from app.config.database import get_db
         from sqlalchemy import text
-        db = next(get_db())
         db.execute(text("SELECT 1"))
         db_status = "connected"
     except Exception as e:
@@ -151,15 +149,14 @@ async def get_rag_status():
 @api_router.get("/audit-logs")
 async def get_audit_logs(
     action_type: str = None,
+    db: Session = Depends(__import__("app.config.database", fromlist=["get_db"]).get_db),
 ):
     """
     Get audit logs, optionally filtered by action type.
     """
-    from app.config.database import get_db
     from app.repositories.analytics_repository import AnalyticsRepository
 
     try:
-        db = next(get_db())
         repo = AnalyticsRepository(db)
         logs = repo.get_audit_logs(action_type)
 
@@ -175,16 +172,17 @@ async def get_audit_logs(
 
 # Backward compatibility alias for old frontend endpoint
 @api_router.get("/scheduled-exams/user/{user_email}")
-async def get_user_scheduled_exams_alias(user_email: str):
+async def get_user_scheduled_exams_alias(
+    user_email: str,
+    db: Session = Depends(__import__("app.config.database", fromlist=["get_db"]).get_db),
+):
     """
     DEPRECATED: Backward compatibility alias for /assessments/scheduled/user/{email}
     Frontend should be updated to use the new endpoint.
     """
-    from app.config.database import get_db
     from app.services.assessment_service import AssessmentService
 
     try:
-        db = next(get_db())
         service = AssessmentService(db)
         exams = service.get_scheduled_exams_for_user(user_email)
 
@@ -217,19 +215,20 @@ async def get_support_categories_alias():
 
 
 @support_router.get("/support/my-tickets/{user_email}")
-async def get_my_support_tickets_alias(user_email: str):
+async def get_my_support_tickets_alias(
+    user_email: str,
+    db: Session = Depends(__import__("app.config.database", fromlist=["get_db"]).get_db),
+):
     """
     BACKWARD COMPATIBILITY: Alias for /notifications/support/user/{email}
     Frontend calls /support/my-tickets/{email} directly.
     """
-    from app.config.database import get_db
     from app.repositories.crm_repository import CRMTicketRepository
     import logging
 
     logger = logging.getLogger(__name__)
 
     try:
-        db = next(get_db())
         repo = CRMTicketRepository(db)
 
         # Get all tickets and filter by customer email (and type='Support' if needed, or query parameter)
@@ -272,7 +271,7 @@ async def create_support_ticket_alias(
     message: str = Form(...),
     category: str = Form("help"),
     priority: str = Form("medium"),
-    db: Session = Depends(lambda: next(__import__("app.config.database", fromlist=["get_db"]).get_db()))
+    db: Session = Depends(__import__("app.config.database", fromlist=["get_db"]).get_db),
 ):
     """
     BACKWARD COMPATIBILITY: Alias for /notifications/support create logic
@@ -338,42 +337,15 @@ async def create_support_ticket_alias(
 @support_router.get("/audit-logs")
 async def get_audit_logs_root_alias(
     action_type: str = None,
+    db: Session = Depends(__import__("app.config.database", fromlist=["get_db"]).get_db),
 ):
     """
     BACKWARD COMPATIBILITY: Alias for /api/v1/audit-logs
     Frontend calls /audit-logs directly.
     """
-    from app.config.database import get_db
     from app.repositories.analytics_repository import AnalyticsRepository
 
     try:
-        db = next(get_db())
-        repo = AnalyticsRepository(db)
-        logs = repo.get_audit_logs(action_type)
-
-        result = []
-        for log in logs:
-            log_dict = log.to_dict() if hasattr(log, 'to_dict') else dict(log)
-            result.append(log_dict)
-
-        return result
-    except Exception as e:
-        return []
-
-
-@support_router.get("/audit-logs")
-async def get_audit_logs_root_alias(
-    action_type: str = None,
-):
-    """
-    BACKWARD COMPATIBILITY: Alias for /api/v1/audit-logs
-    Frontend calls /audit-logs directly.
-    """
-    from app.config.database import get_db
-    from app.repositories.analytics_repository import AnalyticsRepository
-
-    try:
-        db = next(get_db())
         repo = AnalyticsRepository(db)
         logs = repo.get_audit_logs(action_type)
 
@@ -388,19 +360,19 @@ async def get_audit_logs_root_alias(
 
 
 @support_router.get("/support/all-tickets")
-async def get_all_support_tickets_alias():
+async def get_all_support_tickets_alias(
+    db: Session = Depends(__import__("app.config.database", fromlist=["get_db"]).get_db),
+):
     """
     BACKWARD COMPATIBILITY: Alias for /notifications/support/all
     Frontend may call /support/all-tickets directly.
     """
-    from app.config.database import get_db
     from app.repositories.crm_repository import CRMTicketRepository
     import logging
 
     logger = logging.getLogger(__name__)
 
     try:
-        db = next(get_db())
         repo = CRMTicketRepository(db)
 
         all_tickets = repo.get_all()
@@ -431,3 +403,125 @@ async def get_all_support_tickets_alias():
 
 # Include the support router in the main API router (so /api/v1/support/... works)
 api_router.include_router(support_router)
+
+
+# ==========================================
+# LEARNING PATH BACKWARD COMPATIBILITY ALIASES
+# ==========================================
+
+learning_path_router = APIRouter()
+
+
+@learning_path_router.get("/learning-path/node-progress/user/{content_id}")
+async def get_node_progress_alias(
+    content_id: str,
+    user_email: str = "user",
+    db: Session = Depends(__import__("app.config.database", fromlist=["get_db"]).get_db),
+):
+    """
+    BACKWARD COMPATIBILITY: Get progress for a specific content node.
+    Frontend calls /learning-path/node-progress/user/{content_id} directly.
+    """
+    from app.services.user_service import UserService
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        service = UserService(db)
+        progress = service.get_user_node_progress(user_email, content_id)
+
+        if progress:
+            return {
+                "node_id": progress.node_id,
+                "progress_percent": progress.progress_percent or 0,
+                "completed": progress.completed or False,
+                "last_position": progress.last_position or 0,
+                "time_spent_seconds": progress.time_spent_seconds or 0,
+            }
+        else:
+            return {
+                "node_id": content_id,
+                "progress_percent": 0,
+                "completed": False,
+                "last_position": 0,
+                "time_spent_seconds": 0,
+            }
+    except Exception as e:
+        logger.error(f"Node progress fetch failed: {e}")
+        return {
+            "node_id": content_id,
+            "progress_percent": 0,
+            "completed": False,
+            "last_position": 0,
+            "time_spent_seconds": 0,
+        }
+
+
+@learning_path_router.get("/learning-path/mid-video-quizzes/{content_id}")
+async def get_mid_video_quizzes_alias(
+    content_id: str,
+    user_email: str = "user",
+    db: Session = Depends(__import__("app.config.database", fromlist=["get_db"]).get_db),
+):
+    """
+    BACKWARD COMPATIBILITY: Get mid-video quiz checkpoints for a content item.
+    Frontend calls /learning-path/mid-video-quizzes/{content_id} directly.
+    """
+    from app.services.content_service import ContentService
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        service = ContentService(db)
+        content = service.get_content_by_id(content_id)
+
+        if content and content.quiz:
+            # Return quiz checkpoints if they exist
+            return {"quizzes": content.quiz if isinstance(content.quiz, list) else []}
+        else:
+            return {"quizzes": []}
+    except Exception as e:
+        logger.error(f"Mid-video quizzes fetch failed: {e}")
+        return {"quizzes": []}
+
+
+@learning_path_router.post("/learning-path/track-video-progress")
+async def track_video_progress_alias(
+    user_email: str = Form(...),
+    node_id: str = Form(...),
+    progress_percent: float = Form(0),
+    last_position: float = Form(0),
+    time_spent_seconds: int = Form(0),
+    completed: bool = Form(False),
+    db: Session = Depends(__import__("app.config.database", fromlist=["get_db"]).get_db),
+):
+    """
+    BACKWARD COMPATIBILITY: Track video watching progress.
+    Frontend calls POST /learning-path/track-video-progress directly.
+    """
+    from app.services.user_service import UserService
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        service = UserService(db)
+
+        progress_data = {
+            "progress_percent": progress_percent,
+            "last_position": last_position,
+            "time_spent_seconds": time_spent_seconds,
+            "completed": completed,
+        }
+
+        service.update_node_progress(user_email, node_id, progress_data)
+        return {"status": "success", "message": "Progress tracked"}
+    except Exception as e:
+        logger.error(f"Video progress tracking failed: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+# Include the learning path router in the main API router
+api_router.include_router(learning_path_router)

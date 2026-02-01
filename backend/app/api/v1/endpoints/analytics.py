@@ -266,14 +266,27 @@ async def get_learning_profile(
     
     try:
         profile = repo.get_user_learning_profile(user_email)
-        return profile
+        skill_gaps_data = repo.get_skill_gaps(user_email)
+        return {
+            "status": "success",
+            "profile": profile,
+            "skill_gaps": skill_gaps_data.get("skill_gaps", []),
+            "weak_areas": skill_gaps_data.get("weak_areas", []),
+            "strong_areas": skill_gaps_data.get("strong_areas", [])
+        }
     except Exception as e:
         logger.error(f"Learning profile fetch failed: {e}")
         return {
-            "user_email": user_email,
-            "skill_scores": {},
-            "total_xp": 0,
-            "courses_completed": 0,
+            "status": "error",
+            "profile": {
+                "user_email": user_email,
+                "skill_scores": {},
+                "total_xp": 0,
+                "courses_completed": 0,
+            },
+            "skill_gaps": [],
+            "weak_areas": [],
+            "strong_areas": []
         }
 
 

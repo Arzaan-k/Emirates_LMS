@@ -27,7 +27,7 @@ router = APIRouter(prefix="/meetings", tags=["Meetings"])
 # ==========================================
 
 @router.get("")
-async def get_meetings(db: Session = Depends(get_db)):
+def get_meetings(db: Session = Depends(get_db)):
     """
     Get all upcoming and ongoing meetings.
     """
@@ -46,7 +46,7 @@ async def get_meetings(db: Session = Depends(get_db)):
 
 
 @router.get("/{meeting_id}")
-async def get_meeting(meeting_id: str, db: Session = Depends(get_db)):
+def get_meeting(meeting_id: str, db: Session = Depends(get_db)):
     """
     Get a specific meeting by ID.
     """

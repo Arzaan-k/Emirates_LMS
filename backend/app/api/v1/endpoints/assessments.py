@@ -27,7 +27,7 @@ router = APIRouter(prefix="/assessments", tags=["Assessments"])
 # ==========================================
 
 @router.get("/proctored")
-async def get_proctored_assessments(db: Session = Depends(get_db)):
+def get_proctored_assessments(db: Session = Depends(get_db)):
     """
     Get all active proctored assessments.
     """
@@ -43,7 +43,7 @@ async def get_proctored_assessments(db: Session = Depends(get_db)):
 
 
 @router.get("/proctored/all")
-async def get_all_proctored_assessments(db: Session = Depends(get_db)):
+def get_all_proctored_assessments(db: Session = Depends(get_db)):
     """
     Get all proctored assessments (admin).
     """
@@ -59,7 +59,7 @@ async def get_all_proctored_assessments(db: Session = Depends(get_db)):
 
 
 @router.get("/proctored/{assessment_id}")
-async def get_proctored_assessment(
+def get_proctored_assessment(
     assessment_id: str,
     db: Session = Depends(get_db)
 ):
@@ -383,9 +383,30 @@ async def submit_assessment(
     }
     
     try:
-        result = service.submit_assessment(assessment_id, submission_data)
+        result = service.submit_assessment(
+            assessment_id=assessment_id,
+            user_email=user_email,
+            user_name=user_name,
+            answers=answers_list,
+            time_taken_seconds=time_taken_seconds,
+            breach_log=breach_log_list
+        )
         logger.info(f"Assessment submitted: {user_email} - {assessment_id}")
-        return result
+        
+        # Return formatted response
+        return {
+            "submission_id": result.id,
+            "assessment_id": result.assessment_id,
+            "user_email": result.user_email,
+            "correct_count": result.correct_count,
+            "total_questions": result.total_questions,
+            "score_percent": result.score_percent,
+            "passed": result.passed,
+            "integrity_status": result.integrity_status,
+            "violations": result.violations,
+            "critical_breaches": result.critical_breaches,
+            "warning_breaches": result.warning_breaches,
+        }
     except Exception as e:
         logger.error(f"Assessment submission failed: {e}")
         raise
