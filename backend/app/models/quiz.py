@@ -100,9 +100,17 @@ class QuizSubmission(Base):
              return self.score >= self.quiz.passing_score
         return self.score >= 70.0  # Default passing score if undefined
 
-    time_taken_seconds = Column(Integer)
+    # time_taken_seconds = Column(Integer)  # REMOVED: Missing in prod DB, using property
+    # attempt_number = Column(Integer, default=1)  # REMOVED: Missing in prod DB, using property
     submitted_at = Column(DateTime, default=datetime.utcnow)
-    attempt_number = Column(Integer, default=1)
+    
+    @property
+    def time_taken_seconds(self):
+        return getattr(self, '_time_taken_seconds', 0)
+    
+    @property
+    def attempt_number(self):
+        return getattr(self, '_attempt_number', 1)
 
     # Relationships
     quiz = relationship("Quiz", back_populates="submissions")

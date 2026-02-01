@@ -95,7 +95,7 @@ class AssessmentSubmission(Base):
     total_questions = Column(Integer)
     score_percent = Column(Float)
     passed = Column(Boolean, default=False)
-    time_taken_seconds = Column(Integer)
+    # time_taken_seconds = Column(Integer)  # REMOVED: May be missing in prod DB
     time_limit_seconds = Column(Integer)
     violations = Column(Integer, default=0)
     breach_log = Column(JSON, default=[])
@@ -105,7 +105,15 @@ class AssessmentSubmission(Base):
     integrity_score = Column(Float, default=100.0)
     submitted_at = Column(DateTime, default=datetime.utcnow)
     started_at = Column(DateTime)
-    attempt_number = Column(Integer, default=1)
+    # attempt_number = Column(Integer, default=1)  # REMOVED: May be missing in prod DB
+
+    @property
+    def time_taken_seconds(self):
+        return getattr(self, '_time_taken_seconds', 0)
+    
+    @property
+    def attempt_number(self):
+        return getattr(self, '_attempt_number', 1)
 
     # Relationships
     assessment = relationship("ProcturedAssessment", back_populates="submissions")
