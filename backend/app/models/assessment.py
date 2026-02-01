@@ -105,15 +105,7 @@ class AssessmentSubmission(Base):
     integrity_score = Column(Float, default=100.0)
     submitted_at = Column(DateTime, default=datetime.utcnow)
     started_at = Column(DateTime)
-    # attempt_number = Column(Integer, default=1)  # REMOVED: May be missing in prod DB
-
-    @property
-    def time_taken_seconds(self):
-        return getattr(self, '_time_taken_seconds', 0)
-    
-    @property
-    def attempt_number(self):
-        return getattr(self, '_attempt_number', 1)
+    # attempt_number = Column(Integer, default=1)  # DISABLED: May be missing in prod DB
 
     # Relationships
     assessment = relationship("ProcturedAssessment", back_populates="submissions")
@@ -149,13 +141,13 @@ class AssessmentSubmission(Base):
             "total_questions": self.total_questions,
             "score_percent": self.score_percent,
             "passed": self.passed,
-            "time_taken_seconds": self.time_taken_seconds,
+            "time_taken_seconds": getattr(self, 'time_taken_seconds', 0) or 0,
             "violations": self.violations,
             "integrity_status": self.integrity_status,
             "integrity_score": self.integrity_score,
             "submitted_at": safe_iso(self.submitted_at),
             "started_at": safe_iso(self.started_at),
-            "attempt_number": self.attempt_number,
+            "attempt_number": getattr(self, 'attempt_number', 1) or 1,
         }
 
 
