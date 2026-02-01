@@ -12,9 +12,12 @@ import {
   Platform,
   ImageBackground,
   Modal,
+  ActivityIndicator,
 } from "react-native";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Video, ResizeMode } from 'expo-av';
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import { useFocusEffect } from "@react-navigation/native";
 import { BlurView } from "expo-blur";
 import { Feather, Octicons, Ionicons, MaterialIcons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -37,12 +40,14 @@ import Resources from "./Resources";
 import Profile from "./Profile";
 
 // Import AI Components
-import SimulationHub from "../Components/SimulationHub";
+import SimulationHub from "../Components/SimulationHub"; // RESTORED: Customer Simulation (AI Roleplay)
+import InteractiveSimulationHub from "../Components/InteractiveSimulationHub"; // NEW: Interactive Video Simulations
 import AIScanner from "../Components/AIScanner";
 import AIFlashcards from "../Components/AIFlashcards";
 import AIChatBot from "../Components/AIChatBot";
 import AIDigitalTwin from "../Components/AIDigitalTwin";
 import QuizTakingModal from "../Components/QuizTakingModal";
+import UpcomingExamsCard from "../Components/UpcomingExamsCard"; // [NEW] Scheduled Exams
 import { useNavigation } from "@react-navigation/native";
 import { useLanguage } from "../context/language.context";
 import API_URL from "../config";
@@ -183,6 +188,24 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
   const [score, setScore] = useState(0);
   const [showResult, setShowResult] = useState(false);
 
+  // Translation State
+  const [translationLang, setTranslationLang] = useState('English');
+  const [translatedText, setTranslatedText] = useState('');
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [showLangPicker, setShowLangPicker] = useState(false);
+  const [searchLang, setSearchLang] = useState('');
+
+  const LANGUAGES = [
+    "English",
+    // Indian Languages
+    "Hindi", "Bengali", "Telugu", "Marathi", "Tamil", "Urdu", "Gujarati",
+    "Kannada", "Malayalam", "Odia", "Punjabi", "Assamese", "Maithili",
+    "Santali", "Kashmiri", "Nepali", "Konkani", "Sindhi", "Dogri",
+    "Manipuri", "Bodo", "Sanskrit",
+    // International Languages
+    "Spanish", "French", "German", "Chinese", "Japanese", "Arabic", "Portuguese", "Russian"
+  ];
+
   if (!visible || !videoData) return null;
 
   const handleAnswer = (optionIndex) => {
@@ -198,6 +221,39 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
     }
   };
 
+  const handleTranslate = async (targetLang) => {
+    setTranslationLang(targetLang);
+    setShowLangPicker(false);
+
+    if (targetLang === 'English') {
+      setTranslatedText(''); // Reset to original
+      return;
+    }
+
+    setIsTranslating(true);
+    try {
+      const response = await fetch(`${API_URL}/api/v1/ai/translate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: videoData.transcript || "No transcript available.",
+          target_language: targetLang
+        })
+      });
+      const data = await response.json();
+      if (data.translated_text) {
+        setTranslatedText(data.translated_text);
+      }
+    } catch (error) {
+      console.error("Translation error:", error);
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
+  const filteredLanguages = LANGUAGES.filter(l => l.toLowerCase().includes(searchLang.toLowerCase()));
+  const displayTranscript = translatedText || videoData.transcript || "No transcript available for this video.";
+
   const hasQuiz = videoData.quiz && videoData.quiz.length > 0;
 
   return (
@@ -209,14 +265,21 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
         </TouchableOpacity>
 
         {/* VIDEO PLAYER */}
-        <Video
-          source={{ uri: videoData.videoUrl }}
-          style={{ width: '100%', height: 250, marginTop: 40 }}
-          useNativeControls
-          resizeMode={ResizeMode.CONTAIN}
-          shouldPlay
-          onError={(e) => console.log("Video Error:", e)}
-        />
+        {videoData.videoUrl?.includes('youtube.com') || videoData.videoUrl?.includes('youtu.be') ? (
+          <YouTubePlayer
+            url={videoData.videoUrl}
+            style={{ marginTop: 40 }}
+          />
+        ) : (
+          <Video
+            source={{ uri: videoData.videoUrl }}
+            style={{ width: '100%', height: 250, marginTop: 40 }}
+            useNativeControls
+            resizeMode={ResizeMode.CONTAIN}
+            shouldPlay
+            onError={(e) => console.log("Video Error:", e)}
+          />
+        )}
 
         {/* INTERACTIVE SECTION */}
         <View style={styles.interactiveContainer}>
@@ -240,11 +303,33 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
           </View>
 
           {/* CONTENT */}
-          <ScrollView style={styles.contentArea}>
+          <ScrollView style={styles.contentArea} contentContainerStyle={{ paddingBottom: 40 }}>
             {activeTab === 'transcript' ? (
-              <Text style={styles.transcriptText}>
-                {videoData.transcript || "No transcript available for this video."}
-              </Text>
+              <View>
+                {/* Language Selector Bar */}
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <Text style={{ color: '#9CA3AF', fontSize: 13, fontFamily: 'Poppins_500Medium' }}>Language</Text>
+                  <TouchableOpacity
+                    style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#334155', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 }}
+                    onPress={() => { setSearchLang(''); setShowLangPicker(true); }}
+                  >
+                    <MaterialCommunityIcons name="translate" size={16} color="#A5B4FC" style={{ marginRight: 6 }} />
+                    <Text style={{ color: '#E5E7EB', fontSize: 13, fontFamily: 'Poppins_500Medium' }}>{translationLang}</Text>
+                    <Feather name="chevron-down" size={14} color="#9CA3AF" style={{ marginLeft: 4 }} />
+                  </TouchableOpacity>
+                </View>
+
+                {isTranslating ? (
+                  <View style={{ padding: 40, alignItems: 'center' }}>
+                    <ActivityIndicator size="small" color="#F59E0B" />
+                    <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 10, fontFamily: 'Poppins_400Regular' }}>Translating transcript...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.transcriptText}>
+                    {displayTranscript}
+                  </Text>
+                )}
+              </View>
             ) : (
               <View style={styles.quizContainer}>
                 {!showResult ? (
@@ -286,6 +371,57 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
           </ScrollView>
         </View>
       </View>
+      {/* LANGUAGE PICKER MODAL */}
+      <Modal visible={showLangPicker} transparent animationType="fade">
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 20 }}>
+          <View style={{ backgroundColor: '#1F2937', borderRadius: 20, maxHeight: '70%', overflow: 'hidden' }}>
+            <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: '#374151', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={{ color: '#FFF', fontSize: 16, fontFamily: 'Poppins_600SemiBold' }}>Select Language</Text>
+              <TouchableOpacity onPress={() => setShowLangPicker(false)}>
+                <Feather name="x" size={20} color="#9CA3AF" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ padding: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#374151', borderRadius: 10, paddingHorizontal: 10 }}>
+                <Feather name="search" size={16} color="#9CA3AF" />
+                <TextInput
+                  style={{ flex: 1, padding: 10, color: '#FFF', fontFamily: 'Poppins_400Regular' }}
+                  placeholder="Search language..."
+                  placeholderTextColor="#6B7280"
+                  value={searchLang}
+                  onChangeText={setSearchLang}
+                />
+              </View>
+            </View>
+
+            <ScrollView contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 12 }}>
+              {filteredLanguages.map(lang => (
+                <TouchableOpacity
+                  key={lang}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    padding: 12,
+                    backgroundColor: translationLang === lang ? '#374151' : 'transparent',
+                    borderRadius: 10,
+                    marginBottom: 4
+                  }}
+                  onPress={() => handleTranslate(lang)}
+                >
+                  <Text style={{ color: translationLang === lang ? '#F59E0B' : '#E5E7EB', flex: 1, fontFamily: translationLang === lang ? 'Poppins_600SemiBold' : 'Poppins_400Regular' }}>
+                    {lang}
+                  </Text>
+                  {translationLang === lang && <Feather name="check" size={16} color="#F59E0B" />}
+                </TouchableOpacity>
+              ))}
+              {filteredLanguages.length === 0 && (
+                <Text style={{ color: '#6B7280', textAlign: 'center', padding: 20 }}>No languages found</Text>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 }
@@ -403,6 +539,139 @@ function ProctoredFeedSection({ data, onStart }) {
   );
 }
 
+// --- NEW: MEETINGS FEED SECTION ---
+function MeetingsFeedSection({ data, onJoin }) {
+  const { t } = useLanguage();
+  if (!data || data.length === 0) return null;
+
+  const formatTime = (isoString) => {
+    try {
+      const date = new Date(isoString);
+      return date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return '';
+    }
+  };
+
+  return (
+    <View style={styles.sectionContainer}>
+      <View style={[styles.sectionHeader, { paddingHorizontal: 20 }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#6366F1', marginRight: 8 }} />
+          <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Upcoming Meetings</Text>
+        </View>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20, paddingBottom: 10 }}>
+        {data.map((item, index) => (
+          <Animated.View key={index} entering={FadeInRight.duration(500)} style={styles.meetingFeedCard}>
+            <TouchableOpacity
+              style={styles.meetingFeedCardInner}
+              onPress={() => onJoin(item)}
+            >
+              <View style={styles.meetingFeedIcon}>
+                <MaterialCommunityIcons name="video" size={24} color="#FFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.meetingFeedTitle} numberOfLines={1}>{item.title}</Text>
+                <Text style={styles.meetingFeedMeta}>{formatTime(item.scheduled_at)} • {item.duration_minutes}min</Text>
+              </View>
+              <View style={styles.meetingFeedBadge}>
+                <Text style={styles.meetingFeedBadgeText}>Join</Text>
+              </View>
+            </TouchableOpacity>
+          </Animated.View>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+// --- NEW: CRM TASKS FEED SECTION ---
+const PRIORITY_COLORS = {
+  low: '#10B981',
+  medium: '#F59E0B',
+  high: '#EF4444',
+  critical: '#7C3AED'
+};
+
+const TYPE_ICONS = {
+  Query: 'help-circle',
+  Request: 'git-pull-request',
+  Complaint: 'alert-triangle'
+};
+
+function CRMTasksFeedSection({ data, onOpenTask }) {
+  if (!data || data.length === 0) return null;
+
+  // Filter to show only pending tasks
+  const pendingTasks = data.filter(t => t.status !== 'completed');
+  if (pendingTasks.length === 0) return null;
+
+  return (
+    <View style={styles.sectionContainer}>
+      <View style={[styles.sectionHeader, { paddingHorizontal: 20 }]}>
+        <View>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#F59E0B', marginRight: 8 }} />
+            <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>🎯 Live Assessments</Text>
+          </View>
+          <Text style={styles.sectionSubtitle}>Real customer tickets to practice</Text>
+        </View>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20, paddingBottom: 10 }}>
+        {pendingTasks.map((item, index) => {
+          const ticket = item.ticket || {};
+          const priorityColor = PRIORITY_COLORS[ticket.priority] || '#F59E0B';
+          const typeIcon = TYPE_ICONS[ticket.type] || 'file';
+
+          return (
+            <Animated.View key={item.id || index} entering={FadeInRight.delay(index * 100).duration(500)} style={styles.crmTaskCard}>
+              <TouchableOpacity
+                style={styles.crmTaskCardInner}
+                onPress={() => onOpenTask(item)}
+                activeOpacity={0.8}
+              >
+                {/* Priority color bar */}
+                <View style={[styles.crmPriorityBar, { backgroundColor: priorityColor }]} />
+
+                <View style={styles.crmTaskContent}>
+                  {/* Header with type badge and XP */}
+                  <View style={styles.crmTaskHeader}>
+                    <View style={styles.crmTypeBadge}>
+                      <Feather name={typeIcon} size={10} color="#A5B4FC" />
+                      <Text style={styles.crmTypeText}>{ticket.type || 'Task'}</Text>
+                    </View>
+                    <View style={styles.crmXpBadge}>
+                      <Text style={styles.crmXpText}>+50 XP</Text>
+                    </View>
+                  </View>
+
+                  {/* Title */}
+                  <Text style={styles.crmTaskTitle} numberOfLines={2}>{ticket.subject || 'Customer Ticket'}</Text>
+
+                  {/* Customer name */}
+                  <Text style={styles.crmTaskCustomer} numberOfLines={1}>
+                    <Feather name="user" size={10} color="#94A3B8" /> {ticket.customer_name || 'Customer'}
+                  </Text>
+
+                  {/* Footer */}
+                  <View style={styles.crmTaskFooter}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: priorityColor, marginRight: 6 }} />
+                      <Text style={[styles.crmStatusText, { color: priorityColor }]}>{ticket.priority?.toUpperCase() || 'MEDIUM'}</Text>
+                    </View>
+                    <Feather name="arrow-right" size={14} color="#9CA3AF" />
+                  </View>
+                </View>
+              </TouchableOpacity>
+            </Animated.View>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
 // ... (NotificationToast Unchanged)
 
 // --- NEW: PREMIUM CRUCIAL NOTIFICATION COMPONENT ---
@@ -411,8 +680,12 @@ function CrucialNotificationModal({ notification, onAcknowledge }) {
   const [isChecked, setIsChecked] = useState(false);
   const [scrollProgress, setScrollProgress] = useState(0);
   const insets = useSafeAreaInsets();
+  const { width } = Dimensions.get('window');
 
   if (!notification) return null;
+
+  // DEBUG: Log the notification object to see if mediaUrl is present
+  console.log('[CrucialNotification] Notification object:', JSON.stringify(notification, null, 2));
 
   const handlePressOutside = () => {
     setShake(prev => prev + 1);
@@ -462,7 +735,7 @@ function CrucialNotificationModal({ notification, onAcknowledge }) {
               {/* Alert Icon with Glow */}
               <View style={crucialStyles.iconGlow}>
                 <View style={crucialStyles.iconBg}>
-                  <MaterialCommunityIcons name="alert-decagram" size={44} color="#EF4444" />
+                  <MaterialCommunityIcons name="alert-decagram" size={28} color="#EF4444" />
                 </View>
               </View>
 
@@ -472,7 +745,31 @@ function CrucialNotificationModal({ notification, onAcknowledge }) {
                 <Text style={crucialStyles.priorityText}>CRITICAL UPDATE</Text>
               </View>
 
-              {/* Content */}
+              {/* Content - Media Display (Image/Video) */}
+              {notification.mediaUrl && (
+                <View style={{ marginBottom: 12, borderRadius: 12, overflow: 'hidden', width: '100%' }}>
+                  {notification.mediaUrl.toLowerCase().includes('.mp4') ||
+                    notification.mediaUrl.toLowerCase().includes('.mov') ||
+                    notification.mediaUrl.toLowerCase().includes('.webm') ? (
+                    <Video
+                      source={{ uri: notification.mediaUrl }}
+                      style={{ width: '100%', height: 220, borderRadius: 12 }}
+                      resizeMode={ResizeMode.COVER}
+                      useNativeControls
+                      shouldPlay={false}
+                    />
+                  ) : (
+                    <Image
+                      source={{ uri: notification.mediaUrl }}
+                      style={{ width: '100%', height: 220, borderRadius: 12 }}
+                      resizeMode="cover"
+                      onError={(e) => console.log('[CrucialNotification] Image load error:', e.nativeEvent.error)}
+                      onLoad={() => console.log('[CrucialNotification] Image loaded successfully:', notification.mediaUrl)}
+                    />
+                  )}
+                </View>
+              )}
+
               <Text style={crucialStyles.title}>{notification.title}</Text>
 
               <ScrollView
@@ -567,44 +864,45 @@ const crucialStyles = StyleSheet.create({
   },
   ghostWaffle: {
     position: 'absolute',
-    fontSize: 48,
-    opacity: 0.08,
+    fontSize: 40,
+    opacity: 0.05,
   },
   clickLayer: {
     flex: 1,
     width: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
+    paddingHorizontal: 12,
+    paddingVertical: 24,
   },
   card: {
     width: '100%',
-    maxWidth: 380,
-    borderRadius: 32,
+    maxHeight: '95%',
+    borderRadius: 20,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(239, 68, 68, 0.3)',
     shadowColor: '#EF4444',
-    shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.4,
-    shadowRadius: 32,
-    elevation: 24,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.35,
+    shadowRadius: 20,
+    elevation: 18,
   },
   cardBlur: {
-    padding: 28,
+    padding: 16,
     alignItems: 'center',
-    backgroundColor: 'rgba(30, 27, 75, 0.8)',
+    backgroundColor: 'rgba(30, 27, 75, 0.92)',
   },
   iconGlow: {
-    padding: 8,
+    padding: 4,
     borderRadius: 999,
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    marginBottom: 16,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    marginBottom: 8,
   },
   iconBg: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: 'rgba(239, 68, 68, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
@@ -615,51 +913,51 @@ const crucialStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    marginBottom: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 14,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: 'rgba(239, 68, 68, 0.3)',
   },
   priorityDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: '#EF4444',
-    marginRight: 8,
+    marginRight: 6,
   },
   priorityText: {
     color: '#EF4444',
-    fontSize: 11,
+    fontSize: 10,
     fontFamily: 'Poppins_700Bold',
-    letterSpacing: 2,
+    letterSpacing: 1.5,
   },
   title: {
     color: '#FFF',
-    fontSize: 22,
+    fontSize: 18,
     fontFamily: 'Poppins_700Bold',
     textAlign: 'center',
-    marginBottom: 12,
-    lineHeight: 30,
+    marginBottom: 8,
+    lineHeight: 24,
   },
   scrollArea: {
-    maxHeight: 180,
+    maxHeight: 100,
     width: '100%',
-    marginBottom: 16,
+    marginBottom: 8,
   },
   message: {
     color: '#CBD5E1',
-    fontSize: 15,
+    fontSize: 14,
     fontFamily: 'Poppins_400Regular',
     textAlign: 'center',
-    lineHeight: 24,
+    lineHeight: 22,
   },
   dividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     width: '100%',
-    marginVertical: 20,
+    marginVertical: 10,
   },
   dividerLine: {
     flex: 1,
@@ -667,18 +965,18 @@ const crucialStyles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
   },
   dividerEmoji: {
-    fontSize: 20,
-    marginHorizontal: 12,
-    opacity: 0.6,
+    fontSize: 16,
+    marginHorizontal: 10,
+    opacity: 0.5,
   },
   checkboxRow: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderRadius: 16,
-    marginBottom: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginBottom: 12,
     width: '100%',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
@@ -687,9 +985,9 @@ const crucialStyles = StyleSheet.create({
     opacity: 0.5,
   },
   checkbox: {
-    width: 26,
-    height: 26,
-    borderRadius: 8,
+    width: 24,
+    height: 24,
+    borderRadius: 6,
     borderWidth: 2,
     borderColor: 'rgba(255, 255, 255, 0.3)',
     marginRight: 12,
@@ -703,18 +1001,18 @@ const crucialStyles = StyleSheet.create({
   checkboxText: {
     flex: 1,
     color: '#E5E7EB',
-    fontSize: 14,
+    fontSize: 13,
     fontFamily: 'Poppins_500Medium',
   },
   ackBtn: {
     width: '100%',
-    borderRadius: 18,
+    borderRadius: 14,
     overflow: 'hidden',
     shadowColor: '#EF4444',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 6,
   },
   ackBtnDisabled: {
     shadowOpacity: 0,
@@ -724,24 +1022,24 @@ const crucialStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 18,
-    paddingHorizontal: 24,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
   },
   ackBtnText: {
     color: '#FFF',
-    fontSize: 16,
+    fontSize: 15,
     fontFamily: 'Poppins_600SemiBold',
   },
   warnText: {
     color: '#F87171',
-    fontSize: 13,
+    fontSize: 11,
     fontFamily: 'Poppins_500Medium',
-    marginTop: 16,
+    marginTop: 10,
     textAlign: 'center',
   },
 });
 
-function HomeContent({ onOpenTool, onOpenTwin }) {
+function HomeContent({ onOpenTool, onOpenTwin, userEmail }) {
   const navigation = useNavigation();
   const { t } = useLanguage();
   const [liveUpdates, setLiveUpdates] = useState([]);
@@ -771,12 +1069,29 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   const [newsData, setNewsData] = useState([]);
   const [liveQuizzesData, setLiveQuizzesData] = useState([]);
 
+  // [NEW] MEETINGS STATE
+  const [upcomingMeetings, setUpcomingMeetings] = useState([]);
+  const [crmTasks, setCrmTasks] = useState([]);
+
+  // [RESTORED] Exam refresh key
+  const [examRefreshKey, setExamRefreshKey] = useState(0);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      setExamRefreshKey(prev => prev + 1);
+    }, [])
+  );
+
   const handleAcknowledge = async (id) => {
     try {
       // Add to local tracking FIRST to prevent re-display
       acknowledgedNotifIds.current.add(id);
-      await fetch(`${API_URL}/notifications/${id}/read`, { method: 'POST' });
+
+      // PERSIST to AsyncStorage
+      await AsyncStorage.setItem('acknowledged_notifications', JSON.stringify(Array.from(acknowledgedNotifIds.current)));
+
       setCrucialNotif(null);
+      await fetch(`${API_URL}/api/v1/notifications/${id}/read`, { method: 'POST' });
     } catch (e) {
       console.error("Ack Error", e);
       setCrucialNotif(null);
@@ -791,9 +1106,9 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   // FETCH PATH NODES
   const fetchPathNodes = async () => {
     try {
-      const response = await fetch(`${API_URL}/path/nodes`);
+      const response = await fetch(`${API_URL}/api/v1/content/path-nodes`);
       const data = await response.json();
-      setPathNodes(data);
+      setPathNodes(data.courses || (Array.isArray(data) ? data : []));
     } catch (error) {
       console.error("Error fetching path:", error);
     }
@@ -802,7 +1117,7 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   // FETCH NEWS FEED
   const fetchNews = async () => {
     try {
-      const response = await fetch(`${API_URL}/news`);
+      const response = await fetch(`${API_URL}/api/v1/notifications/news`);
       const data = await response.json();
       if (Array.isArray(data)) {
         setNewsData(data);
@@ -815,7 +1130,7 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   // FETCH LIVE QUIZZES
   const fetchLiveQuizzes = async () => {
     try {
-      const response = await fetch(`${API_URL}/live-quizzes`);
+      const response = await fetch(`${API_URL}/api/v1/quizzes/live`);
       const data = await response.json();
       if (Array.isArray(data)) {
         setLiveQuizzesData(data);
@@ -828,7 +1143,7 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   const startQuiz = async (quizData) => {
     if (!quizData.questions) {
       try {
-        const response = await fetch(`${API_URL}/quiz/${quizData.quiz_id || quizData.id}`);
+        const response = await fetch(`${API_URL}/api/v1/quizzes/${quizData.quiz_id || quizData.id}`);
         const fullQuiz = await response.json();
         if (fullQuiz.error) throw new Error(fullQuiz.error);
         setActiveQuiz(fullQuiz);
@@ -844,12 +1159,20 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   };
 
   // FETCH NOTIFICATIONS
+  // FETCH NOTIFICATIONS
   const fetchNotifications = async () => {
+    if (!userEmail) return;
     try {
-      const res = await fetch(`${API_URL}/notifications`);
+      const res = await fetch(`${API_URL}/api/v1/notifications`);
       const data = await res.json();
       if (Array.isArray(data)) {
-        setAllNotifications(data);
+        // Filter notifications relevant to this user
+        const filtered = data.filter(n => {
+          if (!n.target_users || n.target_users.length === 0) return true; // Global? Or maybe restrict? Assuming global if empty.
+          // Better to assume if target_users exists, check it.
+          return n.target_users.includes(userEmail);
+        });
+        setAllNotifications(filtered);
       }
     } catch (e) {
       console.log("Error fetching notifications", e);
@@ -859,7 +1182,7 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   // FETCH PROCTORED ASSESSMENTS
   const fetchProctoredAssessments = async () => {
     try {
-      const response = await fetch(`${API_URL}/proctored-assessments`);
+      const response = await fetch(`${API_URL}/api/v1/assessments/proctored`);
       const data = await response.json();
       if (Array.isArray(data)) {
         setAssignedProctoring(data);
@@ -872,10 +1195,24 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
   // FETCH CRUCIAL NOTIFICATIONS - Runs on load to block app if needed
   const fetchCrucialNotifications = async () => {
     try {
-      const res = await fetch(`${API_URL}/notifications/crucial`);
+      // LOAD ACKNOWLEDGED IDs FROM STORAGE FIRST
+      try {
+        const storedAck = await AsyncStorage.getItem('acknowledged_notifications');
+        if (storedAck) {
+          const ids = JSON.parse(storedAck);
+          ids.forEach(id => acknowledgedNotifIds.current.add(id));
+        }
+      } catch (err) { console.log("Error loading acks", err); }
+
+      const res = await fetch(`${API_URL}/api/v1/notifications/crucial`);
       const data = await res.json();
+
+      // DEBUG: Log the response from the API
+      console.log('[CrucialNotification] API Response:', JSON.stringify(data, null, 2));
+
       // If there's an unread crucial notification AND not already acknowledged locally
       if (data && data.id && !data.read && !acknowledgedNotifIds.current.has(data.id)) {
+        console.log('[CrucialNotification] Setting notification with mediaUrl:', data.mediaUrl);
         setCrucialNotif(data);
       }
     } catch (e) {
@@ -883,15 +1220,51 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
     }
   };
 
+  // [NEW] FETCH MEETINGS
+  const fetchMeetings = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/v1/meetings`);
+      const data = await response.json();
+      if (Array.isArray(data)) {
+        // Filter only scheduled/ongoing meetings
+        const active = data.filter(m => m.status !== 'ended');
+        setUpcomingMeetings(active);
+      }
+    } catch (error) {
+      console.error("Error fetching meetings:", error);
+    }
+  };
+
+  const fetchCrmTasks = async () => {
+    try {
+      // Use actual user email from props
+      if (!userEmail) return; // Skip if userEmail not loaded yet
+      const response = await fetch(`${API_URL}/api/v1/crm/my-tasks?user_email=${encodeURIComponent(userEmail)}`);
+      const data = await response.json();
+      if (Array.isArray(data)) {
+        setCrmTasks(data);
+      }
+    } catch (error) {
+      console.error("Error fetching CRM tasks:", error);
+    }
+  };
+
   useEffect(() => {
     // CRITICAL: Fetch crucial notifications FIRST to block app if needed
     fetchCrucialNotifications();
     fetchPathNodes();
-    fetchNotifications();
     fetchNews();
     fetchLiveQuizzes();
     fetchProctoredAssessments();
+    fetchMeetings();
+    fetchCrmTasks();
   }, []);
+
+  useEffect(() => {
+    if (userEmail) {
+      fetchNotifications();
+    }
+  }, [userEmail]);
 
   useEffect(() => {
     // CONNECT TO WEBSOCKET
@@ -908,8 +1281,13 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
         if (message.type === "NEW_CONTENT") {
           setLiveUpdates(prev => [message.data, ...prev]);
         } else if (message.type === "NOTIFICATION") {
-          setNotification(message.data);
-          setAllNotifications(prev => [message.data, ...prev]);
+          const notif = message.data;
+          // [NEW] Filter by target_users
+          if (notif.target_users && notif.target_users.length > 0 && userEmail && !notif.target_users.includes(userEmail)) {
+            return;
+          }
+          setNotification(notif);
+          setAllNotifications(prev => [notif, ...prev]);
           setTimeout(() => setNotification(null), 5000);
         } else if (message.type === "QUIZ_ASSIGNED") {
           setAssignedQuizzes(prev => [message.data, ...prev]);
@@ -930,6 +1308,12 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
           }
         } else if (message.type === "proctored") {
           setAssignedProctoring(prev => [message.data, ...prev]);
+        } else if (message.type === "MEETING_SCHEDULED") {
+          // [NEW] Handle new meeting notification
+          setUpcomingMeetings(prev => [message.data, ...prev]);
+        } else if (message.type === "MEETING_ENDED") {
+          // Remove ended meeting from list
+          setUpcomingMeetings(prev => prev.filter(m => m.id !== message.data.meeting_id));
           const notif = {
             title: "Locked Assessment!",
             message: message.data.title,
@@ -946,6 +1330,34 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
         } else if (message.type === "QUIZ_POSTED") {
           // Real-time quiz update
           setLiveQuizzesData(prev => [message.data, ...prev]);
+        }
+        else if (message.type === "CRM_TASK_ASSIGNED") {
+          // [NEW] Handle CRM task assignment
+          const taskData = message.data;
+          setCrmTasks(prev => [{ ...taskData.assignment, ticket: taskData.ticket }, ...prev]);
+          const notif = {
+            title: "🎯 Live Assessment Assigned!",
+            message: taskData.ticket?.subject || 'New CRM task',
+            type: "crm_task",
+            data: taskData,
+            created_at: new Date().toISOString()
+          };
+          setNotification(notif);
+          setAllNotifications(prev => [notif, ...prev]);
+          setTimeout(() => setNotification(null), 5000);
+        }
+        else if (message.type === "EXAM_SCHEDULED" || message.type === "EXAM_START_ENABLED") {
+          // Show notification if present and applicable
+          if (message.notification) {
+            const notif = message.notification;
+            if (!notif.target_users || (userEmail && notif.target_users.includes(userEmail))) {
+              setNotification(notif);
+              setAllNotifications(prev => [notif, ...prev]);
+              setTimeout(() => setNotification(null), 5000);
+            }
+          }
+          // Refresh exams list
+          setExamRefreshKey(prev => prev + 1);
         }
       } catch (err) {
         console.log("WS Error", err);
@@ -979,6 +1391,17 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
         <Header onNotificationPress={() => setShowNotifications(true)} />
         <SearchBar />
 
+        {/* [NEW] SCHEDULED EXAMS - High Priority */}
+        <UpcomingExamsCard
+          refreshKey={examRefreshKey}
+          userEmail={userEmail}
+          onStartExam={(examData) => navigation.navigate('ProctoredAssessment', {
+            assessmentData: examData,
+            userProfile: { role: 'User', email: userEmail },
+            isScheduledExam: true
+          })}
+        />
+
         <LiveFeedSection
           data={liveUpdates}
           onPlay={(item) => setSelectedVideo(item)}
@@ -997,12 +1420,35 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
           onStart={(quiz) => startQuiz(quiz)}
         />
 
+
+
+        {/* [NEW] MEETINGS FEED */}
+        <MeetingsFeedSection
+          data={upcomingMeetings}
+          onJoin={(meeting) => navigation.navigate('MeetingRoom', {
+            meeting,
+            userEmail: userEmail,
+            userName: 'User'
+          })}
+        />
+
+        {/* [NEW] CRM TASKS FEED - Live Assessments */}
+        {/* <CRMTasksFeedSection
+          data={crmTasks}
+          onOpenTask={(task) => navigation.navigate('CRMTask', {
+            task,
+            userEmail: userEmail
+          })}
+        /> */}
+
         <DigitalTwinCard onOpen={onOpenTwin} />
 
         <DailyFocus
           item={pathNodes.length > 0 ? pathNodes[0] : null}
           onPress={() => setGoalModalVisible(true)}
         />
+
+        <AIRecommendationsCard navigation={navigation} />
 
         <AIToolsSection onOpenTool={onOpenTool} />
 
@@ -1124,6 +1570,7 @@ function HomeContent({ onOpenTool, onOpenTwin }) {
         notification={selectedNotification}
         onClose={() => setSelectedNotification(null)}
       />
+
     </View>
   )
 }
@@ -1171,6 +1618,7 @@ const RECENT_COURSES = [
 
 const AI_TOOLS = [
   { id: 'roleplay', title: 'Customer Sim', desc: 'Practice Empathy', icon: 'chat-processing-outline', color: ['#8B5CF6', '#7C3AED'], accent: '#FFF' },
+  { id: 'videosim', title: 'Video Training', desc: 'Interactive Sims', icon: 'movie-filter', color: ['#EC4899', '#BE185D'], accent: '#FFF' },
   { id: 'scanner', title: 'Hygiene Scan', desc: 'AR Inspection', icon: 'camera-iris', color: ['#10B981', '#059669'], accent: '#FFF' },
   { id: 'flashcards', title: 'Wiki Cards', desc: 'Rapid Recall', icon: 'cards-playing-outline', color: ['#F59E0B', '#D97706'], accent: '#FFF' },
 ];
@@ -1227,28 +1675,29 @@ function SearchBar() {
   );
 }
 
-// ------ NEW: DIGITAL TWIN HERO CARD ------
+// ------ INTERACTIVE SIMULATION HERO CARD ------
+// NOTE: This replaces the old Digital Twin card with Interactive Video Simulations
 function DigitalTwinCard({ onOpen }) {
   const { t } = useLanguage();
   return (
     <Animated.View entering={FadeInDown.delay(200).duration(800)} style={styles.twinContainer}>
       <TouchableOpacity style={styles.twinCard} activeOpacity={0.9} onPress={onOpen}>
         <ImageBackground
-          source={{ uri: "https://images.unsplash.com/photo-1556910103-1c02745a30bf?q=80&w=2000&auto=format&fit=crop" }}
+          source={{ uri: "https://images.unsplash.com/photo-1562376552-0d160a2f238d?q=80&w=2000&auto=format&fit=crop" }}
           style={styles.twinBg}
           imageStyle={{ borderRadius: 24, opacity: 0.6 }}
         >
           <LinearGradient colors={["transparent", "rgba(0,0,0,0.9)"]} style={styles.twinGradient}>
             <View style={styles.twinBadge}>
-              <MaterialCommunityIcons name="virtual-reality" size={14} color="#FFF" style={{ marginRight: 4 }} />
-              <Text style={styles.twinBadgeText}>{t('digitalTwin')}</Text>
+              <MaterialCommunityIcons name="movie-filter" size={14} color="#FFF" style={{ marginRight: 4 }} />
+              <Text style={styles.twinBadgeText}>INTERACTIVE</Text>
             </View>
-            <Text style={styles.twinTitle}>{t('storeSimulation')}</Text>
-            <Text style={styles.twinDesc}>Practice Waffle Making & Hygiene in a 2D Virtual Store.</Text>
+            <Text style={styles.twinTitle}>First-Person Simulations</Text>
+            <Text style={styles.twinDesc}>Experience real scenarios through immersive video training. Make choices, learn from consequences.</Text>
 
             <View style={styles.twinBtn}>
-              <Text style={styles.twinBtnText}>{t('enterSimulation')}</Text>
-              <Feather name="arrow-right" size={16} color="#000" />
+              <Text style={styles.twinBtnText}>Start Training</Text>
+              <Feather name="play" size={16} color="#000" />
             </View>
           </LinearGradient>
         </ImageBackground>
@@ -1379,6 +1828,62 @@ function DailyFocus({ item, onPress }) {
       </TouchableOpacity>
     </Animated.View>
   )
+}
+
+// --- AI RECOMMENDATIONS CARD ---
+function AIRecommendationsCard({ navigation }) {
+  const { t } = useLanguage();
+
+  return (
+    <Animated.View entering={FadeInDown.delay(350).duration(600)} style={styles.recsContainer}>
+      <TouchableOpacity
+        onPress={() => navigation.navigate('Recommendations')}
+        activeOpacity={0.9}
+      >
+        <LinearGradient
+          colors={["#312E81", "#1E1B4B", "#0F172A"]}
+          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+          style={styles.recsCard}
+        >
+          {/* Decorative Icons */}
+          <View style={styles.recsDecorContainer} pointerEvents="none">
+            <MaterialCommunityIcons name="brain" size={80} color="rgba(99, 102, 241, 0.1)" style={{ position: 'absolute', top: -10, right: -10, transform: [{ rotate: '15deg' }] }} />
+            <MaterialCommunityIcons name="lightbulb-on" size={50} color="rgba(245, 158, 11, 0.1)" style={{ position: 'absolute', bottom: 10, left: 10, transform: [{ rotate: '-10deg' }] }} />
+          </View>
+
+          <View style={styles.recsContent}>
+            <View style={styles.recsLeft}>
+              <View style={styles.recsBadge}>
+                <MaterialCommunityIcons name="robot" size={12} color="#FFF" />
+                <Text style={styles.recsBadgeText}>AI POWERED</Text>
+              </View>
+              <Text style={styles.recsTitle}>Smart Recommendations</Text>
+              <Text style={styles.recsDesc}>Personalized courses based on your skill gaps and learning history</Text>
+            </View>
+
+            <View style={styles.recsRight}>
+              <View style={styles.recsIconBg}>
+                <MaterialCommunityIcons name="lightbulb-on-outline" size={28} color="#F59E0B" />
+              </View>
+              <View style={styles.recsArrow}>
+                <Feather name="chevron-right" size={20} color="rgba(255,255,255,0.7)" />
+              </View>
+            </View>
+          </View>
+
+          {/* Mini Skill Indicators */}
+          <View style={styles.recsSkillRow}>
+            <View style={[styles.recsSkillDot, { backgroundColor: '#EF4444' }]} />
+            <Text style={styles.recsSkillText}>Identify gaps</Text>
+            <View style={[styles.recsSkillDot, { backgroundColor: '#F59E0B' }]} />
+            <Text style={styles.recsSkillText}>Get suggestions</Text>
+            <View style={[styles.recsSkillDot, { backgroundColor: '#10B981' }]} />
+            <Text style={styles.recsSkillText}>Improve skills</Text>
+          </View>
+        </LinearGradient>
+      </TouchableOpacity>
+    </Animated.View>
+  );
 }
 
 function AIToolsSection({ onOpenTool }) {
@@ -1655,9 +2160,61 @@ function NotificationToast({ message, type, visible, navigation, targetScreen, o
 
 // MAIN LAYOUT
 export default function Home() {
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const [activeTool, setActiveTool] = useState(null);
   const [showTwin, setShowTwin] = useState(false); // New Twin State
+
+  // User email and profile for user-specific features
+  const [userEmail, setUserEmail] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
+
+  // Get user profile from navigation params OR fallback to fetching from context
+  useEffect(() => {
+    const getUserEmail = async () => {
+      try {
+        // Try multiple sources for user email
+        // 1. Try route params (from Login navigation)
+        const parentRoute = navigation.getParent()?.getState()?.routes?.[0]?.params?.userProfile;
+        if (parentRoute?.email) {
+          console.log('[Home] Got email from parent route:', parentRoute.email);
+          setUserEmail(parentRoute.email);
+          setUserProfile(parentRoute);
+          return;
+        }
+
+        // 2. Try AsyncStorage
+        const stored = await AsyncStorage.getItem('userProfile');
+        if (stored) {
+          const profile = JSON.parse(stored);
+          console.log('[Home] User profile from AsyncStorage:', profile.email);
+          setUserEmail(profile.email);
+          setUserProfile(profile);
+          return;
+        }
+
+        // 3. Fallback: Fetch current user from login API session or use default
+        const loginEmail = await AsyncStorage.getItem('userEmail');
+        if (loginEmail) {
+          console.log('[Home] User email from userEmail key:', loginEmail);
+          setUserEmail(loginEmail);
+          setUserProfile({ email: loginEmail, name: 'User' });
+          return;
+        }
+
+        // 4. Last resort: default user for testing
+        console.log('[Home] No user email found in any source, using default');
+        setUserEmail('user'); // Default test user
+        setUserProfile({ email: 'user', name: 'Test User' });
+
+      } catch (e) {
+        console.error('Error getting user email:', e);
+        setUserEmail('user'); // Fallback to default
+        setUserProfile({ email: 'user', name: 'Test User' });
+      }
+    };
+    getUserEmail();
+  }, [navigation]);
 
   return (
     <View style={{ flex: 1 }}>
@@ -1685,6 +2242,7 @@ export default function Home() {
       {activeTool && !showTwin && (
         <View style={{ flex: 1, zIndex: 9999, backgroundColor: '#FFF' }}>
           {activeTool === 'roleplay' && <SimulationHub onClose={() => setActiveTool(null)} />}
+          {activeTool === 'videosim' && <InteractiveSimulationHub onClose={() => setActiveTool(null)} userProfile={userProfile} />}
           {activeTool === 'scanner' && <AIScanner onClose={() => setActiveTool(null)} />}
           {activeTool === 'flashcards' && <AIFlashcards onClose={() => setActiveTool(null)} />}
         </View>
@@ -1730,10 +2288,10 @@ export default function Home() {
             ),
           })}
         >
-          <Tab.Screen name="HomeTab" children={() => <HomeContent onOpenTool={setActiveTool} onOpenTwin={() => setShowTwin(true)} />} />
-          <Tab.Screen name="CoursesTab" component={Courses} />
+          <Tab.Screen name="HomeTab" children={() => <HomeContent onOpenTool={setActiveTool} onOpenTwin={() => setActiveTool('videosim')} userEmail={userEmail} />} />
+          <Tab.Screen name="CoursesTab" children={() => <Courses userEmail={userEmail} />} />
           <Tab.Screen name="ResourcesTab" component={Resources} />
-          <Tab.Screen name="ProfileTab" component={Profile} />
+          <Tab.Screen name="ProfileTab" children={() => <Profile navigation={navigation} route={{ params: { userProfile: userProfile } }} />} />
         </Tab.Navigator>
       )}
 
@@ -1859,6 +2417,15 @@ const styles = StyleSheet.create({
   proctorFeedMeta: { color: "#94A3B8", fontSize: 12, fontFamily: "Poppins_400Regular" },
   proctorFeedBadge: { position: 'absolute', top: 12, right: 12, backgroundColor: '#EF4444', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
   proctorFeedBadgeText: { color: '#FFF', fontSize: 9, fontFamily: "Poppins_700Bold" },
+
+  // [NEW] MEETING FEED STYLES
+  meetingFeedCard: { width: 280, marginRight: 16, marginBottom: 5 },
+  meetingFeedCardInner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#4F46E5', padding: 14, borderRadius: 20, shadowColor: "#4F46E5", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.25, shadowRadius: 10, elevation: 6 },
+  meetingFeedIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.15)', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
+  meetingFeedTitle: { color: "#FFF", fontSize: 14, fontFamily: "Poppins_600SemiBold", marginBottom: 2 },
+  meetingFeedMeta: { color: "rgba(255,255,255,0.8)", fontSize: 12, fontFamily: "Poppins_400Regular" },
+  meetingFeedBadge: { position: 'absolute', top: 12, right: 12, backgroundColor: '#10B981', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
+  meetingFeedBadgeText: { color: '#FFF', fontSize: 10, fontFamily: "Poppins_600SemiBold" },
 
   // NOTIFICATIONS
   overlayContainer: { position: 'absolute', top: 120, left: 0, right: 0, paddingHorizontal: 20, zIndex: 9999 },
@@ -2002,4 +2569,37 @@ const styles = StyleSheet.create({
   topicQuizMetaText: { fontSize: 11, fontFamily: 'Poppins_500Medium', color: '#CBD5E1' },
   startQuizBtnSmall: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F59E0B', paddingVertical: 8, borderRadius: 10, gap: 6 },
   startQuizBtnText: { fontSize: 12, fontFamily: 'Poppins_700Bold', color: '#FFF' },
+
+  // --- AI RECOMMENDATIONS CARD STYLES ---
+  recsContainer: { paddingHorizontal: 20, marginBottom: 20 },
+  recsCard: { borderRadius: 24, padding: 20, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(99, 102, 241, 0.3)', shadowColor: '#6366F1', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.2, shadowRadius: 16, elevation: 8 },
+  recsDecorContainer: { ...StyleSheet.absoluteFillObject },
+  recsContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 },
+  recsLeft: { flex: 1, marginRight: 12 },
+  recsBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(99, 102, 241, 0.3)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, alignSelf: 'flex-start', marginBottom: 10, gap: 4 },
+  recsBadgeText: { fontSize: 10, fontFamily: 'Poppins_700Bold', color: '#A5B4FC', letterSpacing: 0.5 },
+  recsTitle: { fontSize: 18, fontFamily: 'Poppins_700Bold', color: '#FFF', marginBottom: 6, lineHeight: 24 },
+  recsDesc: { fontSize: 13, fontFamily: 'Poppins_400Regular', color: '#94A3B8', lineHeight: 19 },
+  recsRight: { alignItems: 'center' },
+  recsIconBg: { width: 56, height: 56, borderRadius: 18, backgroundColor: 'rgba(245, 158, 11, 0.15)', justifyContent: 'center', alignItems: 'center', marginBottom: 8, borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.3)' },
+  recsArrow: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
+  recsSkillRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)' },
+  recsSkillDot: { width: 8, height: 8, borderRadius: 4 },
+  recsSkillText: { fontSize: 11, fontFamily: 'Poppins_500Medium', color: '#94A3B8', marginRight: 8 },
+  crmTaskCard: { width: 220, marginRight: 12 },
+  crmTaskCardInner: { backgroundColor: '#1E293B', borderRadius: 16, overflow: 'hidden', flexDirection: 'row' },
+  crmPriorityBar: { width: 4 },
+  crmTaskContent: { flex: 1, padding: 14 },
+  crmTaskHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  crmTypeBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(99, 102, 241, 0.3)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, gap: 4 },
+  crmTypeText: { fontSize: 10, fontFamily: 'Poppins_600SemiBold', color: '#A5B4FC' },
+  crmXpBadge: { backgroundColor: 'rgba(16, 185, 129, 0.2)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  crmXpText: { fontSize: 10, fontFamily: 'Poppins_700Bold', color: '#10B981' },
+  crmTaskTitle: { fontSize: 13, fontFamily: 'Poppins_600SemiBold', color: '#FFF', marginBottom: 6, lineHeight: 18 },
+  crmTaskCustomer: { fontSize: 11, fontFamily: 'Poppins_400Regular', color: '#94A3B8', marginBottom: 8 },
+  crmTaskFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  crmStatusText: { fontSize: 10, fontFamily: 'Poppins_600SemiBold' },
+  sectionSubtitle: { fontSize: 11, fontFamily: 'Poppins_400Regular', color: '#94A3B8', marginTop: 2 },
 });
+
+

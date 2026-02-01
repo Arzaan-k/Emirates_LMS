@@ -22,44 +22,89 @@ import API_URL from '../config';
 
 const { width } = Dimensions.get("window");
 
-// --- MOCK CALENDAR DATA GENERATOR ---
-const generateCalendarData = (year, month) => {
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const data = {};
-    const skills = ["Latte Art", "Hygiene", "Inventory", "Cust. Service", "Speed", "Safety"];
-
-    for (let i = 1; i <= daysInMonth; i++) {
-        // Random activity
-        if (Math.random() > 0.4) {
-            data[i] = {
-                videos: Math.floor(Math.random() * 5),
-                quizzes: Math.floor(Math.random() * 3),
-                score: Math.floor(Math.random() * 20 + 80),
-                focusTime: Math.floor(Math.random() * 120 + 10) + "m", // e.g. 45m
-                topSkill: skills[Math.floor(Math.random() * skills.length)]
-            };
-        }
-    }
-    return data;
-};
-
 // --- PREMIUM ACTIVITY CALENDAR ---
-const ActivityCalendar = () => {
+const ActivityCalendar = ({ userEmail }) => {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedDay, setSelectedDay] = useState(null);
     const [modalVisible, setModalVisible] = useState(false);
+
+    const [calendarLoading, setCalendarLoading] = useState(false);
 
     const today = new Date();
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
     const isCurrentMonth = month === today.getMonth() && year === today.getFullYear();
 
-    const [activityData, setActivityData] = useState(() => generateCalendarData(year, month));
+    const [activityData, setActivityData] = useState({});
+    const [selectedTimeline, setSelectedTimeline] = useState([]);
+
+    const fetchMonthData = async (targetDate) => {
+        try {
+            if (!userEmail) return;
+            setCalendarLoading(true);
+
+            const y = targetDate.getFullYear();
+            const m = targetDate.getMonth() + 1;
+
+            const res = await fetch(
+                `${API_URL}/api/v1/analytics/calendar/month?user_email=${encodeURIComponent(userEmail)}&year=${y}&month=${m}`
+            );
+            const data = await res.json();
+
+            if (res.ok && data && data.days) {
+                const mapped = {};
+                Object.keys(data.days).forEach((dayKey) => {
+                    const dayNum = parseInt(dayKey, 10);
+                    const d = data.days[dayKey] || {};
+                    mapped[dayNum] = {
+                        videos: d.videos || 0,
+                        quizzes: d.quizzes || 0,
+                        score: d.avg_score ?? 0,
+                        focusTime: `${d.focus_minutes || 0}m`,
+                        topSkill: d.topSkill || 'General',
+                    };
+                });
+                setActivityData(mapped);
+            } else {
+                setActivityData({});
+            }
+        } catch (e) {
+            console.error('Calendar month fetch failed:', e);
+            setActivityData({});
+        } finally {
+            setCalendarLoading(false);
+        }
+    };
+
+    const fetchDayData = async (targetDate) => {
+        try {
+            if (!userEmail) return null;
+            const isoDay = targetDate.toISOString().slice(0, 10);
+            const res = await fetch(
+                `${API_URL}/api/v1/analytics/calendar/day?user_email=${encodeURIComponent(userEmail)}&day=${encodeURIComponent(isoDay)}`
+            );
+            const data = await res.json();
+            if (res.ok && data && data.summary) {
+                return data;
+            }
+            return null;
+        } catch (e) {
+            console.error('Calendar day fetch failed:', e);
+            return null;
+        }
+    };
+
+    useEffect(() => {
+        fetchMonthData(currentDate);
+    }, [userEmail]);
+
+    useEffect(() => {
+        fetchMonthData(currentDate);
+    }, [year, month]);
 
     const changeMonth = (increment) => {
         const newDate = new Date(currentDate.setMonth(currentDate.getMonth() + increment));
         setCurrentDate(new Date(newDate));
-        setActivityData(generateCalendarData(newDate.getFullYear(), newDate.getMonth()));
     };
 
     const getDaysArray = () => {
@@ -76,9 +121,34 @@ const ActivityCalendar = () => {
 
     const handleDayPress = (day) => {
         if (!day) return;
-        const data = activityData[day];
-        setSelectedDay({ day, ...data, year, month });
+
+        const local = activityData[day] || null;
+        setSelectedDay({ day, ...(local || {}), year, month });
+        setSelectedTimeline([]);
         setModalVisible(true);
+
+        const target = new Date(year, month, day);
+        fetchDayData(target).then((detail) => {
+            if (!detail || !detail.summary) return;
+            const summary = detail.summary;
+
+            const timeline = detail?.items?.timeline;
+            if (Array.isArray(timeline)) {
+                setSelectedTimeline(timeline);
+            }
+
+            setSelectedDay((prev) => ({
+                ...(prev || {}),
+                day,
+                year,
+                month,
+                videos: summary.videos || 0,
+                quizzes: summary.quizzes || 0,
+                score: summary.avg_score ?? 0,
+                focusTime: `${summary.focus_minutes || 0}m`,
+                topSkill: summary.topSkill || 'General',
+            }));
+        });
     };
 
     return (
@@ -162,6 +232,12 @@ const ActivityCalendar = () => {
                 })}
             </View>
 
+            {calendarLoading && (
+                <View style={{ marginTop: 8 }}>
+                    <ActivityIndicator size="small" color="#F59E0B" />
+                </View>
+            )}
+
             {/* PREMIUM GOLD MODAL */}
             <Modal visible={modalVisible} transparent animationType="fade">
                 <View style={styles.calModalOverlay}>
@@ -223,6 +299,112 @@ const ActivityCalendar = () => {
                                             </View>
                                         </View>
                                     </LinearGradient>
+
+                                    {/* DAILY TIMELINE */}
+                                    <View style={{ marginTop: 12 }}>
+                                        <Text style={{ fontSize: 14, fontWeight: '700', color: '#111827', marginBottom: 8 }}>
+                                            Activity Timeline
+                                        </Text>
+
+                                        {selectedTimeline.length === 0 ? (
+                                            <View style={{ paddingVertical: 10 }}>
+                                                <Text style={{ color: '#6B7280' }}>
+                                                    No detailed activity items found for this date.
+                                                </Text>
+                                            </View>
+                                        ) : (
+                                            <ScrollView style={{ maxHeight: 220 }} showsVerticalScrollIndicator={false}>
+                                                {selectedTimeline.map((item, idx) => {
+                                                    const t = item?.type || 'activity';
+                                                    const title = item?.title || 'Activity';
+                                                    const ts = item?.ts ? new Date(item.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                                                    const meta = item?.meta || {};
+
+                                                    const iconName =
+                                                        t === 'quiz' ? 'note-text-outline' :
+                                                            t === 'assessment' ? 'shield-check' :
+                                                                t === 'completion' ? 'check-circle' :
+                                                                    t === 'simulation' ? 'gamepad-variant' :
+                                                                        t === 'audit' ? 'clipboard-check-outline' :
+                                                                            t === 'attendance' ? 'clock-outline' :
+                                                                                t === 'video' ? 'play-circle-outline' :
+                                                                                    'circle-outline';
+
+                                                    return (
+                                                        <View key={`${t}_${idx}`} style={{
+                                                            backgroundColor: '#FFF',
+                                                            borderRadius: 12,
+                                                            padding: 12,
+                                                            marginBottom: 8,
+                                                            borderWidth: 1,
+                                                            borderColor: '#F3F4F6'
+                                                        }}>
+                                                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                                                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, paddingRight: 8 }}>
+                                                                    <View style={{
+                                                                        width: 34,
+                                                                        height: 34,
+                                                                        borderRadius: 10,
+                                                                        backgroundColor: '#FFFBEB',
+                                                                        alignItems: 'center',
+                                                                        justifyContent: 'center',
+                                                                        marginRight: 10
+                                                                    }}>
+                                                                        <MaterialCommunityIcons name={iconName} size={18} color="#D97706" />
+                                                                    </View>
+                                                                    <View style={{ flex: 1 }}>
+                                                                        <Text style={{ fontWeight: '700', color: '#111827' }} numberOfLines={1}>
+                                                                            {title}
+                                                                        </Text>
+                                                                        <Text style={{ color: '#6B7280', marginTop: 2 }} numberOfLines={2}>
+                                                                            {t.toUpperCase()}{meta?.store ? ` • ${meta.store}` : ''}{meta?.category ? ` • ${meta.category}` : ''}{meta?.simulation_id ? ` • ${meta.simulation_id}` : ''}{meta?.node_id ? ` • ${meta.node_id}` : ''}
+                                                                        </Text>
+                                                                    </View>
+                                                                </View>
+                                                                <Text style={{ color: '#6B7280', fontWeight: '600' }}>{ts}</Text>
+                                                            </View>
+
+                                                            {(meta?.time_spent_seconds || meta?.time_taken_seconds || meta?.duration_minutes || meta?.score_percent || meta?.completion_rate || meta?.score) !== undefined && (
+                                                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 8 }}>
+                                                                    {meta?.time_spent_seconds ? (
+                                                                        <Text style={{ color: '#374151', marginRight: 10 }}>
+                                                                            Time: {Math.round(meta.time_spent_seconds / 60)}m
+                                                                        </Text>
+                                                                    ) : null}
+                                                                    {meta?.time_taken_seconds ? (
+                                                                        <Text style={{ color: '#374151', marginRight: 10 }}>
+                                                                            Time: {Math.round(meta.time_taken_seconds / 60)}m
+                                                                        </Text>
+                                                                    ) : null}
+                                                                    {meta?.duration_minutes ? (
+                                                                        <Text style={{ color: '#374151', marginRight: 10 }}>
+                                                                            Duration: {meta.duration_minutes}m
+                                                                        </Text>
+                                                                    ) : null}
+                                                                    {meta?.score_percent !== undefined && meta?.score_percent !== null ? (
+                                                                        <Text style={{ color: '#374151', marginRight: 10 }}>
+                                                                            Score: {Math.round(meta.score_percent)}%
+                                                                        </Text>
+                                                                    ) : null}
+                                                                    {meta?.score !== undefined && meta?.score !== null ? (
+                                                                        <Text style={{ color: '#374151', marginRight: 10 }}>
+                                                                            Score: {Math.round(meta.score)}
+                                                                        </Text>
+                                                                    ) : null}
+                                                                    {meta?.completion_rate !== undefined && meta?.completion_rate !== null ? (
+                                                                        <Text style={{ color: '#374151', marginRight: 10 }}>
+                                                                            Audit: {Math.round(meta.completion_rate)}%
+                                                                        </Text>
+                                                                    ) : null}
+                                                                </View>
+                                                            )}
+                                                        </View>
+                                                    );
+                                                })}
+                                                <View style={{ height: 10 }} />
+                                            </ScrollView>
+                                        )}
+                                    </View>
                                 </>
                             ) : (
                                 <View style={styles.noActivity}>
@@ -390,11 +572,11 @@ export default function Profile({ navigation, route }) {
                     const timestamp = new Date().toISOString();
 
                     // Send to backend
-                    await fetch(`${API_URL}/location/update`, {
+                    await fetch(`${API_URL}/api/v1/tracking/location/update`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            user_id: userProfile.email,
+                            user_email: userProfile.email,
                             latitude,
                             longitude,
                             timestamp
@@ -425,10 +607,10 @@ export default function Profile({ navigation, route }) {
 
         // Notify backend
         try {
-            await fetch(`${API_URL}/location/stop`, {
+            await fetch(`${API_URL}/api/v1/tracking/location/stop`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_id: userProfile.email })
+                body: JSON.stringify({ user_email: userProfile.email })
             });
         } catch (error) {
             console.error('Stop tracking error:', error);
@@ -452,11 +634,11 @@ export default function Profile({ navigation, route }) {
         setIsPunchedIn(true);
 
         try {
-            await fetch(`${API_URL}/attendance/punch-in`, {
+            await fetch(`${API_URL}/api/v1/tracking/attendance/punch-in`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    user_id: userProfile.email,
+                    user_email: userProfile.email,
                     timestamp: now.toISOString()
                 })
             });
@@ -480,11 +662,11 @@ export default function Profile({ navigation, route }) {
         }
 
         try {
-            await fetch(`${API_URL}/attendance/punch-out`, {
+            await fetch(`${API_URL}/api/v1/tracking/attendance/punch-out`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    user_id: userProfile.email,
+                    user_email: userProfile.email,
                     timestamp: now.toISOString()
                 })
             });
@@ -643,7 +825,7 @@ export default function Profile({ navigation, route }) {
                 </View>
 
                 {/* PREMIUM CALENDAR */}
-                <ActivityCalendar />
+                <ActivityCalendar userEmail={userProfile.email} />
 
                 {/* ANALYTICS GRAPH */}
                 <DonutChart />

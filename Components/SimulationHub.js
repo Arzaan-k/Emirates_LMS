@@ -27,7 +27,7 @@ export default function SimulationHub({ onClose }) {
 
     const fetchHistory = async () => {
         try {
-            const res = await fetch(`${API_URL}/ai/simulation/history`);
+            const res = await fetch(`${API_URL}/api/v1/roleplay/history`);
             const data = await res.json();
             setHistory(data);
         } catch (e) {
@@ -124,9 +124,9 @@ const styles = StyleSheet.create({
     backBtn: { padding: 10, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.1)' },
     historyBtn: { padding: 10, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.1)' },
 
-    menuContent: { padding: 20 },
-    sectionTitle: { color: '#FFF', fontSize: 28, fontFamily: 'Poppins_700Bold', marginBottom: 5 },
-    sectionSub: { color: 'rgba(255,255,255,0.6)', fontSize: 14, fontFamily: 'Poppins_400Regular', marginBottom: 30 },
+    menuContent: { padding: 20, paddingBottom: 100 },
+    sectionTitle: { color: '#FFF', fontSize: 28, fontFamily: 'Poppins_700Bold', marginBottom: 5, marginRight: 60 },
+    sectionSub: { color: 'rgba(255,255,255,0.6)', fontSize: 14, fontFamily: 'Poppins_400Regular', marginBottom: 30, marginRight: 60 },
 
     grid: { gap: 20 },
     card: { height: 180, borderRadius: 24, borderWidth: 1, overflow: 'hidden', padding: 20, justifyContent: 'space-between' },

@@ -65,41 +65,104 @@ const FloatingWaffle = ({ delay, duration, startX, startY }) => {
     );
 };
 
-// MOCK DATA
+// MOCK DATA - Properly formatted categories with valid Ionicons names
 const MOCK_CATEGORIES = [
-    { id: 1, name: "Safety Protocols", icon: "shield-checkmark", color: "#EF4444" },
-    { id: 2, name: "Recipes & SOPs", icon: "restaurant", color: "#F59E0B" },
-    { id: 3, name: "Training Videos", icon: "videocam", color: "#8B5CF6" },
-    { id: 4, name: "Equipment Guides", icon: "construct", color: "#3B82F6" },
+    { id: 1, name: "Standard SOPs", icon: "document-text", color: "#3B82F6", description: "Standard operating procedures" },
+    { id: 2, name: "Video Tutorials", icon: "play-circle", color: "#F59E0B", description: "Training video library" },
+    { id: 3, name: "Machine Manuals", icon: "cog", color: "#8B5CF6", description: "Equipment documentation" },
+    { id: 4, name: "Safety Guides", icon: "shield-checkmark", color: "#10B981", description: "Safety protocols & guidelines" },
 ];
 
 const MOCK_RESOURCES = [
-    { id: 1, title: "Safety Protocols", type: "PDF", category: "Safety", timestamp: new Date().toISOString() },
-    { id: 2, title: "Waffle Recipe Guide", type: "Document", category: "Recipes", timestamp: new Date(Date.now() - 86400000).toISOString() },
-    { id: 3, title: "Cleaning Procedures", type: "Document", category: "Operations", timestamp: new Date(Date.now() - 172800000).toISOString() },
-    { id: 4, title: "Equipment Training", type: "Video", category: "Training", timestamp: new Date(Date.now() - 259200000).toISOString() },
-    { id: 5, title: "Customer Service Standards", type: "PDF", category: "Service", timestamp: new Date(Date.now() - 345600000).toISOString() },
+    {
+        id: 1,
+        title: "Opening Checklist SOP",
+        type: "PDF",
+        category: "Standard SOPs",
+        timestamp: new Date().toISOString(),
+        description: "Complete store opening procedure checklist including equipment startup and safety checks"
+    },
+    {
+        id: 2,
+        title: "Belgian Waffle Recipe v2.0",
+        type: "Document",
+        category: "Recipes",
+        timestamp: new Date(Date.now() - 86400000).toISOString(),
+        description: "Official Belgian waffle recipe with exact measurements, timing, and presentation guidelines"
+    },
+    {
+        id: 3,
+        title: "Daily Cleaning Guidelines",
+        type: "Document",
+        category: "Operations",
+        timestamp: new Date(Date.now() - 172800000).toISOString(),
+        description: "Step-by-step cleaning procedures for all store areas and equipment"
+    },
+    {
+        id: 4,
+        title: "Espresso Machine Training",
+        type: "Video",
+        category: "Training",
+        timestamp: new Date(Date.now() - 259200000).toISOString(),
+        description: "Complete training video for espresso machine operation and maintenance"
+    },
+    {
+        id: 5,
+        title: "Customer Complaint Handling",
+        type: "PDF",
+        category: "Service",
+        timestamp: new Date(Date.now() - 345600000).toISOString(),
+        description: "Guidelines for handling customer complaints professionally and effectively"
+    },
+    {
+        id: 6,
+        title: "Food Safety Certification Guide",
+        type: "PDF",
+        category: "Safety",
+        timestamp: new Date(Date.now() - 432000000).toISOString(),
+        description: "Complete food safety and hygiene certification training material"
+    },
+    {
+        id: 7,
+        title: "POS System Quick Reference",
+        type: "Document",
+        category: "Operations",
+        timestamp: new Date(Date.now() - 518400000).toISOString(),
+        description: "Quick reference guide for the point-of-sale system features and common operations"
+    },
 ];
 
 const MOCK_CONTENT = {
-    "Safety Protocols": `# Safety Protocols\n\n## Fire Safety\n- Fire extinguishers checked monthly\n- Emergency exits never blocked\n- Staff know evacuation routes\n\n## Equipment Safety\n- Wear protective gloves\n- Unplug before cleaning\n- Never leave unattended`,
-    "Waffle Recipe Guide": `# Belgian Waffle Recipe\n\n## Ingredients\n- 2 cups flour\n- 2 tbsp sugar\n- 4 tsp baking powder\n- 2 eggs\n- 1.5 cups milk\n- 1/2 cup butter\n\n## Instructions\n1. Preheat waffle iron\n2. Mix dry ingredients\n3. Beat egg whites\n4. Combine and fold\n5. Cook 4-5 minutes`,
-    "Cleaning Procedures": `# Daily Cleaning\n\n## Opening (8AM)\n- Wipe all counters\n- Check waffle makers\n- Sanitize prep areas\n- Stock supplies\n\n## Closing (9PM)\n- Deep clean machines\n- Mop floors\n- Take out trash\n- Lock doors`,
-    "Equipment Training": `# Equipment Guide\n\n## Waffle Maker\n- Preheat 5 minutes\n- Spray non-stick\n- 1/2 cup batter\n- Cook 4-5 minutes\n\n## Maintenance\n- Daily: Clean surfaces\n- Weekly: Deep clean\n- Monthly: Service check`,
-    "Customer Service Standards": `# Service Excellence\n\n## Greeting\n- Smile and eye contact\n- Greet within 30 seconds\n- Friendly tone\n\n## Orders\n- Listen carefully\n- Repeat for confirmation\n- Ready in 5 minutes`,
+    // Individual Resource Content
+    "Opening Checklist SOP": `# Opening Checklist SOP\n\n## Pre-Opening (7:30 AM)\n- Unlock store and disarm security\n- Turn on all lights and HVAC\n- Check refrigerator temperatures (must be below 40°F)\n- Inspect waffle irons for cleanliness\n\n## Equipment Startup (7:45 AM)\n- Power on POS systems\n- Start waffle iron preheating\n- Prepare espresso machine\n- Stock batter dispensers\n\n## Final Checks (8:00 AM)\n- Verify cash drawer amounts\n- Check menu board displays\n- Ensure utensils are stocked\n- Open doors for business`,
+
+    "Belgian Waffle Recipe v2.0": `# Belgian Waffle Recipe v2.0\n\n## Ingredients (12 servings)\n- 2 cups all-purpose flour\n- 2 tablespoons sugar\n- 4 teaspoons baking powder\n- 2 large eggs (separated)\n- 1.5 cups whole milk\n- 1/2 cup melted butter\n- 1 teaspoon vanilla extract\n\n## Preparation\n1. Preheat waffle iron to 375°F\n2. Mix dry ingredients in large bowl\n3. Beat egg whites until stiff peaks form\n4. Combine wet ingredients with yolks\n5. Fold in egg whites gently\n6. Cook 4-5 minutes until golden brown\n\n## Presentation Standards\n- Serve within 2 minutes of cooking\n- Add toppings in specified order\n- Use branded serving plate`,
+
+    "Daily Cleaning Guidelines": `# Daily Cleaning Guidelines\n\n## Morning Shift\n- Sanitize all prep surfaces\n- Clean coffee equipment\n- Wipe down dining tables\n- Stock cleaning supplies\n\n## Afternoon Shift\n- Mid-day floor sweep\n- Restroom check and restock\n- Counter and display cleaning\n- Empty waste bins if 75% full\n\n## Closing Shift (9:00 PM)\n- Deep clean waffle irons\n- Drain and clean coffee machines\n- Mop all floor areas\n- Sanitize all door handles\n- Take out trash and recycling`,
+
+    "Espresso Machine Training": `# Espresso Machine Training\n\n## Machine Components\n- Portafilter and basket\n- Steam wand for milk frothing\n- Drip tray and water reservoir\n- Pressure gauge (9-10 bar optimal)\n\n## Making Espresso\n1. Grind fresh beans (18g dose)\n2. Distribute and tamp evenly (30lbs pressure)\n3. Lock portafilter and start extraction\n4. Target 25-30 second extraction time\n5. Yield: 36-40ml double shot\n\n## Milk Steaming\n- Use cold milk, 34-38°F\n- Steam to 140-150°F\n- Create microfoam for lattes\n- Swirl to integrate foam`,
+
+    "Customer Complaint Handling": `# Customer Complaint Handling\n\n## LEARN Method\n- Listen actively without interrupting\n- Empathize with their situation\n- Apologize sincerely (not blame)\n- React with a solution\n- Notify manager if escalation needed\n\n## Common Resolutions\n- Remake order at no charge\n- Offer complimentary item\n- Provide discount on next visit\n- Gift card for major issues\n\n## Documentation\n- Log all complaints in system\n- Note resolution provided\n- Follow up if contact given`,
+
+    "Food Safety Certification Guide": `# Food Safety Certification\n\n## Temperature Guidelines\n- Cold foods: Below 40°F (4°C)\n- Hot foods: Above 140°F (60°C)\n- Danger zone: 40-140°F\n\n## Hand Washing Protocol\n- Wet hands with warm water\n- Apply soap, scrub 20 seconds\n- Rinse thoroughly\n- Dry with single-use towel\n- Required: Before food handling, after breaks, after touching face/hair\n\n## Allergen Awareness\n- Common allergens: Gluten, Dairy, Eggs, Nuts\n- Always ask about allergies\n- Use separate equipment when possible\n- Never guess—verify with kitchen`,
+
+    "POS System Quick Reference": `# POS System Quick Reference\n\n## Basic Operations\n- Login with badge scan\n- Select items from menu screen\n- Apply discounts with manager PIN\n- Process payments (card/cash/mobile)\n\n## Common Tasks\n- Split check: Order > Split\n- Void item: Hold item > Void\n- Refund: Manager > Refunds\n- Print receipt: Complete > Print\n\n## Troubleshooting\n- Frozen screen: Hold power 10 sec\n- Printer jam: Open lid, clear paper\n- Card reader error: Restart terminal\n- Call IT for persistent issues`,
 
     // CATEGORY OVERVIEWS
-    "Safety Protocols Overview": `# Safety Protocols Category\n\n## Overview\nThis section contains all safety-related guidelines and standard operating procedures (SOPs) for the store.\n\n## Contents\n- Fire Safety Procedures\n- Equipment Handling\n- Food Safety Guidelines\n- Emergency Contact List\n\nTap on individual files below to view full details.`,
-    "Recipes & SOPs Overview": `# Recipes & Standard Procedures\n\n## Collection\nAccess our complete library of waffle recipes, topping guides, and preparation standards.\n\n## Featured\n- Classic Belgian Waffle\n- Chocolate Overload\n- Red Velvet Special\n- Batter Preparation Standards`,
-    "Training Videos Overview": `# Training Video Library\n\n## Scope\nVideo tutorials covering equipment operation, customer service scenarios, and closing duties.\n\n## Watch List\n- New Hire Orientation\n- POS System Training\n- Espresso Machine Mastery\n- Handling Difficult Customers`,
-    "Equipment Guides Overview": `# Equipment & Maintenance\n\n## Manuals\nDetailed operation manuals and maintenance schedules for all store machinery.\n\n## Critical Equipment\n- Waffle Irons (Model X-500)\n- Espresso Machine\n- Grinders\n- HVAC System\n- Refrigeration Units`,
+    "Standard SOPs Overview": `# Standard SOPs Category\n\n## Overview\nAccess all standard operating procedures for daily store operations, from opening to closing.\n\n## Contents\n- Opening & Closing Checklists\n- Cash Handling Procedures\n- Inventory Management\n- Shift Changeover Protocol\n\n## Compliance\nAll team members must review SOPs quarterly. Updates are highlighted in yellow.`,
+
+    "Video Tutorials Overview": `# Video Tutorials Library\n\n## Training Modules\nComprehensive video guides for skill development and certification.\n\n## Available Videos\n- New Hire Orientation (45 min)\n- Espresso Mastery Course (30 min)\n- Customer Service Excellence (25 min)\n- Safety and Hygiene (20 min)\n\n## Completion Tracking\nYour progress is tracked automatically. Certificates issued upon completion.`,
+
+    "Machine Manuals Overview": `# Machine Manuals\n\n## Equipment Documentation\nTechnical manuals and maintenance guides for all store equipment.\n\n## Covered Equipment\n- Waffle Irons (Model X-500)\n- Espresso Machine (Breville Pro)\n- Commercial Refrigerators\n- Ice Machines\n- HVAC Control Systems\n\n## Maintenance Schedules\nFollow weekly, monthly, and quarterly maintenance checklists.`,
+
+    "Safety Guides Overview": `# Safety Guides\n\n## Overview\nEssential safety protocols and emergency procedures for all staff members.\n\n## Key Topics\n- Fire Safety & Evacuation\n- First Aid Basics\n- Food Allergen Handling\n- Slip & Fall Prevention\n- Equipment Safety\n\n## Emergency Contacts\n- Fire: 911\n- Manager On-Call: See schedule\n- Corporate Safety: 1-800-555-SAFE`,
 };
 
 const MANDATORY_MODULES = [
-    { id: 1, name: "Batter Preparation", icon: "beaker-outline", count: 4, color: "#F59E0B" },
-    { id: 2, name: "Waffle Baking", icon: "cube-outline", count: 6, color: "#F59E0B" },
-    { id: 3, name: "Topping Application", icon: "water-outline", count: 5, color: "#F59E0B" },
-    { id: 4, name: "Equipment Care", icon: "construct-outline", count: 8, color: "#F59E0B" },
+    { id: 1, name: "Batter Preparation", icon: "flask-outline", count: 4, color: "#F59E0B" },
+    { id: 2, name: "Waffle Baking", icon: "grid-outline", count: 6, color: "#8B5CF6" },
+    { id: 3, name: "Topping Application", icon: "color-palette-outline", count: 5, color: "#EF4444" },
+    { id: 4, name: "Equipment Care", icon: "build-outline", count: 8, color: "#10B981" },
 ];
 
 // Content Preview Modal
@@ -187,6 +250,81 @@ export default function Resources() {
     const [resources, setResources] = useState(MOCK_RESOURCES);
     const [previewVisible, setPreviewVisible] = useState(false);
     const [selectedResource, setSelectedResource] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+    // Fetch real resources from backend
+    useEffect(() => {
+        fetchResources();
+    }, []);
+
+    const fetchResources = async () => {
+        try {
+            setLoading(true);
+            const res = await fetch(`${API_URL}/api/v1/content/resources/all`);
+            const data = await res.json();
+            if (Array.isArray(data) && data.length > 0) {
+                // Transform backend data to match our UI structure
+                const transformedResources = data.map(item => ({
+                    id: item.id,
+                    title: item.title,
+                    type: item.type || (item.file_url?.includes('.mp4') ? 'Video' :
+                        item.file_url?.includes('.pdf') ? 'PDF' : 'Document'),
+                    category: item.category || 'General',
+                    timestamp: item.timestamp || new Date().toISOString(),
+                    description: item.description || '',
+                    file_url: item.file_url,
+                }));
+                setResources(transformedResources);
+            }
+
+            // Also fetch categories
+            const catRes = await fetch(`${API_URL}/api/v1/content/resources/categories`);
+            const catData = await catRes.json();
+            if (Array.isArray(catData) && catData.length > 0) {
+                setCategories(catData.map(cat => ({
+                    id: cat.id,
+                    name: cat.name,
+                    icon: cat.icon || "folder",
+                    color: Array.isArray(cat.color) ? cat.color[0] : (cat.color || "#F59E0B"),
+                })));
+            }
+        } catch (err) {
+            console.log("Using mock data:", err.message);
+            // Keep mock data on error
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Filter resources and categories based on search
+    const filteredCategories = React.useMemo(() => {
+        if (!search.trim()) return categories;
+        const searchLower = search.toLowerCase().trim();
+        return categories.filter(cat =>
+            cat.name.toLowerCase().includes(searchLower)
+        );
+    }, [categories, search]);
+
+    const filteredResources = React.useMemo(() => {
+        if (!search.trim()) return resources;
+        const searchLower = search.toLowerCase().trim();
+        return resources.filter(res =>
+            res.title.toLowerCase().includes(searchLower) ||
+            res.category?.toLowerCase().includes(searchLower) ||
+            res.type?.toLowerCase().includes(searchLower) ||
+            res.description?.toLowerCase().includes(searchLower)
+        );
+    }, [resources, search]);
+
+    const filteredModules = React.useMemo(() => {
+        if (!search.trim()) return MANDATORY_MODULES;
+        const searchLower = search.toLowerCase().trim();
+        return MANDATORY_MODULES.filter(mod =>
+            mod.name.toLowerCase().includes(searchLower)
+        );
+    }, [search]);
+
+    const hasResults = filteredCategories.length > 0 || filteredResources.length > 0 || filteredModules.length > 0;
 
     const handleResourcePress = (resource) => {
         setSelectedResource(resource);
@@ -222,14 +360,16 @@ export default function Resources() {
 
                 {/* SEARCH */}
                 <View style={styles.searchSection}>
-                    <View style={styles.searchBox}>
-                        <MaterialCommunityIcons name="robot" size={24} color="#F59E0B" />
+                    <View style={[styles.searchBox, search.length > 0 && { borderColor: '#F59E0B', borderWidth: 2 }]}>
+                        <MaterialCommunityIcons name="magnify" size={24} color="#F59E0B" />
                         <TextInput
-                            placeholder="Ask AI about SOPs, recipes..."
+                            placeholder="Search SOPs, recipes, guides..."
                             style={styles.input}
                             placeholderTextColor="#9CA3AF"
                             value={search}
                             onChangeText={setSearch}
+                            autoCapitalize="none"
+                            autoCorrect={false}
                         />
                         {search ? (
                             <TouchableOpacity onPress={() => setSearch('')}>
@@ -237,86 +377,117 @@ export default function Resources() {
                             </TouchableOpacity>
                         ) : null}
                     </View>
+                    {search.length > 0 && (
+                        <Text style={{ fontSize: 12, color: '#6B7280', marginTop: 8, marginLeft: 4 }}>
+                            {filteredResources.length + filteredCategories.length + filteredModules.length} results for "{search}"
+                        </Text>
+                    )}
                 </View>
+
+                {/* NO RESULTS */}
+                {search.length > 0 && !hasResults && (
+                    <Animated.View entering={FadeInDown} style={styles.noResultsContainer}>
+                        <MaterialCommunityIcons name="file-search-outline" size={64} color="#D1D5DB" />
+                        <Text style={styles.noResultsTitle}>No results found</Text>
+                        <Text style={styles.noResultsText}>
+                            Try searching with different keywords or check the spelling
+                        </Text>
+                        <TouchableOpacity
+                            style={styles.clearSearchBtn}
+                            onPress={() => setSearch('')}
+                        >
+                            <Feather name="x" size={16} color="#F59E0B" />
+                            <Text style={styles.clearSearchText}>Clear Search</Text>
+                        </TouchableOpacity>
+                    </Animated.View>
+                )}
 
                 {/* CATEGORIES */}
-                <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Resource Categories</Text>
-                    {categories.map((cat, index) => (
-                        <Animated.View key={cat.id} entering={FadeInDown.delay(index * 50)}>
-                            <TouchableOpacity
-                                style={styles.categoryCard}
-                                onPress={() => handleCategoryPress(cat)}
-                            >
-                                <View style={[styles.categoryIcon, { backgroundColor: cat.color + '15' }]}>
-                                    <Ionicons name={cat.icon} size={28} color={cat.color} />
-                                </View>
-                                <Text style={styles.categoryName}>{cat.name}</Text>
-                                <Feather name="chevron-right" size={20} color="#9CA3AF" />
-                            </TouchableOpacity>
-                        </Animated.View>
-                    ))}
-                </View>
-
-                {/* LEARNING BREAKDOWN */}
-                <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Learning Breakdown</Text>
-                    <Text style={styles.sectionSubtitle}>Process & Framework for Waffle Manufacturing</Text>
-                    <View style={styles.modulesGrid}>
-                        {MANDATORY_MODULES.map((mod, index) => (
-                            <Animated.View key={mod.id} entering={FadeInDown.delay(index * 50)} style={styles.moduleCardWrapper}>
+                {filteredCategories.length > 0 && (
+                    <View style={styles.section}>
+                        <Text style={styles.sectionTitle}>Resource Categories</Text>
+                        {filteredCategories.map((cat, index) => (
+                            <Animated.View key={cat.id} entering={FadeInDown.delay(index * 50)}>
                                 <TouchableOpacity
-                                    style={styles.moduleCard}
-                                    onPress={() => navigation.navigate("ModuleDetail", { moduleName: mod.name })}
+                                    style={styles.categoryCard}
+                                    onPress={() => handleCategoryPress(cat)}
                                 >
-                                    <LinearGradient
-                                        colors={[mod.color, mod.color + 'DD']}
-                                        style={styles.moduleGradient}
-                                        start={{ x: 0, y: 0 }}
-                                        end={{ x: 1, y: 1 }}
-                                    >
-                                        <Ionicons name={mod.icon} size={32} color="#FFF" />
-                                    </LinearGradient>
-                                    <Text style={styles.moduleName}>{mod.name}</Text>
-                                    <Text style={styles.moduleCount}>{mod.count} modules</Text>
+                                    <View style={[styles.categoryIcon, { backgroundColor: cat.color + '15' }]}>
+                                        <Ionicons name={cat.icon} size={28} color={cat.color} />
+                                    </View>
+                                    <Text style={styles.categoryName}>{cat.name}</Text>
+                                    <Feather name="chevron-right" size={20} color="#9CA3AF" />
                                 </TouchableOpacity>
                             </Animated.View>
                         ))}
                     </View>
-                </View>
+                )}
+
+                {/* LEARNING BREAKDOWN - only show when not searching or has matches */}
+                {filteredModules.length > 0 && (
+                    <View style={styles.section}>
+                        <Text style={styles.sectionTitle}>Learning Breakdown</Text>
+                        <Text style={styles.sectionSubtitle}>Process & Framework for Waffle Manufacturing</Text>
+                        <View style={styles.modulesGrid}>
+                            {filteredModules.map((mod, index) => (
+                                <Animated.View key={mod.id} entering={FadeInDown.delay(index * 50)} style={styles.moduleCardWrapper}>
+                                    <TouchableOpacity
+                                        style={styles.moduleCard}
+                                        onPress={() => navigation.navigate("ModuleDetail", { moduleName: mod.name })}
+                                    >
+                                        <LinearGradient
+                                            colors={[mod.color, mod.color + 'DD']}
+                                            style={styles.moduleGradient}
+                                            start={{ x: 0, y: 0 }}
+                                            end={{ x: 1, y: 1 }}
+                                        >
+                                            <Ionicons name={mod.icon} size={32} color="#FFF" />
+                                        </LinearGradient>
+                                        <Text style={styles.moduleName}>{mod.name}</Text>
+                                        <Text style={styles.moduleCount}>{mod.count} modules</Text>
+                                    </TouchableOpacity>
+                                </Animated.View>
+                            ))}
+                        </View>
+                    </View>
+                )}
 
                 {/* RECENT RESOURCES */}
-                <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Recently Added</Text>
-                    {resources.map((item, index) => (
-                        <Animated.View key={item.id} entering={FadeInDown.delay(index * 30)}>
-                            <TouchableOpacity
-                                style={styles.resourceCard}
-                                onPress={() => handleResourcePress(item)}
-                            >
-                                <View style={[styles.resourceIcon, {
-                                    backgroundColor: item.type === 'Video' ? '#FEF2F2' :
-                                        item.type === 'PDF' ? '#EFF6FF' : '#F0FDF4'
-                                }]}>
-                                    <MaterialCommunityIcons
-                                        name={item.type === 'Video' ? "file-video-outline" :
-                                            item.type === 'PDF' ? "file-pdf-box" : "file-document-outline"}
-                                        size={24}
-                                        color={item.type === 'Video' ? "#EF4444" :
-                                            item.type === 'PDF' ? "#3B82F6" : "#10B981"}
-                                    />
-                                </View>
-                                <View style={styles.resourceInfo}>
-                                    <Text style={styles.resourceTitle}>{item.title}</Text>
-                                    <Text style={styles.resourceMeta}>
-                                        {item.type} • {item.category} • {new Date(item.timestamp).toLocaleDateString()}
-                                    </Text>
-                                </View>
-                                <Feather name="chevron-right" size={20} color="#9CA3AF" />
-                            </TouchableOpacity>
-                        </Animated.View>
-                    ))}
-                </View>
+                {filteredResources.length > 0 && (
+                    <View style={styles.section}>
+                        <Text style={styles.sectionTitle}>
+                            {search.length > 0 ? 'Matching Resources' : 'Recently Added'}
+                        </Text>
+                        {filteredResources.map((item, index) => (
+                            <Animated.View key={item.id} entering={FadeInDown.delay(index * 30)}>
+                                <TouchableOpacity
+                                    style={styles.resourceCard}
+                                    onPress={() => handleResourcePress(item)}
+                                >
+                                    <View style={[styles.resourceIcon, {
+                                        backgroundColor: item.type === 'Video' ? '#FEF2F2' :
+                                            item.type === 'PDF' ? '#EFF6FF' : '#F0FDF4'
+                                    }]}>
+                                        <MaterialCommunityIcons
+                                            name={item.type === 'Video' ? "file-video-outline" :
+                                                item.type === 'PDF' ? "file-pdf-box" : "file-document-outline"}
+                                            size={24}
+                                            color={item.type === 'Video' ? "#EF4444" :
+                                                item.type === 'PDF' ? "#3B82F6" : "#10B981"}
+                                        />
+                                    </View>
+                                    <View style={styles.resourceInfo}>
+                                        <Text style={styles.resourceTitle}>{item.title}</Text>
+                                        <Text style={styles.resourceMeta}>
+                                            {item.type} • {item.category} • {new Date(item.timestamp).toLocaleDateString()}
+                                        </Text>
+                                    </View>
+                                    <Feather name="chevron-right" size={20} color="#9CA3AF" />
+                                </TouchableOpacity>
+                            </Animated.View>
+                        ))}
+                    </View>
+                )}
             </ScrollView>
 
             <ContentPreviewModal
@@ -635,6 +806,41 @@ const styles = StyleSheet.create({
         backgroundColor: '#F59E0B',
     },
     footerBtnText: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#F59E0B',
+    },
+    // No Results Styles
+    noResultsContainer: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 40,
+        marginTop: 20,
+    },
+    noResultsTitle: {
+        fontSize: 18,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#374151',
+        marginTop: 16,
+        marginBottom: 8,
+    },
+    noResultsText: {
+        fontSize: 14,
+        fontFamily: 'Poppins_400Regular',
+        color: '#9CA3AF',
+        textAlign: 'center',
+        marginBottom: 20,
+    },
+    clearSearchBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FEF3C7',
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        borderRadius: 12,
+        gap: 6,
+    },
+    clearSearchText: {
         fontSize: 14,
         fontFamily: 'Poppins_600SemiBold',
         color: '#F59E0B',

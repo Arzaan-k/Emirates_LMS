@@ -7,11 +7,15 @@ import {
     ScrollView,
     Dimensions,
     TextInput,
+    ActivityIndicator,
+    KeyboardAvoidingView,
+    Platform
 } from "react-native";
 import { MaterialCommunityIcons, Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import CoursePath from "../Components/CoursePath";
 import QuizSection from "../Components/QuizSection";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { Video, ResizeMode } from 'expo-av';
 import { Modal } from 'react-native';
@@ -19,8 +23,65 @@ import { Modal } from 'react-native';
 const { width, height } = Dimensions.get("window");
 
 // --- VIDEO PLAYER MODAL ---
+// --- VIDEO PLAYER MODAL WITH TRANSCRIPT & AI TRANSLATION ---
 function VideoPlayerModal({ visible, videoData, onClose }) {
+    const [transcript, setTranscript] = useState('');
+    const [language, setLanguage] = useState('English');
+    const [isTranslating, setIsTranslating] = useState(false);
+    const [showLangPicker, setShowLangPicker] = useState(false);
+    const [searchLang, setSearchLang] = useState('');
+
+    const LANGUAGES = [
+        "English",
+        // Indian Languages
+        "Hindi", "Bengali", "Telugu", "Marathi", "Tamil", "Urdu", "Gujarati",
+        "Kannada", "Malayalam", "Odia", "Punjabi", "Assamese", "Maithili",
+        "Santali", "Kashmiri", "Nepali", "Konkani", "Sindhi", "Dogri",
+        "Manipuri", "Bodo", "Sanskrit",
+        // International Languages
+        "Spanish", "French", "German", "Chinese", "Japanese", "Arabic", "Portuguese", "Russian"
+    ];
+
+    React.useEffect(() => {
+        if (videoData) {
+            setTranscript(videoData.transcript || "No transcript available.");
+            setLanguage('English'); // Default to English or original
+        }
+    }, [videoData]);
+
+    const handleTranslate = async (targetLang) => {
+        setLanguage(targetLang);
+        setShowLangPicker(false);
+
+        // If switching back to English (assuming original is English for now), we could cache original. 
+        // But for simplicity/robustness with AI, we just translate. 
+        // NOTE: In a production app, we'd cache the original text to avoid re-translating to source.
+
+        setIsTranslating(true);
+        try {
+            const response = await fetch(`${API_URL}/api/v1/ai/translate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    text: videoData.transcript || "No transcript available.", // Always translate from source
+                    target_language: targetLang
+                })
+            });
+            const data = await response.json();
+            if (data.translated_text) {
+                setTranscript(data.translated_text);
+            }
+        } catch (error) {
+            console.error("Translation error:", error);
+            // Fallback or alert (silent fail to keep UI smooth)
+        } finally {
+            setIsTranslating(false);
+        }
+    };
+
     if (!visible || !videoData) return null;
+
+    const filteredLanguages = LANGUAGES.filter(l => l.toLowerCase().includes(searchLang.toLowerCase()));
 
     return (
         <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
@@ -31,19 +92,104 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
                 </TouchableOpacity>
 
                 {/* VIDEO PLAYER */}
-                <Video
-                    source={{ uri: videoData.videoUrl }}
-                    style={{ width: '100%', height: 300, marginTop: 100 }}
-                    useNativeControls
-                    resizeMode={ResizeMode.CONTAIN}
-                    shouldPlay
-                    onError={(e) => console.log("Video Error:", e)}
-                />
-
-                <View style={{ padding: 20 }}>
-                    <Text style={{ color: '#FFF', fontSize: 18, fontFamily: 'Poppins_600SemiBold', marginBottom: 10 }}>{videoData.title}</Text>
-                    <Text style={{ color: '#9CA3AF', fontSize: 14, fontFamily: 'Poppins_400Regular' }}>{videoData.category} • {videoData.duration}</Text>
+                <View style={{ width: '100%', height: 300, backgroundColor: '#000', justifyContent: 'center' }}>
+                    <Video
+                        source={{ uri: videoData.videoUrl }}
+                        style={{ width: '100%', height: '100%' }}
+                        useNativeControls
+                        resizeMode={ResizeMode.CONTAIN}
+                        shouldPlay
+                        onError={(e) => console.log("Video Error:", e)}
+                    />
                 </View>
+
+                {/* CONTENT CONTAINER */}
+                <View style={{ flex: 1, backgroundColor: '#111827', borderTopLeftRadius: 24, borderTopRightRadius: 24, marginTop: -20, overflow: 'hidden' }}>
+                    <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 50 }}>
+                        {/* HEADER INFO */}
+                        <Text style={{ color: '#FFF', fontSize: 20, fontFamily: 'Poppins_600SemiBold', marginBottom: 4 }}>{videoData.title}</Text>
+                        <Text style={{ color: '#9CA3AF', fontSize: 14, fontFamily: 'Poppins_400Regular', marginBottom: 24 }}>{videoData.category} • {videoData.duration}</Text>
+
+                        {/* TRANSCRIPT HEADER & LANG SELECTOR */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                            <Text style={{ color: '#E5E7EB', fontSize: 16, fontFamily: 'Poppins_600SemiBold' }}>Transcript</Text>
+
+                            <TouchableOpacity
+                                style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#374151', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 }}
+                                onPress={() => { setSearchLang(''); setShowLangPicker(true); }}
+                            >
+                                <MaterialCommunityIcons name="translate" size={16} color="#A5B4FC" style={{ marginRight: 6 }} />
+                                <Text style={{ color: '#E5E7EB', fontSize: 13, fontFamily: 'Poppins_500Medium' }}>{language}</Text>
+                                <Feather name="chevron-down" size={14} color="#9CA3AF" style={{ marginLeft: 4 }} />
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* TRANSCRIPT TEXT */}
+                        {isTranslating ? (
+                            <View style={{ padding: 40, alignItems: 'center' }}>
+                                <ActivityIndicator size="small" color="#A5B4FC" />
+                                <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 10, fontFamily: 'Poppins_400Regular' }}>Translating with AI...</Text>
+                            </View>
+                        ) : (
+                            <View style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 16, padding: 16 }}>
+                                <Text style={{ color: '#D1D5DB', fontSize: 14, fontFamily: 'Poppins_400Regular', lineHeight: 24 }}>
+                                    {transcript}
+                                </Text>
+                            </View>
+                        )}
+                    </ScrollView>
+                </View>
+
+                {/* LANGUAGE PICKER MODAL */}
+                <Modal visible={showLangPicker} transparent animationType="fade">
+                    <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 20 }}>
+                        <View style={{ backgroundColor: '#1F2937', borderRadius: 20, maxHeight: '70%', overflow: 'hidden' }}>
+                            <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: '#374151', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <Text style={{ color: '#FFF', fontSize: 16, fontFamily: 'Poppins_600SemiBold' }}>Select Language</Text>
+                                <TouchableOpacity onPress={() => setShowLangPicker(false)}>
+                                    <Feather name="x" size={20} color="#9CA3AF" />
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={{ padding: 12 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#374151', borderRadius: 10, paddingHorizontal: 10 }}>
+                                    <Feather name="search" size={16} color="#9CA3AF" />
+                                    <TextInput
+                                        style={{ flex: 1, padding: 10, color: '#FFF', fontFamily: 'Poppins_400Regular' }}
+                                        placeholder="Search language..."
+                                        placeholderTextColor="#6B7280"
+                                        value={searchLang}
+                                        onChangeText={setSearchLang}
+                                    />
+                                </View>
+                            </View>
+
+                            <ScrollView contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 12 }}>
+                                {filteredLanguages.map(lang => (
+                                    <TouchableOpacity
+                                        key={lang}
+                                        style={{
+                                            paddingVertical: 14,
+                                            paddingHorizontal: 16,
+                                            borderBottomWidth: 1,
+                                            borderBottomColor: '#374151',
+                                            flexDirection: 'row',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center'
+                                        }}
+                                        onPress={() => handleTranslate(lang)}
+                                    >
+                                        <Text style={{ color: lang === language ? '#A5B4FC' : '#D1D5DB', fontFamily: 'Poppins_400Regular', fontSize: 15 }}>{lang}</Text>
+                                        {lang === language && <Feather name="check" size={16} color="#A5B4FC" />}
+                                    </TouchableOpacity>
+                                ))}
+                                {filteredLanguages.length === 0 && (
+                                    <Text style={{ color: '#6B7280', textAlign: 'center', marginTop: 20, paddingBottom: 20 }}>No languages found</Text>
+                                )}
+                            </ScrollView>
+                        </View>
+                    </View>
+                </Modal>
             </View>
         </Modal>
     );
@@ -51,10 +197,132 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
 
 import API_URL from "../config";
 
+// --- ASK AI CHAT MODAL ---
+function AskAIChatModal({ visible, courseData, onClose }) {
+    const [question, setQuestion] = useState('');
+    const [messages, setMessages] = useState([]); // {role: 'user'|'ai', content: ''}
+    const [loading, setLoading] = useState(false);
+
+    const handleSend = async () => {
+        if (!question.trim()) return;
+
+        const userMsg = { role: 'user', content: question };
+        setMessages(prev => [...prev, userMsg]);
+        setQuestion('');
+        setLoading(true);
+
+        try {
+            const response = await fetch(`${API_URL}/api/v1/ai/ask`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    course_id: courseData.id,
+                    question: userMsg.content
+                })
+            });
+            const data = await response.json();
+            console.log(data);
+
+            const aiMsg = { role: 'ai', content: data.answer || "Sorry, I couldn't generate an answer." };
+            setMessages(prev => [...prev, aiMsg]);
+        } catch (error) {
+            const errorMsg = { role: 'ai', content: "Error connecting to AI. Please try again." };
+            setMessages(prev => [...prev, errorMsg]);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    if (!visible || !courseData) return null;
+
+    return (
+        <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+            <KeyboardAvoidingView
+                behavior={Platform.OS === "ios" ? "padding" : "height"}
+                style={{ flex: 1, backgroundColor: '#FFF' }}
+            >
+                {/* HEADER */}
+                <View style={{ padding: 20, borderBottomWidth: 1, borderBottomColor: '#F3F4F6', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <View>
+                        <Text style={{ fontSize: 18, fontFamily: 'Poppins_700Bold', color: '#111827' }}>Ask AI Assistant</Text>
+                        <Text style={{ fontSize: 12, color: '#6B7280', fontFamily: 'Poppins_400Regular' }}>Context: {courseData.title.substring(0, 30)}...</Text>
+                    </View>
+                    <TouchableOpacity onPress={onClose} style={{ padding: 5 }}>
+                        <Feather name="x" size={24} color="#6B7280" />
+                    </TouchableOpacity>
+                </View>
+
+                {/* MESSAGES */}
+                <ScrollView
+                    style={{ flex: 1, padding: 20 }}
+                    contentContainerStyle={{ paddingBottom: 20 }}
+                    ref={ref => ref?.scrollToEnd({ animated: true })}
+                >
+                    {messages.length === 0 && (
+                        <View style={{ alignItems: 'center', marginTop: 50, opacity: 0.7 }}>
+                            <MaterialCommunityIcons name="robot-outline" size={60} color="#E5E7EB" />
+                            <Text style={{ marginTop: 15, color: '#9CA3AF', fontFamily: 'Poppins_500Medium', textAlign: 'center' }}>
+                                Ask me anything about this course!{"\n"}I've watched the video so you don't have to.
+                            </Text>
+                        </View>
+                    )}
+
+                    {messages.map((msg, idx) => (
+                        <View key={idx} style={{
+                            alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                            backgroundColor: msg.role === 'user' ? '#7C3AED' : '#F3F4F6',
+                            padding: 12,
+                            borderRadius: 16,
+                            borderBottomRightRadius: msg.role === 'user' ? 2 : 16,
+                            borderBottomLeftRadius: msg.role === 'ai' ? 2 : 16,
+                            marginBottom: 10,
+                            maxWidth: '80%'
+                        }}>
+                            <Text style={{
+                                color: msg.role === 'user' ? '#FFF' : '#374151',
+                                fontFamily: 'Poppins_400Regular',
+                                lineHeight: 20
+                            }}>
+                                {msg.content}
+                            </Text>
+                        </View>
+                    ))}
+                    {loading && (
+                        <View style={{ alignSelf: 'flex-start', padding: 12, backgroundColor: '#F3F4F6', borderRadius: 16, borderBottomLeftRadius: 2 }}>
+                            <ActivityIndicator size="small" color="#6B7280" />
+                        </View>
+                    )}
+                </ScrollView>
+
+                {/* INPUT */}
+                <View style={{ padding: 15, borderTopWidth: 1, borderTopColor: '#F3F4F6', backgroundColor: '#FFF' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', borderRadius: 25, paddingHorizontal: 15, borderWidth: 1, borderColor: '#E5E7EB' }}>
+                        <TextInput
+                            style={{ flex: 1, height: 50, fontFamily: 'Poppins_400Regular' }}
+                            placeholder="Type your question..."
+                            value={question}
+                            onChangeText={setQuestion}
+                            onSubmitEditing={handleSend}
+                        />
+                        <TouchableOpacity
+                            onPress={handleSend}
+                            disabled={!question.trim() || loading}
+                            style={{ padding: 8, backgroundColor: question.trim() ? '#7C3AED' : '#E5E7EB', borderRadius: 20 }}
+                        >
+                            <Feather name="arrow-up" size={20} color={question.trim() ? "#FFF" : "#9CA3AF"} />
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </KeyboardAvoidingView>
+        </Modal>
+    );
+}
+
 const AllCourses = () => {
     const [search, setSearch] = useState("");
     const [selectedCat, setSelectedCat] = useState("All");
     const [modalVisible, setModalVisible] = useState(false);
+    const [chatVisible, setChatVisible] = useState(false); // [NEW] Chat Modal State
     const [currentVideo, setCurrentVideo] = useState(null);
     const [courses, setCourses] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -72,7 +340,7 @@ const AllCourses = () => {
     const fetchBuckets = async () => {
         setLoadingBuckets(true);
         try {
-            const response = await fetch(`${API_URL}/course-buckets`);
+            const response = await fetch(`${API_URL}/api/v1/content/buckets/all`);
             const data = await response.json();
             setCourseBuckets(data);
         } catch (error) {
@@ -84,7 +352,15 @@ const AllCourses = () => {
 
     const fetchCourses = async () => {
         try {
-            const response = await fetch(`${API_URL}/content`);
+            // Get auth token for level-based filtering
+            const token = await AsyncStorage.getItem('userToken');
+
+            const headers = {};
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+
+            const response = await fetch(`${API_URL}/api/v1/content`, { headers });
             const data = await response.json();
             // Map backend data to UI model
             const mappedCourses = data.map(item => {
@@ -101,7 +377,8 @@ const AllCourses = () => {
                     bg: bucket?.color ? `${bucket.color}15` : "#FFF7ED", // Light version of bucket color
                     videoUrl: item.videoUrl,
                     description: item.description,
-                    bucket: item.bucket
+                    bucket: item.bucket,
+                    transcript: item.transcript || "No transcript available for this video."
                 };
             });
             setCourses(mappedCourses);
@@ -136,6 +413,11 @@ const AllCourses = () => {
     const playVideo = (course) => {
         setCurrentVideo(course);
         setModalVisible(true);
+    };
+
+    const openChat = (course) => {
+        setCurrentVideo(course); // Set context course
+        setChatVisible(true);
     };
 
     return (
@@ -252,7 +534,22 @@ const AllCourses = () => {
                                     <Text style={styles.ratingText}>{course.rating}</Text>
                                 </View>
                             </View>
-                            <Feather name="play-circle" size={24} color="#F59E0B" />
+
+                            <View style={{ alignItems: 'flex-end', gap: 10 }}>
+                                <Feather name="play-circle" size={24} color="#F59E0B" />
+
+                                {/* ASK AI BUTTON */}
+                                <TouchableOpacity
+                                    onPress={(e) => {
+                                        e.stopPropagation(); // Prevent opening video
+                                        openChat(course);
+                                    }}
+                                    style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#EEF2FF', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: '#C7D2FE' }}
+                                >
+                                    <MaterialCommunityIcons name="robot" size={12} color="#4F46E5" />
+                                    <Text style={{ fontSize: 10, fontFamily: 'Poppins_600SemiBold', color: '#4F46E5', marginLeft: 4 }}>Ask AI</Text>
+                                </TouchableOpacity>
+                            </View>
                         </TouchableOpacity>
                     ))
                 )}
@@ -263,13 +560,56 @@ const AllCourses = () => {
                 videoData={currentVideo}
                 onClose={() => setModalVisible(false)}
             />
+
+            {/* ASK AI MODAL */}
+            <AskAIChatModal
+                visible={chatVisible}
+                courseData={currentVideo}
+                onClose={() => setChatVisible(false)}
+            />
+
         </View>
     );
 };
 
-export default function Courses() {
+export default function Courses({ userEmail = "user" }) {
     const insets = useSafeAreaInsets();
     const [activeTab, setActiveTab] = useState('path'); // 'path' or 'quizzes'
+    const [learningPathTab, setLearningPathTab] = useState('self_learning'); // 'self_learning' or 'career_progression'
+    const [selfLearningStatus, setSelfLearningStatus] = useState({
+        self_learning_completed: true,
+        career_path_unlocked: true,
+        self_learning_progress: 100,
+        completed_courses: 0,
+        total_courses: 0
+    });
+    const [loadingStatus, setLoadingStatus] = useState(true);
+
+    // Fetch self-learning status on mount
+    React.useEffect(() => {
+        fetchSelfLearningStatus();
+    }, []);
+
+    const fetchSelfLearningStatus = async () => {
+        try {
+            setLoadingStatus(true);
+            const response = await fetch(`${API_URL}/api/v1/users/${userEmail}/self-learning-status`);
+            const data = await response.json();
+            setSelfLearningStatus(data);
+        } catch (error) {
+            console.error("Failed to fetch self-learning status:", error);
+        } finally {
+            setLoadingStatus(false);
+        }
+    };
+
+    const handlePathTabChange = (tab) => {
+        // If career progression is locked, show message
+        if (tab === 'career_progression' && !selfLearningStatus.career_path_unlocked) {
+            return; // Can't switch to locked tab
+        }
+        setLearningPathTab(tab);
+    };
 
     return (
         <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -279,7 +619,9 @@ export default function Courses() {
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                     <View>
                         <Text style={styles.pageTitle}>My Learning Path</Text>
-                        <Text style={styles.subTitle}>Unit 2: Espresso Mastery</Text>
+                        <Text style={styles.subTitle}>
+                            {learningPathTab === 'self_learning' ? '📚 Self Learning Journey' : '🚀 Career Progression'}
+                        </Text>
                     </View>
                     <View style={styles.xpContainer}>
                         <MaterialCommunityIcons name="lightning-bolt" size={20} color="#F59E0B" />
@@ -314,9 +656,101 @@ export default function Courses() {
                 </View>
             </View>
 
+            {/* LEARNING PATH SUB-TABS (Only visible when Path tab is active) */}
+            {activeTab === 'path' && (
+                <View style={styles.learningPathTabsContainer}>
+                    {/* Self Learning Tab */}
+                    <TouchableOpacity
+                        style={[
+                            styles.learningPathTab,
+                            learningPathTab === 'self_learning' && styles.learningPathTabActive,
+                            { borderColor: '#10B981' }
+                        ]}
+                        onPress={() => handlePathTabChange('self_learning')}
+                    >
+                        <MaterialCommunityIcons
+                            name="school"
+                            size={18}
+                            color={learningPathTab === 'self_learning' ? '#FFF' : '#10B981'}
+                        />
+                        <Text style={[
+                            styles.learningPathTabText,
+                            learningPathTab === 'self_learning' && styles.learningPathTabTextActive
+                        ]}>Self Learning</Text>
+                        {/* Progress Badge */}
+                        {selfLearningStatus.total_courses > 0 && (
+                            <View style={[styles.progressBadge, { backgroundColor: learningPathTab === 'self_learning' ? 'rgba(255,255,255,0.3)' : '#D1FAE5' }]}>
+                                <Text style={[styles.progressBadgeText, { color: learningPathTab === 'self_learning' ? '#FFF' : '#059669' }]}>
+                                    {selfLearningStatus.completed_courses}/{selfLearningStatus.total_courses}
+                                </Text>
+                            </View>
+                        )}
+                    </TouchableOpacity>
+
+                    {/* Career Progression Tab */}
+                    <TouchableOpacity
+                        style={[
+                            styles.learningPathTab,
+                            learningPathTab === 'career_progression' && styles.learningPathTabActiveCareer,
+                            !selfLearningStatus.career_path_unlocked && styles.learningPathTabLocked
+                        ]}
+                        onPress={() => handlePathTabChange('career_progression')}
+                        disabled={!selfLearningStatus.career_path_unlocked}
+                    >
+                        {/* Lock Icon if locked */}
+                        {!selfLearningStatus.career_path_unlocked ? (
+                            <MaterialCommunityIcons name="lock" size={18} color="#9CA3AF" />
+                        ) : (
+                            <MaterialCommunityIcons
+                                name="trending-up"
+                                size={18}
+                                color={learningPathTab === 'career_progression' ? '#FFF' : '#F59E0B'}
+                            />
+                        )}
+                        <Text style={[
+                            styles.learningPathTabText,
+                            learningPathTab === 'career_progression' && selfLearningStatus.career_path_unlocked && styles.learningPathTabTextActive,
+                            !selfLearningStatus.career_path_unlocked && styles.learningPathTabTextLocked
+                        ]}>Career Progression</Text>
+                    </TouchableOpacity>
+                </View>
+            )}
+
+            {/* LOCKED OVERLAY MESSAGE (when trying to access locked career path) */}
+            {activeTab === 'path' && learningPathTab === 'career_progression' && !selfLearningStatus.career_path_unlocked && (
+                <View style={styles.lockedOverlay}>
+                    <View style={styles.lockedCard}>
+                        <MaterialCommunityIcons name="lock-outline" size={60} color="#9CA3AF" />
+                        <Text style={styles.lockedTitle}>Career Progression Locked</Text>
+                        <Text style={styles.lockedMessage}>
+                            Complete Self Learning to unlock Career Progression
+                        </Text>
+                        <View style={styles.progressContainer}>
+                            <View style={styles.progressBar}>
+                                <View style={[styles.progressFill, { width: `${selfLearningStatus.self_learning_progress || 0}%` }]} />
+                            </View>
+                            <Text style={styles.progressText}>{Math.round(selfLearningStatus.self_learning_progress || 0)}% Complete</Text>
+                        </View>
+                        <TouchableOpacity
+                            style={styles.goToSelfLearningBtn}
+                            onPress={() => setLearningPathTab('self_learning')}
+                        >
+                            <MaterialCommunityIcons name="school" size={18} color="#FFF" />
+                            <Text style={styles.goToSelfLearningBtnText}>Go to Self Learning</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            )}
+
             {/* MAIN CONTENT */}
             <View style={{ flex: 1 }}>
-                {activeTab === 'path' && <CoursePath />}
+                {activeTab === 'path' && (
+                    <CoursePath
+                        userEmail={userEmail}
+                        learningPathType={learningPathTab}
+                        onComplete={fetchSelfLearningStatus}
+                    />
+                )}
                 {activeTab === 'quizzes' && <QuizSection />}
                 {activeTab === 'courses' && <AllCourses />}
             </View>
@@ -493,5 +927,134 @@ const styles = StyleSheet.create({
         padding: 10,
         backgroundColor: 'rgba(0,0,0,0.5)',
         borderRadius: 20,
+    },
+
+    // DUAL LEARNING PATHS STYLES
+    learningPathTabsContainer: {
+        flexDirection: 'row',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        backgroundColor: '#FFF',
+        borderBottomWidth: 1,
+        borderBottomColor: '#F3F4F6',
+        gap: 10,
+    },
+    learningPathTab: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 12,
+        paddingHorizontal: 8,
+        borderRadius: 12,
+        backgroundColor: '#F9FAFB',
+        borderWidth: 1.5,
+        borderColor: '#E5E7EB',
+        gap: 6,
+    },
+    learningPathTabActive: {
+        backgroundColor: '#10B981',
+        borderColor: '#10B981',
+    },
+    learningPathTabActiveCareer: {
+        backgroundColor: '#F59E0B',
+        borderColor: '#F59E0B',
+    },
+    learningPathTabLocked: {
+        backgroundColor: '#F3F4F6',
+        borderColor: '#E5E7EB',
+        opacity: 0.7,
+    },
+    learningPathTabText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#374151',
+    },
+    learningPathTabTextActive: {
+        color: '#FFF',
+    },
+    learningPathTabTextLocked: {
+        color: '#9CA3AF',
+    },
+    progressBadge: {
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 10,
+    },
+    progressBadgeText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_700Bold',
+    },
+
+    // Locked Overlay
+    lockedOverlay: {
+        flex: 1,
+        backgroundColor: '#F9FAFB',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20,
+    },
+    lockedCard: {
+        backgroundColor: '#FFF',
+        borderRadius: 24,
+        padding: 32,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 20,
+        elevation: 5,
+        width: '100%',
+        maxWidth: 340,
+    },
+    lockedTitle: {
+        fontSize: 20,
+        fontFamily: 'Poppins_700Bold',
+        color: '#111827',
+        marginTop: 16,
+        marginBottom: 8,
+    },
+    lockedMessage: {
+        fontSize: 14,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        textAlign: 'center',
+        marginBottom: 24,
+    },
+    progressContainer: {
+        width: '100%',
+        marginBottom: 24,
+    },
+    progressBar: {
+        height: 8,
+        backgroundColor: '#E5E7EB',
+        borderRadius: 4,
+        overflow: 'hidden',
+    },
+    progressFill: {
+        height: '100%',
+        backgroundColor: '#10B981',
+        borderRadius: 4,
+    },
+    progressText: {
+        fontSize: 12,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#059669',
+        textAlign: 'center',
+        marginTop: 8,
+    },
+    goToSelfLearningBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#10B981',
+        paddingVertical: 14,
+        paddingHorizontal: 24,
+        borderRadius: 12,
+        gap: 8,
+    },
+    goToSelfLearningBtnText: {
+        fontSize: 15,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF',
     },
 });

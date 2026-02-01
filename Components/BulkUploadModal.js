@@ -21,16 +21,17 @@ const { width } = Dimensions.get('window');
 
 export default function BulkUploadModal({ visible, onClose, onUploadComplete }) {
     const [files, setFiles] = useState([]);
-    const [isPathNode, setIsPathNode] = useState(false);
+    const [isPathNode, setIsPathNode] = useState(true); // Default to true for bulk uploads to learning path
+    const [isSelfLearning, setIsSelfLearning] = useState(false); // NEW: Self Learning toggle
     const [uploading, setUploading] = useState(false);
     const [progress, setProgress] = useState(0);
 
-    // [NEW] Bucket state
+    // Bucket state
     const [courseBuckets, setCourseBuckets] = useState([]);
     const [selectedBucket, setSelectedBucket] = useState(null);
     const [loadingBuckets, setLoadingBuckets] = useState(false);
 
-    // [NEW] Fetch buckets when modal opens
+    // Fetch buckets when modal opens
     useEffect(() => {
         if (visible) {
             fetchBuckets();
@@ -40,7 +41,7 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
     const fetchBuckets = async () => {
         setLoadingBuckets(true);
         try {
-            const res = await fetch(`${API_URL}/course-buckets`);
+            const res = await fetch(`${API_URL}/api/v1/content/buckets/all`);
             const data = await res.json();
             setCourseBuckets(data);
         } catch (e) { console.error('Error fetching buckets:', e); }
@@ -83,49 +84,129 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
 
     const handleUpload = async () => {
         if (files.length === 0) return;
+        if (!selectedBucket) {
+            Alert.alert("Required", "Please select a Course Bucket (Category).");
+            return;
+        }
 
         setUploading(true);
         let completed = 0;
+        let failed = 0;
+        const failedFiles = [];
 
-        for (const file of files) {
-            try {
-                const formData = new FormData();
-                formData.append('title', file.name.replace(/\.[^/.]+$/, "")); // Remove extension
-                formData.append('description', "Bulk Uploaded Content");
-                formData.append('authorRole', "Store Manager");
-                formData.append('timestamp', new Date().toISOString());
-                formData.append('isPathNode', String(isPathNode));
-                if (selectedBucket) {
-                    formData.append('bucket', selectedBucket); // [NEW] Add bucket if selected
+        // Determine learning path type based on toggle
+        const learningPathType = isSelfLearning ? 'self_learning' : 'career_progression';
+
+        // Helper function to delay between uploads
+        const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+        // Get the selected bucket name (not just ID)
+        const selectedBucketData = courseBuckets.find(b => b.id === selectedBucket);
+        const bucketName = selectedBucketData?.name || "General";
+
+        // Helper function to upload a single file with retries
+        const uploadWithRetry = async (file, maxRetries = 3) => {
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    const formData = new FormData();
+                    formData.append('title', file.name.replace(/\.[^/.]+$/, "")); // Remove extension
+                    formData.append('description', "Bulk Uploaded Content");
+                    formData.append('category', bucketName); // Use bucket NAME, not ID
+                    formData.append('is_path_node', String(isPathNode));
+                    formData.append('learning_path_type', learningPathType);
+                    if (selectedBucket) {
+                        formData.append('bucket', selectedBucket); // Use bucket ID here
+                    }
+                    formData.append('file', {
+                        uri: file.uri,
+                        name: file.name,
+                        type: file.mimeType || 'video/mp4'
+                    });
+
+                    // Use timeout controller for large files (5 minutes timeout per file)
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+
+                    console.log(`[Upload] Attempt ${attempt}/${maxRetries} for ${file.name} to bucket: ${bucketName}`);
+
+                    // Use universal upload endpoint
+                    const response = await fetch(`${API_URL}/api/v1/content/`, {
+                        method: 'POST',
+                        body: formData,
+                        signal: controller.signal,
+                    });
+
+                    clearTimeout(timeoutId);
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(`Server error: ${response.status} - ${errorText}`);
+                    }
+
+                    console.log(`[Upload] Success: ${file.name}`);
+                    return true; // Success
+
+                } catch (error) {
+                    console.error(`[Upload] Attempt ${attempt} failed for ${file.name}:`, error.message);
+
+                    if (attempt < maxRetries) {
+                        // Wait before retrying (exponential backoff: 2s, 4s, 8s...)
+                        const waitTime = Math.pow(2, attempt) * 1000;
+                        console.log(`[Upload] Retrying in ${waitTime / 1000}s...`);
+                        await delay(waitTime);
+                    } else {
+                        // All retries failed
+                        return false;
+                    }
                 }
-                formData.append('file', {
-                    uri: file.uri,
-                    name: file.name,
-                    type: file.mimeType || 'video/mp4'
-                });
-
-                await fetch(`${API_URL}/upload`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'multipart/form-data' },
-                    body: formData
-                });
-
-                completed++;
-                setProgress(completed / files.length);
-
-            } catch (error) {
-                console.error("Upload failed for", file.name, error);
-                Alert.alert("Upload Error", `Failed to upload ${file.name}`);
             }
+            return false;
+        };
+
+        // Upload files sequentially with delays
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+
+            // Add a small delay between consecutive uploads to prevent overwhelming the server
+            if (i > 0) {
+                await delay(1000); // 1 second delay between files
+            }
+
+            const success = await uploadWithRetry(file);
+
+            if (success) {
+                completed++;
+            } else {
+                failed++;
+                failedFiles.push(file.name);
+            }
+
+            setProgress((completed + failed) / files.length);
         }
+
+        // Show appropriate message based on results
+        const uploadedPathName = isSelfLearning ? 'Self Learning' : 'Career Progression';
 
         setUploading(false);
         setFiles([]);
         setProgress(0);
-        setSelectedBucket(null); // [NEW] Reset bucket selection
-        onUploadComplete();
-        Alert.alert("Success", "All files uploaded!");
-        onClose();
+        setSelectedBucket(null);
+        setIsSelfLearning(false);
+        setIsPathNode(true);
+
+        if (failed === 0) {
+            Alert.alert("Success! 🎉", `All ${completed} files uploaded to ${uploadedPathName} path!`);
+            onUploadComplete();
+            onClose();
+        } else if (completed > 0) {
+            Alert.alert(
+                "Partial Success",
+                `${completed} files uploaded successfully.\n${failed} files failed:\n${failedFiles.join('\n')}`,
+                [{ text: "OK", onPress: () => { onUploadComplete(); onClose(); } }]
+            );
+        } else {
+            Alert.alert("Upload Failed", `All uploads failed. Please check your network connection and try again.`);
+        }
     };
 
     return (
@@ -151,40 +232,46 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                         <Text style={styles.addBtnText}>Select Videos</Text>
                     </TouchableOpacity>
 
-                    {/* [NEW] BUCKET SELECTOR */}
                     <Text style={styles.sectionLabel}>Course Bucket (Optional)</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.bucketScroll}>
-                        <TouchableOpacity
-                            onPress={() => setSelectedBucket(null)}
-                            style={[
-                                styles.bucketChip,
-                                !selectedBucket && styles.bucketChipSelected
-                            ]}
+                    <View style={{ height: 50 }}>
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            style={styles.bucketScroll}
+                            contentContainerStyle={{ alignItems: 'center', paddingRight: 20 }}
                         >
-                            <MaterialCommunityIcons name="close-circle" size={16} color={!selectedBucket ? '#FFF' : '#6B7280'} />
-                            <Text style={[styles.bucketChipText, !selectedBucket && { color: '#FFF' }]}>None</Text>
-                        </TouchableOpacity>
-                        {courseBuckets.map((bucket) => (
                             <TouchableOpacity
-                                key={bucket.id}
-                                onPress={() => setSelectedBucket(bucket.name)}
+                                onPress={() => setSelectedBucket(null)}
                                 style={[
                                     styles.bucketChip,
-                                    selectedBucket === bucket.name && { backgroundColor: bucket.color, borderColor: bucket.color }
+                                    !selectedBucket && styles.bucketChipSelected
                                 ]}
                             >
-                                <MaterialCommunityIcons
-                                    name={bucket.icon || 'folder'}
-                                    size={16}
-                                    color={selectedBucket === bucket.name ? '#FFF' : bucket.color}
-                                />
-                                <Text style={[
-                                    styles.bucketChipText,
-                                    selectedBucket === bucket.name && { color: '#FFF' }
-                                ]}>{bucket.name}</Text>
+                                <MaterialCommunityIcons name="close-circle" size={16} color={!selectedBucket ? '#FFF' : '#6B7280'} />
+                                <Text style={[styles.bucketChipText, !selectedBucket && { color: '#FFF' }]}>None</Text>
                             </TouchableOpacity>
-                        ))}
-                    </ScrollView>
+                            {courseBuckets.map((bucket) => (
+                                <TouchableOpacity
+                                    key={bucket.id}
+                                    onPress={() => setSelectedBucket(selectedBucket === bucket.id ? null : bucket.id)}
+                                    style={[
+                                        styles.bucketChip,
+                                        selectedBucket === bucket.id && { backgroundColor: bucket.color, borderColor: bucket.color }
+                                    ]}
+                                >
+                                    <MaterialCommunityIcons
+                                        name={bucket.icon || 'folder'}
+                                        size={16}
+                                        color={selectedBucket === bucket.id ? '#FFF' : bucket.color}
+                                    />
+                                    <Text style={[
+                                        styles.bucketChipText,
+                                        selectedBucket === bucket.id && { color: '#FFF' }
+                                    ]}>{bucket.name}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </View>
 
                     {/* PATH TOGGLE */}
                     <View style={styles.optionRow}>
@@ -199,6 +286,48 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                         />
                     </View>
 
+                    {/* SELF LEARNING TOGGLE - NEW - Only visible if Path is enabled */}
+                    {isPathNode && (
+                        <View style={[styles.optionRow, { borderColor: isSelfLearning ? '#10B981' : '#E5E7EB', backgroundColor: isSelfLearning ? '#F0FDF4' : '#FFF' }]}>
+                            <View style={{ flex: 1 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                    <MaterialCommunityIcons
+                                        name="school"
+                                        size={18}
+                                        color={isSelfLearning ? '#10B981' : '#6B7280'}
+                                        style={{ marginRight: 6 }}
+                                    />
+                                    <Text style={[styles.optionTitle, isSelfLearning && { color: '#047857' }]}>Self Learning Path</Text>
+                                </View>
+                                <Text style={styles.optionDesc}>
+                                    {isSelfLearning
+                                        ? "Courses for mandatory onboarding (Basics, SOPs, Compliance)"
+                                        : "Enable to add to Self Learning path instead of Career Progression"}
+                                </Text>
+                            </View>
+                            <Switch
+                                value={isSelfLearning}
+                                onValueChange={setIsSelfLearning}
+                                trackColor={{ false: "#E5E7EB", true: "#10B981" }}
+                                thumbColor={isSelfLearning ? "#059669" : "#f4f3f4"}
+                            />
+                        </View>
+                    )}
+
+                    {/* PATH TYPE INDICATOR */}
+                    {isPathNode && (
+                        <View style={[styles.pathIndicator, { backgroundColor: isSelfLearning ? '#ECFDF5' : '#FFF7ED', borderColor: isSelfLearning ? '#A7F3D0' : '#FED7AA' }]}>
+                            <MaterialCommunityIcons
+                                name={isSelfLearning ? "book-education" : "trending-up"}
+                                size={20}
+                                color={isSelfLearning ? '#10B981' : '#F59E0B'}
+                            />
+                            <Text style={[styles.pathIndicatorText, { color: isSelfLearning ? '#047857' : '#D97706' }]}>
+                                {isSelfLearning ? '📚 Self Learning Path' : '🚀 Career Progression Path'}
+                            </Text>
+                        </View>
+                    )}
+
                     {/* LIST */}
                     <FlatList
                         data={files}
@@ -206,8 +335,8 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                         contentContainerStyle={{ paddingBottom: 100 }}
                         renderItem={({ item, index }) => (
                             <View style={styles.fileCard}>
-                                <View style={styles.orderBadge}>
-                                    <Text style={styles.orderText}>{index + 1}</Text>
+                                <View style={[styles.orderBadge, isSelfLearning && { backgroundColor: '#D1FAE5' }]}>
+                                    <Text style={[styles.orderText, isSelfLearning && { color: '#059669' }]}>{index + 1}</Text>
                                 </View>
                                 <View style={{ flex: 1, paddingHorizontal: 12 }}>
                                     <Text style={styles.fileName} numberOfLines={1}>{item.name}</Text>
@@ -241,16 +370,18 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                 <View style={styles.footer}>
                     {uploading ? (
                         <View style={styles.uploadingBox}>
-                            <ActivityIndicator color="#F59E0B" />
+                            <ActivityIndicator color={isSelfLearning ? "#10B981" : "#F59E0B"} />
                             <Text style={styles.uploadingText}>Uploading... {(progress * 100).toFixed(0)}%</Text>
                         </View>
                     ) : (
                         <TouchableOpacity
-                            style={[styles.uploadBtn, files.length === 0 && styles.disabledBtn]}
+                            style={[styles.uploadBtn, files.length === 0 && styles.disabledBtn, isSelfLearning && { backgroundColor: '#10B981' }]}
                             onPress={handleUpload}
                             disabled={files.length === 0}
                         >
-                            <Text style={styles.uploadBtnText}>Start Bulk Upload ({files.length})</Text>
+                            <Text style={styles.uploadBtnText}>
+                                {isSelfLearning ? '📚 Upload to Self Learning' : '🚀 Upload to Career Path'} ({files.length})
+                            </Text>
                         </TouchableOpacity>
                     )}
                 </View>
@@ -270,9 +401,25 @@ const styles = StyleSheet.create({
     addBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF7ED', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#FED7AA', borderStyle: 'dashed', marginBottom: 20 },
     addBtnText: { marginLeft: 10, fontSize: 16, fontFamily: 'Poppins_600SemiBold', color: '#F59E0B' },
 
-    optionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#FFF', padding: 16, borderRadius: 16, marginBottom: 20, borderWidth: 1, borderColor: '#E5E7EB' },
+    optionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#FFF', padding: 16, borderRadius: 16, marginBottom: 12, borderWidth: 1, borderColor: '#E5E7EB' },
     optionTitle: { fontSize: 15, fontFamily: 'Poppins_600SemiBold', color: '#374151' },
     optionDesc: { fontSize: 11, fontFamily: 'Poppins_400Regular', color: '#9CA3AF', marginTop: 2 },
+
+    // Path Indicator
+    pathIndicator: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 10,
+        borderRadius: 12,
+        marginBottom: 16,
+        borderWidth: 1,
+    },
+    pathIndicatorText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        marginLeft: 8,
+    },
 
     fileCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 12, borderRadius: 12, marginBottom: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
     orderBadge: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
@@ -292,7 +439,7 @@ const styles = StyleSheet.create({
     uploadingBox: { flexDirection: 'row', alignItems: 'center', justifyContent: "center" },
     uploadingText: { marginLeft: 10, fontFamily: 'Poppins_600SemiBold', color: '#374151' },
 
-    // [NEW] Bucket styles
+    // Bucket styles
     sectionLabel: { fontSize: 13, fontFamily: 'Poppins_600SemiBold', color: '#374151', marginBottom: 8 },
     bucketScroll: { flexDirection: 'row', marginBottom: 16 },
     bucketChip: {

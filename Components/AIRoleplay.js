@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInUp, FadeInRight, Layout } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 import { Audio } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 // TODO: Move this to .env in production
 import API_URL from '../config';
@@ -147,6 +147,14 @@ export default function AIRoleplay({ onClose, scenario }) {
         }
     };
 
+    // Helper to map scenario ID to backend context
+    const getContext = () => {
+        if (!scenario) return 'cold_waffle';
+        if (scenario.id === 'confused') return 'payment_trouble';
+        if (scenario.id === 'happy') return 'positive_feedback';
+        return 'cold_waffle'; // Default/Angry
+    };
+
     const handleSendWithAudio = async (uri) => {
         setIsProcessing(true);
         // Optimistic UI for voice
@@ -162,9 +170,9 @@ export default function AIRoleplay({ onClose, scenario }) {
                 name: 'upload.m4a'
             });
             formData.append('history', JSON.stringify(chat));
-            if (scenario) formData.append('scenario', scenario.id); // Future use
+            formData.append('context', getContext()); // Pass Context
 
-            const response = await fetch(`${API_URL}/ai/roleplay/voice`, {
+            const response = await fetch(`${API_URL}/api/v1/roleplay/voice`, {
                 method: 'POST',
                 body: formData,
                 headers: {
@@ -231,12 +239,13 @@ export default function AIRoleplay({ onClose, scenario }) {
 
         try {
             // SEND TO BACKEND
-            const response = await fetch(`${API_URL}/ai/roleplay`, {
+            const response = await fetch(`${API_URL}/api/v1/roleplay`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     user_text: newMsg.text,
-                    history: chat
+                    history: chat,
+                    context: getContext() // Pass Context
                 })
             });
 
@@ -354,7 +363,7 @@ export default function AIRoleplay({ onClose, scenario }) {
             if (!scenario) return;
             setIsProcessing(true);
             try {
-                const response = await fetch(`${API_URL}/ai/roleplay/start`, {
+                const response = await fetch(`${API_URL}/api/v1/roleplay/start`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ scenario_id: scenario.id })

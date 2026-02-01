@@ -31,10 +31,13 @@ import InterviewModules from "./Screens/InterviewModules";
 import ModuleDetail from "./Screens/ModuleDetail";
 import Hierarchy from "./Screens/Hierarchy";
 import { LanguageProvider } from "./context/language.context";
-import Analytics from "./Screens/Analytics";
+import Analytics from "./Screens/AdvancedAnalytics"; // NEW: Comprehensive Analytics Module
 import LiveTrackingScreen from './Screens/LiveTrackingScreen';
 import TeamListScreen from './Screens/TeamListScreen';
 import AuditsScreen from './Screens/AuditsScreen';
+import Recommendations from './Screens/Recommendations';
+import MeetingRoom from './Screens/MeetingRoom';
+import CRMTaskScreen from './Screens/CRMTaskScreen';
 import DisclaimerModal from './Components/DisclaimerModal'; // Global disclaimer
 
 LogBox.ignoreAllLogs();
@@ -121,6 +124,9 @@ function App() {
               <Stack.Screen name="LiveTracking" component={LiveTrackingScreen} />
               <Stack.Screen name="TeamList" component={TeamListScreen} />
               <Stack.Screen name="Audits" component={AuditsScreen} />
+              <Stack.Screen name="Recommendations" component={Recommendations} />
+              <Stack.Screen name="MeetingRoom" component={MeetingRoom} />
+              <Stack.Screen name="CRMTask" component={CRMTaskScreen} />
             </Stack.Navigator>
           </NavigationContainer>
           {/* </NotificationProvider> */}

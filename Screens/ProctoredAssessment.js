@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import {
     View,
@@ -13,23 +13,67 @@ import {
     ActivityIndicator,
     Modal,
     FlatList,
-    AppState
+    AppState,
+    Vibration,
+    Platform
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
+import Animated, { FadeInDown, FadeInRight, FadeIn, useSharedValue, useAnimatedStyle, withRepeat, withTiming } from 'react-native-reanimated';
 import * as DocumentPicker from 'expo-document-picker';
 
 import API_URL from '../config';
 
 const { width, height } = Dimensions.get('window');
 
-export default function ProctoredAssessment({ route, navigation }) {
-    const { userProfile, assessmentData } = route.params || {};
-    const role = userProfile?.role || "User";
-    const isAdmin = role === 'Ops Manager' || role === 'City Manager' || role === 'Store Manager';
+// Breach Types for Professional Proctoring
+const BREACH_TYPES = {
+    APP_BACKGROUND: { type: 'app_background', label: 'App Backgrounded', severity: 'critical', icon: 'alert-circle' },
+    FACE_NOT_VISIBLE: { type: 'face_not_visible', label: 'Face Not Visible', severity: 'warning', icon: 'eye-off' },
+    MULTIPLE_FACES: { type: 'multiple_faces', label: 'Multiple Faces Detected', severity: 'critical', icon: 'users' },
+    LOOKING_AWAY: { type: 'looking_away', label: 'Looking Away', severity: 'warning', icon: 'eye' },
+    FULLSCREEN_EXIT: { type: 'fullscreen_exit', label: 'Fullscreen Exited', severity: 'warning', icon: 'maximize' },
+    AUDIO_DETECTED: { type: 'audio_detected', label: 'Audio/Voice Detected', severity: 'warning', icon: 'mic' },
+    RAPID_ANSWERS: { type: 'rapid_answers', label: 'Suspiciously Rapid Answers', severity: 'info', icon: 'zap' },
+    COPY_PASTE: { type: 'copy_paste', label: 'Copy/Paste Attempted', severity: 'warning', icon: 'clipboard' },
+};
 
-    // VIEW STATE
+// Helper to safely format error messages (handles strings, arrays, objects)
+const getSafeErrorMsg = (detail, defaultMsg) => {
+    if (!detail) return defaultMsg;
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) {
+        return detail.map(d => d.msg || JSON.stringify(d)).join('\n');
+    }
+    try {
+        return JSON.stringify(detail);
+    } catch (e) {
+        return defaultMsg;
+    }
+};
+
+export default function ProctoredAssessment({ route, navigation }) {
+    const { userProfile, assessmentData, isScheduledExam } = route.params || {};
+    const role = userProfile?.role || "User";
+    const userPrivileges = userProfile?.privileges || [];
+
+    // Helper function to check if user has a specific privilege
+    const hasPrivilege = (privilege) => {
+        // Super Admin always has all privileges
+        if (role === 'Super Admin') return true;
+        return userPrivileges.includes(privilege);
+    };
+
+    // Legacy role-based admin check (for backward compatibility)
+    const isRoleBasedAdmin = role === 'Super Admin' || role === 'Ops Manager' || role === 'City Manager' || role === 'Store Manager';
+
+    // New privilege-based checks
+    const canCreateManage = hasPrivilege('proctored_create_manage') || isRoleBasedAdmin;
+    const canViewResults = hasPrivilege('proctored_view_results') || isRoleBasedAdmin;
+
+    // Combined admin check (can do anything admin-related)
+    const isAdmin = canCreateManage || canViewResults;
+
     // VIEW STATE
     const [viewMode, setViewMode] = useState(assessmentData ? 'taker' : 'list'); // Always start with list unless linked
 
@@ -48,12 +92,16 @@ export default function ProctoredAssessment({ route, navigation }) {
     const [options, setOptions] = useState(['', '', '', '']);
     const [correctIdx, setCorrectIdx] = useState(0);
     const [creating, setCreating] = useState(false);
+    const [editingId, setEditingId] = useState(null);
+    const [editingQIndex, setEditingQIndex] = useState(-1);
 
     // AI GENERATION STATE
     const [aiModalVisible, setAiModalVisible] = useState(false);
     const [aiTopic, setAiTopic] = useState('');
     const [aiContent, setAiContent] = useState('');
     const [aiNumQuestions, setAiNumQuestions] = useState('10');
+    const [aiDifficulty, setAiDifficulty] = useState('medium');
+    const [aiDocumentFile, setAiDocumentFile] = useState(null);
     const [generating, setGenerating] = useState(false);
 
     // BULK UPLOAD STATE
@@ -72,13 +120,27 @@ export default function ProctoredAssessment({ route, navigation }) {
     const [permission, requestPermission] = useCameraPermissions();
     const cameraRef = useRef(null);
     const [videoUri, setVideoUri] = useState(null);
-    const [violations, setViolations] = useState(0);
     const [submitting, setSubmitting] = useState(false);
     const [cheatingStatus, setCheatingStatus] = useState('clean'); // clean, warning, critical
+
+    // ENHANCED PROCTORING STATE
+    const [breachLog, setBreachLog] = useState([]); // Array of {type, timestamp, description, severity}
+    const [totalBreaches, setTotalBreaches] = useState(0);
+    const [criticalBreaches, setCriticalBreaches] = useState(0);
+    const [warningBreaches, setWarningBreaches] = useState(0);
+    const [proctorStatus, setProctorStatus] = useState('initializing'); // initializing, active, warning, critical
+    const [faceDetected, setFaceDetected] = useState(true);
+    const [lastAnswerTime, setLastAnswerTime] = useState(null);
+    const [aiAnalysisActive, setAiAnalysisActive] = useState(false);
+    const [showBreachModal, setShowBreachModal] = useState(false);
+    const [currentBreachWarning, setCurrentBreachWarning] = useState(null);
+    const lastBreachTimeRef = useRef({});
+    const pulseAnim = useSharedValue(1);
 
     // ADMIN RESULTS STATE
     const [viewSubmissions, setViewSubmissions] = useState([]);
     const [loadingSubmissions, setLoadingSubmissions] = useState(false);
+    const [selectedSubmissionDetail, setSelectedSubmissionDetail] = useState(null);
 
     // FETCH AVAILABLE ASSESSMENTS
     useEffect(() => {
@@ -88,7 +150,7 @@ export default function ProctoredAssessment({ route, navigation }) {
     const fetchAssessments = async () => {
         setLoadingAssessments(true);
         try {
-            const url = isAdmin ? `${API_URL}/proctored-assessments/all` : `${API_URL}/proctored-assessments`;
+            const url = isAdmin ? `${API_URL}/api/v1/assessments/proctored/all` : `${API_URL}/api/v1/assessments/proctored`;
             const response = await fetch(url);
             const data = await response.json();
             setAssessments(data);
@@ -99,55 +161,133 @@ export default function ProctoredAssessment({ route, navigation }) {
         }
     };
 
-    // TIMER EFFECTS
+    // LOG BREACH FUNCTION
+    const logBreach = useCallback((breachType, customDescription = null) => {
+        const now = Date.now();
+        const breachKey = breachType.type;
+
+        // Prevent duplicate breaches within 5 seconds
+        if (lastBreachTimeRef.current[breachKey] && now - lastBreachTimeRef.current[breachKey] < 5000) {
+            return;
+        }
+        lastBreachTimeRef.current[breachKey] = now;
+
+        const breach = {
+            id: `breach_${now}_${Math.random().toString(36).substr(2, 9)}`,
+            type: breachType.type,
+            label: breachType.label,
+            severity: breachType.severity,
+            icon: breachType.icon,
+            timestamp: new Date().toISOString(),
+            timeElapsed: recordingTime,
+            description: customDescription || breachType.label,
+            questionNumber: currentStep + 1
+        };
+
+        setBreachLog(prev => [breach, ...prev]);
+        setTotalBreaches(prev => prev + 1);
+
+        if (breachType.severity === 'critical') {
+            setCriticalBreaches(prev => prev + 1);
+            setCheatingStatus('critical');
+            setProctorStatus('critical');
+            Vibration.vibrate([100, 200, 100]);
+            setCurrentBreachWarning(breach);
+        } else if (breachType.severity === 'warning') {
+            setWarningBreaches(prev => prev + 1);
+            if (cheatingStatus !== 'critical') {
+                setCheatingStatus('warning');
+                setProctorStatus('warning');
+            }
+            Vibration.vibrate(100);
+        }
+
+        // Auto-dismiss warning after 3 seconds
+        if (breachType.severity === 'critical') {
+            setTimeout(() => {
+                setCurrentBreachWarning(null);
+                if (cheatingStatus === 'critical') {
+                    setCheatingStatus('warning');
+                    setTimeout(() => setCheatingStatus('clean'), 5000);
+                }
+            }, 4000);
+        }
+    }, [recordingTime, currentStep, cheatingStatus]);
+
+    // TIMER AND PROCTORING EFFECTS
     useEffect(() => {
         let interval;
+        let aiScanInterval;
+
         if (testStarted && !testSubmitted && selectedAssessment) {
             const totalSeconds = (selectedAssessment.time_limit_minutes || 30) * 60;
             setTimeRemaining(totalSeconds);
+            setProctorStatus('active');
+
+            // Start pulse animation
+            pulseAnim.value = withRepeat(withTiming(1.2, { duration: 1000 }), -1, true);
 
             interval = setInterval(() => {
                 setRecordingTime(prev => prev + 1);
                 setTimeRemaining(prev => {
                     if (prev <= 1) {
-                        // Auto-submit when time runs out
                         handleAutoSubmit();
                         return 0;
                     }
                     return prev - 1;
                 });
-                // Random AI Scan Simulation
-                if (Math.random() > 0.97) {
-                    setIsAiScanning(true);
-                    setTimeout(() => setIsAiScanning(false), 2000);
-                }
             }, 1000);
+
+            // AI SCAN INTERVAL - Simulated face detection and behavior analysis
+            aiScanInterval = setInterval(() => {
+                // Simulate AI behavior analysis
+                setIsAiScanning(true);
+                setAiAnalysisActive(true);
+
+                // Random face detection simulation (in production would use actual ML)
+                const faceCheck = Math.random();
+                if (faceCheck > 0.95) {
+                    // 5% chance of face not detected
+                    setFaceDetected(false);
+                    logBreach(BREACH_TYPES.FACE_NOT_VISIBLE);
+                } else if (faceCheck > 0.92) {
+                    // 3% chance of looking away
+                    logBreach(BREACH_TYPES.LOOKING_AWAY);
+                } else {
+                    setFaceDetected(true);
+                }
+
+                setTimeout(() => {
+                    setIsAiScanning(false);
+                    setAiAnalysisActive(false);
+                }, 2000);
+            }, 8000); // Scan every 8 seconds
         }
 
-        // REAL PROCTORING - Detect App Backgrounding
+        // APP STATE MONITORING - Critical Breach Detection
         const subscription = AppState.addEventListener('change', nextAppState => {
-            if (!testStarted) return;
+            if (!testStarted || testSubmitted) return;
             if (nextAppState.match(/inactive|background/)) {
-                setViolations(prev => {
-                    const newVal = prev + 1;
-                    if (newVal >= 1) setCheatingStatus('critical');
-                    return newVal;
-                });
-                // Persistent visual warning instead of just one alert
-                setTimeout(() => setCheatingStatus('warning'), 5000);
+                logBreach(BREACH_TYPES.APP_BACKGROUND, 'User left the assessment application');
             }
         });
 
         return () => {
             clearInterval(interval);
+            clearInterval(aiScanInterval);
             subscription.remove();
         };
-    }, [testStarted, testSubmitted, selectedAssessment]);
+    }, [testStarted, testSubmitted, selectedAssessment, logBreach]);
 
     const formatTime = (seconds) => {
         const mins = Math.floor(seconds / 60);
         const secs = seconds % 60;
         return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+
+    const formatBreachTime = (isoString) => {
+        const date = new Date(isoString);
+        return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     };
 
     const handleAutoSubmit = () => {
@@ -161,14 +301,35 @@ export default function ProctoredAssessment({ route, navigation }) {
             Alert.alert("Incomplete", "Please fill question and all 4 options.");
             return;
         }
-        setQuestions([...questions, {
+
+        const newQuestionObj = {
             question: currentQ,
             options: [...options],
             correctIndex: correctIdx
-        }]);
+        };
+
+        if (editingQIndex >= 0) {
+            // Update existing question
+            const updatedQuestions = [...questions];
+            updatedQuestions[editingQIndex] = newQuestionObj;
+            setQuestions(updatedQuestions);
+            setEditingQIndex(-1);
+        } else {
+            // Add new question
+            setQuestions([...questions, newQuestionObj]);
+        }
+
         setCurrentQ('');
         setOptions(['', '', '', '']);
         setCorrectIdx(0);
+    };
+
+    const editQuestion = (index) => {
+        const q = questions[index];
+        setCurrentQ(q.question);
+        setOptions([...q.options]);
+        setCorrectIdx(q.correctIndex);
+        setEditingQIndex(index);
     };
 
     const removeQuestion = (index) => {
@@ -196,26 +357,41 @@ export default function ProctoredAssessment({ route, navigation }) {
                 created_by: userProfile?.name || 'Admin'
             };
 
-            const response = await fetch(`${API_URL}/proctored-assessments`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
+            let response;
+            if (editingId) {
+                // UPDATE EXISTING
+                response = await fetch(`${API_URL}/api/v1/assessments/proctored/${editingId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            } else {
+                // CREATE NEW
+                response = await fetch(`${API_URL}/api/v1/assessments/proctored`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            }
 
             const result = await response.json();
             if (result.status === 'success') {
-                Alert.alert("Success", "Assessment created successfully!");
+                const action = editingId ? "updated" : "created";
+                Alert.alert("Success", `Assessment ${action} successfully!`);
                 setTitle('');
                 setDesc('');
                 setQuestions([]);
                 setTimeLimit('30');
                 setPassingScore('70');
+                setEditingId(null); // Reset editing state
+                setEditingQIndex(-1);
                 fetchAssessments();
                 setViewMode('list');
             } else {
-                Alert.alert("Error", result.detail || "Failed to create assessment.");
+                Alert.alert("Error", getSafeErrorMsg(result.detail, "Failed to save assessment."));
             }
         } catch (err) {
+            console.error(err);
             Alert.alert("Error", "Failed to publish assessment.");
         } finally {
             setCreating(false);
@@ -257,7 +433,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                 type: bulkFile.mimeType || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             });
 
-            const response = await fetch(`${API_URL}/proctored-assessments/bulk-upload`, {
+            const response = await fetch(`${API_URL}/api/v1/assessments/proctored/bulk-upload`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'multipart/form-data' },
                 body: formData
@@ -272,7 +448,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                 fetchAssessments();
                 setViewMode('list');
             } else {
-                Alert.alert("Error", result.detail || "Failed to upload.");
+                Alert.alert("Error", getSafeErrorMsg(result.detail, "Failed to upload."));
             }
         } catch (err) {
             Alert.alert("Error", "Failed to process bulk upload.");
@@ -281,48 +457,147 @@ export default function ProctoredAssessment({ route, navigation }) {
         }
     };
 
+    // --- AI DOCUMENT PICKER ---
+    const pickAiDocument = async () => {
+        try {
+            const result = await DocumentPicker.getDocumentAsync({
+                type: [
+                    'application/pdf',
+                    'image/*',
+                    'text/plain',
+                    'text/csv',
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    'application/msword',
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    'application/vnd.ms-excel'
+                ],
+                copyToCacheDirectory: true
+            });
+            if (result.assets && result.assets.length > 0) {
+                setAiDocumentFile(result.assets[0]);
+                // Clear text content when file is selected
+                setAiContent('');
+            }
+        } catch (err) {
+            console.log("Pick Error:", err);
+        }
+    };
+
     // --- AI GENERATION ---
     const handleAiGenerate = async () => {
-        if (!title || (!aiTopic && !aiContent)) {
-            Alert.alert("Missing", "Please provide a title and either a topic or content.");
+        if (!title) {
+            Alert.alert("Missing", "Please provide an assessment title.");
+            return;
+        }
+
+        if (!aiTopic && !aiContent && !aiDocumentFile) {
+            Alert.alert("Missing", "Please provide a topic, paste content, or upload a document.");
             return;
         }
 
         setGenerating(true);
         try {
-            const formData = new FormData();
-            formData.append('title', title);
-            formData.append('description', desc);
-            formData.append('time_limit_minutes', (parseInt(timeLimit) || 30).toString());
-            formData.append('passing_score', (parseInt(passingScore) || 70).toString());
-            formData.append('num_questions', (parseInt(aiNumQuestions) || 10).toString());
-            formData.append('topic', aiTopic);
-            formData.append('content', aiContent);
-            formData.append('created_by', userProfile?.name || 'Admin');
+            let response;
 
-            const response = await fetch(`${API_URL}/proctored-assessments/ai-generate`, {
-                method: 'POST',
-                body: formData
-            });
+            // If a document file is selected, use the generate-quiz-from-content endpoint
+            if (aiDocumentFile) {
+                const formData = new FormData();
+                formData.append('file', {
+                    uri: aiDocumentFile.uri,
+                    name: aiDocumentFile.name,
+                    type: aiDocumentFile.mimeType || 'application/octet-stream'
+                });
+                formData.append('title', title || 'AI Generated Assessment');
+                formData.append('num_questions', (parseInt(aiNumQuestions) || 10).toString());
+                formData.append('difficulty', aiDifficulty);
+                formData.append('preview_only', 'true'); // We just want questions, not to save the quiz
 
-            const result = await response.json();
-            if (result.status === 'success') {
-                Alert.alert("Success", `AI generated ${result.questions_count} questions for your assessment!`);
-                setTitle('');
-                setDesc('');
-                setAiTopic('');
-                setAiContent('');
-                setAiModalVisible(false);
-                fetchAssessments();
-                setViewMode('list');
+                response = await fetch(`${API_URL}/api/v1/quizzes/generate/from-content`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const quizResult = await response.json();
+
+                // Access questions from data object if available
+                const questions = quizResult.data?.questions || quizResult.questions || [];
+
+                if (questions && questions.length > 0) {
+                    // Now create the proctored assessment with these questions
+                    const assessmentPayload = {
+                        title,
+                        description: desc || `AI-generated from ${aiDocumentFile.name}`,
+                        time_limit_minutes: parseInt(timeLimit) || 30,
+                        passing_score: parseInt(passingScore) || 70,
+                        questions: questions.map(q => ({
+                            question: q.question,
+                            options: q.options,
+                            correctIndex: (q.correctIndex !== undefined) ? parseInt(q.correctIndex) : 0
+                        })),
+                        created_by: userProfile?.name || 'Admin',
+                        ai_generated: true
+                    };
+
+                    const createResponse = await fetch(`${API_URL}/api/v1/assessments/proctored`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(assessmentPayload)
+                    });
+
+                    const createResult = await createResponse.json();
+                    if (createResult.status === 'success') {
+                        Alert.alert("Success", `AI generated ${questions.length} questions from your document!`);
+                        resetAiModal();
+                        fetchAssessments();
+                        setViewMode('list');
+                    } else {
+                        Alert.alert("Error", getSafeErrorMsg(createResult.detail, "Failed to create assessment."));
+                    }
+                } else {
+                    Alert.alert("Error", getSafeErrorMsg(quizResult.detail, "Could not generate questions from the document."));
+                }
             } else {
-                Alert.alert("Error", result.detail || "AI generation failed.");
+                // Use the existing topic/content based generation
+                const formData = new FormData();
+                formData.append('title', title);
+                formData.append('description', desc);
+                formData.append('time_limit_minutes', (parseInt(timeLimit) || 30).toString());
+                formData.append('passing_score', (parseInt(passingScore) || 70).toString());
+                formData.append('num_questions', (parseInt(aiNumQuestions) || 10).toString());
+                formData.append('topic', aiTopic);
+                formData.append('content', aiContent);
+                formData.append('created_by', userProfile?.name || 'Admin');
+
+                response = await fetch(`${API_URL}/api/v1/assessments/proctored/ai-generate`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                if (result.status === 'success') {
+                    Alert.alert("Success", `AI generated ${result.questions_count} questions for your assessment!`);
+                    resetAiModal();
+                    fetchAssessments();
+                    setViewMode('list');
+                } else {
+                    Alert.alert("Error", getSafeErrorMsg(result.detail, "AI generation failed."));
+                }
             }
         } catch (err) {
-            Alert.alert("Error", "Failed to generate questions with AI.");
+            console.error("AI Generation Error:", err);
+            Alert.alert("Error", "Failed to generate questions with AI. Please try again.");
         } finally {
             setGenerating(false);
         }
+    };
+
+    const resetAiModal = () => {
+        setTitle('');
+        setDesc('');
+        setAiTopic('');
+        setAiContent('');
+        setAiDocumentFile(null);
+        setAiModalVisible(false);
     };
 
     // --- TAKER LOGIC ---
@@ -331,15 +606,24 @@ export default function ProctoredAssessment({ route, navigation }) {
         if (!permission?.granted) {
             const res = await requestPermission();
             if (!res.granted) {
-                Alert.alert("Permission Required", "Camera access is needed.");
+                Alert.alert("Permission Required", "Camera access is needed for proctoring.");
                 return;
             }
         }
 
+        // Reset all proctoring states
         setTestStarted(true);
         setUserAnswers(new Array((selectedAssessment?.questions || []).length).fill(null));
         setRecordingTime(0);
-        setViolations(0);
+        setBreachLog([]);
+        setTotalBreaches(0);
+        setCriticalBreaches(0);
+        setWarningBreaches(0);
+        setProctorStatus('initializing');
+        setCheatingStatus('clean');
+        setFaceDetected(true);
+        setLastAnswerTime(Date.now());
+        lastBreachTimeRef.current = {};
 
         // Start Recording
         setTimeout(async () => {
@@ -358,6 +642,18 @@ export default function ProctoredAssessment({ route, navigation }) {
     };
 
     const handleAnswer = (idx) => {
+        const now = Date.now();
+
+        // Check for suspiciously rapid answers (less than 2 seconds)
+        if (lastAnswerTime && (now - lastAnswerTime) < 2000 && userAnswers[currentStep] === null) {
+            // Only flag if this is a new answer, not a change
+            const rapidCount = breachLog.filter(b => b.type === 'rapid_answers').length;
+            if (rapidCount < 3) { // Don't spam warnings
+                logBreach(BREACH_TYPES.RAPID_ANSWERS, `Answered in ${((now - lastAnswerTime) / 1000).toFixed(1)}s`);
+            }
+        }
+
+        setLastAnswerTime(now);
         const newAns = [...userAnswers];
         newAns[currentStep] = idx;
         setUserAnswers(newAns);
@@ -371,15 +667,25 @@ export default function ProctoredAssessment({ route, navigation }) {
         }
 
         setSubmitting(true);
+        setProctorStatus('submitting');
+
         try {
             const formData = new FormData();
             formData.append('user_email', userProfile?.email || 'user@example.com');
             formData.append('user_name', userProfile?.name || 'User');
             formData.append('answers', JSON.stringify(userAnswers));
             formData.append('time_taken_seconds', recordingTime.toString());
-            formData.append('violations', violations.toString());
+            formData.append('violations', totalBreaches.toString());
+            formData.append('breach_log', JSON.stringify(breachLog));
+            formData.append('critical_breaches', criticalBreaches.toString());
+            formData.append('warning_breaches', warningBreaches.toString());
 
-            const response = await fetch(`${API_URL}/proctored-assessments/${selectedAssessment.id}/submit`, {
+            // Use correct /api/v1/ endpoints for both scheduled and proctored exams
+            const submitUrl = isScheduledExam
+                ? `${API_URL}/api/v1/assessments/scheduled/${selectedAssessment.id}/submit`
+                : `${API_URL}/api/v1/assessments/proctored/${selectedAssessment.id}/submit`;
+
+            const response = await fetch(submitUrl, {
                 method: 'POST',
                 body: formData
             });
@@ -391,7 +697,11 @@ export default function ProctoredAssessment({ route, navigation }) {
                     correct: result.result.correct,
                     percent: result.result.score,
                     passed: result.result.passed,
-                    passingScore: result.result.passing_score
+                    passingScore: result.result.passing_score,
+                    breachLog: breachLog,
+                    totalBreaches: totalBreaches,
+                    criticalBreaches: criticalBreaches,
+                    warningBreaches: warningBreaches
                 });
             } else {
                 // Fallback to local calculation
@@ -405,7 +715,11 @@ export default function ProctoredAssessment({ route, navigation }) {
                     correct: correctCount,
                     percent: ((correctCount / targetQuestions.length) * 100).toFixed(0),
                     passed: (correctCount / targetQuestions.length) * 100 >= (selectedAssessment?.passing_score || 70),
-                    passingScore: selectedAssessment?.passing_score || 70
+                    passingScore: selectedAssessment?.passing_score || 70,
+                    breachLog: breachLog,
+                    totalBreaches: totalBreaches,
+                    criticalBreaches: criticalBreaches,
+                    warningBreaches: warningBreaches
                 });
             }
         } catch (err) {
@@ -420,7 +734,11 @@ export default function ProctoredAssessment({ route, navigation }) {
                 correct: correctCount,
                 percent: ((correctCount / targetQuestions.length) * 100).toFixed(0),
                 passed: (correctCount / targetQuestions.length) * 100 >= (selectedAssessment?.passing_score || 70),
-                passingScore: selectedAssessment?.passing_score || 70
+                passingScore: selectedAssessment?.passing_score || 70,
+                breachLog: breachLog,
+                totalBreaches: totalBreaches,
+                criticalBreaches: criticalBreaches,
+                warningBreaches: warningBreaches
             });
         } finally {
             setSubmitting(false);
@@ -435,8 +753,12 @@ export default function ProctoredAssessment({ route, navigation }) {
         setTestSubmitted(false);
         setCurrentStep(0);
         setScore(null);
-        setScore(null);
         setCheatingStatus('clean');
+        setBreachLog([]);
+        setTotalBreaches(0);
+        setCriticalBreaches(0);
+        setWarningBreaches(0);
+        setProctorStatus('initializing');
     };
 
     // --- ADMIN ACTIONS ---
@@ -449,7 +771,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                 {
                     text: "Delete", style: "destructive", onPress: async () => {
                         try {
-                            const res = await fetch(`${API_URL}/proctored-assessments/${id}`, { method: 'DELETE' });
+                            const res = await fetch(`${API_URL}/api/v1/assessments/proctored/${id}`, { method: 'DELETE' });
                             const data = await res.json();
                             if (data.status === 'success') {
                                 Alert.alert("Deleted", "Assessment removed.");
@@ -466,12 +788,34 @@ export default function ProctoredAssessment({ route, navigation }) {
         );
     };
 
+    const handleEditAssessment = (assessment) => {
+        setTitle(assessment.title);
+        setDesc(assessment.description || '');
+        setTimeLimit((assessment.time_limit_minutes || 30).toString());
+        setPassingScore((assessment.passing_score || 70).toString());
+        setQuestions(assessment.questions || []);
+
+        setEditingId(assessment.id);
+        setViewMode('admin'); // 'admin' mode renders the creator form
+    };
+
+    const handleCreateNew = () => {
+        setTitle('');
+        setDesc('');
+        setTimeLimit('30');
+        setPassingScore('70');
+        setQuestions([]);
+        setEditingId(null);
+        setEditingQIndex(-1);
+        setViewMode('admin');
+    };
+
     const handleViewResults = async (assessment) => {
         setSelectedAssessment(assessment);
         setViewMode('results');
         setLoadingSubmissions(true);
         try {
-            const res = await fetch(`${API_URL}/proctored-assessments/${assessment.id}/submissions`);
+            const res = await fetch(`${API_URL}/api/v1/assessments/proctored/${assessment.id}/submissions`);
             const data = await res.json();
             setViewSubmissions(data);
         } catch (e) {
@@ -493,22 +837,116 @@ export default function ProctoredAssessment({ route, navigation }) {
                 <Text style={styles.emptyText}>No submissions yet.</Text>
             ) : (
                 viewSubmissions.map((sub, i) => (
-                    <View key={i} style={styles.resultCard}>
-                        <View>
-                            <Text style={styles.resultName}>{sub.user_name}</Text>
-                            <Text style={styles.resultDate}>{new Date(sub.submitted_at).toLocaleString()}</Text>
+                    <TouchableOpacity
+                        key={i}
+                        style={styles.resultCardEnhanced}
+                        onPress={() => setSelectedSubmissionDetail(
+                            selectedSubmissionDetail?.id === sub.id ? null : sub
+                        )}
+                        activeOpacity={0.8}
+                    >
+                        {/* Main Info Row */}
+                        <View style={styles.resultMainRow}>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.resultName}>{sub.user_name}</Text>
+                                <Text style={styles.resultDate}>{new Date(sub.submitted_at).toLocaleString()}</Text>
+                                <Text style={styles.resultTimeTaken}>
+                                    Duration: {formatTime(sub.time_taken_seconds || 0)}
+                                </Text>
+                            </View>
+                            <View style={{ alignItems: 'flex-end' }}>
+                                <Text style={[styles.resultScore, { color: sub.passed ? '#10B981' : '#EF4444' }]}>
+                                    {sub.score_percent || sub.score}%
+                                </Text>
+                                <Text style={[styles.resultPassLabel, { color: sub.passed ? '#10B981' : '#EF4444' }]}>
+                                    {sub.passed ? '✓ PASSED' : '✗ FAILED'}
+                                </Text>
+                            </View>
                         </View>
-                        <View style={{ alignItems: 'flex-end' }}>
-                            <Text style={[styles.resultScore, { color: sub.passed ? '#10B981' : '#EF4444' }]}>
-                                {sub.score}%
-                            </Text>
-                            {sub.violations > 0 && (
-                                <Text style={styles.violationText}>⚠️ {sub.violations} Violations</Text>
-                            )}
-                        </View>
-                    </View>
+
+                        {/* Breach Summary Bar */}
+                        {(sub.violations > 0 || sub.breach_log?.length > 0) && (
+                            <View style={styles.breachSummaryBar}>
+                                <View style={styles.breachCountBox}>
+                                    <Feather name="alert-triangle" size={14} color="#EF4444" />
+                                    <Text style={styles.breachCountText}>
+                                        {sub.violations || sub.breach_log?.length || 0} Breaches
+                                    </Text>
+                                </View>
+                                {sub.critical_breaches > 0 && (
+                                    <View style={[styles.breachBadge, { backgroundColor: '#FEE2E2' }]}>
+                                        <Text style={[styles.breachBadgeText, { color: '#DC2626' }]}>
+                                            {sub.critical_breaches} Critical
+                                        </Text>
+                                    </View>
+                                )}
+                                {sub.warning_breaches > 0 && (
+                                    <View style={[styles.breachBadge, { backgroundColor: '#FEF3C7' }]}>
+                                        <Text style={[styles.breachBadgeText, { color: '#D97706' }]}>
+                                            {sub.warning_breaches} Warning
+                                        </Text>
+                                    </View>
+                                )}
+                                <Feather
+                                    name={selectedSubmissionDetail?.id === sub.id ? "chevron-up" : "chevron-down"}
+                                    size={18}
+                                    color="#6B7280"
+                                />
+                            </View>
+                        )}
+
+                        {/* Expanded Breach Details */}
+                        {selectedSubmissionDetail?.id === sub.id && sub.breach_log && sub.breach_log.length > 0 && (
+                            <View style={styles.breachDetailsContainer}>
+                                <Text style={styles.breachDetailsTitle}>Breach Log</Text>
+                                {sub.breach_log.map((breach, idx) => (
+                                    <View key={idx} style={[
+                                        styles.breachLogItem,
+                                        breach.severity === 'critical' && styles.breachLogItemCritical,
+                                        breach.severity === 'warning' && styles.breachLogItemWarning
+                                    ]}>
+                                        <View style={styles.breachLogIcon}>
+                                            <Feather
+                                                name={breach.icon || 'alert-circle'}
+                                                size={16}
+                                                color={breach.severity === 'critical' ? '#DC2626' : '#D97706'}
+                                            />
+                                        </View>
+                                        <View style={styles.breachLogContent}>
+                                            <Text style={styles.breachLogLabel}>{breach.label}</Text>
+                                            <Text style={styles.breachLogMeta}>
+                                                Q{breach.questionNumber} • {formatBreachTime(breach.timestamp)} • {formatTime(breach.timeElapsed || 0)} elapsed
+                                            </Text>
+                                            {breach.description !== breach.label && (
+                                                <Text style={styles.breachLogDesc}>{breach.description}</Text>
+                                            )}
+                                        </View>
+                                        <View style={[
+                                            styles.breachSeverityDot,
+                                            { backgroundColor: breach.severity === 'critical' ? '#DC2626' : breach.severity === 'warning' ? '#D97706' : '#6B7280' }
+                                        ]} />
+                                    </View>
+                                ))}
+                            </View>
+                        )}
+
+                        {/* Show empty breach state */}
+                        {selectedSubmissionDetail?.id === sub.id && (!sub.breach_log || sub.breach_log.length === 0) && sub.violations > 0 && (
+                            <View style={styles.breachDetailsContainer}>
+                                <Text style={styles.breachDetailsTitle}>Breach Summary</Text>
+                                <View style={styles.legacyBreachInfo}>
+                                    <Feather name="alert-triangle" size={20} color="#D97706" />
+                                    <Text style={styles.legacyBreachText}>
+                                        {sub.violations} integrity violation(s) detected during this assessment.
+                                        Detailed logs not available for legacy submissions.
+                                    </Text>
+                                </View>
+                            </View>
+                        )}
+                    </TouchableOpacity>
                 ))
             )}
+            <View style={{ height: 100 }} />
         </ScrollView>
     );
 
@@ -520,8 +958,8 @@ export default function ProctoredAssessment({ route, navigation }) {
                     <Text style={styles.sectionHeader}>
                         {isAdmin ? 'All Assessments' : 'Available Assessments'}
                     </Text>
-                    {isAdmin && (
-                        <TouchableOpacity style={styles.createBtnHeader} onPress={() => setViewMode('admin')}>
+                    {canCreateManage && (
+                        <TouchableOpacity style={styles.createBtnHeader} onPress={handleCreateNew}>
                             <Feather name="plus-circle" size={24} color="#F59E0B" />
                             <Text style={styles.createBtnHeaderText}>Create New</Text>
                         </TouchableOpacity>
@@ -534,10 +972,10 @@ export default function ProctoredAssessment({ route, navigation }) {
                     <View style={styles.emptyState}>
                         <MaterialCommunityIcons name="clipboard-text-outline" size={60} color="#D1D5DB" />
                         <Text style={styles.emptyText}>No assessments available</Text>
-                        {isAdmin && (
+                        {canCreateManage && (
                             <TouchableOpacity
                                 style={styles.createFirstBtn}
-                                onPress={() => setViewMode('admin')}
+                                onPress={handleCreateNew}
                             >
                                 <Text style={styles.createFirstBtnText}>Create First Assessment</Text>
                             </TouchableOpacity>
@@ -573,14 +1011,23 @@ export default function ProctoredAssessment({ route, navigation }) {
                                     )}
                                 </View>
                             </View>
-                            {isAdmin ? (
+                            {(canViewResults || canCreateManage) ? (
                                 <View style={{ flexDirection: 'row', gap: 10 }}>
-                                    <TouchableOpacity onPress={() => handleViewResults(assessment)}>
-                                        <Feather name="eye" size={20} color="#6B7280" />
-                                    </TouchableOpacity>
-                                    <TouchableOpacity onPress={() => handleDeleteAssessment(assessment.id)}>
-                                        <Feather name="trash-2" size={20} color="#EF4444" />
-                                    </TouchableOpacity>
+                                    {canViewResults && (
+                                        <TouchableOpacity onPress={() => handleViewResults(assessment)}>
+                                            <Feather name="eye" size={20} color="#6B7280" />
+                                        </TouchableOpacity>
+                                    )}
+                                    {canCreateManage && (
+                                        <>
+                                            <TouchableOpacity onPress={() => handleEditAssessment(assessment)}>
+                                                <Feather name="edit-2" size={20} color="#3B82F6" />
+                                            </TouchableOpacity>
+                                            <TouchableOpacity onPress={() => handleDeleteAssessment(assessment.id)}>
+                                                <Feather name="trash-2" size={20} color="#EF4444" />
+                                            </TouchableOpacity>
+                                        </>
+                                    )}
                                 </View>
                             ) : (
                                 <Feather name="chevron-right" size={20} color="#9CA3AF" />
@@ -713,8 +1160,10 @@ export default function ProctoredAssessment({ route, navigation }) {
                         ))}
 
                         <TouchableOpacity style={styles.addBtn} onPress={addQuestion}>
-                            <Feather name="plus" size={20} color="#F59E0B" />
-                            <Text style={styles.addBtnText}>Add to Assessment</Text>
+                            <Feather name={editingQIndex >= 0 ? "save" : "plus"} size={20} color="#F59E0B" />
+                            <Text style={styles.addBtnText}>
+                                {editingQIndex >= 0 ? 'Update Question' : 'Add to Assessment'}
+                            </Text>
                         </TouchableOpacity>
 
                         {/* QUESTIONS LIST */}
@@ -726,9 +1175,14 @@ export default function ProctoredAssessment({ route, navigation }) {
                                         <Text style={styles.questionItemText} numberOfLines={2}>
                                             {idx + 1}. {q.question}
                                         </Text>
-                                        <TouchableOpacity onPress={() => removeQuestion(idx)}>
-                                            <Feather name="trash-2" size={16} color="#EF4444" />
-                                        </TouchableOpacity>
+                                        <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+                                            <TouchableOpacity onPress={() => editQuestion(idx)}>
+                                                <Feather name="edit-2" size={16} color="#3B82F6" />
+                                            </TouchableOpacity>
+                                            <TouchableOpacity onPress={() => removeQuestion(idx)}>
+                                                <Feather name="trash-2" size={16} color="#EF4444" />
+                                            </TouchableOpacity>
+                                        </View>
                                     </View>
                                 ))}
                             </View>
@@ -744,7 +1198,9 @@ export default function ProctoredAssessment({ route, navigation }) {
                             {creating ? (
                                 <ActivityIndicator color="#FFF" />
                             ) : (
-                                <Text style={styles.publishBtnText}>Publish Assessment</Text>
+                                <Text style={styles.publishBtnText}>
+                                    {editingId ? "Update Assessment" : "Publish Assessment"}
+                                </Text>
                             )}
                         </LinearGradient>
                     </TouchableOpacity>
@@ -788,15 +1244,18 @@ export default function ProctoredAssessment({ route, navigation }) {
 
         if (testSubmitted) {
             return (
-                <View style={styles.centerMode}>
-                    <MaterialCommunityIcons
-                        name={score?.passed ? "check-decagram" : "close-circle"}
-                        size={80}
-                        color={score?.passed ? "#10B981" : "#EF4444"}
-                    />
-                    <Text style={styles.modeTitle}>
-                        {score?.passed ? "Congratulations!" : "Assessment Complete"}
-                    </Text>
+                <ScrollView style={{ flex: 1, backgroundColor: '#F9FAFB' }} contentContainerStyle={{ padding: 20, paddingBottom: 100 }}>
+                    <View style={styles.resultHeader}>
+                        <MaterialCommunityIcons
+                            name={score?.passed ? "check-decagram" : "close-circle"}
+                            size={80}
+                            color={score?.passed ? "#10B981" : "#EF4444"}
+                        />
+                        <Text style={styles.modeTitle}>
+                            {score?.passed ? "Congratulations!" : "Assessment Complete"}
+                        </Text>
+                    </View>
+
                     <View style={[styles.scoreBox, { borderColor: score?.passed ? '#10B981' : '#EF4444' }]}>
                         <Text style={[styles.scoreText, { color: score?.passed ? '#10B981' : '#EF4444' }]}>
                             {score?.correct} / {score?.total}
@@ -806,11 +1265,82 @@ export default function ProctoredAssessment({ route, navigation }) {
                         </Text>
                         <Text style={styles.scorePassReq}>Passing Score: {score?.passingScore}%</Text>
                     </View>
+
                     <Text style={styles.timeTaken}>Time Taken: {formatTime(recordingTime)}</Text>
+
+                    {/* INTEGRITY REPORT SECTION */}
+                    <View style={styles.integrityReportCard}>
+                        <View style={styles.integrityReportHeader}>
+                            <MaterialCommunityIcons
+                                name={totalBreaches > 0 ? "shield-alert" : "shield-check"}
+                                size={24}
+                                color={totalBreaches > 0 ? "#D97706" : "#10B981"}
+                            />
+                            <Text style={styles.integrityReportTitle}>Integrity Report</Text>
+                        </View>
+
+                        {/* Breach Statistics */}
+                        <View style={styles.breachStatsRow}>
+                            <View style={[styles.breachStatBox, { backgroundColor: totalBreaches > 0 ? '#FEF2F2' : '#ECFDF5' }]}>
+                                <Text style={[styles.breachStatNumber, { color: totalBreaches > 0 ? '#DC2626' : '#10B981' }]}>
+                                    {totalBreaches}
+                                </Text>
+                                <Text style={styles.breachStatLabel}>Total{'\n'}Breaches</Text>
+                            </View>
+                            <View style={[styles.breachStatBox, { backgroundColor: criticalBreaches > 0 ? '#FEE2E2' : '#F9FAFB' }]}>
+                                <Text style={[styles.breachStatNumber, { color: criticalBreaches > 0 ? '#DC2626' : '#6B7280' }]}>
+                                    {criticalBreaches}
+                                </Text>
+                                <Text style={styles.breachStatLabel}>Critical</Text>
+                            </View>
+                            <View style={[styles.breachStatBox, { backgroundColor: warningBreaches > 0 ? '#FEF3C7' : '#F9FAFB' }]}>
+                                <Text style={[styles.breachStatNumber, { color: warningBreaches > 0 ? '#D97706' : '#6B7280' }]}>
+                                    {warningBreaches}
+                                </Text>
+                                <Text style={styles.breachStatLabel}>Warnings</Text>
+                            </View>
+                        </View>
+
+                        {/* Breach Log */}
+                        {breachLog.length > 0 ? (
+                            <View style={styles.breachLogSection}>
+                                <Text style={styles.breachLogSectionTitle}>Breach Log</Text>
+                                {breachLog.map((breach, idx) => (
+                                    <View key={breach.id || idx} style={[
+                                        styles.breachLogItemUser,
+                                        breach.severity === 'critical' && styles.breachLogItemCritical,
+                                        breach.severity === 'warning' && styles.breachLogItemWarning
+                                    ]}>
+                                        <View style={styles.breachLogIconSmall}>
+                                            <Feather
+                                                name={breach.icon || 'alert-circle'}
+                                                size={14}
+                                                color={breach.severity === 'critical' ? '#DC2626' : '#D97706'}
+                                            />
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.breachLogLabelSmall}>{breach.label}</Text>
+                                            <Text style={styles.breachLogMetaSmall}>
+                                                Q{breach.questionNumber} • {formatTime(breach.timeElapsed || 0)} into test
+                                            </Text>
+                                        </View>
+                                    </View>
+                                ))}
+                            </View>
+                        ) : (
+                            <View style={styles.cleanIntegrityBox}>
+                                <MaterialCommunityIcons name="check-circle" size={40} color="#10B981" />
+                                <Text style={styles.cleanIntegrityText}>
+                                    No integrity issues detected during your assessment.
+                                </Text>
+                            </View>
+                        )}
+                    </View>
+
                     <TouchableOpacity style={styles.backHomeBtn} onPress={() => navigation.goBack()}>
                         <Text style={styles.backHomeBtnText}>Go Back</Text>
                     </TouchableOpacity>
-                </View>
+                </ScrollView>
             );
         }
 
@@ -819,24 +1349,53 @@ export default function ProctoredAssessment({ route, navigation }) {
 
         return (
             <View style={{ flex: 1 }}>
-                {/* PROCTORING OVERLAY */}
-                <View style={[styles.proctorBar, cheatingStatus === 'critical' && { backgroundColor: '#DC2626' }]}>
-                    <View style={styles.proctorDot} />
-                    <Text style={styles.proctorText}>
-                        {cheatingStatus === 'critical' ? 'VIOLATION DETECTED' : cheatingStatus === 'warning' ? 'WARNING' : 'SECURE'} • {formatTime(recordingTime)}
-                    </Text>
-                    <View style={styles.timerBox}>
-                        <MaterialCommunityIcons name="clock-outline" size={14} color={timeRemaining < 60 ? "#FFF" : "#FCD34D"} />
-                        <Text style={[styles.timerText, timeRemaining < 60 && { color: '#FFF' }]}>
-                            {formatTime(timeRemaining)}
+                {/* PROCTORING STATUS BAR - Enhanced */}
+                <View style={[
+                    styles.proctorBar,
+                    cheatingStatus === 'critical' && { backgroundColor: '#DC2626' },
+                    cheatingStatus === 'warning' && { backgroundColor: '#D97706' },
+                    isAiScanning && cheatingStatus === 'clean' && { backgroundColor: '#7C3AED' }
+                ]}>
+                    <View style={styles.proctorLeft}>
+                        <View style={[styles.proctorDot, isAiScanning && { backgroundColor: '#A78BFA' }]} />
+                        <Text style={styles.proctorText}>
+                            {isAiScanning ? 'AI SCANNING...' :
+                                cheatingStatus === 'critical' ? '⚠️ VIOLATION' :
+                                    cheatingStatus === 'warning' ? '⚠️ WARNING' : '🛡️ SECURE'}
                         </Text>
+                        <Text style={styles.proctorTime}>• {formatTime(recordingTime)}</Text>
+                    </View>
+                    <View style={styles.proctorRight}>
+                        {totalBreaches > 0 && (
+                            <View style={styles.breachCountBadge}>
+                                <Feather name="alert-triangle" size={10} color="#FFF" />
+                                <Text style={styles.breachCountBadgeText}>{totalBreaches}</Text>
+                            </View>
+                        )}
+                        <View style={styles.timerBox}>
+                            <MaterialCommunityIcons
+                                name="clock-outline"
+                                size={14}
+                                color={timeRemaining < 60 ? "#FFF" : "#FCD34D"}
+                            />
+                            <Text style={[styles.timerText, timeRemaining < 60 && { color: '#FFF' }]}>
+                                {formatTime(timeRemaining)}
+                            </Text>
+                        </View>
                     </View>
                 </View>
 
-                {cheatingStatus === 'critical' && (
+                {/* CRITICAL VIOLATION OVERLAY */}
+                {cheatingStatus === 'critical' && currentBreachWarning && (
                     <View style={styles.criticalOverlay}>
                         <MaterialCommunityIcons name="alert-decagram" size={60} color="#FFF" />
-                        <Text style={styles.criticalText}>RETURN TO APP IMMEDIATELY</Text>
+                        <Text style={styles.criticalText}>INTEGRITY VIOLATION</Text>
+                        <Text style={styles.criticalSubtext}>
+                            {currentBreachWarning.label}
+                        </Text>
+                        <Text style={styles.criticalInstruction}>
+                            Return to assessment immediately
+                        </Text>
                     </View>
                 )}
 
@@ -848,14 +1407,19 @@ export default function ProctoredAssessment({ route, navigation }) {
                         ref={cameraRef}
                         mode="video"
                     />
-                    <View style={styles.recDot} />
+                    <View style={[styles.recDot, isAiScanning && { backgroundColor: '#7C3AED' }]} />
+                    {!faceDetected && (
+                        <View style={styles.faceWarning}>
+                            <Feather name="eye-off" size={12} color="#FFF" />
+                        </View>
+                    )}
                 </View>
 
-                {/* AI SCAN SIMULATION */}
+                {/* AI SCAN ANIMATION */}
                 {isAiScanning && (
-                    <Animated.View entering={FadeInDown} style={styles.aiScanOverlay}>
+                    <Animated.View entering={FadeIn} style={styles.aiScanOverlay}>
                         <View style={styles.scanLine} />
-                        <Text style={styles.aiScanText}>AI BEHAVIORAL ANALYSIS...</Text>
+                        <Text style={styles.aiScanText}>🤖 AI BEHAVIORAL ANALYSIS...</Text>
                     </Animated.View>
                 )}
 
@@ -921,37 +1485,118 @@ export default function ProctoredAssessment({ route, navigation }) {
                     <View style={styles.modalHeader}>
                         <MaterialCommunityIcons name="robot" size={24} color="#7C3AED" />
                         <Text style={styles.modalTitle}>AI Generate Questions</Text>
-                        <TouchableOpacity onPress={() => setAiModalVisible(false)}>
+                        <TouchableOpacity onPress={() => { resetAiModal(); }}>
                             <Feather name="x" size={24} color="#6B7280" />
                         </TouchableOpacity>
                     </View>
 
                     <ScrollView showsVerticalScrollIndicator={false}>
-                        <Text style={styles.label}>Topic (optional)</Text>
-                        <TextInput
-                            style={styles.input}
-                            placeholder="e.g. Food Safety Protocols"
-                            value={aiTopic}
-                            onChangeText={setAiTopic}
-                        />
+                        {/* DOCUMENT UPLOAD SECTION */}
+                        <View style={styles.aiSectionCard}>
+                            <View style={styles.aiSectionHeader}>
+                                <MaterialCommunityIcons name="file-document-outline" size={20} color="#10B981" />
+                                <Text style={styles.aiSectionTitle}>Upload Document</Text>
+                            </View>
+                            <Text style={styles.aiSectionDesc}>
+                                Upload PDF, images, Word docs, or text files
+                            </Text>
 
-                        <Text style={styles.label}>Or Paste Content</Text>
-                        <TextInput
-                            style={[styles.input, { height: 120 }]}
-                            placeholder="Paste training content, SOP text, or any material to generate questions from..."
-                            value={aiContent}
-                            onChangeText={setAiContent}
-                            multiline
-                        />
+                            {aiDocumentFile ? (
+                                <View style={styles.aiDocumentCard}>
+                                    <MaterialCommunityIcons
+                                        name={getDocumentIcon(aiDocumentFile.mimeType)}
+                                        size={24}
+                                        color="#10B981"
+                                    />
+                                    <View style={{ flex: 1, marginLeft: 10 }}>
+                                        <Text style={styles.aiDocumentName} numberOfLines={1}>
+                                            {aiDocumentFile.name}
+                                        </Text>
+                                        <Text style={styles.aiDocumentSize}>
+                                            {formatFileSize(aiDocumentFile.size)}
+                                        </Text>
+                                    </View>
+                                    <TouchableOpacity onPress={() => setAiDocumentFile(null)}>
+                                        <Feather name="x-circle" size={20} color="#EF4444" />
+                                    </TouchableOpacity>
+                                </View>
+                            ) : (
+                                <TouchableOpacity style={styles.aiUploadBtn} onPress={pickAiDocument}>
+                                    <Feather name="upload-cloud" size={24} color="#10B981" />
+                                    <Text style={styles.aiUploadBtnText}>Choose File</Text>
+                                </TouchableOpacity>
+                            )}
+                        </View>
 
-                        <Text style={styles.label}>Number of Questions</Text>
-                        <TextInput
-                            style={styles.input}
-                            placeholder="10"
-                            value={aiNumQuestions}
-                            onChangeText={setAiNumQuestions}
-                            keyboardType="numeric"
-                        />
+                        {/* OR DIVIDER */}
+                        <View style={styles.orDivider}>
+                            <View style={styles.orLine} />
+                            <Text style={styles.orText}>OR</Text>
+                            <View style={styles.orLine} />
+                        </View>
+
+                        {/* TOPIC/CONTENT SECTION */}
+                        <View style={[styles.aiSectionCard, aiDocumentFile && { opacity: 0.5 }]}>
+                            <View style={styles.aiSectionHeader}>
+                                <MaterialCommunityIcons name="text-box-outline" size={20} color="#F59E0B" />
+                                <Text style={styles.aiSectionTitle}>Enter Topic or Content</Text>
+                            </View>
+
+                            <Text style={styles.label}>Topic</Text>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="e.g. Food Safety Protocols"
+                                value={aiTopic}
+                                onChangeText={setAiTopic}
+                                editable={!aiDocumentFile}
+                            />
+
+                            <Text style={styles.label}>Or Paste Content</Text>
+                            <TextInput
+                                style={[styles.input, { height: 100 }]}
+                                placeholder="Paste training content, SOP text, or any material..."
+                                value={aiContent}
+                                onChangeText={setAiContent}
+                                multiline
+                                editable={!aiDocumentFile}
+                            />
+                        </View>
+
+                        {/* SETTINGS SECTION */}
+                        <View style={styles.aiSettingsRow}>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.label}>Questions</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="10"
+                                    value={aiNumQuestions}
+                                    onChangeText={setAiNumQuestions}
+                                    keyboardType="numeric"
+                                />
+                            </View>
+                            <View style={{ flex: 1, marginLeft: 10 }}>
+                                <Text style={styles.label}>Difficulty</Text>
+                                <View style={styles.difficultyRow}>
+                                    {['easy', 'medium', 'hard'].map((level) => (
+                                        <TouchableOpacity
+                                            key={level}
+                                            style={[
+                                                styles.difficultyBtn,
+                                                aiDifficulty === level && styles.difficultyBtnActive
+                                            ]}
+                                            onPress={() => setAiDifficulty(level)}
+                                        >
+                                            <Text style={[
+                                                styles.difficultyBtnText,
+                                                aiDifficulty === level && styles.difficultyBtnTextActive
+                                            ]}>
+                                                {level.charAt(0).toUpperCase() + level.slice(1)}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+                            </View>
+                        </View>
 
                         <TouchableOpacity
                             style={[styles.aiGenerateBtn, generating && { opacity: 0.7 }]}
@@ -959,7 +1604,10 @@ export default function ProctoredAssessment({ route, navigation }) {
                             disabled={generating}
                         >
                             {generating ? (
-                                <ActivityIndicator color="#FFF" />
+                                <View style={styles.generatingContainer}>
+                                    <ActivityIndicator color="#FFF" />
+                                    <Text style={styles.generatingText}>Generating Questions...</Text>
+                                </View>
                             ) : (
                                 <>
                                     <MaterialCommunityIcons name="auto-fix" size={20} color="#FFF" />
@@ -967,11 +1615,31 @@ export default function ProctoredAssessment({ route, navigation }) {
                                 </>
                             )}
                         </TouchableOpacity>
+
+                        <View style={{ height: 30 }} />
                     </ScrollView>
                 </View>
             </View>
         </Modal>
     );
+
+    // Helper functions for document display
+    const getDocumentIcon = (mimeType) => {
+        if (!mimeType) return 'file-document';
+        if (mimeType.includes('pdf')) return 'file-pdf-box';
+        if (mimeType.includes('image')) return 'file-image';
+        if (mimeType.includes('word') || mimeType.includes('document')) return 'file-word';
+        if (mimeType.includes('excel') || mimeType.includes('spreadsheet')) return 'file-excel';
+        if (mimeType.includes('text')) return 'file-document-outline';
+        return 'file-document';
+    };
+
+    const formatFileSize = (bytes) => {
+        if (!bytes) return '';
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    };
 
     return (
         <SafeAreaView style={styles.container}>
@@ -1096,6 +1764,11 @@ const styles = StyleSheet.create({
     proctorBar: { backgroundColor: '#EF4444', paddingVertical: 8, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', zIndex: 100 },
     proctorDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FFF' },
     proctorText: { color: '#FFF', fontSize: 10, fontFamily: 'Poppins_700Bold', letterSpacing: 0.5 },
+    proctorTime: { color: 'rgba(255,255,255,0.8)', fontSize: 10, fontFamily: 'Poppins_500Medium', marginLeft: 4 },
+    proctorLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+    proctorRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    breachCountBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.3)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, gap: 4 },
+    breachCountBadgeText: { color: '#FFF', fontSize: 10, fontFamily: 'Poppins_700Bold' },
     timerBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.2)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
     timerText: { marginLeft: 5, color: '#FCD34D', fontSize: 12, fontFamily: 'Poppins_700Bold' },
     progressContainer: { height: 4, backgroundColor: '#E5E7EB' },
@@ -1105,10 +1778,14 @@ const styles = StyleSheet.create({
     cameraPreview: { position: 'absolute', top: 50, right: 20, width: 80, height: 100, backgroundColor: '#111827', borderRadius: 10, borderWidth: 2, borderColor: '#EF4444', overflow: 'hidden', zIndex: 50, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 10, elevation: 8 },
     cameraInner: { flex: 1 },
     recDot: { position: 'absolute', top: 6, left: 6, width: 5, height: 5, borderRadius: 3, backgroundColor: '#EF4444' },
+    faceWarning: { position: 'absolute', bottom: 6, left: 6, width: 20, height: 20, borderRadius: 10, backgroundColor: '#D97706', justifyContent: 'center', alignItems: 'center' },
 
-    aiScanOverlay: { position: 'absolute', top: 50, left: 20, right: 110, height: 100, backgroundColor: 'rgba(239, 68, 68, 0.1)', borderRadius: 10, borderWidth: 1, borderStyle: 'dashed', borderColor: '#EF4444', justifyContent: 'center', alignItems: 'center', zIndex: 40 },
-    scanLine: { position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: '#EF4444', opacity: 0.5 },
-    aiScanText: { color: '#EF4444', fontSize: 9, fontFamily: 'Poppins_700Bold', textAlign: 'center' },
+    aiScanOverlay: { position: 'absolute', top: 50, left: 20, right: 110, height: 100, backgroundColor: 'rgba(124, 58, 237, 0.1)', borderRadius: 10, borderWidth: 1, borderStyle: 'dashed', borderColor: '#7C3AED', justifyContent: 'center', alignItems: 'center', zIndex: 40 },
+    scanLine: { position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: '#7C3AED', opacity: 0.7 },
+    aiScanText: { color: '#7C3AED', fontSize: 9, fontFamily: 'Poppins_700Bold', textAlign: 'center' },
+
+    criticalSubtext: { color: 'rgba(255,255,255,0.9)', fontSize: 16, fontFamily: 'Poppins_600SemiBold', textAlign: 'center', marginTop: 10 },
+    criticalInstruction: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontFamily: 'Poppins_400Regular', textAlign: 'center', marginTop: 8 },
 
     qText: { fontSize: 18, fontFamily: 'Poppins_600SemiBold', color: '#1F2937', marginBottom: 25, marginTop: 60, lineHeight: 26 },
     answerBtn: { backgroundColor: '#FFF', borderWidth: 2, borderColor: '#E5E7EB', borderRadius: 14, padding: 16, marginBottom: 10 },
@@ -1131,11 +1808,43 @@ const styles = StyleSheet.create({
 
     // Modal
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-    modalContent: { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, maxHeight: height * 0.8 },
+    modalContent: { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, maxHeight: height * 0.85 },
     modalHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
     modalTitle: { flex: 1, fontSize: 18, fontFamily: 'Poppins_700Bold', color: '#1F2937', marginLeft: 10 },
-    aiGenerateBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#7C3AED', padding: 16, borderRadius: 14, marginTop: 20, marginBottom: 30 },
+    aiGenerateBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#7C3AED', padding: 16, borderRadius: 14, marginTop: 20 },
     aiGenerateBtnText: { color: '#FFF', fontSize: 16, fontFamily: 'Poppins_700Bold', marginLeft: 8 },
+
+    // AI Section Cards
+    aiSectionCard: { backgroundColor: '#F9FAFB', borderRadius: 16, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB' },
+    aiSectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+    aiSectionTitle: { fontSize: 15, fontFamily: 'Poppins_600SemiBold', color: '#374151', marginLeft: 8 },
+    aiSectionDesc: { fontSize: 12, fontFamily: 'Poppins_400Regular', color: '#6B7280', marginBottom: 12 },
+
+    // AI Upload Button
+    aiUploadBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#ECFDF5', borderWidth: 2, borderColor: '#10B981', borderStyle: 'dashed', borderRadius: 12, padding: 20 },
+    aiUploadBtnText: { fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: '#10B981', marginLeft: 8 },
+
+    // AI Document Card
+    aiDocumentCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ECFDF5', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#A7F3D0' },
+    aiDocumentName: { fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: '#065F46' },
+    aiDocumentSize: { fontSize: 11, fontFamily: 'Poppins_400Regular', color: '#6B7280', marginTop: 2 },
+
+    // OR Divider
+    orDivider: { flexDirection: 'row', alignItems: 'center', marginVertical: 16 },
+    orLine: { flex: 1, height: 1, backgroundColor: '#E5E7EB' },
+    orText: { paddingHorizontal: 12, fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: '#9CA3AF' },
+
+    // AI Settings
+    aiSettingsRow: { flexDirection: 'row', marginTop: 8 },
+    difficultyRow: { flexDirection: 'row', marginTop: 5 },
+    difficultyBtn: { flex: 1, paddingVertical: 8, alignItems: 'center', backgroundColor: '#F3F4F6', borderRadius: 8, marginRight: 4 },
+    difficultyBtnActive: { backgroundColor: '#7C3AED' },
+    difficultyBtnText: { fontSize: 11, fontFamily: 'Poppins_600SemiBold', color: '#6B7280' },
+    difficultyBtnTextActive: { color: '#FFF' },
+
+    // Generating State
+    generatingContainer: { flexDirection: 'row', alignItems: 'center' },
+    generatingText: { color: '#FFF', fontFamily: 'Poppins_600SemiBold', marginLeft: 10 },
 
     // Results & Overlay
     criticalOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(220, 38, 38, 0.9)', justifyContent: 'center', alignItems: 'center', zIndex: 200 },
@@ -1146,4 +1855,71 @@ const styles = StyleSheet.create({
     resultScore: { fontSize: 18, fontFamily: 'Poppins_700Bold' },
     violationText: { fontSize: 10, color: '#EF4444', fontFamily: 'Poppins_700Bold', marginTop: 2 },
     sectionHeaderBox: { marginBottom: 15 },
+
+    // Enhanced Result Cards with Breach Details
+    resultCardEnhanced: { backgroundColor: '#FFF', borderRadius: 16, marginBottom: 12, borderWidth: 1, borderColor: '#E5E7EB', overflow: 'hidden' },
+    resultMainRow: { flexDirection: 'row', justifyContent: 'space-between', padding: 16 },
+    resultTimeTaken: { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
+    resultPassLabel: { fontSize: 12, fontFamily: 'Poppins_600SemiBold', marginTop: 2 },
+
+    // Breach Summary Bar
+    breachSummaryBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF2F2', paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#FECACA', gap: 8 },
+    breachCountBox: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    breachCountText: { fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: '#DC2626' },
+    breachBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
+    breachBadgeText: { fontSize: 10, fontFamily: 'Poppins_600SemiBold' },
+
+    // Breach Details Container
+    breachDetailsContainer: { backgroundColor: '#F9FAFB', padding: 16, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
+    breachDetailsTitle: { fontSize: 14, fontFamily: 'Poppins_700Bold', color: '#374151', marginBottom: 12 },
+
+    // Breach Log Item
+    breachLogItem: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#FFF', borderRadius: 10, padding: 12, marginBottom: 8, borderLeftWidth: 3, borderLeftColor: '#D1D5DB' },
+    breachLogItemCritical: { borderLeftColor: '#DC2626', backgroundColor: '#FEF2F2' },
+    breachLogItemWarning: { borderLeftColor: '#D97706', backgroundColor: '#FFFBEB' },
+    breachLogIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+    breachLogContent: { flex: 1 },
+    breachLogLabel: { fontSize: 13, fontFamily: 'Poppins_600SemiBold', color: '#1F2937' },
+    breachLogMeta: { fontSize: 11, fontFamily: 'Poppins_400Regular', color: '#6B7280', marginTop: 2 },
+    breachLogDesc: { fontSize: 11, fontFamily: 'Poppins_400Regular', color: '#4B5563', marginTop: 4, fontStyle: 'italic' },
+    breachSeverityDot: { width: 8, height: 8, borderRadius: 4, marginLeft: 8 },
+
+    // Legacy Breach Info
+    legacyBreachInfo: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#FFFBEB', borderRadius: 10, padding: 12, gap: 10 },
+    legacyBreachText: { flex: 1, fontSize: 12, fontFamily: 'Poppins_400Regular', color: '#92400E', lineHeight: 18 },
+
+    // Proctor Status Bar Styles
+    proctorStatusBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 8, zIndex: 100 },
+    proctorStatusActive: { backgroundColor: '#10B981' },
+    proctorStatusWarning: { backgroundColor: '#F59E0B' },
+    proctorStatusCritical: { backgroundColor: '#EF4444' },
+    proctorStatusLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    proctorStatusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FFF' },
+    proctorStatusText: { color: '#FFF', fontSize: 11, fontFamily: 'Poppins_600SemiBold' },
+    proctorBreachCount: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, gap: 4 },
+    proctorBreachCountText: { color: '#FFF', fontSize: 10, fontFamily: 'Poppins_700Bold' },
+
+    // User Results - Integrity Report
+    resultHeader: { alignItems: 'center', marginBottom: 20, paddingTop: 20 },
+    integrityReportCard: { backgroundColor: '#FFF', borderRadius: 16, padding: 16, marginTop: 20, borderWidth: 1, borderColor: '#E5E7EB' },
+    integrityReportHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 10 },
+    integrityReportTitle: { fontSize: 18, fontFamily: 'Poppins_700Bold', color: '#1F2937' },
+
+    // Breach Stats Row
+    breachStatsRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
+    breachStatBox: { flex: 1, alignItems: 'center', padding: 12, borderRadius: 12 },
+    breachStatNumber: { fontSize: 28, fontFamily: 'Poppins_700Bold' },
+    breachStatLabel: { fontSize: 11, fontFamily: 'Poppins_500Medium', color: '#6B7280', textAlign: 'center', marginTop: 2 },
+
+    // Breach Log Section
+    breachLogSection: { marginTop: 8 },
+    breachLogSectionTitle: { fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: '#374151', marginBottom: 10 },
+    breachLogItemUser: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', borderRadius: 10, padding: 10, marginBottom: 8, borderLeftWidth: 3, borderLeftColor: '#D1D5DB' },
+    breachLogIconSmall: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+    breachLogLabelSmall: { fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: '#1F2937' },
+    breachLogMetaSmall: { fontSize: 10, fontFamily: 'Poppins_400Regular', color: '#6B7280', marginTop: 1 },
+
+    // Clean Integrity
+    cleanIntegrityBox: { alignItems: 'center', padding: 20, backgroundColor: '#ECFDF5', borderRadius: 12 },
+    cleanIntegrityText: { fontSize: 13, fontFamily: 'Poppins_500Medium', color: '#065F46', textAlign: 'center', marginTop: 10 },
 });

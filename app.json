@@ -28,7 +28,7 @@
       "package": "com.gajjoshi.LMS_BW"
     },
     "web": {
-      "favicon": "./favicon.ico"
+      "favicon": "./assets/BW_Logo.png"
     },
     "plugins": [
       "expo-secure-store",
@@ -39,11 +39,12 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Allow Belgian Waffle LMS to use your location for attendance tracking and team coordination."
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "extra": {
       "eas": {
-        "projectId": "a8877ea8-76c8-4e31-ab71-7182e02d91b5"
+        "projectId": "f0f6378a-3df0-4fb8-a336-4a0f58c307c5"
       }
     }
   }

@@ -79,9 +79,11 @@ const PathNode = ({ item, index, x, y, onPress }) => {
         }
     };
 
-    const animatedStyle = useAnimatedStyle(() => ({
-        transform: [{ scale: scale.value }, { translateX: shake.value }],
-    }));
+    const animatedStyle = useAnimatedStyle(() => {
+        return {
+            transform: [{ scale: scale.value }, { translateX: shake.value }],
+        };
+    });
 
     // Style Logic
     let gradientColors = ["#E5E7EB", "#D1D5DB"]; // Locked Gray
@@ -214,46 +216,611 @@ const LevelDetailModal = ({ visible, level, onClose, onStart }) => {
 };
 
 import LessonView from './LessonView';
+import RoleAdvancementExam from './RoleAdvancementExam';
 
-export default function CoursePath() {
+import ConfettiSystem from './ConfettiSystem';
+
+/**
+ * Level Up Celebration Modal - Shows when user advances to a new tier
+ */
+const LevelUpCelebrationModal = ({ visible, previousLevel, newLevel, levelColor, levelIcon, onClose }) => {
+    const scale = useSharedValue(0);
+    const opacity = useSharedValue(0);
+    const badgeScale = useSharedValue(0.5);
+
+    useEffect(() => {
+        if (visible) {
+            opacity.value = withTiming(1, { duration: 300 });
+            scale.value = withSpring(1, { damping: 12, stiffness: 100 });
+            badgeScale.value = withSequence(
+                withTiming(1.3, { duration: 400 }),
+                withSpring(1, { damping: 8 })
+            );
+        } else {
+            opacity.value = withTiming(0, { duration: 200 });
+            scale.value = withTiming(0, { duration: 200 });
+        }
+    }, [visible]);
+
+    const containerStyle = useAnimatedStyle(() => ({
+        opacity: opacity.value,
+    }));
+
+    const modalStyle = useAnimatedStyle(() => ({
+        transform: [{ scale: scale.value }],
+    }));
+
+    const badgeAnimatedStyle = useAnimatedStyle(() => ({
+        transform: [{ scale: badgeScale.value }],
+    }));
+
+    if (!visible) return null;
+
+    return (
+        <Modal transparent visible={visible} animationType="none">
+            <Animated.View style={[levelUpStyles.overlay, containerStyle]}>
+                <Animated.View style={[levelUpStyles.modal, modalStyle]}>
+                    <LinearGradient
+                        colors={[levelColor || '#F59E0B', '#D97706']}
+                        style={levelUpStyles.gradient}
+                    >
+                        {/* Stars Decoration */}
+                        <View style={levelUpStyles.starsContainer}>
+                            <MaterialCommunityIcons name="star" size={24} color="rgba(255,255,255,0.3)" style={{ position: 'absolute', top: 10, left: 30 }} />
+                            <MaterialCommunityIcons name="star-four-points" size={18} color="rgba(255,255,255,0.4)" style={{ position: 'absolute', top: 40, right: 20 }} />
+                            <MaterialCommunityIcons name="shimmer" size={22} color="rgba(255,255,255,0.5)" style={{ position: 'absolute', bottom: 60, left: 20 }} />
+                        </View>
+
+                        {/* Title */}
+                        <Text style={levelUpStyles.title}>🎉 LEVEL UP! 🎉</Text>
+                        <Text style={levelUpStyles.subtitle}>You have advanced to a new tier</Text>
+
+                        {/* Badge */}
+                        <Animated.View style={[levelUpStyles.badgeContainer, badgeAnimatedStyle]}>
+                            <View style={levelUpStyles.badgeGlow}>
+                                <View style={levelUpStyles.badge}>
+                                    <MaterialCommunityIcons name={levelIcon || 'medal'} size={60} color="#FFF" />
+                                </View>
+                            </View>
+                        </Animated.View>
+
+                        {/* Level Name */}
+                        <Text style={levelUpStyles.levelName}>{newLevel}</Text>
+
+                        {/* Previous Level */}
+                        {previousLevel && (
+                            <View style={levelUpStyles.fromContainer}>
+                                <Text style={levelUpStyles.fromText}>
+                                    Promoted from <Text style={{ fontFamily: 'Poppins_700Bold' }}>{previousLevel}</Text>
+                                </Text>
+                            </View>
+                        )}
+
+                        {/* Continue Button */}
+                        <TouchableOpacity style={levelUpStyles.continueBtn} onPress={onClose}>
+                            <Text style={levelUpStyles.continueBtnText}>Continue Journey</Text>
+                            <Feather name="arrow-right" size={18} color="#F59E0B" style={{ marginLeft: 8 }} />
+                        </TouchableOpacity>
+                    </LinearGradient>
+                </Animated.View>
+            </Animated.View>
+        </Modal>
+    );
+};
+
+const levelUpStyles = StyleSheet.create({
+    overlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.8)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    modal: {
+        width: width * 0.85,
+        borderRadius: 30,
+        overflow: 'hidden',
+        shadowColor: '#F59E0B',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.5,
+        shadowRadius: 30,
+        elevation: 20,
+    },
+    gradient: {
+        padding: 30,
+        alignItems: 'center',
+    },
+    starsContainer: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    title: {
+        fontSize: 28,
+        fontFamily: 'Poppins_700Bold',
+        color: '#FFF',
+        textAlign: 'center',
+        marginBottom: 8,
+        textShadowColor: 'rgba(0,0,0,0.3)',
+        textShadowOffset: { width: 0, height: 2 },
+        textShadowRadius: 4,
+    },
+    subtitle: {
+        fontSize: 14,
+        fontFamily: 'Poppins_500Medium',
+        color: 'rgba(255,255,255,0.9)',
+        marginBottom: 24,
+    },
+    badgeContainer: {
+        marginBottom: 20,
+    },
+    badgeGlow: {
+        padding: 10,
+        borderRadius: 100,
+        backgroundColor: 'rgba(255,255,255,0.2)',
+    },
+    badge: {
+        width: 100,
+        height: 100,
+        borderRadius: 50,
+        backgroundColor: 'rgba(255,255,255,0.3)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 3,
+        borderColor: 'rgba(255,255,255,0.5)',
+    },
+    levelName: {
+        fontSize: 26,
+        fontFamily: 'Poppins_700Bold',
+        color: '#FFF',
+        marginBottom: 12,
+        textAlign: 'center',
+    },
+    fromContainer: {
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 20,
+        marginBottom: 24,
+    },
+    fromText: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: 'rgba(255,255,255,0.9)',
+    },
+    continueBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFF',
+        paddingHorizontal: 24,
+        paddingVertical: 14,
+        borderRadius: 25,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+        elevation: 5,
+    },
+    continueBtnText: {
+        fontSize: 16,
+        fontFamily: 'Poppins_700Bold',
+        color: '#F59E0B',
+    },
+});
+
+const CAR_IMAGE = require('../assets/images/path_car.png');
+
+export default function CoursePath(props) {
+    // Handle usage as both a Screen (route.params) and a Component (direct props)
+    const params = props.route?.params || props;
+    const { userEmail = "user", learningPathType = "self_learning", onComplete } = params;
     const [selectedLevel, setSelectedLevel] = useState(null);
     const [activeLesson, setActiveLesson] = useState(null);
     const [levels, setLevels] = useState([]);
+    const [showConfetti, setShowConfetti] = useState(false);
+    const [userProgress, setUserProgress] = useState(null);
+    const [levelConfig, setLevelConfig] = useState({});
 
+    // Level Up Celebration State
+    const [levelUpInfo, setLevelUpInfo] = useState(null); // { previousLevel, newLevel }
+
+    // Role Advancement Exam State
+    const [showAdvancementExam, setShowAdvancementExam] = useState(false);
+    const [isEligibleForAdvancement, setIsEligibleForAdvancement] = useState(false);
+    const [advancementTarget, setAdvancementTarget] = useState(null);
+
+
+    // Animation State
+    const carX = useSharedValue(CENTER_X);
+    const carY = useSharedValue(100);
+    const prevActiveIndex = React.useRef(0);
+
+    const isFirstLoad = React.useRef(true);
+
+    // Level stages configuration
+    const LEVEL_STAGES = [
+        { name: 'Waffler', icon: 'account', color: '#6B7280', minNodes: 0 },
+        { name: 'Silver Waffler', icon: 'medal-outline', color: '#9CA3AF', minNodes: 10 },
+        { name: 'Gold Waffler', icon: 'medal', color: '#F59E0B', minNodes: 25 },
+    ];
+
+    // Level stages configuration
+    const HIERARCHY = ['Waffler', 'Silver Waffler', 'Gold Waffler', 'Shift Manager', 'Assistant Store Manager'];
+    const LEVEL_COLORS = {
+        'Waffler': '#9CA3AF',
+        'Silver Waffler': '#60A5FA',
+        'Gold Waffler': '#F59E0B',
+        'Shift Manager': '#8B5CF6',
+        'Assistant Store Manager': '#EF4444'
+    };
+    const LEVEL_ICONS = {
+        'Waffler': 'account',
+        'Silver Waffler': 'medal-outline',
+        'Gold Waffler': 'medal',
+        'Shift Manager': 'account-tie',
+        'Assistant Store Manager': 'store'
+    };
+
+    const [hierarchy, setHierarchy] = useState(HIERARCHY);
+
+    // Reload when learningPathType changes
     useEffect(() => {
-        fetchPathNodes();
-    }, []);
+        loadCoursePath();
+        if (learningPathType === 'career_progression') {
+            checkAdvancementEligibility();
+        }
+    }, [learningPathType]);
+    // ...
 
-    const fetchPathNodes = async () => {
+
+    // Check if user is eligible for role advancement exam
+    const checkAdvancementEligibility = async () => {
         try {
-            console.log("Fetching path nodes from:", `${API_URL}/path/nodes`);
-            const response = await fetch(`${API_URL}/path/nodes`);
+            const response = await fetch(`${API_URL}/api/v1/levels/role-advancement/eligibility/${userEmail}`);
             const data = await response.json();
-            console.log("Path nodes response:", data);
-
-            if (data && data.length > 0) {
-                // Map backend data to UI Nodes
-                const mappedLevels = data.map((item, index) => ({
-                    id: item.videoUrl || index, // Use URL as unique ID
-                    title: item.title,
-                    desc: item.description,
-                    transcript: item.transcript, // Pass transcript to lesson
-                    icon: ICONS[index % ICONS.length], // Cycle through icons
-                    status: index === 0 ? "active" : "locked", // Linear unlock logic: 1st Active, others Locked
-                    lessonCount: 1, // Single video per node for now
-                    xp: item.xp || 50,
-                    videoUrl: item.videoUrl,
-                    quiz: item.quiz
-                }));
-                setLevels(mappedLevels);
-            } else {
-                console.log("No path nodes found. Data:", data);
-                // Optional: Force a refresh or show empty state
+            setIsEligibleForAdvancement(data.eligible === true);
+            if (data.eligible) {
+                setAdvancementTarget(data.target_role);
             }
+        } catch (err) {
+            console.log("Error checking advancement eligibility:", err);
+        }
+    };
+
+    // Handle advancement exam completion
+    const handleAdvancementComplete = (result) => {
+        if (result?.passed) {
+            // Show level up celebration
+            setLevelUpInfo({
+                previousLevel: userProgress?.current_level || 'Waffler',
+                newLevel: result.new_role
+            });
+            setShowConfetti(true);
+            setTimeout(() => setShowConfetti(false), 5000);
+
+            // Reload course path to reflect new level
+            loadCoursePath();
+            checkAdvancementEligibility();
+        }
+    };
+
+    const loadCoursePath = async () => {
+        try {
+            // 1. Common: User Progress (needed for header)
+            const progressPromise = fetch(`${API_URL}/api/v1/levels/user/${userEmail}/progress`).catch(e => ({ json: () => ({}) }));
+
+            // =========================================================
+            //  MODE A: SELF LEARNING (Fast Load)
+            // =========================================================
+            if (learningPathType === 'self_learning') {
+                const [progressRes, learningPathRes] = await Promise.all([
+                    progressPromise,
+                    fetch(`${API_URL}/api/v1/content/learning-paths/self_learning?user_email=${userEmail}`).catch(e => ({ json: () => ({}) }))
+                ]);
+
+                const progressData = await progressRes.json();
+                const learningPathData = await learningPathRes.json();
+
+                setUserProgress(progressData);
+
+                const pathCourses = learningPathData.courses || [];
+
+                if (learningPathData.is_locked) {
+                    setLevels([]);
+                    return;
+                }
+
+                // Filter & Sort
+                const relevantCourses = pathCourses.filter(c =>
+                    c.learning_path_type === 'self_learning' ||
+                    (!c.learning_path_type && c.bucket === 'Self Learning')
+                );
+                const sortedCourses = [...relevantCourses].sort((a, b) =>
+                    new Date(a.timestamp || 0) - new Date(b.timestamp || 0)
+                );
+
+                let foundFirstIncomplete = false;
+                let builtPath = sortedCourses.map((course, index) => {
+                    const isCompleted = course.status === 'completed';
+                    let status = 'locked';
+                    if (isCompleted) {
+                        status = 'completed';
+                    } else if (index === 0) {
+                        status = 'active';
+                        foundFirstIncomplete = true;
+                    } else {
+                        const previousCourse = sortedCourses[index - 1];
+                        if (previousCourse?.status === 'completed' && !foundFirstIncomplete) {
+                            status = 'active';
+                            foundFirstIncomplete = true;
+                        } else {
+                            status = 'locked';
+                        }
+                    }
+                    return {
+                        ...course,
+                        status: status,
+                        icon: ICONS[index % ICONS.length],
+                        levelContext: 'Self Learning',
+                        isFirstInLevel: index === 0
+                    };
+                });
+
+                // Auto-complete logic
+                const allCompleted = builtPath.length > 0 && builtPath.every(c => c.status === 'completed');
+                if (allCompleted && onComplete) {
+                    try {
+                        await fetch(`${API_URL}/api/v1/content/learning-paths/complete-self-learning/${userEmail}`, { method: 'POST' });
+                        onComplete();
+                    } catch (e) { }
+                }
+
+                setLevels(builtPath);
+                updateCarPosition(builtPath);
+                return;
+            }
+
+            // =========================================================
+            //  MODE B: CAREER PROGRESSION (Full Hierarchy)
+            // =========================================================
+
+            const [levelsRes, progressRes, rulesRes, learningPathRes, statusRes] = await Promise.all([
+                fetch(`${API_URL}/api/v1/levels/`).catch(e => ({ json: () => ({ levels: [] }) })),
+                progressPromise,
+                fetch(`${API_URL}/api/v1/users/privileges/all`).catch(e => ({ json: () => ({}) })),
+                fetch(`${API_URL}/api/v1/content/learning-paths/career_progression?user_email=${userEmail}`).catch(e => ({ json: () => ({}) })),
+                fetch(`${API_URL}/api/v1/content/path-nodes?user_email=${userEmail}&t=${Date.now()}`).catch(e => ({ json: () => ({ courses: [] }) }))
+            ]);
+
+            const [levelsData, progressData, rulesData, learningPathData, statusData] = await Promise.all([
+                levelsRes.json(),
+                progressRes.json(),
+                rulesRes.json(),
+                learningPathRes.json(),
+                statusRes.json()
+            ]);
+
+            // Process Hierarchy
+            let dynamicHierarchy = levelsData.levels || [];
+            let hierarchyNames = dynamicHierarchy.map(l => l.name).filter(n => n !== 'Self Learning' && n !== 'General');
+            if (hierarchyNames.length === 0) hierarchyNames = HIERARCHY;
+            setHierarchy(hierarchyNames);
+            setUserProgress(progressData);
+
+            if (learningPathData.is_locked) {
+                setLevels([]);
+                return;
+            }
+
+            const pathCourses = learningPathData.courses || [];
+            // Merge completions
+            const completedIds = new Set(
+                pathCourses.filter(c => c.status === 'completed').map(c => c.id)
+            );
+            (statusData.courses || []).filter(c => c.status === 'completed').forEach(c => {
+                completedIds.add(c.id || c.videoUrl);
+            });
+
+            // Build Career Path
+            const userLevel = progressData.current_level || 'Waffler';
+            // Robust Index Finding: Exact -> Lowercase -> Default
+            let userLevelIdx = hierarchyNames.indexOf(userLevel);
+            if (userLevelIdx === -1) userLevelIdx = hierarchyNames.findIndex(h => h.toLowerCase() === userLevel.toLowerCase());
+            if (userLevelIdx === -1) userLevelIdx = 0;
+
+            let builtPath = [];
+            let cumulativeIndex = 0;
+            let foundFirstIncomplete = false;
+
+            hierarchyNames.forEach((levelName) => {
+                // ROBUST RULE LOOKUP: Exact name -> Lowercase name
+                // This fixes the "Blank Interface" if cases mismatch (e.g. Waffler vs waffler)
+                const levelRules = rulesData[levelName] || rulesData[levelName.toLowerCase()] || {};
+                const courseIds = levelRules.accessible_courses || [];
+
+                // Filter Courses
+                const levelCourses = courseIds.map(id => pathCourses.find(c => c.id === id))
+                    .filter(c => c && c.learning_path_type !== 'self_learning');
+
+                const levelTotal = levelCourses.length;
+                let levelCompletedCount = 0;
+
+                const thisLevelIdx = hierarchyNames.indexOf(levelName);
+                const isPastLevel = userLevelIdx > thisLevelIdx;
+                const isCurrentLevel = userLevelIdx === thisLevelIdx;
+                // const isFutureLevel = userLevelIdx < thisLevelIdx;
+
+                levelCourses.forEach((course) => {
+                    const isCompleted = completedIds.has(course.id);
+                    if (isCompleted) levelCompletedCount++;
+
+                    let status = "locked";
+                    // Only unlock if current or past level
+                    if (isCompleted) status = "completed";
+                    else if (isPastLevel) status = "completed"; // Assume passed levels are accessible/done
+                    else if (isCurrentLevel) {
+                        if (!foundFirstIncomplete) {
+                            status = "active";
+                            foundFirstIncomplete = true;
+                        }
+                    }
+
+                    builtPath.push({
+                        ...course,
+                        icon: ICONS[cumulativeIndex % ICONS.length],
+                        status: status,
+                        levelContext: levelName,
+                        isFirstInLevel: builtPath.length === 0 || builtPath[builtPath.length - 1].levelContext !== levelName
+                    });
+                    cumulativeIndex++;
+                });
+
+                // Exam Node
+                if (levelTotal > 0) {
+                    const allLevelCoursesDone = levelCompletedCount >= levelTotal;
+                    if (allLevelCoursesDone) {
+                        let examStatus = "locked";
+                        if (isPastLevel) examStatus = "completed";
+                        else if (isCurrentLevel) {
+                            // If all courses done, exam is next
+                            // If foundFirstIncomplete is false (all courses were complete), then exam is active
+                            // If foundFirstIncomplete was set true by a course, then exam is inactive?
+                            // WAIT: If allLevelCoursesDone is TRUE, then all course loops set 'completed'.
+                            // foundFirstIncomplete would still be FALSE (because no course set it to active, they were all completed).
+                            // So Exam becomes active here.
+                            if (!foundFirstIncomplete) {
+                                examStatus = "active";
+                                foundFirstIncomplete = true;
+                            } else {
+                                // If a course was found active (incomplete), we shouldn't be here?
+                                // Actually, levelCompletedCount < levelTotal if any course is incomplete.
+                                // So allLevelCoursesDone is False.
+                                // So this block is skipped.
+                                // So this else is unreachable safely.
+                                examStatus = "active";
+                            }
+                        }
+
+                        builtPath.push({
+                            id: `exam-${levelName}`,
+                            title: `${levelName} Assessment`,
+                            desc: `Assesment for ${levelName}.`,
+                            icon: "shield-star",
+                            status: examStatus,
+                            type: "EXAM",
+                            levelContext: levelName,
+                            isFirstInLevel: false,
+                            roleTarget: levelName
+                        });
+                        cumulativeIndex++;
+                    }
+                }
+            });
+
+            setUserProgress(prev => ({
+                ...prev,
+                current_level: userLevel,
+                next_level: userLevelIdx < hierarchyNames.length - 1 ? hierarchyNames[userLevelIdx + 1] : null
+            }));
+
+            setLevels(builtPath);
+            updateCarPosition(builtPath);
+
         } catch (error) {
-            console.error("Error fetching path:", error);
-            // Alert for user feedback
-            // alert("Debug: Error fetching path. Check console.");
+            console.error("Error loading path:", error);
+        }
+    };
+
+    // Helper for milestones (rendering dividers between levels)
+    const renderMilestones = () => {
+        return levels.map((node, index) => {
+            if (node.isFirstInLevel) {
+                const pos = getPosition(index);
+                const levelName = node.levelContext;
+                const config = {
+                    name: levelName,
+                    icon: LEVEL_ICONS[levelName] || 'star',
+                    color: LEVEL_COLORS[levelName] || '#6B7280'
+                };
+
+                // Determine if this milestone is "reached" (User is at or past this level)
+                const userLvlIdx = hierarchy.indexOf(userProgress?.current_level || 'Waffler');
+                const thisLvlIdx = hierarchy.indexOf(levelName);
+                const isReached = userLvlIdx >= thisLvlIdx;
+
+                return (
+                    <View
+                        key={`milestone-${levelName}`}
+                        style={[
+                            styles.milestoneBanner,
+                            { top: pos.y - VERTICAL_SPACING / 2 - 40 }
+                        ]}
+                    >
+                        <LinearGradient
+                            colors={isReached ? [config.color, config.color] : ['#9CA3AF', '#6B7280']}
+                            style={styles.milestoneGradient}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 0 }}
+                        >
+                            <MaterialCommunityIcons
+                                name={config.icon}
+                                size={20}
+                                color="#FFF"
+                            />
+                            <Text style={styles.milestoneText}>{config.name}</Text>
+                            {isReached && <MaterialCommunityIcons name="check-circle" size={16} color="#FFF" style={{ marginLeft: 6 }} />}
+                        </LinearGradient>
+                    </View>
+                );
+            }
+            return null;
+        });
+    };
+
+    // Replace getStageMilestones with new logic inside render
+    // ... code structure ...
+
+
+    const updateCarPosition = (currentLevels) => {
+        // Find current active node index
+        let activeIdx = currentLevels.findIndex(l => l.status === 'active');
+
+        if (activeIdx === -1) {
+            // usage case: All locked (new user/empty level) OR All completed.
+            // Find last completed to determine progress
+            const lastCompletedIdx = currentLevels.map(l => l.status).lastIndexOf('completed');
+
+            if (lastCompletedIdx !== -1) {
+                // If we have completions, park at the one after the last completed (if valid), or stay at last completed
+                activeIdx = Math.min(lastCompletedIdx + 1, currentLevels.length - 1);
+            } else {
+                // If nothing completed and nothing active (all locked?), start at 0
+                activeIdx = 0;
+            }
+        }
+
+        const targetPos = getPosition(activeIdx);
+
+        if (isFirstLoad.current) {
+            // Initial placement - no animation
+            carX.value = targetPos.x;
+            carY.value = targetPos.y;
+            isFirstLoad.current = false;
+            prevActiveIndex.current = activeIdx;
+        } else {
+            // If progressed
+            if (activeIdx > prevActiveIndex.current) {
+                // Trigger Animation
+                carX.value = withSpring(targetPos.x, { damping: 12 });
+                carY.value = withTiming(targetPos.y, { duration: 1500, easing: Easing.bezier(0.25, 0.1, 0.25, 1) });
+
+                // Show Confetti
+                setShowConfetti(true);
+                setTimeout(() => setShowConfetti(false), 4000);
+
+                prevActiveIndex.current = activeIdx;
+            } else {
+                // Just sync if went backward or same
+                carX.value = targetPos.x;
+                carY.value = targetPos.y;
+            }
         }
     };
 
@@ -263,23 +830,29 @@ export default function CoursePath() {
         return { x, y };
     };
 
+    // Animated Style for Car
+    const carStyle = useAnimatedStyle(() => ({
+        transform: [
+            { translateX: carX.value - 30 }, // Centering (width 60)
+            { translateY: carY.value - 40 }, // Resting on top
+            { scale: withSequence(withTiming(1.1, { duration: 500 }), withTiming(1, { duration: 500 })) } // Idle breath
+        ]
+    }));
+
     const renderCurvedConnections = () => {
-        // Create a single path string for optimized rendering?
-        // Or multiple segments. Multiple segments allows coloring.
         return levels.map((item, index) => {
             if (index === levels.length - 1) return null;
 
             const curr = getPosition(index);
             const next = getPosition(index + 1);
 
-            // Control Points for Curve
             const cp1x = curr.x;
             const cp1y = curr.y + (VERTICAL_SPACING / 2);
             const cp2x = next.x;
             const cp2y = next.y - (VERTICAL_SPACING / 2);
 
-            const isUnlocked = levels[index + 1].status !== "locked";
-            const color = isUnlocked ? "#F59E0B" : "#E5E7EB";
+            const isNextUnlocked = levels[index + 1].status !== "locked";
+            const color = isNextUnlocked ? "#F59E0B" : "#E5E7EB";
 
             return (
                 <Path
@@ -288,7 +861,7 @@ export default function CoursePath() {
                     stroke={color}
                     strokeWidth="10"
                     strokeLinecap="round"
-                    strokeDasharray={!isUnlocked ? "15, 15" : ""}
+                    strokeDasharray={!isNextUnlocked ? "15, 15" : ""}
                     fill="none"
                 />
             )
@@ -296,17 +869,56 @@ export default function CoursePath() {
     }
 
     const handleNodePress = (item) => {
+        // Allow re-playing completed, or playing active. Block locked.
+        if (item.status === 'locked') return;
+
+        // [NEW] Exam Node Handler
+        if (item.type === 'EXAM') {
+            setShowAdvancementExam(true);
+            return;
+        }
+
         setSelectedLevel(item);
     };
 
     const handleStartLesson = () => {
         const lessonToStart = selectedLevel;
-        setSelectedLevel(null); // Close modal
-        // Small delay to allow modal exit animation if desired, or instant switch
+        setSelectedLevel(null);
         setTimeout(() => {
             setActiveLesson(lessonToStart);
         }, 100);
     };
+
+    const handleLessonClose = async (completionResult) => {
+        setActiveLesson(null);
+
+        // Check if a level up occurred from the lesson completion
+        if (completionResult && completionResult.level_up && completionResult.new_level) {
+            // Store previous level before refresh
+            const previousLevel = userProgress?.current_level || 'Waffler';
+
+            // Show celebration
+            setLevelUpInfo({
+                previousLevel: previousLevel,
+                newLevel: completionResult.new_level
+            });
+            setShowConfetti(true);
+
+            // Auto-hide confetti after animation
+            setTimeout(() => setShowConfetti(false), 5000);
+        }
+
+        // Refresh progress to trigger car movement and update path
+        await loadCoursePath();
+
+        // Re-check advancement eligibility after course completion
+        checkAdvancementEligibility();
+    };
+
+    const closeLevelUpModal = () => {
+        setLevelUpInfo(null);
+    };
+
 
     const totalHeight = levels.length * VERTICAL_SPACING + 250;
 
@@ -314,16 +926,35 @@ export default function CoursePath() {
         <>
             <ScrollView
                 style={styles.container}
-                contentContainerStyle={{ height: totalHeight }}
+                contentContainerStyle={{ height: totalHeight + 100 }}
                 showsVerticalScrollIndicator={false}
             >
-                {/* DEBUG OVERLAY */}
-                {levels.length === 0 && (
-                    <View style={{ padding: 20, backgroundColor: '#FEF2F2', margin: 20, borderRadius: 10, borderWidth: 1, borderColor: '#EF4444' }}>
-                        <Text style={{ color: '#B91C1C', fontFamily: 'Poppins_700Bold' }}>DEBUG INFO:</Text>
-                        <Text style={{ color: '#EF4444' }}>0 Path Nodes Loaded.</Text>
-                        <Text style={{ color: '#EF4444', fontSize: 10, marginTop: 5 }}>API: {API_URL}</Text>
-                        <Text style={{ color: '#EF4444', fontSize: 10 }}>Check console logs for details.</Text>
+                {/* USER PROGRESS HEADER */}
+                {userProgress && (
+                    <View style={styles.progressHeader}>
+                        <View style={styles.progressBadge}>
+                            <MaterialCommunityIcons
+                                name={LEVEL_ICONS[userProgress.current_level] || 'medal-outline'}
+                                size={24}
+                                color={LEVEL_COLORS[userProgress.current_level] || '#F59E0B'}
+                            />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.progressTitle}>
+                                {HIERARCHY.includes(userProgress.current_level) ? userProgress.current_level : 'Waffler'}
+                            </Text>
+                            <Text style={styles.progressSubtitle}>
+                                {userProgress.completed_nodes || 0} courses completed
+                            </Text>
+                        </View>
+
+                        {userProgress.next_level && (
+                            <View style={styles.nextLevelBadge}>
+                                <Text style={styles.nextLevelText}>
+                                    {userProgress.nodes_remaining} to {userProgress.next_level}
+                                </Text>
+                            </View>
+                        )}
                     </View>
                 )}
 
@@ -333,17 +964,27 @@ export default function CoursePath() {
                     <MaterialCommunityIcons name="cloud" size={80} color="#E5E7EB" style={{ position: 'absolute', top: 300, right: -20, opacity: 0.5 }} />
                     <MaterialCommunityIcons name="star-four-points" size={30} color="#FCD34D" style={{ position: 'absolute', top: 150, left: 50 }} />
 
+                    {/* LEVEL STAGE MILESTONES */}
+                    {renderMilestones()}
+
                     {/* CONNECTIONS */}
                     <Svg height={totalHeight} width={width} style={styles.svgLayer}>
                         {renderCurvedConnections()}
                     </Svg>
+
+                    {/* PLAYER CAR */}
+                    <Animated.Image
+                        source={CAR_IMAGE}
+                        style={[styles.playerCar, carStyle]}
+                        resizeMode="contain"
+                    />
 
                     {/* NODES */}
                     {levels.map((item, index) => {
                         const { x, y } = getPosition(index);
                         return (
                             <PathNode
-                                key={item.id}
+                                key={`${item.id}-${index}`}
                                 item={item}
                                 index={index}
                                 x={x} y={y}
@@ -365,9 +1006,37 @@ export default function CoursePath() {
             {activeLesson && (
                 <LessonView
                     lesson={activeLesson}
-                    onClose={() => setActiveLesson(null)}
+                    onClose={handleLessonClose}
+                    userEmail={userEmail}
                 />
             )}
+
+            {/* CONFETTI OVERLAY */}
+            <ConfettiSystem trigger={showConfetti} />
+
+            {/* LEVEL UP CELEBRATION MODAL */}
+            <LevelUpCelebrationModal
+                visible={!!levelUpInfo}
+                previousLevel={levelUpInfo?.previousLevel}
+                newLevel={levelUpInfo?.newLevel}
+                levelColor={LEVEL_COLORS[levelUpInfo?.newLevel] || '#F59E0B'}
+                levelIcon={LEVEL_ICONS[levelUpInfo?.newLevel] || 'medal'}
+                onClose={closeLevelUpModal}
+            />
+
+            {/* ROLE ADVANCEMENT BUTTON (Floating) */}
+            {/* ROLE ADVANCEMENT BUTTON (Floating) - REMOVED, now integrated as Node */}
+
+            {/* ROLE ADVANCEMENT EXAM MODAL */}
+            <RoleAdvancementExam
+                visible={showAdvancementExam}
+                userEmail={userEmail}
+                onComplete={handleAdvancementComplete}
+                onClose={() => {
+                    setShowAdvancementExam(false);
+                    checkAdvancementEligibility(); // Re-check in case exam was taken
+                }}
+            />
         </>
     );
 }
@@ -567,5 +1236,116 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontFamily: "Poppins_700Bold",
         letterSpacing: 1,
+    },
+    playerCar: {
+        width: 60,
+        height: 60,
+        position: 'absolute',
+        zIndex: 20,
+    },
+    // Progress Header Styles
+    progressHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFF',
+        marginHorizontal: 16,
+        marginTop: 10,
+        marginBottom: 10,
+        padding: 12,
+        borderRadius: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 5,
+        elevation: 2,
+    },
+    progressBadge: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: '#FEF3C7',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+    },
+    progressTitle: {
+        fontSize: 16,
+        fontFamily: 'Poppins_700Bold',
+        color: '#111827',
+    },
+    progressSubtitle: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+    },
+    nextLevelBadge: {
+        backgroundColor: '#DBEAFE',
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 12,
+    },
+    nextLevelText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#3B82F6',
+    },
+    // Milestone Banner Styles
+    milestoneBanner: {
+        position: 'absolute',
+        left: 20,
+        right: 20,
+        zIndex: 5,
+        alignItems: 'center',
+    },
+    milestoneGradient: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+        borderRadius: 20,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 4,
+        elevation: 3,
+    },
+    milestoneText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_700Bold',
+        color: '#FFF',
+        marginHorizontal: 8,
+    },
+
+    // ROLE ADVANCEMENT BUTTON
+    advancementBtn: {
+        position: 'absolute',
+        bottom: 30,
+        left: 20,
+        right: 20,
+        borderRadius: 16,
+        overflow: 'hidden',
+        shadowColor: '#10B981',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.4,
+        shadowRadius: 10,
+        elevation: 8,
+    },
+    advancementBtnGradient: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 14,
+        paddingHorizontal: 18,
+    },
+    advancementBtnLabel: {
+        fontSize: 10,
+        fontFamily: 'Poppins_500Medium',
+        color: 'rgba(255,255,255,0.8)',
+        textTransform: 'uppercase',
+        letterSpacing: 1,
+    },
+    advancementBtnText: {
+        fontSize: 15,
+        fontFamily: 'Poppins_700Bold',
+        color: '#FFF',
     },
 });

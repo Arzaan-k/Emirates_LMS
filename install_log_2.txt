@@ -1,0 +1,639 @@
+﻿Defaulting to user installation because normal site-packages is not writeable
+Collecting git+https://github.com/openai/whisper.git (from -r backend/requirements.txt (line 8))
+  Cloning https://github.com/openai/whisper.git to c:\users\msi user\appdata\local\temp\pip-req-build-h34_blal
+pip :   Running command git 
+clone --filter=blob:none 
+--quiet https://github.com/op
+enai/whisper.git 
+'C:\Users\msi user\AppData\Lo
+cal\Temp\pip-req-build-h34_bl
+al'
+At line:1 char:1
++ pip install -r 
+backend/requirements.txt 
+2>&1 | Out-File -FilePath 
+ins ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~
+    + CategoryInfo           
+   : NotSpecified: (  Runni  
+  ng comma...build-h34_bla   
+ l':String) [], RemoteExc    
+eption
+    + FullyQualifiedErrorId  
+   : NativeCommandError
+ 
+  Resolved https://github.com/openai/whisper.git to commit c0d2f624c09dc18e709e37c2ad90c039a4eb72a2
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'done'
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Collecting fastapi==0.115.0 (from -r backend/requirements.txt (line 2))
+  Using cached fastapi-0.115.0-py3-none-any.whl.metadata (27 kB)
+Collecting uvicorn==0.30.6 (from uvicorn[standard]==0.30.6->-r backend/requirements.txt (line 3))
+  Using cached uvicorn-0.30.6-py3-none-any.whl.metadata (6.6 kB)
+Collecting python-multipart==0.0.9 (from -r backend/requirements.txt (line 4))
+  Using cached python_multipart-0.0.9-py3-none-any.whl.metadata (2.5 kB)
+Collecting pydantic==2.9.0 (from -r backend/requirements.txt (line 5))
+  Using cached pydantic-2.9.0-py3-none-any.whl.metadata (146 kB)
+Collecting groq==0.11.0 (from -r backend/requirements.txt (line 9))
+  Using cached groq-0.11.0-py3-none-any.whl.metadata (13 kB)
+Collecting moviepy==1.0.3 (from -r backend/requirements.txt (line 12))
+  Using cached moviepy-1.0.3.tar.gz (388 kB)
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'done'
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Collecting imageio-ffmpeg==0.5.1 (from -r backend/requirements.txt (line 13))
+  Using cached imageio_ffmpeg-0.5.1-py3-none-win_amd64.whl.metadata (1.6 kB)
+Collecting requests==2.32.3 (from -r backend/requirements.txt (line 16))
+  Using cached requests-2.32.3-py3-none-any.whl.metadata (4.6 kB)
+Collecting PyMuPDF==1.24.10 (from -r backend/requirements.txt (line 19))
+  Using cached PyMuPDF-1.24.10.tar.gz (47.0 MB)
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'done'
+  Installing backend dependencies: started
+  Installing backend dependencies: finished with status 'done'
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'error'
+  error: 
+subprocess-exited-with-error
+  
+  Preparing metadata 
+(pyproject.toml) did not run 
+successfully.
+  exit code: 1
+  
+  [124 lines of output]
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py: ### 
+Starting.
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py: 
+__name__: 'setup'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py: 
+platform.platform(): 
+'Windows-11-10.0.26200-SP0'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py: 
+platform.python_version(): 
+'3.14.0'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py: 
+sys.executable: 
+'C:\\Python314\\python.exe'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py: CPU 
+bits: 64 sys.maxsize=92233720
+36854775807
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py: 
+__file__: 'C:\\Users\\msi use
+r\\AppData\\Local\\Temp\\pip-
+install-wi5o4wrr\\pymupdf_47b
+679322c2d4b52b23f4ff53301795d
+\\setup.py'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py: 
+os.getcwd(): 'C:\\Users\\msi 
+user\\AppData\\Local\\Temp\\p
+ip-install-wi5o4wrr\\pymupdf_
+47b679322c2d4b52b23f4ff533017
+95d'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py: 
+sys.argv (3):
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+0: 'C:\\Users\\msi user\\AppD
+ata\\Roaming\\Python\\Python3
+14\\site-packages\\pip\\_vend
+or\\pyproject_hooks\\_in_proc
+ess\\_in_process.py'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+1: 'prepare_metadata_for_buil
+d_wheel'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+2: 'C:\\Users\\MSIUSE~1\\AppD
+ata\\Local\\Temp\\tmp_ysmbkno
+'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py: 
+os.environ (68):
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+ALLUSERSPROFILE: 
+'C:\\ProgramData'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+ANTIGRAVITY_AGENT: '1'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+ANTIGRAVITY_CLI_ALIAS: 'agy'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+APPDATA: 'C:\\Users\\msi 
+user\\AppData\\Roaming'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+CHOCOLATEYINSTALL: 
+'C:\\ProgramData\\chocolatey'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+CHOCOLATEYLASTPATHUPDATE: 
+'134067122504342118'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+CHROME_CRASHPAD_PIPE_NAME: '\
+\\\.\\pipe\\crashpad_29108_EW
+SKXDKOYZPUJXKB'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+COLORTERM: 'truecolor'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+COMMONPROGRAMFILES: 
+'C:\\Program Files\\Common 
+Files'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+COMMONPROGRAMFILES(X86): 
+'C:\\Program Files 
+(x86)\\Common Files'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+COMMONPROGRAMW6432: 
+'C:\\Program Files\\Common 
+Files'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+COMPUTERNAME: 
+'DESKTOP-OSC2MT3'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+COMSPEC: 'C:\\WINDOWS\\system
+32\\cmd.exe'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+DRIVERDATA: 'C:\\Windows\\Sys
+tem32\\Drivers\\DriverData'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+EFC_40036_1262719628: '1'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+EFC_40036_1592913036: '1'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+EFC_40036_2283032206: '1'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+EFC_40036_2775293581: '1'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+EFC_40036_3789132940: '1'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     F
+PS_BROWSER_APP_PROFILE_STRING
+: 'Internet Explorer'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     F
+PS_BROWSER_USER_PROFILE_STRIN
+G: 'Default'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+GIT_ASKPASS: 'c:\\Users\\msi 
+user\\AppData\\Local\\Program
+s\\Antigravity\\resources\\ap
+p\\extensions\\git\\dist\\ask
+pass.sh'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+HOMEDRIVE: 'C:'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+HOMEPATH: '\\Users\\msi user'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+LANG: 'en_US.UTF-8'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+LOCALAPPDATA: 
+'C:\\Users\\msi 
+user\\AppData\\Local'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+LOGONSERVER: 
+'\\\\DESKTOP-OSC2MT3'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+NUMBER_OF_PROCESSORS: '12'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+ONEDRIVE: 'C:\\Users\\msi 
+user\\OneDrive'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     O
+RIGINAL_XDG_CURRENT_DESKTOP: 
+'undefined'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+OS: 'Windows_NT'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+PAGER: 'cat'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+PATH: 'C:\\Users\\msi user\\A
+ppData\\Local\\Temp\\pip-buil
+d-env-ayd0hoyx\\overlay\\Scri
+pts;C:\\Users\\msi user\\AppD
+ata\\Local\\Temp\\pip-build-e
+nv-ayd0hoyx\\normal\\Scripts;
+C:\\Python314\\Scripts\\;C:\\
+Python314\\;C:\\Windows\\syst
+em32;C:\\Windows;C:\\Windows\
+\System32\\Wbem;C:\\Windows\\
+System32\\WindowsPowerShell\\
+v1.0\\;C:\\Windows\\System32\
+\OpenSSH\\;C:\\Program 
+Files\\NVIDIA 
+Corporation\\NVIDIA NGX;C:\\W
+INDOWS\\system32;C:\\WINDOWS;
+C:\\WINDOWS\\System32\\Wbem;C
+:\\WINDOWS\\System32\\Windows
+PowerShell\\v1.0\\;C:\\WINDOW
+S\\System32\\OpenSSH\\;C:\\Pr
+ogram Files\\cursor\\resource
+s\\app\\bin;C:\\Program Files
+\\nodejs\\;C:\\ProgramData\\c
+hocolatey\\bin;C:\\Program 
+Files\\Git\\cmd;C:\\Program F
+iles\\Docker\\Docker\\resourc
+es\\bin;C:\\Users\\msi user\\
+AppData\\Local\\Microsoft\\Wi
+ndowsApps;C:\\Users\\msi user
+\\AppData\\Local\\Programs\\M
+icrosoft VS 
+Code\\bin;C:\\Users\\msi user
+\\AppData\\Roaming\\npm;C:\\U
+sers\\msi user\\AppData\\Loca
+l\\Programs\\Windsurf\\bin;C:
+\\Users\\msi user\\AppData\\L
+ocal\\Programs\\Antigravity\\
+bin;C:\\Users\\msi user\\AppD
+ata\\Local\\Microsoft\\WinGet
+\\Links;'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+PATHEXT: '.COM;.EXE;.BAT;.CMD
+;.VBS;.VBE;.JS;.JSE;.WSF;.WSH
+;.MSC;.PY;.PYW;.CPL'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+PIP_BUILD_TRACKER: 
+'C:\\Users\\msi user\\AppData
+\\Local\\Temp\\pip-build-trac
+ker-w3kxhncr'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+PROCESSOR_ARCHITECTURE: 
+'AMD64'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+PROCESSOR_IDENTIFIER: 
+'Intel64 Family 6 Model 158 
+Stepping 10, GenuineIntel'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+PROCESSOR_LEVEL: '6'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+PROCESSOR_REVISION: '9e0a'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+PROGRAMDATA: 
+'C:\\ProgramData'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+PROGRAMFILES: 'C:\\Program 
+Files'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+PROGRAMFILES(X86): 
+'C:\\Program Files (x86)'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+PROGRAMW6432: 'C:\\Program 
+Files'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+PSMODULEPATH: 
+'C:\\Users\\msi user\\Documen
+ts\\WindowsPowerShell\\Module
+s;C:\\Program Files\\WindowsP
+owerShell\\Modules;C:\\WINDOW
+S\\system32\\WindowsPowerShel
+l\\v1.0\\Modules'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+PUBLIC: 'C:\\Users\\Public'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+PYTHONNOUSERSITE: '1'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+PYTHONPATH: 'C:\\Users\\msi u
+ser\\AppData\\Local\\Temp\\pi
+p-build-env-ayd0hoyx\\site'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+SESSIONNAME: 'Console'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+SYSTEMDRIVE: 'C:'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+SYSTEMROOT: 'C:\\WINDOWS'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+TEMP: 'C:\\Users\\MSIUSE~1\\A
+ppData\\Local\\Temp'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+TERM_PROGRAM: 'vscode'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+TERM_PROGRAM_VERSION: 
+'1.104.0'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+TMP: 'C:\\Users\\MSIUSE~1\\Ap
+pData\\Local\\Temp'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+USERDOMAIN: 'DESKTOP-OSC2MT3'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+USERDOMAIN_ROAMINGPROFILE: 
+'DESKTOP-OSC2MT3'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+USERNAME: 'msi user'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+USERPROFILE: 'C:\\Users\\msi 
+user'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     V
+SCODE_GIT_ASKPASS_EXTRA_ARGS:
+ ''
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+VSCODE_GIT_ASKPASS_MAIN: 
+'c:\\Users\\msi user\\AppData
+\\Local\\Programs\\Antigravit
+y\\resources\\app\\extensions
+\\git\\dist\\askpass-main.js'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+VSCODE_GIT_ASKPASS_NODE: 
+'C:\\Users\\msi user\\AppData
+\\Local\\Programs\\Antigravit
+y\\Antigravity.exe'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+VSCODE_GIT_IPC_HANDLE: '\\\\.
+\\pipe\\vscode-git-c14bea0dd5
+-sock'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+VSCODE_INJECTION: '1'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     V
+SCODE_PYTHON_AUTOACTIVATE_GUA
+RD: '1'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+WINDIR: 'C:\\WINDOWS'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     
+ZES_ENABLE_SYSMAN: '1'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     _
+PYPROJECT_HOOKS_BACKEND_PATH:
+ 'C:\\Users\\msi user\\AppDat
+a\\Local\\Temp\\pip-install-w
+i5o4wrr\\pymupdf_47b679322c2d
+4b52b23f4ff53301795d'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py:     _
+PYPROJECT_HOOKS_BUILD_BACKEND
+: 'setup'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py: 
+get_mupdf_internal(): 
+out='dir' location=None 
+sha=None
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py: 
+Download location='https://mu
+pdf.com/downloads/archive/mup
+df-1.24.9-source.tar.gz' loca
+l_tgz='mupdf-1.24.9-source.ta
+r.gz' 
+name='mupdf-1.24.9-source'
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py: 
+Downloading from location='ht
+tps://mupdf.com/downloads/arc
+hive/mupdf-1.24.9-source.tar.
+gz' to local_tgz='mupdf-1.24.
+9-source.tar.gz'.
+  pymupdf_47b679322c2d4b52b23
+f4ff53301795d\setup.py: 
+Extracting 
+mupdf-1.24.9-source.tar.gz
+  Prefixing C:\Users\msi user
+\AppData\Local\Temp\pip-insta
+ll-wi5o4wrr\pymupdf_47b679322
+c2d4b52b23f4ff53301795d\mupdf
+-1.24.9-source/include/mupdf/
+fitz/config.h with '#define 
+TOFU_CJK_EXT 1 /* PyMuPDF 
+override. */\n'.
+  C:\Users\msi user\AppData\L
+ocal\Temp\pip-install-wi5o4wr
+r\pymupdf_47b679322c2d4b52b23
+f4ff53301795d\wdev.py: 
+Looking for Python 
+version='3.14' cpu.bits=64.
+  C:\Users\msi user\AppData\L
+ocal\Temp\pip-install-wi5o4wr
+r\pymupdf_47b679322c2d4b52b23
+f4ff53301795d\wdev.py: 
+cpu=<wdev.WindowsCpu object 
+at 0x000002918FBB4EC0> 
+version='3.14': using sys.exe
+cutable='C:\\Python314\\pytho
+n.exe'.
+  C:\Users\msi user\AppData\L
+ocal\Temp\pip-install-wi5o4wr
+r\pymupdf_47b679322c2d4b52b23
+f4ff53301795d\wdev.py: 
+WindowsPython:
+  C:\Users\msi user\AppData\L
+ocal\Temp\pip-install-wi5o4wr
+r\pymupdf_47b679322c2d4b52b23
+f4ff53301795d\wdev.py:
+  C:\Users\msi user\AppData\L
+ocal\Temp\pip-install-wi5o4wr
+r\pymupdf_47b679322c2d4b52b23
+f4ff53301795d\wdev.py:     
+path:       
+C:\Python314\python.exe
+  C:\Users\msi user\AppData\L
+ocal\Temp\pip-install-wi5o4wr
+r\pymupdf_47b679322c2d4b52b23
+f4ff53301795d\wdev.py:     
+version:    3.14
+  C:\Users\msi user\AppData\L
+ocal\Temp\pip-install-wi5o4wr
+r\pymupdf_47b679322c2d4b52b23
+f4ff53301795d\wdev.py:     
+cpu:        x64
+  C:\Users\msi user\AppData\L
+ocal\Temp\pip-install-wi5o4wr
+r\pymupdf_47b679322c2d4b52b23
+f4ff53301795d\wdev.py:     
+include:    
+C:\Python314\Include
+  C:\Users\msi user\AppData\L
+ocal\Temp\pip-install-wi5o4wr
+r\pymupdf_47b679322c2d4b52b23
+f4ff53301795d\wdev.py:     
+libs:       C:\Python314\libs
+  C:\Users\msi user\AppData\L
+ocal\Temp\pip-install-wi5o4wr
+r\pymupdf_47b679322c2d4b52b23
+f4ff53301795d\wdev.py:
+  Traceback (most recent 
+call last):
+    File "C:\Users\msi user\A
+ppData\Local\Temp\pip-install
+-wi5o4wrr\pymupdf_47b679322c2
+d4b52b23f4ff53301795d\wdev.py
+", line 84, in __init__
+      assert os.path.isfile( 
+devenv), f'Does not exist: 
+{devenv}'
+             
+~~~~~~~~~~~~~~^^^^^^^^^
+  AssertionError: Does not 
+exist: C:\Program Files 
+(x86)\Microsoft Visual Studio
+\2019\BuildTools\Common7\IDE\
+devenv.com
+  
+  The above exception was 
+the direct cause of the 
+following exception:
+  
+  Traceback (most recent 
+call last):
+    File "C:\Users\msi user\A
+ppData\Roaming\Python\Python3
+14\site-packages\pip\_vendor\
+pyproject_hooks\_in_process\_
+in_process.py", line 389, in 
+<module>
+      main()
+      ~~~~^^
+    File "C:\Users\msi user\A
+ppData\Roaming\Python\Python3
+14\site-packages\pip\_vendor\
+pyproject_hooks\_in_process\_
+in_process.py", line 373, in 
+main
+      json_out["return_val"] 
+= 
+hook(**hook_input["kwargs"])
+                             
+  
+~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+    File "C:\Users\msi user\A
+ppData\Roaming\Python\Python3
+14\site-packages\pip\_vendor\
+pyproject_hooks\_in_process\_
+in_process.py", line 178, in 
+prepare_metadata_for_build_wh
+eel
+      whl_basename = backend.
+build_wheel(metadata_director
+y, config_settings)
+    File "C:\Users\msi user\A
+ppData\Local\Temp\pip-install
+-wi5o4wrr\pymupdf_47b679322c2
+d4b52b23f4ff53301795d\pipcl.p
+y", line 639, in build_wheel
+      items = self._call_fn_b
+uild(config_settings)
+    File "C:\Users\msi user\A
+ppData\Local\Temp\pip-install
+-wi5o4wrr\pymupdf_47b679322c2
+d4b52b23f4ff53301795d\pipcl.p
+y", line 809, in 
+_call_fn_build
+      ret = self.fn_build()
+    File "C:\Users\msi user\A
+ppData\Local\Temp\pip-install
+-wi5o4wrr\pymupdf_47b679322c2
+d4b52b23f4ff53301795d\setup.p
+y", line 526, in build
+      mupdf_build_dir = 
+build_mupdf_windows( 
+mupdf_local, build_type, 
+overwrite_config)
+    File "C:\Users\msi user\A
+ppData\Local\Temp\pip-install
+-wi5o4wrr\pymupdf_47b679322c2
+d4b52b23f4ff53301795d\setup.p
+y", line 678, in 
+build_mupdf_windows
+      vs = 
+pipcl.wdev.WindowsVS()
+    File "C:\Users\msi user\A
+ppData\Local\Temp\pip-install
+-wi5o4wrr\pymupdf_47b679322c2
+d4b52b23f4ff53301795d\wdev.py
+", line 168, in __init__
+      raise Exception( 
+f'Unable to find Visual 
+Studio') from e
+  Exception: Unable to find 
+Visual Studio
+  [end of output]
+  
+  note: This error 
+originates from a 
+subprocess, and is likely 
+not a problem with pip.
+error: 
+metadata-generation-failed
+
+Encountered error while 
+generating package metadata.
+
+PyMuPDF
+
+note: This is an issue with 
+the package mentioned above, 
+not pip.
+hint: See above for details.

@@ -21,6 +21,7 @@ import Animated, {
     Easing,
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
+import API_URL from '../config';
 
 const { width, height } = Dimensions.get('window');
 
@@ -128,26 +129,57 @@ export default function Login({ navigation }) {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
+    const [loading, setLoading] = useState(false);
 
-    const handleLogin = () => {
-        // Simple authentication logic
-        if (username === 'user' && password === 'user@123') {
-            navigation.replace('Home', {
-                userProfile: { name: 'Aditya User', role: 'User', email: 'user' }
+    const handleLogin = async () => {
+        if (!username || !password) {
+            Alert.alert('Missing Fields', 'Please enter both username and password.');
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const response = await fetch(`${API_URL}/api/v1/auth/login-json`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: username, password: password })
             });
-        } else if (username === 'store.manager' && password === 'bw_store@2025') {
-            navigation.replace('ManagerDashboard', {
-                userProfile: { name: 'Store Manager', role: 'Store Manager', email: 'store.manager' }
-            });
-        } else {
-            Alert.alert('Invalid Credentials', 'Please check your username and password');
+
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                const user = data.user;
+
+                // [NEW] Save user profile to AsyncStorage for other components
+                const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+                await AsyncStorage.setItem('userProfile', JSON.stringify(user));
+                await AsyncStorage.setItem('userEmail', user.email);
+                if (data.access_token) {
+                    await AsyncStorage.setItem('userToken', data.access_token);
+                }
+                console.log('[Login] Saved user profile and token to AsyncStorage:', user.email);
+
+                // Determine destination based on role/access
+                if (user.has_admin_access || user.is_superadmin || user.role === 'Store Manager') {
+                    navigation.replace('ManagerDashboard', { userProfile: user });
+                } else {
+                    navigation.replace('Home', { userProfile: user });
+                }
+            } else {
+                Alert.alert('Login Failed', data.message || 'Invalid credentials');
+            }
+        } catch (error) {
+            console.error('Login error:', error);
+            Alert.alert('Error', 'Unable to connect to server. Please try again.');
+        } finally {
+            setLoading(false);
         }
     };
 
     const handleForgotPassword = () => {
         Alert.alert(
             'Reset Password',
-            'Please contact your Store Manager or admin to reset your password.\n\nEmail: admin@belgianwaffle.com',
+            'Please contact your Super Admin to reset your password.\n\nEmail: admin@belgianwaffle.com',
             [{ text: 'OK', style: 'default' }]
         );
     };
@@ -224,25 +256,29 @@ export default function Login({ navigation }) {
                     </TouchableOpacity>
 
                     {/* LOGIN BUTTON */}
-                    <TouchableOpacity style={styles.loginBtn} onPress={handleLogin}>
+                    <TouchableOpacity style={styles.loginBtn} onPress={handleLogin} disabled={loading}>
                         <LinearGradient
                             colors={['#F59E0B', '#D97706']}
                             start={{ x: 0, y: 0 }}
                             end={{ x: 1, y: 0 }}
                             style={styles.loginGradient}
                         >
-                            <Text style={styles.loginText}>Sign In</Text>
-                            <Feather name="arrow-right" size={20} color="#FFF" />
+                            <Text style={styles.loginText}>{loading ? "Signing In..." : "Sign In"}</Text>
+                            {!loading && <Feather name="arrow-right" size={20} color="#FFF" />}
                         </LinearGradient>
                     </TouchableOpacity>
 
                     {/* DEMO CREDENTIALS HINT */}
+                    {/* DEMO CREDENTIALS HINT - HIDDEN
                     <View style={styles.hintBox}>
                         <Feather name="info" size={14} color="#6B7280" />
                         <Text style={styles.hintText}>
-                            Demo: user / user@123 or store.manager / bw_store@2025
+                            Demo: superadmin / superadmin@2025 (Full Access){'\n'}
+                            store.manager / bw_store@2025 (Limited){'\n'}
+                            user / user@123 (Employee)
                         </Text>
                     </View>
+                    */}
                 </BlurView>
             </KeyboardAvoidingView>
         </View>

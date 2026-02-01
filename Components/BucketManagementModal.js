@@ -53,7 +53,7 @@ export default function BucketManagementModal({ visible, onClose, onBucketsChang
     const fetchBuckets = async () => {
         setLoading(true);
         try {
-            const res = await fetch(`${API_URL}/course-buckets`);
+            const res = await fetch(`${API_URL}/api/v1/content/buckets/all`);
             const data = await res.json();
             setBuckets(data);
         } catch (e) {
@@ -102,8 +102,8 @@ export default function BucketManagementModal({ visible, onClose, onBucketsChang
             formData.append('icon', bucketIcon);
 
             const url = editingBucket
-                ? `${API_URL}/course-buckets/${editingBucket.id}`
-                : `${API_URL}/course-buckets`;
+                ? `${API_URL}/api/v1/content/buckets/${editingBucket.id}`
+                : `${API_URL}/api/v1/content/buckets`;
 
             const method = editingBucket ? 'PUT' : 'POST';
 
@@ -140,7 +140,7 @@ export default function BucketManagementModal({ visible, onClose, onBucketsChang
                     style: 'destructive',
                     onPress: async () => {
                         try {
-                            const res = await fetch(`${API_URL}/course-buckets/${bucketId}`, {
+                            const res = await fetch(`${API_URL}/api/v1/content/buckets/${bucketId}`, {
                                 method: 'DELETE'
                             });
                             const data = await res.json();
