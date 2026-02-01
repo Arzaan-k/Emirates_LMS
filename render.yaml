@@ -7,7 +7,7 @@ services:
     name: newlms-backend
     runtime: python
     rootDir: backend
-    buildCommand: pip install -r requirements.txt && alembic upgrade head
+    buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     region: singapore # Closer to India
     plan: free # Change to 'starter' for persistent uptime
