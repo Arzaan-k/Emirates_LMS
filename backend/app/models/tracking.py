@@ -74,17 +74,18 @@ class AttendanceRecord(Base):
     location_lat = Column(Float)
     location_lng = Column(Float)
     store = Column(String(255))
-    status = Column(String(50), default="active")  # active, completed, absent
-    punch_in_notes = Column(Text)
-    punch_out_notes = Column(Text)
-    overtime_minutes = Column(Integer, default=0)
-    break_duration_minutes = Column(Integer, default=0)
+    # The following columns are defined but MISSING in production DB
+    # status = Column(String(50), default="active")  # active, completed, absent - MISSING IN DB
+    # punch_in_notes = Column(Text)  # MISSING IN DB
+    # punch_out_notes = Column(Text)  # MISSING IN DB
+    # overtime_minutes = Column(Integer, default=0)  # MISSING IN DB
+    # break_duration_minutes = Column(Integer, default=0)  # MISSING IN DB
 
     __table_args__ = (
         Index('idx_attendance_user', 'user_email'),
         Index('idx_attendance_date', 'punch_in'),
         Index('idx_attendance_store', 'store'),
-        Index('idx_attendance_status', 'status'),
+        # Index('idx_attendance_status', 'status'),
     )
 
     def __repr__(self):

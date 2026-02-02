@@ -272,18 +272,29 @@ export default function ManagerDashboard({ route, navigation }) {
         setIsChatLoading(true);
 
         try {
-            const res = await fetch(`${API_URL}/api/v1/ai/ask`, {
+            // Send request to privilege-aware admin copilot endpoint
+            const res = await fetch(`${API_URL}/api/v1/ai/admin-copilot`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question: query })
+                body: JSON.stringify({
+                    question: query,
+                    privileges: userPrivileges,
+                    is_superadmin: isSuperAdmin,
+                    admin_name: name,
+                    admin_role: role
+                })
             });
             const data = await res.json();
 
-            // Add AI response
-            setChatMessages(prev => [...prev, { role: 'ai', content: data.answer }]);
+            // Add AI response with data sources info
+            let responseContent = data.answer;
+            if (data.data_sources && data.data_sources.length > 0) {
+                responseContent += `\n\n📊 *Data sources: ${data.data_sources.join(', ')}*`;
+            }
+            setChatMessages(prev => [...prev, { role: 'ai', content: responseContent }]);
         } catch (error) {
             console.error(error);
-            setChatMessages(prev => [...prev, { role: 'ai', content: "Error connecting to AI Analyst." }]);
+            setChatMessages(prev => [...prev, { role: 'ai', content: "Error connecting to Admin Copilot. Please try again." }]);
         } finally {
             setIsChatLoading(false);
         }
