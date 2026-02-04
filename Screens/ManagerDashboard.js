@@ -396,11 +396,22 @@ export default function ManagerDashboard({ route, navigation }) {
             if (selectedBucket) {
                 formData.append('bucket', selectedBucket); // Add bucket if selected
             }
-            formData.append('file', {
-                uri: resFile.uri,
-                name: resFile.name,
-                type: resFile.mimeType || 'application/octet-stream'
-            });
+
+            // Handle file differently for web vs mobile
+            if (Platform.OS === 'web') {
+                // On web, fetch the blob from the uri and create a proper File object
+                const fileResponse = await fetch(resFile.uri);
+                const blob = await fileResponse.blob();
+                const webFile = new File([blob], resFile.name, { type: resFile.mimeType || 'application/octet-stream' });
+                formData.append('file', webFile);
+            } else {
+                // On mobile, use the React Native format
+                formData.append('file', {
+                    uri: resFile.uri,
+                    name: resFile.name,
+                    type: resFile.mimeType || 'application/octet-stream'
+                });
+            }
 
             // Use the universal resource upload endpoint
             // It will handle adding to Knowledge Base AND optionally to Learning Path

@@ -10,7 +10,8 @@ import {
     Dimensions,
     Alert,
     ActivityIndicator,
-    ScrollView
+    ScrollView,
+    Platform
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
@@ -117,11 +118,22 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                     if (selectedBucket) {
                         formData.append('bucket', selectedBucket); // Use bucket ID here
                     }
-                    formData.append('file', {
-                        uri: file.uri,
-                        name: file.name,
-                        type: file.mimeType || 'video/mp4'
-                    });
+
+                    // Handle file differently for web vs mobile
+                    if (Platform.OS === 'web') {
+                        // On web, fetch the blob from the uri and create a proper File object
+                        const response = await fetch(file.uri);
+                        const blob = await response.blob();
+                        const webFile = new File([blob], file.name, { type: file.mimeType || 'video/mp4' });
+                        formData.append('file', webFile);
+                    } else {
+                        // On mobile, use the React Native format
+                        formData.append('file', {
+                            uri: file.uri,
+                            name: file.name,
+                            type: file.mimeType || 'video/mp4'
+                        });
+                    }
 
                     // Use timeout controller for large files (5 minutes timeout per file)
                     const controller = new AbortController();
