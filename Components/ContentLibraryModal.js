@@ -43,6 +43,11 @@ export default function ContentLibraryModal({ visible, onClose }) {
     const [categoryModalVisible, setCategoryModalVisible] = useState(false);
     const [availableBuckets, setAvailableBuckets] = useState([]);
 
+    // Bulk Selection State
+    const [selectionMode, setSelectionMode] = useState(false);
+    const [selectedItems, setSelectedItems] = useState(new Set());
+    const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
+
     useEffect(() => {
         if (visible) {
             fetchContent();
@@ -157,6 +162,95 @@ export default function ContentLibraryModal({ visible, onClose }) {
         setCategoryModalVisible(true);
     };
 
+    const toggleItemSelection = (itemId) => {
+        setSelectedItems(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(itemId)) {
+                newSet.delete(itemId);
+            } else {
+                newSet.add(itemId);
+            }
+            return newSet;
+        });
+    };
+
+    const selectAll = () => {
+        const allItemIds = new Set();
+        displayCategories.forEach(cat => {
+            cat.items.forEach(item => allItemIds.add(item.id));
+        });
+        setSelectedItems(allItemIds);
+    };
+
+    const deselectAll = () => {
+        setSelectedItems(new Set());
+    };
+
+    const toggleSelectionMode = () => {
+        setSelectionMode(!selectionMode);
+        if (selectionMode) {
+            // Exiting selection mode, clear selections
+            setSelectedItems(new Set());
+        }
+    };
+
+    const handleBulkDelete = () => {
+        if (selectedItems.size === 0) {
+            Alert.alert("No Items Selected", "Please select items to delete");
+            return;
+        }
+
+        Alert.alert(
+            "Bulk Delete",
+            `Are you sure you want to delete ${selectedItems.size} item(s)? This action cannot be undone.`,
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Delete All",
+                    style: "destructive",
+                    onPress: async () => {
+                        setBulkDeleteLoading(true);
+                        try {
+                            const response = await fetch(`${API_URL}/api/v1/content/bulk-delete`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                },
+                                body: JSON.stringify({
+                                    item_ids: Array.from(selectedItems)
+                                }),
+                            });
+
+                            const result = await response.json();
+
+                            if (result.status === 'completed') {
+                                Alert.alert(
+                                    "Deletion Complete",
+                                    result.message +
+                                    (result.results.failed.length > 0
+                                        ? `\n\nFailed: ${result.results.failed.length} item(s)`
+                                        : "")
+                                );
+                                // Clear selection and exit selection mode
+                                setSelectedItems(new Set());
+                                setSelectionMode(false);
+                                // Refresh content
+                                fetchContent();
+                            } else {
+                                Alert.alert("Error", "Failed to delete items");
+                            }
+                        } catch (error) {
+                            console.error("Bulk delete error:", error);
+                            Alert.alert("Error", "An error occurred during bulk deletion");
+                        } finally {
+                            setBulkDeleteLoading(false);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
     const handleChangeCategory = async (bucketId) => {
         if (!selectedContent) return;
 
@@ -196,7 +290,7 @@ export default function ContentLibraryModal({ visible, onClose }) {
         });
     };
 
-    const tabs = ['All', ...availableBuckets.map(b => b.name)];
+    const tabs = Array.from(new Set(['All', ...availableBuckets.map(b => b.name)]));
 
     const filteredCategories = activeTab === 'All'
         ? contentCategories
@@ -211,7 +305,7 @@ export default function ContentLibraryModal({ visible, onClose }) {
         )
     })).filter(cat => cat.items.length > 0);
 
-    const renderContentItem = (item, indentLevel = 0) => {
+    const renderContentItem = (item, indentLevel = 0, keyPrefix = '') => {
         let iconName = 'file-document-outline';
         let iconColor = '#6B7280';
 
@@ -227,9 +321,22 @@ export default function ContentLibraryModal({ visible, onClose }) {
 
         // Calculate indentation for nested content
         const indentWidth = indentLevel * 24;
+        const isSelected = selectedItems.has(item.id);
 
         return (
-            <View key={item.id} style={[styles.contentItem, { marginLeft: indentWidth }]}>
+            <View style={[styles.contentItem, { marginLeft: indentWidth }, isSelected && styles.selectedItem]}>
+                {/* Selection Checkbox (shown in selection mode) */}
+                {selectionMode && (
+                    <TouchableOpacity
+                        onPress={() => toggleItemSelection(item.id)}
+                        style={styles.checkboxContainer}
+                    >
+                        <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
+                            {isSelected && <Feather name="check" size={16} color="#FFF" />}
+                        </View>
+                    </TouchableOpacity>
+                )}
+
                 <View style={[styles.iconBox, { backgroundColor: iconColor + '20' }]}>
                     <MaterialCommunityIcons name={iconName} size={24} color={iconColor} />
                 </View>
@@ -254,18 +361,20 @@ export default function ContentLibraryModal({ visible, onClose }) {
                     </View>
                 </View>
 
-                {/* Actions */}
-                <View style={styles.actionsContainer}>
-                    <TouchableOpacity onPress={() => openEditModal(item)} style={styles.actionBtn}>
-                        <Feather name="edit-2" size={18} color="#3B82F6" />
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => openCategoryModal(item)} style={styles.actionBtn}>
-                        <Feather name="folder" size={18} color="#F59E0B" />
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => handleDelete(item)} style={styles.actionBtn}>
-                        <Feather name="trash-2" size={18} color="#EF4444" />
-                    </TouchableOpacity>
-                </View>
+                {/* Actions (hidden in selection mode) */}
+                {!selectionMode && (
+                    <View style={styles.actionsContainer}>
+                        <TouchableOpacity onPress={() => openEditModal(item)} style={styles.actionBtn}>
+                            <Feather name="edit-2" size={18} color="#3B82F6" />
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => openCategoryModal(item)} style={styles.actionBtn}>
+                            <Feather name="folder" size={18} color="#F59E0B" />
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => handleDelete(item)} style={styles.actionBtn}>
+                            <Feather name="trash-2" size={18} color="#EF4444" />
+                        </TouchableOpacity>
+                    </View>
+                )}
             </View>
         );
     };
@@ -286,24 +395,62 @@ export default function ContentLibraryModal({ visible, onClose }) {
                                 <View style={styles.headerIcon}>
                                     <MaterialCommunityIcons name="bookshelf" size={24} color="#FFF" />
                                 </View>
-                                <Text style={styles.headerTitle}>Content Library</Text>
+                                <Text style={styles.headerTitle}>
+                                    {selectionMode ? `${selectedItems.size} Selected` : 'Content Library'}
+                                </Text>
                             </View>
-                            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-                                <Feather name="x" size={22} color="#FFF" />
-                            </TouchableOpacity>
+                            <View style={{ flexDirection: 'row', gap: 8 }}>
+                                {/* Bulk Select Toggle Button */}
+                                <TouchableOpacity onPress={toggleSelectionMode} style={[styles.closeBtn, selectionMode && { backgroundColor: '#EF4444' }]}>
+                                    <MaterialCommunityIcons name={selectionMode ? "close" : "checkbox-multiple-marked-outline"} size={22} color="#FFF" />
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+                                    <Feather name="x" size={22} color="#FFF" />
+                                </TouchableOpacity>
+                            </View>
                         </View>
 
+                        {/* Bulk Action Bar (shown in selection mode) */}
+                        {selectionMode && (
+                            <View style={styles.bulkActionBar}>
+                                <TouchableOpacity onPress={selectAll} style={styles.bulkActionBtn}>
+                                    <Feather name="check-square" size={16} color="#FFF" />
+                                    <Text style={styles.bulkActionText}>Select All</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={deselectAll} style={styles.bulkActionBtn}>
+                                    <Feather name="square" size={16} color="#FFF" />
+                                    <Text style={styles.bulkActionText}>Deselect All</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    onPress={handleBulkDelete}
+                                    disabled={selectedItems.size === 0 || bulkDeleteLoading}
+                                    style={[styles.bulkActionBtn, styles.bulkDeleteBtn, selectedItems.size === 0 && { opacity: 0.5 }]}
+                                >
+                                    {bulkDeleteLoading ? (
+                                        <ActivityIndicator size="small" color="#FFF" />
+                                    ) : (
+                                        <>
+                                            <Feather name="trash-2" size={16} color="#FFF" />
+                                            <Text style={styles.bulkActionText}>Delete ({selectedItems.size})</Text>
+                                        </>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        )}
+
                         {/* Search Bar */}
-                        <View style={styles.searchContainer}>
-                            <Feather name="search" size={20} color="#93C5FD" style={{ marginLeft: 12 }} />
-                            <TextInput
-                                style={styles.searchInput}
-                                placeholder="Search documents, videos..."
-                                placeholderTextColor="#93C5FD"
-                                value={searchQuery}
-                                onChangeText={setSearchQuery}
-                            />
-                        </View>
+                        {!selectionMode && (
+                            <View style={styles.searchContainer}>
+                                <Feather name="search" size={20} color="#93C5FD" style={{ marginLeft: 12 }} />
+                                <TextInput
+                                    style={styles.searchInput}
+                                    placeholder="Search documents, videos..."
+                                    placeholderTextColor="#93C5FD"
+                                    value={searchQuery}
+                                    onChangeText={setSearchQuery}
+                                />
+                            </View>
+                        )}
                     </LinearGradient>
 
                     {/* Tabs */}
@@ -408,14 +555,28 @@ export default function ContentLibraryModal({ visible, onClose }) {
                                                             {/* Nested folder contents */}
                                                             {expandedFolders.has(childBucket.id) && (
                                                                 <View style={styles.nestedFolderContents}>
-                                                                    {(childBucket.items || []).map(item => renderContentItem(item, 2))}
+                                                                    {(childBucket.items || []).map((item, idx) => {
+                                                                        const uniqueKey = `${childBucket.id}-${item.id}-${idx}`;
+                                                                        return (
+                                                                            <View key={uniqueKey}>
+                                                                                {renderContentItem(item, 2, uniqueKey)}
+                                                                            </View>
+                                                                        );
+                                                                    })}
                                                                 </View>
                                                             )}
                                                         </View>
                                                     ))}
 
                                                     {/* Render content items */}
-                                                    {category.items.map(item => renderContentItem(item, 1))}
+                                                    {category.items.map((item, idx) => {
+                                                        const uniqueKey = `${category.id}-${item.id}-${idx}`;
+                                                        return (
+                                                            <View key={uniqueKey}>
+                                                                {renderContentItem(item, 1, uniqueKey)}
+                                                            </View>
+                                                        );
+                                                    })}
                                                 </View>
                                             )}
                                         </View>
@@ -941,5 +1102,56 @@ const styles = StyleSheet.create({
         fontSize: 15,
         fontFamily: 'Poppins_500Medium',
         color: '#6B7280',
-    }
+    },
+
+    // Bulk Selection Styles
+    checkboxContainer: {
+        marginRight: 12,
+    },
+    checkbox: {
+        width: 24,
+        height: 24,
+        borderRadius: 6,
+        borderWidth: 2,
+        borderColor: '#D1D5DB',
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#FFF',
+    },
+    checkboxSelected: {
+        backgroundColor: '#3B82F6',
+        borderColor: '#3B82F6',
+    },
+    selectedItem: {
+        backgroundColor: '#EFF6FF',
+        borderWidth: 2,
+        borderColor: '#3B82F6',
+    },
+    bulkActionBar: {
+        flexDirection: 'row',
+        gap: 8,
+        marginTop: 12,
+        paddingBottom: 8,
+    },
+    bulkActionBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 10,
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.3)',
+    },
+    bulkDeleteBtn: {
+        backgroundColor: '#EF4444',
+        borderColor: '#DC2626',
+        marginLeft: 'auto',
+    },
+    bulkActionText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF',
+    },
 });
