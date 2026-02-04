@@ -17,6 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import API_URL from '../config';
 
 // BWC THEME
@@ -322,12 +323,19 @@ const CreateUser = ({
                 type: file.mimeType || 'application/octet-stream'
             });
 
+            // Get auth token
+            const token = await AsyncStorage.getItem('userToken');
+            const headers = {
+                'Content-Type': 'multipart/form-data',
+            };
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+
             const response = await fetch(`${API_URL}/api/v1/users/bulk-upload`, {
                 method: 'POST',
                 body: formData,
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                },
+                headers,
             });
 
             const data = await response.json();
