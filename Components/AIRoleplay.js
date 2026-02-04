@@ -175,9 +175,6 @@ export default function AIRoleplay({ onClose, scenario }) {
             const response = await fetch(`${API_URL}/api/v1/roleplay/voice`, {
                 method: 'POST',
                 body: formData,
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                },
             });
 
             const data = await response.json();

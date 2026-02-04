@@ -443,7 +443,6 @@ export default function ProctoredAssessment({ route, navigation }) {
 
             const response = await fetch(`${API_URL}/api/v1/assessments/proctored/bulk-upload`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'multipart/form-data' },
                 body: formData
             });
 
