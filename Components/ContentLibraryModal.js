@@ -22,6 +22,30 @@ import API_URL from '../config';
 
 const { width, height } = Dimensions.get('window');
 
+// Cross-platform alert function that works on Web, iOS, and Android
+const showAlert = (title, message, buttons = []) => {
+    if (Platform.OS === 'web') {
+        // Web: Use window.confirm for confirmation dialogs
+        const confirmed = window.confirm(`${title}\n\n${message}`);
+        if (confirmed && buttons.length > 0) {
+            // Find and execute the action button
+            const actionButton = buttons.find(b => b.style === 'destructive' || (b.text && b.text !== 'Cancel'));
+            if (actionButton && actionButton.onPress) {
+                actionButton.onPress();
+            }
+        } else if (!confirmed && buttons.length > 0) {
+            // Find and execute cancel button if it exists
+            const cancelButton = buttons.find(b => b.style === 'cancel' || b.text === 'Cancel');
+            if (cancelButton && cancelButton.onPress) {
+                cancelButton.onPress();
+            }
+        }
+    } else {
+        // iOS and Android: Use native Alert.alert
+        Alert.alert(title, message, buttons);
+    }
+};
+
 export default function ContentLibraryModal({ visible, onClose }) {
     const [searchQuery, setSearchQuery] = useState('');
     const [activeTab, setActiveTab] = useState('All');
@@ -47,6 +71,7 @@ export default function ContentLibraryModal({ visible, onClose }) {
     const [selectionMode, setSelectionMode] = useState(false);
     const [selectedItems, setSelectedItems] = useState(new Set());
     const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
+    const [deletingInBackground, setDeletingInBackground] = useState(false);
 
     useEffect(() => {
         if (visible) {
@@ -163,13 +188,17 @@ export default function ContentLibraryModal({ visible, onClose }) {
     };
 
     const toggleItemSelection = (itemId) => {
+        console.log("📌 Toggling selection for item:", itemId);
         setSelectedItems(prev => {
             const newSet = new Set(prev);
             if (newSet.has(itemId)) {
+                console.log("  ➖ Deselecting item");
                 newSet.delete(itemId);
             } else {
+                console.log("  ➕ Selecting item");
                 newSet.add(itemId);
             }
+            console.log("  Total selected now:", newSet.size);
             return newSet;
         });
     };
@@ -195,60 +224,150 @@ export default function ContentLibraryModal({ visible, onClose }) {
     };
 
     const handleBulkDelete = () => {
+        console.log("🗑️ Bulk delete initiated");
+        console.log("Selected items count:", selectedItems.size);
+        console.log("Selected item IDs:", Array.from(selectedItems));
+
         if (selectedItems.size === 0) {
             Alert.alert("No Items Selected", "Please select items to delete");
             return;
         }
 
-        Alert.alert(
-            "Bulk Delete",
-            `Are you sure you want to delete ${selectedItems.size} item(s)? This action cannot be undone.`,
+        const itemCount = selectedItems.size;
+        const itemIds = Array.from(selectedItems);
+
+        console.log("Showing confirmation dialog for", itemCount, "items");
+
+        showAlert(
+            "Delete Confirmation",
+            `Are you sure you want to delete ${itemCount} item(s)? This action cannot be undone.`,
             [
                 { text: "Cancel", style: "cancel" },
                 {
                     text: "Delete All",
                     style: "destructive",
-                    onPress: async () => {
-                        setBulkDeleteLoading(true);
-                        try {
-                            const response = await fetch(`${API_URL}/api/v1/content/bulk-delete`, {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                },
-                                body: JSON.stringify({
-                                    item_ids: Array.from(selectedItems)
-                                }),
-                            });
+                    onPress: () => {
+                        console.log("✅ User confirmed deletion");
+                        // OPTIMISTIC UI UPDATE - Remove items from UI immediately
+                        const deletedIds = new Set(itemIds);
 
-                            const result = await response.json();
+                        // Filter out deleted items from categories
+                        const updatedCategories = contentCategories.map(cat => ({
+                            ...cat,
+                            items: cat.items.filter(item => !deletedIds.has(item.id)),
+                            children: cat.children ? cat.children.map(child => ({
+                                ...child,
+                                items: child.items ? child.items.filter(item => !deletedIds.has(item.id)) : []
+                            })) : []
+                        }));
 
-                            if (result.status === 'completed') {
-                                Alert.alert(
-                                    "Deletion Complete",
-                                    result.message +
-                                    (result.results.failed.length > 0
-                                        ? `\n\nFailed: ${result.results.failed.length} item(s)`
-                                        : "")
-                                );
-                                // Clear selection and exit selection mode
-                                setSelectedItems(new Set());
-                                setSelectionMode(false);
-                                // Refresh content
-                                fetchContent();
+                        // Update UI immediately
+                        setContentCategories(updatedCategories);
+                        setSelectedItems(new Set());
+                        setSelectionMode(false);
+                        setDeletingInBackground(true);
+
+                        // Show instant feedback
+                        setTimeout(() => {
+                            if (Platform.OS === 'web') {
+                                alert(`✓ Items Removed\n\n${itemCount} item(s) deleted successfully.\n\nCleanup is happening in the background.`);
                             } else {
-                                Alert.alert("Error", "Failed to delete items");
+                                Alert.alert(
+                                    "✓ Items Removed",
+                                    `${itemCount} item(s) deleted successfully.\n\nCleanup is happening in the background.`,
+                                    [{ text: "OK" }]
+                                );
                             }
-                        } catch (error) {
-                            console.error("Bulk delete error:", error);
-                            Alert.alert("Error", "An error occurred during bulk deletion");
-                        } finally {
-                            setBulkDeleteLoading(false);
-                        }
+                        }, 100);
+
+                        // BACKGROUND DELETION - Actual deletion happens here
+                        performBackgroundDeletion(itemIds, itemCount);
                     }
                 }
             ]
         );
+    };
+
+    const performBackgroundDeletion = async (itemIds, itemCount) => {
+        console.log("🔄 Starting background deletion...");
+        console.log("API URL:", API_URL);
+        console.log("Item IDs to delete:", itemIds);
+        console.log("Item count:", itemCount);
+
+        try {
+            const apiUrl = `${API_URL}/api/v1/content/bulk-delete`;
+            console.log("Full API URL:", apiUrl);
+
+            const requestBody = {
+                item_ids: itemIds
+            };
+            console.log("Request body:", JSON.stringify(requestBody, null, 2));
+
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestBody),
+            });
+
+            console.log("Response status:", response.status);
+            console.log("Response ok:", response.ok);
+
+            const result = await response.json();
+            console.log("Response result:", result);
+
+            setDeletingInBackground(false);
+
+            if (result.status === 'completed') {
+                const successCount = result.results.success.length;
+                const failedCount = result.results.failed.length;
+
+                // Show completion notification
+                if (failedCount > 0) {
+                    Alert.alert(
+                        "⚠️ Deletion Completed with Errors",
+                        `Successfully deleted ${successCount} of ${itemCount} item(s).\n\nFailed: ${failedCount} item(s). Some items may need to be deleted manually.`,
+                        [
+                            {
+                                text: "Refresh",
+                                onPress: () => fetchContent()
+                            }
+                        ]
+                    );
+                } else {
+                    // Silent success - items already removed from UI
+                    console.log(`✅ Successfully deleted ${successCount} items in background`);
+                }
+            } else {
+                // If the deletion failed completely, refresh to show items again
+                Alert.alert(
+                    "❌ Deletion Failed",
+                    "Failed to delete items from the server. Refreshing to restore items...",
+                    [
+                        {
+                            text: "OK",
+                            onPress: () => fetchContent()
+                        }
+                    ]
+                );
+            }
+        } catch (error) {
+            console.error("Background deletion error:", error);
+            setDeletingInBackground(false);
+
+            // On error, refresh to restore items
+            Alert.alert(
+                "❌ Deletion Error",
+                "An error occurred during deletion. Refreshing content to restore items...",
+                [
+                    {
+                        text: "OK",
+                        onPress: () => fetchContent()
+                    }
+                ]
+            );
+        }
     };
 
     const handleChangeCategory = async (bucketId) => {
@@ -400,6 +519,12 @@ export default function ContentLibraryModal({ visible, onClose }) {
                                 </Text>
                             </View>
                             <View style={{ flexDirection: 'row', gap: 8 }}>
+                                {/* Background Deletion Indicator */}
+                                {deletingInBackground && (
+                                    <View style={styles.backgroundDeleteIndicator}>
+                                        <ActivityIndicator size="small" color="#FFF" />
+                                    </View>
+                                )}
                                 {/* Bulk Select Toggle Button */}
                                 <TouchableOpacity onPress={toggleSelectionMode} style={[styles.closeBtn, selectionMode && { backgroundColor: '#EF4444' }]}>
                                     <MaterialCommunityIcons name={selectionMode ? "close" : "checkbox-multiple-marked-outline"} size={22} color="#FFF" />
@@ -413,7 +538,13 @@ export default function ContentLibraryModal({ visible, onClose }) {
                         {/* Bulk Action Bar (shown in selection mode) */}
                         {selectionMode && (
                             <View style={styles.bulkActionBar}>
-                                <TouchableOpacity onPress={selectAll} style={styles.bulkActionBtn}>
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        console.log("🔵 Select All pressed");
+                                        selectAll();
+                                    }}
+                                    style={styles.bulkActionBtn}
+                                >
                                     <Feather name="check-square" size={16} color="#FFF" />
                                     <Text style={styles.bulkActionText}>Select All</Text>
                                 </TouchableOpacity>
@@ -422,11 +553,16 @@ export default function ContentLibraryModal({ visible, onClose }) {
                                     <Text style={styles.bulkActionText}>Deselect All</Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity
-                                    onPress={handleBulkDelete}
-                                    disabled={selectedItems.size === 0 || bulkDeleteLoading}
+                                    onPress={() => {
+                                        console.log("🔴 DELETE BUTTON PRESSED!");
+                                        console.log("Selected items size:", selectedItems.size);
+                                        console.log("Bulk delete loading:", bulkDeleteLoading);
+                                        handleBulkDelete();
+                                    }}
+                                    disabled={selectedItems.size === 0 || bulkDeleteLoading || deletingInBackground}
                                     style={[styles.bulkActionBtn, styles.bulkDeleteBtn, selectedItems.size === 0 && { opacity: 0.5 }]}
                                 >
-                                    {bulkDeleteLoading ? (
+                                    {bulkDeleteLoading || deletingInBackground ? (
                                         <ActivityIndicator size="small" color="#FFF" />
                                     ) : (
                                         <>
@@ -1153,5 +1289,15 @@ const styles = StyleSheet.create({
         fontSize: 13,
         fontFamily: 'Poppins_600SemiBold',
         color: '#FFF',
+    },
+    backgroundDeleteIndicator: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: 'rgba(251,191,36,0.3)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.3)',
     },
 });
