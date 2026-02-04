@@ -447,6 +447,18 @@ async def get_assessment_submissions(
     return result
 
 
+@router.get("/proctored/{assessment_id}/submissions")
+async def get_proctored_assessment_submissions_alias(
+    assessment_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get submissions for a specific proctored assessment.
+    Alias to match frontend route structure.
+    """
+    return await get_assessment_submissions(assessment_id, db)
+
+
 @router.get("/submissions/user/{user_email}")
 async def get_user_submissions(
     user_email: str,

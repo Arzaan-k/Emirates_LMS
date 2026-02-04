@@ -55,6 +55,24 @@ export default function LiveTrackingScreen({ navigation }) {
         return () => clearInterval(interval);
     }, []);
 
+    // [NEW] Web Support: Listen for map messages
+    useEffect(() => {
+        if (Platform.OS === 'web') {
+            const handleWebMessage = (event) => {
+                try {
+                    const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+                    if (data?.type === 'mapReady') {
+                        setMapReady(true);
+                    }
+                } catch (e) {
+                    console.error("Web message error:", e);
+                }
+            };
+            window.addEventListener('message', handleWebMessage);
+            return () => window.removeEventListener('message', handleWebMessage);
+        }
+    }, []);
+
     const fetchLocations = async () => {
         try {
             const res = await fetch(`${API_URL}/api/v1/tracking/location/all`);
@@ -89,22 +107,36 @@ export default function LiveTrackingScreen({ navigation }) {
     };
 
     const updateMarkersInWebView = (data) => {
-        const markersJS = `
-            updateMarkers(${JSON.stringify(data)});
-            true;
-        `;
-        webViewRef.current?.injectJavaScript(markersJS);
+        if (Platform.OS === 'web') {
+            webViewRef.current?.contentWindow?.postMessage(JSON.stringify({ type: 'updateMarkers', data }), '*');
+        } else {
+            const markersJS = `
+                updateMarkers(${JSON.stringify(data)});
+                true;
+            `;
+            webViewRef.current?.injectJavaScript(markersJS);
+        }
     };
 
     const centerOnEmployee = (loc) => {
         setSelectedEmployee(loc);
         if (webViewRef.current) {
-            const script = `
-                centerMap(${loc.latitude}, ${loc.longitude}, 16);
-                highlightMarker('${loc.user_email}');
-                true;
-            `;
-            webViewRef.current.injectJavaScript(script);
+            if (Platform.OS === 'web') {
+                webViewRef.current.contentWindow?.postMessage(JSON.stringify({
+                    type: 'centerMap',
+                    lat: loc.latitude,
+                    lng: loc.longitude,
+                    zoom: 16,
+                    highlightId: loc.user_email
+                }), '*');
+            } else {
+                const script = `
+                    centerMap(${loc.latitude}, ${loc.longitude}, 16);
+                    highlightMarker('${loc.user_email}');
+                    true;
+                `;
+                webViewRef.current.injectJavaScript(script);
+            }
         }
     };
 
@@ -288,8 +320,27 @@ export default function LiveTrackingScreen({ navigation }) {
 
             // Notify React Native that map is ready
             setTimeout(function() {
-                window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'mapReady' }));
+                if (window.ReactNativeWebView) {
+                    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'mapReady' }));
+                } else {
+                    window.parent.postMessage(JSON.stringify({ type: 'mapReady' }), '*');
+                }
             }, 1000);
+
+            // [NEW] Listen for messages from Parent (Web & Native)
+            window.addEventListener('message', function(event) {
+                var msg = event.data;
+                try {
+                    if (typeof msg === 'string') msg = JSON.parse(msg);
+                } catch(e) {}
+                
+                if (msg.type === 'updateMarkers') {
+                    updateMarkers(msg.data);
+                } else if (msg.type === 'centerMap') {
+                    centerMap(msg.lat, msg.lng, msg.zoom);
+                    if (msg.highlightId) highlightMarker(msg.highlightId);
+                }
+            });
         </script>
     </body>
     </html>
@@ -347,25 +398,34 @@ export default function LiveTrackingScreen({ navigation }) {
                 </View>
             ) : (
                 <View style={styles.mapContainer}>
-                    <WebView
-                        ref={webViewRef}
-                        source={{ html: mapHtml }}
-                        style={styles.map}
-                        onMessage={handleWebViewMessage}
-                        javaScriptEnabled={true}
-                        domStorageEnabled={true}
-                        startInLoadingState={true}
-                        renderLoading={() => (
-                            <View style={styles.mapLoading}>
-                                <ActivityIndicator size="large" color="#F59E0B" />
-                                <Text style={styles.mapLoadingText}>Loading map...</Text>
-                            </View>
-                        )}
-                        onError={(syntheticEvent) => {
-                            const { nativeEvent } = syntheticEvent;
-                            console.error('WebView error:', nativeEvent);
-                        }}
-                    />
+                    {Platform.OS === 'web' ? (
+                        <iframe
+                            ref={webViewRef}
+                            srcDoc={mapHtml}
+                            style={{ width: '100%', height: '100%', border: 'none' }}
+                            title="Live Tracking Map"
+                        />
+                    ) : (
+                        <WebView
+                            ref={webViewRef}
+                            source={{ html: mapHtml }}
+                            style={styles.map}
+                            onMessage={handleWebViewMessage}
+                            javaScriptEnabled={true}
+                            domStorageEnabled={true}
+                            startInLoadingState={true}
+                            renderLoading={() => (
+                                <View style={styles.mapLoading}>
+                                    <ActivityIndicator size="large" color="#F59E0B" />
+                                    <Text style={styles.mapLoadingText}>Loading map...</Text>
+                                </View>
+                            )}
+                            onError={(syntheticEvent) => {
+                                const { nativeEvent } = syntheticEvent;
+                                console.error('WebView error:', nativeEvent);
+                            }}
+                        />
+                    )}
 
                     {/* FLOATING LEGEND */}
                     <View style={styles.legend}>

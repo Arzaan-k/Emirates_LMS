@@ -35,6 +35,8 @@ class User(Base):
     self_learning_completed = Column(Boolean, default=False, nullable=True)
     profile_data = Column(JSON, default={}, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=True)
+    last_active = Column(DateTime, nullable=True)
+    xp_points = Column(Integer, default=0, nullable=True)
 
     # Relationships
     completions = relationship(

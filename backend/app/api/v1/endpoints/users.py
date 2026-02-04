@@ -491,12 +491,18 @@ async def get_bulk_upload_status(task_id: str):
         raise HTTPException(status_code=404, detail="Task not found")
     return task
 
-async def process_bulk_upload_task(task_id: str, contents: bytes, db: Session):
+def process_bulk_upload_task(task_id: str, contents: bytes):
     """
     Background task to process bulk upload.
+    Creates its own database session since the request session becomes invalid 
+    after the request completes.
     """
     import pandas as pd
     import io
+    from app.config.database import SessionLocal
+    
+    # Create a fresh database session for the background task
+    db = SessionLocal()
     
     try:
         service = UserService(db)
@@ -534,8 +540,6 @@ async def process_bulk_upload_task(task_id: str, contents: bytes, db: Session):
             try:
                 row_dict = {k: (v if pd.notna(v) else None) for k, v in row.items()}
                 
-                # ... USER CREATION LOGIC (Copying core logic) ...
-                
                 # Extract core fields
                 email = str(row_dict.get('Email', row_dict.get('email', ''))).strip()
                 if not email or email.lower() == 'nan' or email.lower() == 'none' or '@' not in email:
@@ -568,8 +572,9 @@ async def process_bulk_upload_task(task_id: str, contents: bytes, db: Session):
                     "profile_data": profile_data
                 }
                 
-                # Check exist
-                if service.get_user_by_email(email):
+                # Check exist - use optional to not raise exception
+                existing_user = service.get_user_by_email_optional(email)
+                if existing_user:
                     skipped += 1
                     continue
                 
@@ -578,6 +583,7 @@ async def process_bulk_upload_task(task_id: str, contents: bytes, db: Session):
                 
             except Exception as e:
                 errors.append({"email": row_dict.get("Email", "unknown"), "error": str(e)})
+                logger.error(f"Bulk upload row error: {e}")
 
         # Complete
         upload_tasks[task_id]["status"] = "completed"
@@ -586,10 +592,15 @@ async def process_bulk_upload_task(task_id: str, contents: bytes, db: Session):
             "skipped": skipped,
             "errors": errors
         }
+        logger.info(f"Bulk upload completed: {created} created, {skipped} skipped, {len(errors)} errors")
         
     except Exception as e:
         upload_tasks[task_id]["status"] = "failed"
         upload_tasks[task_id]["error"] = str(e)
+        logger.error(f"Bulk upload task failed: {e}")
+    finally:
+        # Always close the session
+        db.close()
 
 
 @router.post("/bulk-upload")
@@ -619,7 +630,7 @@ async def bulk_upload_users(
         "filename": file.filename
     }
     
-    background_tasks.add_task(process_bulk_upload_task, task_id, contents, db)
+    background_tasks.add_task(process_bulk_upload_task, task_id, contents)
     
     return {
         "status": "processing",

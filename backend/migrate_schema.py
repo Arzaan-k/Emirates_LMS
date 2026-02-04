@@ -45,6 +45,14 @@ def migrate():
         "ALTER TABLE course_buckets ADD COLUMN IF NOT EXISTS parent_bucket_id VARCHAR(100)",
         "ALTER TABLE course_buckets ADD COLUMN IF NOT EXISTS folder_path VARCHAR(1000)",
         "CREATE INDEX IF NOT EXISTS idx_bucket_parent ON course_buckets(parent_bucket_id)",
+
+        # Progression Level - Exam Config
+        "ALTER TABLE progression_levels ADD COLUMN IF NOT EXISTS exam_questions INTEGER DEFAULT 10",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active TIMESTAMP",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS xp_points INTEGER DEFAULT 0",
+        "ALTER TABLE progression_levels ADD COLUMN IF NOT EXISTS exam_time_minutes INTEGER DEFAULT 15",
+        "ALTER TABLE progression_levels ADD COLUMN IF NOT EXISTS pass_percent INTEGER DEFAULT 70",
+        "ALTER TABLE progression_levels ADD COLUMN IF NOT EXISTS proctored BOOLEAN DEFAULT false",
     ]
     
     for migration in migrations:

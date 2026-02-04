@@ -256,6 +256,9 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
     const [showLangPicker, setShowLangPicker] = useState(false);
     const [searchLang, setSearchLang] = useState('');
 
+    // Document navigation hint
+    const [showDocumentHint, setShowDocumentHint] = useState(true);
+
     const LANGUAGES = [
         "English",
         // Indian Languages
@@ -337,12 +340,12 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
             try {
                 const formData = new FormData();
                 formData.append("user_email", userEmail);
-                formData.append("progress_percent", "100");
-                formData.append("last_position", "0");
-                formData.append("time_spent_seconds", "0");
-                formData.append("completed", "false");
+                formData.append("node_id", lesson.id);
+                formData.append("video_position_seconds", "0");
+                formData.append("video_duration_seconds", "1"); // Dummy duration for documents
+                formData.append("explicit_progress_percent", "100");
 
-                await fetch(`${API_URL}/learning-paths/progress/${lesson.id}`, {
+                await fetch(`${API_URL}/learning-path/track-video-progress`, {
                     method: "POST",
                     body: formData
                 });
@@ -775,6 +778,12 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
         }, 800);
     };
 
+    // Determine if content is a document (not video/audio)
+    const isDocumentType = () => {
+        const resourceType = lesson.resourceType || lesson.resource_type || 'Video';
+        return resourceType !== 'Video' && resourceType !== 'Audio';
+    };
+
     // Render content viewer based on resource type
     const renderContentViewer = () => {
         const resourceType = lesson.resourceType || lesson.resource_type || 'Video';
@@ -835,18 +844,40 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
         // PDF content
         if (resourceType === 'PDF') {
             if (contentUrl) {
+                // Use Google Docs Viewer for better PDF compatibility
+                const viewerUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(contentUrl)}`;
                 return (
-                    <WebView
-                        source={{ uri: contentUrl }}
-                        style={StyleSheet.absoluteFill}
-                        startInLoadingState={true}
-                        renderLoading={() => (
-                            <View style={styles.loadingOverlay}>
-                                <ActivityIndicator size="large" color="#F59E0B" />
-                                <Text style={styles.loadingText}>Loading PDF...</Text>
+                    <>
+                        <WebView
+                            source={{ uri: viewerUrl }}
+                            style={StyleSheet.absoluteFill}
+                            startInLoadingState={true}
+                            renderLoading={() => (
+                                <View style={styles.loadingOverlay}>
+                                    <ActivityIndicator size="large" color="#F59E0B" />
+                                    <Text style={styles.loadingText}>Loading PDF...</Text>
+                                </View>
+                            )}
+                            javaScriptEnabled={true}
+                            domStorageEnabled={true}
+                            onLoadEnd={() => {
+                                // Show hint for 4 seconds when document loads
+                                setShowDocumentHint(true);
+                                setTimeout(() => setShowDocumentHint(false), 4000);
+                            }}
+                        />
+                        {/* Navigation Hint Overlay */}
+                        {showDocumentHint && (
+                            <View style={styles.documentHintOverlay}>
+                                <View style={styles.documentHintBox}>
+                                    <MaterialCommunityIcons name="gesture-swipe-horizontal" size={24} color="#F59E0B" />
+                                    <Text style={styles.documentHintText}>
+                                        Swipe or scroll to navigate pages
+                                    </Text>
+                                </View>
                             </View>
                         )}
-                    />
+                    </>
                 );
             } else {
                 return (
@@ -864,17 +895,36 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
                 // Use Google Docs Viewer for presentations
                 const viewerUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(contentUrl)}`;
                 return (
-                    <WebView
-                        source={{ uri: viewerUrl }}
-                        style={StyleSheet.absoluteFill}
-                        startInLoadingState={true}
-                        renderLoading={() => (
-                            <View style={styles.loadingOverlay}>
-                                <ActivityIndicator size="large" color="#F59E0B" />
-                                <Text style={styles.loadingText}>Loading Presentation...</Text>
+                    <>
+                        <WebView
+                            source={{ uri: viewerUrl }}
+                            style={StyleSheet.absoluteFill}
+                            startInLoadingState={true}
+                            renderLoading={() => (
+                                <View style={styles.loadingOverlay}>
+                                    <ActivityIndicator size="large" color="#F59E0B" />
+                                    <Text style={styles.loadingText}>Loading Presentation...</Text>
+                                </View>
+                            )}
+                            javaScriptEnabled={true}
+                            domStorageEnabled={true}
+                            onLoadEnd={() => {
+                                setShowDocumentHint(true);
+                                setTimeout(() => setShowDocumentHint(false), 4000);
+                            }}
+                        />
+                        {/* Navigation Hint Overlay */}
+                        {showDocumentHint && (
+                            <View style={styles.documentHintOverlay}>
+                                <View style={styles.documentHintBox}>
+                                    <MaterialCommunityIcons name="gesture-swipe-horizontal" size={24} color="#F59E0B" />
+                                    <Text style={styles.documentHintText}>
+                                        Swipe or scroll to navigate slides
+                                    </Text>
+                                </View>
                             </View>
                         )}
-                    />
+                    </>
                 );
             } else {
                 return (
@@ -892,17 +942,36 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
                 // Use Google Docs Viewer for Word documents
                 const viewerUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(contentUrl)}`;
                 return (
-                    <WebView
-                        source={{ uri: viewerUrl }}
-                        style={StyleSheet.absoluteFill}
-                        startInLoadingState={true}
-                        renderLoading={() => (
-                            <View style={styles.loadingOverlay}>
-                                <ActivityIndicator size="large" color="#F59E0B" />
-                                <Text style={styles.loadingText}>Loading Document...</Text>
+                    <>
+                        <WebView
+                            source={{ uri: viewerUrl }}
+                            style={StyleSheet.absoluteFill}
+                            startInLoadingState={true}
+                            renderLoading={() => (
+                                <View style={styles.loadingOverlay}>
+                                    <ActivityIndicator size="large" color="#F59E0B" />
+                                    <Text style={styles.loadingText}>Loading Document...</Text>
+                                </View>
+                            )}
+                            javaScriptEnabled={true}
+                            domStorageEnabled={true}
+                            onLoadEnd={() => {
+                                setShowDocumentHint(true);
+                                setTimeout(() => setShowDocumentHint(false), 4000);
+                            }}
+                        />
+                        {/* Navigation Hint Overlay */}
+                        {showDocumentHint && (
+                            <View style={styles.documentHintOverlay}>
+                                <View style={styles.documentHintBox}>
+                                    <MaterialCommunityIcons name="gesture-swipe-horizontal" size={24} color="#F59E0B" />
+                                    <Text style={styles.documentHintText}>
+                                        Swipe or scroll to navigate pages
+                                    </Text>
+                                </View>
                             </View>
                         )}
-                    />
+                    </>
                 );
             } else {
                 return (
@@ -971,7 +1040,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
                     />
 
                     {/* CONTENT VIEWER (Video, PDF, Documents) */}
-                    <View style={styles.videoContainer}>
+                    <View style={isDocumentType() ? styles.documentContainer : styles.videoContainer}>
                         {isLoading && (
                             <View style={styles.loadingOverlay}>
                                 <ActivityIndicator size="large" color="#F59E0B" />
@@ -1150,53 +1219,59 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
                                         </ScrollView>
                                     </Animated.View>
                                 ) : (
-                                    <View style={styles.quizResult}>
-                                        <MaterialCommunityIcons
-                                            name={endQuizPassed ? "trophy-outline" : "reload"}
-                                            size={64}
-                                            color={endQuizPassed ? "#FBBF24" : "#EF4444"}
-                                        />
-                                        <Text style={styles.resultTitle}>
-                                            {endQuizPassed ? "Quiz Passed!" : "Quiz Not Passed"}
-                                        </Text>
-                                        <Text style={styles.resultScore}>
-                                            You scored {quizScore}/{quizData.length} ({((quizScore / quizData.length) * 100).toFixed(0)}%)
-                                        </Text>
-
-                                        {endQuizPassed && moduleCompleted && (
-                                            <>
-                                                <View style={styles.xpBadge}>
-                                                    <MaterialCommunityIcons name="star" size={20} color="#FBBF24" />
-                                                    <Text style={styles.xpBadgeText}>
-                                                        +{lesson.xp || 50} XP Earned!
-                                                    </Text>
-                                                </View>
-                                                <View style={styles.completeBadge}>
-                                                    <MaterialCommunityIcons name="check-circle" size={20} color="#10B981" />
-                                                    <Text style={styles.completeBadgeText}>
-                                                        Module Completed
-                                                    </Text>
-                                                </View>
-                                            </>
-                                        )}
-
-                                        {!endQuizPassed && (
-                                            <Text style={styles.failMessage}>
-                                                You need {requirements.quiz_pass_percent}% to pass
+                                    <ScrollView
+                                        style={{ flex: 1 }}
+                                        contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', paddingVertical: 40 }}
+                                        showsVerticalScrollIndicator={false}
+                                    >
+                                        <View style={styles.quizResult}>
+                                            <MaterialCommunityIcons
+                                                name={endQuizPassed ? "trophy-outline" : "reload"}
+                                                size={64}
+                                                color={endQuizPassed ? "#FBBF24" : "#EF4444"}
+                                            />
+                                            <Text style={styles.resultTitle}>
+                                                {endQuizPassed ? "Quiz Passed!" : "Quiz Not Passed"}
                                             </Text>
-                                        )}
-
-                                        <TouchableOpacity style={styles.restartBtn} onPress={() => {
-                                            setQuizComplete(false);
-                                            setCurrentQuizIdx(0);
-                                            setQuizScore(0);
-                                            setSelectedOption(null);
-                                        }}>
-                                            <Text style={styles.restartBtnText}>
-                                                {endQuizPassed ? "Practice Again" : "Try Again"}
+                                            <Text style={styles.resultScore}>
+                                                You scored {quizScore}/{quizData.length} ({((quizScore / quizData.length) * 100).toFixed(0)}%)
                                             </Text>
-                                        </TouchableOpacity>
-                                    </View>
+
+                                            {endQuizPassed && moduleCompleted && (
+                                                <>
+                                                    <View style={styles.xpBadge}>
+                                                        <MaterialCommunityIcons name="star" size={20} color="#FBBF24" />
+                                                        <Text style={styles.xpBadgeText}>
+                                                            +{lesson.xp || 50} XP Earned!
+                                                        </Text>
+                                                    </View>
+                                                    <View style={styles.completeBadge}>
+                                                        <MaterialCommunityIcons name="check-circle" size={20} color="#10B981" />
+                                                        <Text style={styles.completeBadgeText}>
+                                                            Module Completed
+                                                        </Text>
+                                                    </View>
+                                                </>
+                                            )}
+
+                                            {!endQuizPassed && (
+                                                <Text style={styles.failMessage}>
+                                                    You need {requirements.quiz_pass_percent}% to pass
+                                                </Text>
+                                            )}
+
+                                            <TouchableOpacity style={styles.restartBtn} onPress={() => {
+                                                setQuizComplete(false);
+                                                setCurrentQuizIdx(0);
+                                                setQuizScore(0);
+                                                setSelectedOption(null);
+                                            }}>
+                                                <Text style={styles.restartBtnText}>
+                                                    {endQuizPassed ? "Practice Again" : "Try Again"}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    </ScrollView>
                                 )}
                             </View>
                         )}
@@ -1440,6 +1515,16 @@ const styles = StyleSheet.create({
     videoContainer: {
         width: width,
         height: width * 0.5625,
+        backgroundColor: '#000',
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4.65,
+        elevation: 8,
+    },
+    documentContainer: {
+        width: width,
+        height: height * 0.35, // Use 35% of screen height for documents - leaves room for quiz/transcript
         backgroundColor: '#000',
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 4 },
@@ -1691,5 +1776,35 @@ const styles = StyleSheet.create({
         color: '#9CA3AF',
         fontSize: 12,
         fontFamily: 'Poppins_400Regular',
+    },
+    // Document navigation hint overlay
+    documentHintOverlay: {
+        position: 'absolute',
+        bottom: 20,
+        left: 20,
+        right: 20,
+        alignItems: 'center',
+        zIndex: 100,
+    },
+    documentHintBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(17, 24, 39, 0.95)',
+        paddingHorizontal: 20,
+        paddingVertical: 12,
+        borderRadius: 12,
+        gap: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(245, 158, 11, 0.3)',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 8,
+    },
+    documentHintText: {
+        color: '#F3F4F6',
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
     },
 });
