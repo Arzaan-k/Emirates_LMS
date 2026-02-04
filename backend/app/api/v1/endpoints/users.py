@@ -7,9 +7,11 @@ import json
 import logging
 from typing import Dict, Any, Optional, List
 
-from fastapi import APIRouter, Depends, Form, File, UploadFile, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, BackgroundTasks, Request, Form
 from sqlalchemy.orm import Session
-
+from typing import List, Dict, Any, Optional
+import io
+import csv
 from app.config.database import get_db
 from app.core.dependencies import get_current_user, require_admin, require_privilege
 from app.core.middleware import limiter
@@ -25,47 +27,56 @@ router = APIRouter(prefix="/users", tags=["Users"])
 # ==========================================
 
 @router.get("/", response_model=Dict[str, Any])
-async def list_users(
+def list_users(
     page: int = 1,
     limit: int = 50,
     search: str = "",
     store: str = "",
     role: str = "",
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
-    Returns all users (without passwords) with pagination and filtering.
+    Optimized users list with pagination and filtering.
+    Uses single DB round-trip via UserService.
     """
-    service = UserService(db)
+
     skip = (page - 1) * limit
-    
-    users = service.get_all_users(
+    service = UserService(db)
+
+    users, total = service.get_users_with_count(
         skip=skip,
         limit=limit,
-        store=store if store else None,
-        role=role if role else None,
-        search=search if search else None
+        store=store or None,
+        role=role or None,
+        search=search or None,
     )
-    
-    # Remove passwords from response
-    user_list = []
-    for user in users:
-        user_dict = user.to_dict() if hasattr(user, 'to_dict') else dict(user)
-        user_dict.pop('password', None)
-        user_list.append(user_dict)
-        
-    # Get total count for pagination
-    total = service.get_user_count(
-        store=store if store else None,
-        role=role if role else None,
-        search=search if search else None
-    )
-    
+
+    # Fast serialization (no password ever fetched)
+    user_list = [
+        {
+            **(
+                user.to_dict()
+                if hasattr(user, "to_dict")
+                else {
+                    k: v
+                    for k, v in user.__dict__.items()
+                    if not k.startswith("_")
+                }
+            ),
+            **{}
+        }
+        for user in users
+    ]
+
+    for u in user_list:
+        u.pop("password", None)
+
+
     return {
         "users": user_list,
         "total": total,
         "page": page,
-        "total_pages": (total + limit - 1) // limit if limit > 0 else 1
+        "total_pages": (total + limit - 1) // limit if limit > 0 else 1,
     }
 
 
@@ -74,18 +85,18 @@ async def list_users(
 # ==========================================
 
 @router.get("/list")
-async def list_users_alias(
+def list_users_alias(
     page: int = 1,
     limit: int = 50,
     search: str = "",
     store: str = "",
     role: str = "",
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Alias for /users/ - backward compatibility with frontend.
     """
-    return await list_users(page, limit, search, store, role, db)
+    return list_users(page, limit, search, store, role, db)
 
 
 @router.post("/create")
@@ -466,88 +477,192 @@ async def get_stores_summary(db: Session = Depends(get_db)):
 # BULK UPLOAD ENDPOINTS
 # ==========================================
 
-@router.post("/bulk-upload")
-async def bulk_upload_users(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user: Dict[str, Any] = Depends(require_admin)
-):
+
+# In-memory store for upload progress (In a real app, use Redis/DB)
+upload_tasks = {}
+
+@router.get("/bulk-upload/status/{task_id}")
+async def get_bulk_upload_status(task_id: str):
     """
-    Bulk upload users from Excel/CSV file.
-    Expected columns: Name, Email, Password, Role, Category, Store
+    Get the status of a bulk upload background task.
+    """
+    task = upload_tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
+
+async def process_bulk_upload_task(task_id: str, contents: bytes, db: Session):
+    """
+    Background task to process bulk upload.
     """
     import pandas as pd
     import io
     
-    service = UserService(db)
-    
     try:
-        contents = await file.read()
+        service = UserService(db)
         
-        # Determine file type
-        if file.filename.endswith('.csv'):
-            df = pd.read_csv(io.BytesIO(contents))
-        else:
-            df = pd.read_excel(io.BytesIO(contents))
+        # Determine file type & Load DF
+        try:
+            # We can't easy guess extension from bytes, assume Excel then CSV or try-catch
+            # Since we lost filename, let's try Excel first (most common) then CSV
+            try:
+                df = pd.read_excel(io.BytesIO(contents))
+            except:
+                try:
+                    df = pd.read_csv(io.BytesIO(contents))
+                except:
+                    df = pd.read_csv(io.BytesIO(contents), encoding='ISO-8859-1')
+        except Exception as e:
+            upload_tasks[task_id]["status"] = "failed"
+            upload_tasks[task_id]["error"] = f"Invalid file format: {str(e)}"
+            return
+
+        # Sanitize
+        df.columns = [c.strip() for c in df.columns]
+        total_rows = len(df)
+        upload_tasks[task_id]["total"] = total_rows
         
         created = 0
+        skipped = 0
         errors = []
         
-        for _, row in df.iterrows():
+        for index, row in df.iterrows():
+            # Update progress every 5 rows or so to avoid lock contention if tracking was heavy
+            upload_tasks[task_id]["current"] = index + 1
+            upload_tasks[task_id]["progress"] = int(((index + 1) / total_rows) * 100) if total_rows > 0 else 100
+            
             try:
+                row_dict = {k: (v if pd.notna(v) else None) for k, v in row.items()}
+                
+                # ... USER CREATION LOGIC (Copying core logic) ...
+                
+                # Extract core fields
+                email = str(row_dict.get('Email', row_dict.get('email', ''))).strip()
+                if not email or email.lower() == 'nan' or email.lower() == 'none' or '@' not in email:
+                    skipped += 1
+                    continue
+                    
+                name = str(row_dict.get('Full Name', row_dict.get('Name', row_dict.get('name', '')))).strip()
+                if not name: name = email.split('@')[0]
+                
+                raw_role = str(row_dict.get('Designation', row_dict.get('Role', 'Waffler'))).strip()
+                role = raw_role if raw_role and raw_role.lower() != 'nan' else "Waffler"
+                
+                raw_cat = str(row_dict.get('Category', row_dict.get('Department', 'Employee'))).strip()
+                category = "Employee"
+                if raw_cat and raw_cat.lower() != 'nan':
+                    if "manager" in raw_cat.lower(): category = "Manager"
+                    elif "super" in raw_cat.lower(): category = "Supervisor"
+                    elif "admin" in raw_cat.lower(): category = "Super Admin"
+                
+                store = str(row_dict.get('Store Name', row_dict.get('Store', 'Unassigned'))).strip()
+                if not store or store.lower() == 'nan': store = "Unassigned"
+                
+                password = str(row_dict.get('Password', 'Welcome@123')).strip()
+                profile_data = row_dict
+                
                 user_data = {
-                    "name": str(row.get('Name', row.get('name', ''))),
-                    "email": str(row.get('Email', row.get('email', ''))),
-                    "password": str(row.get('Password', row.get('password', 'changeme123'))),
-                    "role": str(row.get('Role', row.get('role', 'Waffler'))),
-                    "category": str(row.get('Category', row.get('category', 'Employee'))),
-                    "store": str(row.get('Store', row.get('store', 'Unassigned'))),
-                    "privileges": [],
-                    "is_superadmin": False,
-                    "has_admin_access": False,
+                    "name": name, "email": email, "password": password,
+                    "role": role, "category": category, "store": store,
+                    "privileges": [], "is_superadmin": False, "has_admin_access": False,
+                    "profile_data": profile_data
                 }
+                
+                # Check exist
+                if service.get_user_by_email(email):
+                    skipped += 1
+                    continue
                 
                 service.create_user(user_data)
                 created += 1
                 
             except Exception as e:
-                errors.append({
-                    "email": user_data.get("email", "unknown"),
-                    "error": str(e)
-                })
-        
-        return {
-            "message": f"Bulk upload complete. Created: {created}, Errors: {len(errors)}",
+                errors.append({"email": row_dict.get("Email", "unknown"), "error": str(e)})
+
+        # Complete
+        upload_tasks[task_id]["status"] = "completed"
+        upload_tasks[task_id]["results"] = {
             "created": created,
+            "skipped": skipped,
             "errors": errors
         }
         
     except Exception as e:
-        logger.error(f"Bulk upload failed: {e}")
-        raise HTTPException(status_code=400, detail=f"Failed to process file: {str(e)}")
+        upload_tasks[task_id]["status"] = "failed"
+        upload_tasks[task_id]["error"] = str(e)
+
+
+@router.post("/bulk-upload")
+async def bulk_upload_users(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """
+    Start background bulk upload task.
+    """
+    import uuid
+    
+    # Read content here (async) before passing to background task
+    try:
+        contents = await file.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to read file: {e}")
+
+    task_id = str(uuid.uuid4())
+    upload_tasks[task_id] = {
+        "status": "processing",
+        "progress": 0,
+        "total": 0,
+        "current": 0,
+        "filename": file.filename
+    }
+    
+    background_tasks.add_task(process_bulk_upload_task, task_id, contents, db)
+    
+    return {
+        "status": "processing",
+        "task_id": task_id,
+        "message": "Upload started in background"
+    }
 
 
 @router.get("/bulk-upload/template")
 async def get_bulk_upload_template():
     """
-    Returns the expected format for bulk user upload.
+    Returns the expected format for bulk user upload based on the standard employee export.
     """
     return {
-        "columns": ["Name", "Email", "Password", "Role", "Category", "Store"],
+        "columns": [
+            "Employee Code", "Full Name", "Temporary Employee Code", "User Name", "Date of Birth", 
+            "Gender", "Email", "Contact Number", "Address", "Proof Type", "Proof ID", 
+            "Qualification", "Specialization", "Qualification Status", "Previous Experience Designation", 
+            "Previous Experience", "Marital Status", "Shirt Size", "Denim Size", "Blood Group", 
+            "Account Verified", "Account Approved", "Approved By", "Joining Date", "Date of Resign", 
+            "Date of Leaving", "Reason for Leaving", "Franchise", "Store Name", "Store Code", 
+            "Region", "City", "State", "Designation", "User Status", "Grade", "Concept", 
+            "Department", "Sub Department", "Function", "Sub Function", "Job Role", 
+            "Career Job Roles", "User Created On"
+        ],
         "example": [
             {
-                "Name": "John Doe",
-                "Email": "john@company.com",
-                "Password": "SecurePass123",
-                "Role": "Waffler",
-                "Category": "Employee",
-                "Store": "Mumbai Central"
+                "Employee Code": "BWCO-0028",
+                "Full Name": "Roshan Malekar",
+                "Email": "malekarroshan2@gmail.com",
+                "Designation": "Assistant Store Manager - Store Operations",
+                "Store Name": "C/005-MH-MMR-Ghatkopar",
+                "Department": "Store Operations",
+                "Contact Number": "9177382834",
+                "Gender": "male",
+                "Join Date": "23-09-2017"
             }
         ],
         "notes": [
-            "Role options: Waffler, Silver Waffler, Gold Waffler, Shift Manager, Assistant Store Manager, Store Manager",
-            "Category options: Employee, Supervisor, Manager, Super Admin",
-            "Password will be hashed automatically"
+            "Email is mandatory.",
+            "Default password will be 'Welcome@123' if not specified.",
+            "Designation will be mapped to User Role.",
+            "Store Name will be used for store assignment."
         ]
     }
 
@@ -636,3 +751,26 @@ async def delete_user(
     except Exception as e:
         logger.error(f"User deletion failed: {e}")
         raise
+
+
+@router.post("/bulk-delete")
+async def bulk_delete_users(
+    data: Dict[str, List[str]],
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """
+    Bulk delete users by list of emails (admin only).
+    """
+    emails = data.get("emails", [])
+    if not emails:
+        raise HTTPException(status_code=400, detail="No emails provided")
+        
+    service = UserService(db)
+    try:
+        result = service.bulk_delete_users(emails)
+        logger.info(f"Bulk deleted {result['deleted']} users by {current_user.get('email')}")
+        return result
+    except Exception as e:
+        logger.error(f"Bulk deletion failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

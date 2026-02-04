@@ -533,34 +533,111 @@ async def generate_quiz_from_topic(
 @router.post("/mid-video/generate")
 async def generate_mid_video_quiz(
     node_id: str = Form(...),
-    transcript_segment: str = Form(...),
+    transcript_segment: str = Form(None),
     trigger_time_seconds: float = Form(...),
-    num_questions: int = Form(3)
+    num_questions: int = Form(3),
+    db: Session = Depends(get_db)
 ):
     """
-    Generate a mid-video quiz based on transcript segment using AI.
+    Get or generate a mid-video quiz.
+    First checks database for pre-generated quiz, falls back to real-time generation if needed.
     """
-    ai_service = AIService()
-    
+    from app.models.video_progress import MidVideoQuiz
+
     try:
+        # First, try to get pre-generated quiz from database
+        # Look for quiz within 5 seconds of trigger time (handles rounding)
+        existing_quizzes = db.query(MidVideoQuiz).filter(
+            MidVideoQuiz.node_id == node_id,
+            MidVideoQuiz.trigger_time_seconds.between(trigger_time_seconds - 5, trigger_time_seconds + 5)
+        ).all()
+
+        if existing_quizzes:
+            # Return cached quiz
+            quiz = existing_quizzes[0]
+            logger.info(f"Returning cached mid-video quiz for {node_id} at {trigger_time_seconds}s")
+            return {
+                "id": quiz.id,
+                "node_id": quiz.node_id,
+                "trigger_time_seconds": quiz.trigger_time_seconds,
+                "questions": quiz.questions,
+                "cached": True
+            }
+
+        # Fallback: Generate on-demand if no cached quiz exists
+        logger.warning(f"No cached quiz found for {node_id} at {trigger_time_seconds}s, generating on-demand...")
+
+        if not transcript_segment:
+            raise HTTPException(status_code=400, detail="transcript_segment required for on-demand generation")
+
+        ai_service = AIService()
         questions = await ai_service.generate_quiz_from_text(
             text=transcript_segment,
             num_questions=num_questions,
             difficulty="Easy"
         )
-        
-        quiz = {
-            "id": f"mvq_{uuid.uuid4().hex[:8]}",
+
+        # Store for future use
+        mid_quiz_id = f"mvq_{node_id}_{int(trigger_time_seconds)}"
+        mid_quiz = MidVideoQuiz(
+            id=mid_quiz_id,
+            node_id=node_id,
+            trigger_time_seconds=trigger_time_seconds,
+            questions=questions,
+            generated_from_transcript=transcript_segment[:500] if transcript_segment else "",
+            created_at=datetime.utcnow()
+        )
+
+        db.add(mid_quiz)
+        db.commit()
+
+        logger.info(f"Generated and cached mid-video quiz for {node_id} at {trigger_time_seconds}s")
+
+        return {
+            "id": mid_quiz_id,
             "node_id": node_id,
             "trigger_time_seconds": trigger_time_seconds,
             "questions": questions,
+            "cached": False
         }
-        
-        return quiz
-        
+
     except Exception as e:
-        logger.error(f"Mid-video quiz generation failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
+        logger.error(f"Mid-video quiz retrieval/generation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed: {str(e)}")
+
+
+@router.get("/mid-video/all/{node_id}")
+async def get_all_mid_video_quizzes(
+    node_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get all pre-generated mid-video quizzes for a video.
+    Returns empty array if none exist yet (still generating in background).
+    """
+    from app.models.video_progress import MidVideoQuiz
+
+    try:
+        quizzes = db.query(MidVideoQuiz).filter(
+            MidVideoQuiz.node_id == node_id
+        ).order_by(MidVideoQuiz.trigger_time_seconds).all()
+
+        result = []
+        for quiz in quizzes:
+            result.append({
+                "id": quiz.id,
+                "node_id": quiz.node_id,
+                "trigger_time_seconds": quiz.trigger_time_seconds,
+                "questions": quiz.questions,
+                "question_count": len(quiz.questions) if quiz.questions else 0
+            })
+
+        logger.info(f"Returning {len(result)} pre-generated quizzes for {node_id}")
+        return result
+
+    except Exception as e:
+        logger.error(f"Failed to fetch mid-video quizzes for {node_id}: {e}")
+        return []
 
 
 @router.post("/mid-video/submit")
@@ -576,12 +653,12 @@ async def submit_mid_video_quiz(
     Submit answers for a mid-video quiz.
     """
     quiz_service = QuizService(db)
-    
+
     try:
         answers_list = json.loads(answers)
     except:
         raise HTTPException(status_code=400, detail="Invalid answers format")
-    
+
     # Calculate score (simplified - would need stored quiz questions)
     result = {
         "quiz_id": quiz_id,
@@ -590,7 +667,7 @@ async def submit_mid_video_quiz(
         "submitted_at": datetime.utcnow().isoformat(),
         "answers": answers_list,
     }
-    
+
     return result
 
 

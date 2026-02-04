@@ -512,12 +512,22 @@ export default function SimulationFlowBuilder({ existingSimulation, onSave, onCl
             let mimeType = type === 'video' ? 'video/mp4' : 'image/jpeg';
             if (filename.endsWith('.png')) mimeType = 'image/png';
             if (filename.endsWith('.mov')) mimeType = 'video/quicktime';
+            if (filename.endsWith('.webp')) mimeType = 'image/webp';
 
-            formData.append('file', {
-                uri: uri,
-                name: filename,
-                type: mimeType
-            });
+            if (Platform.OS === 'web') {
+                // WEB: Fetch the URI and convert to Blob, then File
+                const response = await fetch(uri);
+                const blob = await response.blob();
+                const file = new File([blob], filename, { type: mimeType });
+                formData.append('file', file);
+            } else {
+                // NATIVE: Use internal object format for FormData
+                formData.append('file', {
+                    uri: uri,
+                    name: filename,
+                    type: mimeType
+                });
+            }
 
             // Note: In React Native with FormData, do NOT set Content-Type header manually
             const res = await fetch(`${API_URL}/api/v1/simulations/upload-media`, {
@@ -527,7 +537,7 @@ export default function SimulationFlowBuilder({ existingSimulation, onSave, onCl
 
             const data = await res.json();
             if (data.url) return data.url;
-            throw new Error('No URL returned from server');
+            throw new Error(data.detail || 'No URL returned from server');
         } catch (e) {
             console.error("Upload failed:", e);
             Alert.alert("Upload Failed", "Could not upload media to server. Check connection.");

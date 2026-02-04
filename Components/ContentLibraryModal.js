@@ -29,6 +29,9 @@ export default function ContentLibraryModal({ visible, onClose }) {
     const [loading, setLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
 
+    // Folder/Bucket collapse state (tracks which folders are expanded)
+    const [expandedFolders, setExpandedFolders] = useState(new Set());
+
     // Edit Modal State
     const [editModalVisible, setEditModalVisible] = useState(false);
     const [selectedContent, setSelectedContent] = useState(null);
@@ -180,6 +183,19 @@ export default function ContentLibraryModal({ visible, onClose }) {
         }
     };
 
+    // Toggle folder expansion (like clicking folder in file explorer)
+    const toggleFolder = (folderId) => {
+        setExpandedFolders(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(folderId)) {
+                newSet.delete(folderId); // Collapse
+            } else {
+                newSet.add(folderId); // Expand
+            }
+            return newSet;
+        });
+    };
+
     const tabs = ['All', ...availableBuckets.map(b => b.name)];
 
     const filteredCategories = activeTab === 'All'
@@ -195,16 +211,25 @@ export default function ContentLibraryModal({ visible, onClose }) {
         )
     })).filter(cat => cat.items.length > 0);
 
-    const renderContentItem = (item) => {
+    const renderContentItem = (item, indentLevel = 0) => {
         let iconName = 'file-document-outline';
         let iconColor = '#6B7280';
 
-        if (item.type === 'PDF' || item.title.endsWith('.pdf')) { iconName = 'file-pdf-box'; iconColor = '#EF4444'; }
-        else if (item.type === 'Video' || item.videoUrl) { iconName = 'video'; iconColor = '#8B5CF6'; }
-        else if (item.type === 'Excel' || item.title.endsWith('.xlsx')) { iconName = 'file-excel'; iconColor = '#10B981'; }
+        // Detect resource type from multiple sources
+        const resourceType = item.resource_type || item.resourceType || item.type;
+
+        if (resourceType === 'PDF' || item.title.endsWith('.pdf')) { iconName = 'file-pdf-box'; iconColor = '#EF4444'; }
+        else if (resourceType === 'Video' || item.videoUrl) { iconName = 'play-circle'; iconColor = '#8B5CF6'; }
+        else if (resourceType === 'Presentation' || item.title.endsWith('.ppt') || item.title.endsWith('.pptx')) { iconName = 'file-powerpoint'; iconColor = '#F59E0B'; }
+        else if (resourceType === 'Document' || item.title.endsWith('.doc') || item.title.endsWith('.docx')) { iconName = 'file-word'; iconColor = '#2B579A'; }
+        else if (resourceType === 'Excel' || item.title.endsWith('.xlsx')) { iconName = 'file-excel'; iconColor = '#10B981'; }
+        else if (resourceType === 'Audio') { iconName = 'volume-high'; iconColor = '#EC4899'; }
+
+        // Calculate indentation for nested content
+        const indentWidth = indentLevel * 24;
 
         return (
-            <View key={item.id} style={styles.contentItem}>
+            <View key={item.id} style={[styles.contentItem, { marginLeft: indentWidth }]}>
                 <View style={[styles.iconBox, { backgroundColor: iconColor + '20' }]}>
                     <MaterialCommunityIcons name={iconName} size={24} color={iconColor} />
                 </View>
@@ -212,9 +237,20 @@ export default function ContentLibraryModal({ visible, onClose }) {
                     <Text style={styles.itemTitle}>{item.title}</Text>
                     <Text style={styles.itemDesc} numberOfLines={1}>{item.description}</Text>
                     <View style={styles.itemMetaRow}>
-                        <Text style={styles.itemCategory}>{item.category}</Text>
-                        <Text style={styles.itemDot}>•</Text>
-                        <Text style={styles.itemDate}>{item.date}</Text>
+                        {resourceType && (
+                            <>
+                                <MaterialCommunityIcons name="tag" size={12} color="#9CA3AF" />
+                                <Text style={styles.itemResourceType}>{resourceType}</Text>
+                                <Text style={styles.itemDot}>•</Text>
+                            </>
+                        )}
+                        <Text style={styles.itemCategory}>{item.category || item.bucket}</Text>
+                        {item.date && (
+                            <>
+                                <Text style={styles.itemDot}>•</Text>
+                                <Text style={styles.itemDate}>{item.date}</Text>
+                            </>
+                        )}
                     </View>
                 </View>
 
@@ -302,18 +338,89 @@ export default function ContentLibraryModal({ visible, onClose }) {
                                     <Text style={styles.emptyStateText}>No content found</Text>
                                 </View>
                             ) : (
-                                displayCategories.map(category => (
-                                    <View key={category.id} style={styles.categorySection}>
-                                        <View style={styles.categoryHeader}>
-                                            <MaterialCommunityIcons name={category.icon || "folder"} size={20} color={category.color || "#6B7280"} />
-                                            <Text style={styles.categoryTitle}>{category.name}</Text>
-                                            <View style={styles.badge}>
-                                                <Text style={styles.badgeText}>{category.items.length}</Text>
-                                            </View>
+                                displayCategories.map(category => {
+                                    const isExpanded = expandedFolders.has(category.id);
+                                    const hasNestedBuckets = category.children && category.children.length > 0;
+
+                                    return (
+                                        <View key={category.id} style={styles.folderContainer}>
+                                            {/* Folder Header (Clickable like desktop folder) */}
+                                            <TouchableOpacity
+                                                style={styles.folderHeader}
+                                                onPress={() => toggleFolder(category.id)}
+                                                activeOpacity={0.7}
+                                            >
+                                                {/* Expand/Collapse Arrow */}
+                                                <View style={styles.expandIconContainer}>
+                                                    <MaterialCommunityIcons
+                                                        name={isExpanded ? "chevron-down" : "chevron-right"}
+                                                        size={20}
+                                                        color="#6B7280"
+                                                    />
+                                                </View>
+
+                                                {/* Folder Icon (changes when opened) */}
+                                                <View style={[styles.folderIconBox, { backgroundColor: (category.color || "#F59E0B") + '15' }]}>
+                                                    <MaterialCommunityIcons
+                                                        name={isExpanded ? "folder-open" : "folder"}
+                                                        size={22}
+                                                        color={category.color || "#F59E0B"}
+                                                    />
+                                                </View>
+
+                                                {/* Folder Name */}
+                                                <Text style={styles.folderName}>{category.name}</Text>
+
+                                                {/* Item Count Badge */}
+                                                <View style={[styles.folderBadge, { backgroundColor: (category.color || "#F59E0B") + '20' }]}>
+                                                    <Text style={[styles.folderBadgeText, { color: category.color || "#F59E0B" }]}>
+                                                        {category.items.length}
+                                                    </Text>
+                                                </View>
+                                            </TouchableOpacity>
+
+                                            {/* Folder Contents (shown when expanded) */}
+                                            {isExpanded && (
+                                                <View style={styles.folderContents}>
+                                                    {/* Render nested buckets first (if any) */}
+                                                    {hasNestedBuckets && category.children.map(childBucket => (
+                                                        <View key={childBucket.id} style={styles.nestedFolder}>
+                                                            <TouchableOpacity
+                                                                style={styles.nestedFolderHeader}
+                                                                onPress={() => toggleFolder(childBucket.id)}
+                                                                activeOpacity={0.7}
+                                                            >
+                                                                <MaterialCommunityIcons
+                                                                    name={expandedFolders.has(childBucket.id) ? "chevron-down" : "chevron-right"}
+                                                                    size={18}
+                                                                    color="#9CA3AF"
+                                                                />
+                                                                <MaterialCommunityIcons
+                                                                    name={expandedFolders.has(childBucket.id) ? "folder-open-outline" : "folder-outline"}
+                                                                    size={20}
+                                                                    color={childBucket.color || "#9CA3AF"}
+                                                                    style={{ marginLeft: 8 }}
+                                                                />
+                                                                <Text style={styles.nestedFolderName}>{childBucket.name}</Text>
+                                                                <Text style={styles.nestedFolderCount}>({childBucket.items?.length || 0})</Text>
+                                                            </TouchableOpacity>
+
+                                                            {/* Nested folder contents */}
+                                                            {expandedFolders.has(childBucket.id) && (
+                                                                <View style={styles.nestedFolderContents}>
+                                                                    {(childBucket.items || []).map(item => renderContentItem(item, 2))}
+                                                                </View>
+                                                            )}
+                                                        </View>
+                                                    ))}
+
+                                                    {/* Render content items */}
+                                                    {category.items.map(item => renderContentItem(item, 1))}
+                                                </View>
+                                            )}
                                         </View>
-                                        {category.items.map(item => renderContentItem(item))}
-                                    </View>
-                                ))
+                                    );
+                                })
                             )}
                             <View style={{ height: 100 }} />
                         </ScrollView>
@@ -543,6 +650,90 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_500Medium',
         color: '#6B7280'
     },
+    // Folder-like structure styles
+    folderContainer: {
+        marginBottom: 8,
+    },
+    folderHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFFFFF',
+        padding: 12,
+        borderRadius: 12,
+        marginBottom: 4,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+        elevation: 2,
+    },
+    expandIconContainer: {
+        width: 28,
+        height: 28,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 4,
+    },
+    folderIconBox: {
+        width: 36,
+        height: 36,
+        borderRadius: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+    },
+    folderName: {
+        flex: 1,
+        fontSize: 16,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#111827',
+    },
+    folderBadge: {
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 12,
+        marginLeft: 8,
+    },
+    folderBadgeText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    folderContents: {
+        marginLeft: 8,
+        marginTop: 4,
+        paddingLeft: 12,
+        borderLeftWidth: 2,
+        borderLeftColor: '#E5E7EB',
+    },
+    nestedFolder: {
+        marginBottom: 8,
+    },
+    nestedFolderHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#F9FAFB',
+        padding: 10,
+        borderRadius: 10,
+        marginBottom: 4,
+    },
+    nestedFolderName: {
+        flex: 1,
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#374151',
+        marginLeft: 8,
+    },
+    nestedFolderCount: {
+        fontSize: 12,
+        fontFamily: 'Poppins_500Medium',
+        color: '#9CA3AF',
+        marginLeft: 4,
+    },
+    nestedFolderContents: {
+        marginLeft: 20,
+        marginTop: 4,
+    },
+    // Legacy styles (kept for backwards compatibility)
     categorySection: {
         marginBottom: 24,
     },
@@ -609,6 +800,12 @@ const styles = StyleSheet.create({
     itemMetaRow: {
         flexDirection: 'row',
         alignItems: 'center',
+    },
+    itemResourceType: {
+        fontSize: 11,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#9CA3AF',
+        marginLeft: 4,
     },
     itemCategory: {
         fontSize: 12,

@@ -28,6 +28,7 @@ import Animated, {
     Easing
 } from 'react-native-reanimated';
 import { Video, ResizeMode } from 'expo-av';
+import { WebView } from 'react-native-webview';
 import API_URL from '../config';
 
 const { width, height } = Dimensions.get('window');
@@ -314,7 +315,42 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
     useEffect(() => {
         fetchNodeProgress();
         fetchMidVideoQuizzes();
+
+        // Auto-complete progress for non-video content (documents)
+        const resourceType = lesson.resourceType || lesson.resource_type || 'Video';
+        if (resourceType !== 'Video' && resourceType !== 'Audio') {
+            // For documents, mark as viewed immediately
+            setTimeout(() => {
+                handleDocumentViewed();
+            }, 2000); // Give 2 seconds for the document to load
+        }
     }, []);
+
+    const handleDocumentViewed = async () => {
+        // Mark document as 100% viewed since we can't track scroll/page progress
+        const resourceType = lesson.resourceType || lesson.resource_type || 'Video';
+        if (resourceType !== 'Video' && resourceType !== 'Audio') {
+            setVideoProgress(100);
+            highestServerPercent.current = 100;
+
+            // Update server
+            try {
+                const formData = new FormData();
+                formData.append("user_email", userEmail);
+                formData.append("progress_percent", "100");
+                formData.append("last_position", "0");
+                formData.append("time_spent_seconds", "0");
+                formData.append("completed", "false");
+
+                await fetch(`${API_URL}/learning-paths/progress/${lesson.id}`, {
+                    method: "POST",
+                    body: formData
+                });
+            } catch (err) {
+                console.log("Error updating document progress:", err);
+            }
+        }
+    };
 
     const fetchNodeProgress = async () => {
         try {
@@ -739,6 +775,171 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
         }, 800);
     };
 
+    // Render content viewer based on resource type
+    const renderContentViewer = () => {
+        const resourceType = lesson.resourceType || lesson.resource_type || 'Video';
+        const contentUrl = lesson.videoUrl || lesson.video_url || lesson.fileUrl || lesson.file_url;
+
+        // Video or Audio content
+        if (resourceType === 'Video' || resourceType === 'Audio') {
+            if (contentUrl) {
+                return (
+                    <>
+                        <Video
+                            ref={videoRef}
+                            style={StyleSheet.absoluteFill}
+                            source={{ uri: contentUrl }}
+                            useNativeControls
+                            resizeMode={ResizeMode.CONTAIN}
+                            isLooping={false}
+                            shouldPlay={true}
+                            rate={playbackSpeed}
+                            onPlaybackStatusUpdate={handleVideoPlaybackStatus}
+                        />
+
+                        {/* Speed Control Overlay */}
+                        <TouchableOpacity
+                            onPress={toggleSpeed}
+                            style={{
+                                position: 'absolute',
+                                top: 10,
+                                right: 10,
+                                backgroundColor: 'rgba(0,0,0,0.6)',
+                                paddingHorizontal: 10,
+                                paddingVertical: 5,
+                                borderRadius: 15,
+                                borderWidth: 1,
+                                borderColor: 'rgba(255,255,255,0.2)',
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                zIndex: 10
+                            }}
+                        >
+                            <Feather name="fast-forward" size={12} color="#FBBF24" style={{ marginRight: 4 }} />
+                            <Text style={{ color: '#FFF', fontFamily: 'Poppins_600SemiBold', fontSize: 12 }}>
+                                {playbackSpeed.toFixed(1)}x
+                            </Text>
+                        </TouchableOpacity>
+                    </>
+                );
+            } else {
+                return (
+                    <LinearGradient colors={['#374151', '#1F2937']} style={styles.videoPlaceholder}>
+                        <MaterialCommunityIcons name="video-off-outline" size={64} color="rgba(255,255,255,0.5)" />
+                        <Text style={styles.videoDuration}>No Video Source</Text>
+                    </LinearGradient>
+                );
+            }
+        }
+
+        // PDF content
+        if (resourceType === 'PDF') {
+            if (contentUrl) {
+                return (
+                    <WebView
+                        source={{ uri: contentUrl }}
+                        style={StyleSheet.absoluteFill}
+                        startInLoadingState={true}
+                        renderLoading={() => (
+                            <View style={styles.loadingOverlay}>
+                                <ActivityIndicator size="large" color="#F59E0B" />
+                                <Text style={styles.loadingText}>Loading PDF...</Text>
+                            </View>
+                        )}
+                    />
+                );
+            } else {
+                return (
+                    <LinearGradient colors={['#374151', '#1F2937']} style={styles.videoPlaceholder}>
+                        <MaterialCommunityIcons name="file-pdf-box" size={64} color="rgba(255,255,255,0.5)" />
+                        <Text style={styles.videoDuration}>No PDF Source</Text>
+                    </LinearGradient>
+                );
+            }
+        }
+
+        // Presentation (PPT, PPTX) content
+        if (resourceType === 'Presentation') {
+            if (contentUrl) {
+                // Use Google Docs Viewer for presentations
+                const viewerUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(contentUrl)}`;
+                return (
+                    <WebView
+                        source={{ uri: viewerUrl }}
+                        style={StyleSheet.absoluteFill}
+                        startInLoadingState={true}
+                        renderLoading={() => (
+                            <View style={styles.loadingOverlay}>
+                                <ActivityIndicator size="large" color="#F59E0B" />
+                                <Text style={styles.loadingText}>Loading Presentation...</Text>
+                            </View>
+                        )}
+                    />
+                );
+            } else {
+                return (
+                    <LinearGradient colors={['#374151', '#1F2937']} style={styles.videoPlaceholder}>
+                        <MaterialCommunityIcons name="file-powerpoint" size={64} color="rgba(255,255,255,0.5)" />
+                        <Text style={styles.videoDuration}>No Presentation Source</Text>
+                    </LinearGradient>
+                );
+            }
+        }
+
+        // Document (Word, DOCX) content
+        if (resourceType === 'Document') {
+            if (contentUrl) {
+                // Use Google Docs Viewer for Word documents
+                const viewerUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(contentUrl)}`;
+                return (
+                    <WebView
+                        source={{ uri: viewerUrl }}
+                        style={StyleSheet.absoluteFill}
+                        startInLoadingState={true}
+                        renderLoading={() => (
+                            <View style={styles.loadingOverlay}>
+                                <ActivityIndicator size="large" color="#F59E0B" />
+                                <Text style={styles.loadingText}>Loading Document...</Text>
+                            </View>
+                        )}
+                    />
+                );
+            } else {
+                return (
+                    <LinearGradient colors={['#374151', '#1F2937']} style={styles.videoPlaceholder}>
+                        <MaterialCommunityIcons name="file-word" size={64} color="rgba(255,255,255,0.5)" />
+                        <Text style={styles.videoDuration}>No Document Source</Text>
+                    </LinearGradient>
+                );
+            }
+        }
+
+        // Other/Unknown content types - use generic document viewer
+        if (contentUrl) {
+            const viewerUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(contentUrl)}`;
+            return (
+                <WebView
+                    source={{ uri: viewerUrl }}
+                    style={StyleSheet.absoluteFill}
+                    startInLoadingState={true}
+                    renderLoading={() => (
+                        <View style={styles.loadingOverlay}>
+                            <ActivityIndicator size="large" color="#F59E0B" />
+                            <Text style={styles.loadingText}>Loading Content...</Text>
+                        </View>
+                    )}
+                />
+            );
+        } else {
+            return (
+                <LinearGradient colors={['#374151', '#1F2937']} style={styles.videoPlaceholder}>
+                    <MaterialCommunityIcons name="file-document-outline" size={64} color="rgba(255,255,255,0.5)" />
+                    <Text style={styles.videoDuration}>No Content Source</Text>
+                </LinearGradient>
+            );
+        }
+    };
+
     const canComplete = videoProgress >= requirements.video_watch_percent && endQuizPassed;
 
     return (
@@ -769,7 +970,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
                         quizRequired={requirements.quiz_pass_percent}
                     />
 
-                    {/* VIDEO PLAYER */}
+                    {/* CONTENT VIEWER (Video, PDF, Documents) */}
                     <View style={styles.videoContainer}>
                         {isLoading && (
                             <View style={styles.loadingOverlay}>
@@ -777,53 +978,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
                                 <Text style={styles.loadingText}>Generating quiz...</Text>
                             </View>
                         )}
-                        {lesson.videoUrl ? (
-                            <>
-                                <Video
-                                    ref={videoRef}
-                                    style={StyleSheet.absoluteFill}
-                                    source={{ uri: lesson.videoUrl }}
-                                    useNativeControls
-                                    resizeMode={ResizeMode.CONTAIN}
-                                    isLooping={false}
-                                    shouldPlay={true}
-                                    rate={playbackSpeed}
-                                    onPlaybackStatusUpdate={handleVideoPlaybackStatus}
-                                />
-
-                                {/* Speed Control Overlay */}
-                                <TouchableOpacity
-                                    onPress={toggleSpeed}
-                                    style={{
-                                        position: 'absolute',
-                                        top: 10,
-                                        right: 10,
-                                        backgroundColor: 'rgba(0,0,0,0.6)',
-                                        paddingHorizontal: 10,
-                                        paddingVertical: 5,
-                                        borderRadius: 15,
-                                        borderWidth: 1,
-                                        borderColor: 'rgba(255,255,255,0.2)',
-                                        flexDirection: 'row',
-                                        alignItems: 'center',
-                                        zIndex: 10 // Ensure it's above video
-                                    }}
-                                >
-                                    <Feather name="fast-forward" size={12} color="#FBBF24" style={{ marginRight: 4 }} />
-                                    <Text style={{ color: '#FFF', fontFamily: 'Poppins_600SemiBold', fontSize: 12 }}>
-                                        {playbackSpeed.toFixed(1)}x
-                                    </Text>
-                                </TouchableOpacity>
-                            </>
-                        ) : (
-                            <LinearGradient
-                                colors={['#374151', '#1F2937']}
-                                style={styles.videoPlaceholder}
-                            >
-                                <MaterialCommunityIcons name="video-off-outline" size={64} color="rgba(255,255,255,0.5)" />
-                                <Text style={styles.videoDuration}>No Video Source</Text>
-                            </LinearGradient>
-                        )}
+                        {renderContentViewer()}
                     </View>
 
                     {/* TABS */}
@@ -951,7 +1106,10 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
                                                 <View style={styles.warningBanner}>
                                                     <MaterialCommunityIcons name="alert-circle" size={18} color="#F59E0B" />
                                                     <Text style={styles.warningText}>
-                                                        Watch at least {requirements.video_watch_percent}% of the video to complete (Current: {videoProgress}%)
+                                                        {(lesson.resourceType === 'Video' || lesson.resource_type === 'Video' || lesson.resourceType === 'Audio' || lesson.resource_type === 'Audio')
+                                                            ? `Watch at least ${requirements.video_watch_percent}% of the content to complete (Current: ${videoProgress}%)`
+                                                            : `View the document and complete the quiz to proceed`
+                                                        }
                                                     </Text>
                                                 </View>
                                             )}

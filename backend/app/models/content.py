@@ -94,12 +94,15 @@ class CourseBucket(Base):
     """
     Course categories/buckets for organizing content.
     Also serves as skill categories for AI recommendations.
+    Supports hierarchical nesting via parent_bucket_id.
     """
     __tablename__ = "course_buckets"
 
     id = Column(String(100), primary_key=True)
     name = Column(String(255), nullable=False)
     description = Column(Text)
+    parent_bucket_id = Column(String(100))  # ID of parent bucket for nested structure
+    folder_path = Column(String(1000))  # Full path from root (e.g., 'BWC/Career/Module1')
     color = Column(String(50))
     icon = Column(String(100))
     keywords = Column(JSON, default=list)  # Keywords for matching courses to this category
@@ -111,6 +114,7 @@ class CourseBucket(Base):
     __table_args__ = (
         Index('idx_bucket_active', 'is_active'),
         Index('idx_bucket_order', 'order_index'),
+        Index('idx_bucket_parent', 'parent_bucket_id'),
     )
 
     def __repr__(self):
@@ -122,6 +126,8 @@ class CourseBucket(Base):
             "id": self.id,
             "name": self.name,
             "description": self.description,
+            "parent_bucket_id": self.parent_bucket_id,
+            "folder_path": self.folder_path,
             "color": self.color,
             "icon": self.icon,
             "keywords": self.keywords or [],
