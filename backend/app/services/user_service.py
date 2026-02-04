@@ -795,15 +795,45 @@ class UserService:
         # Eligible if ALL required courses for current level are completed
         eligible = len(incomplete_required) == 0 and total > 0
         
+        # [NEW] Dynamic Exam Config (fetched from Target Level)
+        exam_config = {
+            "exam_questions": 10,
+            "exam_time_minutes": 15,
+            "pass_percent": 70,
+            "proctored": False
+        }
+        
+        if next_role:
+            try:
+                from app.repositories.content_repository import ProgressionLevelRepository
+                # Local import to prevent circular dependency
+                
+                level_repo = ProgressionLevelRepository(self.db)
+                target_level = level_repo.get_by_name(next_role)
+                
+                if target_level:
+                    # Use getattr to be safe if migration hasn't run yet (though SQLAlchemy might still error on query)
+                    # The try/catch block handles any DB schema mismatch errors safely
+                    exam_config["exam_questions"] = getattr(target_level, "exam_questions", 10) or 10
+                    exam_config["exam_time_minutes"] = getattr(target_level, "exam_time_minutes", 15) or 15
+                    exam_config["pass_percent"] = getattr(target_level, "pass_percent", 70) or 70
+                    exam_config["proctored"] = getattr(target_level, "proctored", False)
+            except Exception as e:
+                logger.warning(f"Could not load dynamic exam config for {next_role} (using defaults): {e}")
+
         return {
             "eligible": eligible,
             "current_role": current_role,
+            "target_role": next_role,
             "next_role": next_role,
             "requirements_met": requirements_met,
             "requirements_pending": requirements_pending,
             "progress_percent": int((completed / total * 100)) if total > 0 else 100,
             "completed_courses": completed,
             "total_courses": total,
+            "courses_total": total,
+            "courses_remaining": len(incomplete_required),
             "required_course_ids": list(required_courses),
-            "completed_course_ids": list(completed_required)
+            "completed_course_ids": list(completed_required),
+            "config": exam_config
         }

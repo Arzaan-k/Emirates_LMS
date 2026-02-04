@@ -196,6 +196,13 @@ class ProgressionLevel(Base):
     description = Column(Text)
     min_nodes = Column(Integer, default=0)  # Minimum nodes to reach this level
     min_score = Column(Float, default=0.0)  # Minimum average score required
+    
+    # Exam Configuration
+    exam_questions = Column(Integer, default=10)
+    exam_time_minutes = Column(Integer, default=15)
+    pass_percent = Column(Integer, default=70) # Required percentage to pass
+    proctored = Column(Boolean, default=False) # Is camera required?
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -218,6 +225,10 @@ class ProgressionLevel(Base):
             "description": self.description,
             "min_nodes": self.min_nodes,
             "min_score": self.min_score,
+            "exam_questions": self.exam_questions,
+            "exam_time_minutes": self.exam_time_minutes,
+            "pass_percent": self.pass_percent,
+            "proctored": self.proctored,
         }
 
 

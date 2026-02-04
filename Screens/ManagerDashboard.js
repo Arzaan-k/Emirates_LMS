@@ -46,6 +46,8 @@ import ExamAttendanceModal from '../Components/ExamAttendanceModal'; // [NEW] Ex
 import ScheduledExamsListModal from '../Components/ScheduledExamsListModal'; // [NEW] Scheduled Exams List
 import ExamHistoryModal from '../Components/ExamHistoryModal'; // [NEW] Exam History
 import RoleplayHistoryModal from '../Components/RoleplayHistoryModal'; // [NEW] Roleplay History
+import ModeSwitcher from '../Components/ModeSwitcher'; // [NEW] Mode Switcher
+import ModeIndicator from '../Components/ModeIndicator'; // [NEW] Mode Indicator
 
 
 
@@ -174,6 +176,8 @@ export default function ManagerDashboard({ route, navigation }) {
     const [auditLogsVisible, setAuditLogsVisible] = useState(false);
     const [contentLibraryVisible, setContentLibraryVisible] = useState(false);
 
+    // User Mode State
+    const [userMode, setUserMode] = useState('admin');
 
     const { userProfile } = route.params || {};
     const role = userProfile?.role || "Manager";
@@ -967,6 +971,26 @@ export default function ManagerDashboard({ route, navigation }) {
 
     // --- LOGOUT HANDLER ---
     const handleLogout = async () => {
+        if (Platform.OS === 'web') {
+            const confirm = window.confirm("Are you sure you want to logout?");
+            if (confirm) {
+                try {
+                    await AsyncStorage.removeItem('accessToken');
+                    await AsyncStorage.removeItem('userRole');
+                    navigation.dispatch(
+                        CommonActions.reset({
+                            index: 0,
+                            routes: [{ name: 'Login' }],
+                        })
+                    );
+                } catch (e) {
+                    console.error('Logout error:', e);
+                    alert('Failed to logout. Please try again.');
+                }
+            }
+            return;
+        }
+
         Alert.alert(
             "Logout",
             "Are you sure you want to logout?",
@@ -977,13 +1001,9 @@ export default function ManagerDashboard({ route, navigation }) {
                     style: "destructive",
                     onPress: async () => {
                         try {
-                            if (Platform.OS === 'web') {
-                                await AsyncStorage.removeItem('accessToken');
-                                await AsyncStorage.removeItem('userRole');
-                            } else {
-                                await SecureStore.deleteItemAsync('accessToken');
-                                await SecureStore.deleteItemAsync('userRole');
-                            }
+                            await SecureStore.deleteItemAsync('accessToken');
+                            await SecureStore.deleteItemAsync('userRole');
+
                             navigation.dispatch(
                                 CommonActions.reset({
                                     index: 0,
@@ -1000,7 +1020,20 @@ export default function ManagerDashboard({ route, navigation }) {
         );
     };
 
-
+    // Load user mode on mount
+    useEffect(() => {
+        const loadUserMode = async () => {
+            try {
+                const mode = await AsyncStorage.getItem('userMode');
+                if (mode) {
+                    setUserMode(mode);
+                }
+            } catch (error) {
+                console.error('Error loading user mode:', error);
+            }
+        };
+        loadUserMode();
+    }, []);
 
     return (
         <View style={styles.container}>
@@ -1047,6 +1080,16 @@ export default function ManagerDashboard({ route, navigation }) {
                         </LinearGradient>
                     </Animated.View>
 
+                    {/* MODE INDICATOR & SWITCHER */}
+                    <Animated.View entering={FadeInDown.delay(400)} style={styles.modeSection}>
+                        <ModeIndicator mode={userMode} style={{ marginBottom: 12 }} />
+                        <ModeSwitcher
+                            navigation={navigation}
+                            currentMode={userMode}
+                            userProfile={userProfile}
+                        />
+                    </Animated.View>
+
                     {/* STATS GRID */}
                     <Text style={styles.sectionTitle}>Key Performance Indicators</Text>
                     <View style={styles.statsGrid}>
@@ -1083,7 +1126,7 @@ export default function ManagerDashboard({ route, navigation }) {
                         {hasPrivilege('reports') && (
                             <TouchableOpacity
                                 style={styles.actionBtn}
-                                onPress={() => navigation.navigate('Analytics', { userProfile })}
+                                onPress={() => navigation.navigate('AdminReports', { userProfile })}
                             >
                                 <View style={[styles.actionIcon, { backgroundColor: '#FCE7F3' }]}>
                                     <Feather name="bar-chart-2" size={24} color="#DB2777" />
@@ -2755,5 +2798,20 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontFamily: 'Poppins_600SemiBold',
         color: '#6B7280',
+    },
+
+    // MODE SECTION STYLES
+    modeSection: {
+        backgroundColor: '#FFF',
+        borderRadius: 20,
+        padding: 20,
+        marginHorizontal: 20,
+        marginTop: -10,
+        marginBottom: 20,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 12,
+        elevation: 4,
     },
 });

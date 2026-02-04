@@ -38,6 +38,7 @@ import AuditsScreen from './Screens/AuditsScreen';
 import Recommendations from './Screens/Recommendations';
 import MeetingRoom from './Screens/MeetingRoom';
 import CRMTaskScreen from './Screens/CRMTaskScreen';
+import AdminReports from './Screens/AdminReports'; // NEW: Comprehensive Reports Module
 import DisclaimerModal from './Components/DisclaimerModal'; // Global disclaimer
 
 LogBox.ignoreAllLogs();
@@ -127,6 +128,7 @@ function App() {
               <Stack.Screen name="Recommendations" component={Recommendations} />
               <Stack.Screen name="MeetingRoom" component={MeetingRoom} />
               <Stack.Screen name="CRMTask" component={CRMTaskScreen} />
+              <Stack.Screen name="AdminReports" component={AdminReports} />
             </Stack.Navigator>
           </NavigationContainer>
           {/* </NotificationProvider> */}

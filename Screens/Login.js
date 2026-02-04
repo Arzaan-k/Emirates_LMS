@@ -9,9 +9,11 @@ import {
     Alert,
     KeyboardAvoidingView,
     Platform,
+    Modal,
+    ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Feather } from '@expo/vector-icons';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import Animated, {
     useSharedValue,
     useAnimatedStyle,
@@ -21,6 +23,7 @@ import Animated, {
     Easing,
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import API_URL from '../config';
 
 const { width, height } = Dimensions.get('window');
@@ -130,6 +133,8 @@ export default function Login({ navigation }) {
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [showRoleModal, setShowRoleModal] = useState(false);
+    const [pendingUserData, setPendingUserData] = useState(null);
 
     const handleLogin = async () => {
         if (!username || !password) {
@@ -150,8 +155,7 @@ export default function Login({ navigation }) {
             if (data.status === 'success') {
                 const user = data.user;
 
-                // [NEW] Save user profile to AsyncStorage for other components
-                const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+                // Save user profile to AsyncStorage
                 await AsyncStorage.setItem('userProfile', JSON.stringify(user));
                 await AsyncStorage.setItem('userEmail', user.email);
                 if (data.access_token) {
@@ -159,10 +163,17 @@ export default function Login({ navigation }) {
                 }
                 console.log('[Login] Saved user profile and token to AsyncStorage:', user.email);
 
-                // Determine destination based on role/access
-                if (user.has_admin_access || user.is_superadmin || user.role === 'Store Manager') {
-                    navigation.replace('ManagerDashboard', { userProfile: user });
+                // Check if user has admin privileges
+                const hasAdminPrivileges = user.has_admin_access || user.is_superadmin || (user.privileges && user.privileges.length > 0);
+
+                if (hasAdminPrivileges) {
+                    // Show role selection modal for privileged users
+                    setPendingUserData(user);
+                    setShowRoleModal(true);
+                    setLoading(false);
                 } else {
+                    // Regular users - go directly to employee view
+                    await AsyncStorage.setItem('userMode', 'user');
                     navigation.replace('Home', { userProfile: user });
                 }
             } else {
@@ -172,7 +183,33 @@ export default function Login({ navigation }) {
             console.error('Login error:', error);
             Alert.alert('Error', 'Unable to connect to server. Please try again.');
         } finally {
-            setLoading(false);
+            if (!showRoleModal) {
+                setLoading(false);
+            }
+        }
+    };
+
+    const handleRoleSelection = async (mode) => {
+        if (!pendingUserData) return;
+
+        try {
+            // Save selected mode
+            await AsyncStorage.setItem('userMode', mode);
+            console.log(`[Login] User selected mode: ${mode}`);
+
+            // Navigate based on selected mode
+            if (mode === 'admin') {
+                navigation.replace('ManagerDashboard', { userProfile: pendingUserData });
+            } else {
+                navigation.replace('Home', { userProfile: pendingUserData });
+            }
+
+            // Reset state
+            setShowRoleModal(false);
+            setPendingUserData(null);
+        } catch (error) {
+            console.error('Error saving mode:', error);
+            Alert.alert('Error', 'Failed to save login mode');
         }
     };
 
@@ -281,6 +318,81 @@ export default function Login({ navigation }) {
                     */}
                 </BlurView>
             </KeyboardAvoidingView>
+
+            {/* ROLE SELECTION MODAL */}
+            <Modal visible={showRoleModal} transparent animationType="fade">
+                <View style={styles.modalOverlay}>
+                    <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
+                    <View style={styles.roleModalCard}>
+                        {/* Header */}
+                        <View style={styles.roleModalHeader}>
+                            <MaterialCommunityIcons name="shield-account" size={48} color="#F59E0B" />
+                            <Text style={styles.roleModalTitle}>Choose Login Mode</Text>
+                            <Text style={styles.roleModalSubtitle}>
+                                You have admin privileges. How would you like to login?
+                            </Text>
+                        </View>
+
+                        {/* Admin Mode Button */}
+                        <TouchableOpacity
+                            style={styles.roleModeButton}
+                            onPress={() => handleRoleSelection('admin')}
+                            activeOpacity={0.8}
+                        >
+                            <LinearGradient
+                                colors={['#EF4444', '#DC2626']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={styles.roleModeGradient}
+                            >
+                                <View style={styles.roleModeIconBox}>
+                                    <MaterialCommunityIcons name="shield-crown" size={32} color="#FFF" />
+                                </View>
+                                <View style={styles.roleModeContent}>
+                                    <Text style={styles.roleModeTitle}>Admin Mode</Text>
+                                    <Text style={styles.roleModeDescription}>
+                                        Access admin dashboard, manage users, content, and settings
+                                    </Text>
+                                </View>
+                                <Feather name="chevron-right" size={24} color="#FFF" />
+                            </LinearGradient>
+                        </TouchableOpacity>
+
+                        {/* User Mode Button */}
+                        <TouchableOpacity
+                            style={styles.roleModeButton}
+                            onPress={() => handleRoleSelection('user')}
+                            activeOpacity={0.8}
+                        >
+                            <LinearGradient
+                                colors={['#3B82F6', '#2563EB']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={styles.roleModeGradient}
+                            >
+                                <View style={styles.roleModeIconBox}>
+                                    <MaterialCommunityIcons name="account-circle" size={32} color="#FFF" />
+                                </View>
+                                <View style={styles.roleModeContent}>
+                                    <Text style={styles.roleModeTitle}>Employee Mode</Text>
+                                    <Text style={styles.roleModeDescription}>
+                                        Access learning content, quizzes, analytics, and profile
+                                    </Text>
+                                </View>
+                                <Feather name="chevron-right" size={24} color="#FFF" />
+                            </LinearGradient>
+                        </TouchableOpacity>
+
+                        {/* Info Footer */}
+                        <View style={styles.roleModalFooter}>
+                            <Feather name="info" size={14} color="#6B7280" />
+                            <Text style={styles.roleModalFooterText}>
+                                You can switch modes anytime from your profile/dashboard
+                            </Text>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 }
@@ -402,5 +514,97 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_400Regular',
         color: '#6B7280',
         flex: 1,
+    },
+    // Role Selection Modal
+    modalOverlay: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20,
+    },
+    roleModalCard: {
+        width: '100%',
+        maxWidth: 450,
+        backgroundColor: '#FFFFFF',
+        borderRadius: 24,
+        padding: 24,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 20 },
+        shadowOpacity: 0.3,
+        shadowRadius: 30,
+        elevation: 20,
+    },
+    roleModalHeader: {
+        alignItems: 'center',
+        marginBottom: 24,
+    },
+    roleModalTitle: {
+        fontSize: 24,
+        fontFamily: 'Poppins_700Bold',
+        color: '#111827',
+        marginTop: 12,
+        marginBottom: 8,
+    },
+    roleModalSubtitle: {
+        fontSize: 14,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        textAlign: 'center',
+        lineHeight: 20,
+    },
+    roleModeButton: {
+        borderRadius: 16,
+        overflow: 'hidden',
+        marginBottom: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.2,
+        shadowRadius: 12,
+        elevation: 8,
+    },
+    roleModeGradient: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+        gap: 12,
+    },
+    roleModeIconBox: {
+        width: 56,
+        height: 56,
+        borderRadius: 16,
+        backgroundColor: 'rgba(255, 255, 255, 0.2)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    roleModeContent: {
+        flex: 1,
+    },
+    roleModeTitle: {
+        fontSize: 18,
+        fontFamily: 'Poppins_700Bold',
+        color: '#FFF',
+        marginBottom: 4,
+    },
+    roleModeDescription: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: 'rgba(255, 255, 255, 0.9)',
+        lineHeight: 18,
+    },
+    roleModalFooter: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#F3F4F6',
+        padding: 12,
+        borderRadius: 12,
+        gap: 8,
+        marginTop: 8,
+    },
+    roleModalFooterText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        flex: 1,
+        lineHeight: 16,
     },
 });
