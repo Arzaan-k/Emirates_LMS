@@ -317,11 +317,18 @@ const CreateUser = ({
             setBulkResult(null);
 
             const formData = new FormData();
-            formData.append('file', {
-                uri: file.uri,
-                name: file.name,
-                type: file.mimeType || 'application/octet-stream'
-            });
+            if (Platform.OS === 'web') {
+                const response = await fetch(file.uri);
+                const blob = await response.blob();
+                const webFile = new File([blob], file.name, { type: file.mimeType || 'application/vnd.ms-excel' });
+                formData.append('file', webFile);
+            } else {
+                formData.append('file', {
+                    uri: file.uri,
+                    name: file.name,
+                    type: file.mimeType || 'application/octet-stream'
+                });
+            }
 
             // Get auth token
             const token = await AsyncStorage.getItem('userToken');

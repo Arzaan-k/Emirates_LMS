@@ -2339,33 +2339,31 @@ const styles = StyleSheet.create({
     actionGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        justifyContent: 'space-between',
+        justifyContent: 'flex-start', // Align left for web grid
         gap: 15,
     },
     actionBtn: {
-        width: (width - 55) / 2, // 2 cols
-        backgroundColor: '#FFF',
-        padding: 20,
-        borderRadius: 16,
+        width: Platform.OS === 'web' ? 100 : '22%', // Fixed width on web, % on mobile
         alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 5,
-        elevation: 2,
+        marginBottom: 20,
+        // backgroundColor: '#FFF', // Removed card bg
+        // padding: 20, // Removed card padding
+        // borderRadius: 16,
+        // shadow... // Removed card shadows
     },
     actionIcon: {
         width: 50,
         height: 50,
-        borderRadius: 25,
+        borderRadius: 16,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 12,
+        marginBottom: 8,
     },
     actionText: {
-        color: '#374151',
+        color: '#4B5563',
         fontFamily: 'Poppins_600SemiBold',
-        fontSize: 14,
+        fontSize: 12,
+        textAlign: 'center',
     },
 
     // MODAL STYLES
@@ -2477,11 +2475,5 @@ const styles = StyleSheet.create({
     pathNodeSub: { fontSize: 11, fontFamily: 'Poppins_400Regular', color: '#6B7280' },
     emptyPathText: { marginLeft: 20, color: '#9CA3AF', fontStyle: 'italic' },
 
-    // QUICK ACTION STYLES
-    sectionContainer: { marginTop: 24, paddingHorizontal: 20 },
-    sectionTitle: { fontSize: 18, fontFamily: 'Poppins_700Bold', color: '#111827', marginBottom: 16 },
-    actionGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-    actionBtn: { width: (width - 60) / 4, alignItems: 'center', marginBottom: 20 },
-    actionIcon: { width: 50, height: 50, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-    actionText: { fontSize: 11, fontFamily: 'Poppins_500Medium', color: '#4B5563', textAlign: 'center' }
+    // QUICK ACTION STYLES REMOVED (Merged with main styles)
 });
