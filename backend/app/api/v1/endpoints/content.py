@@ -10,8 +10,9 @@ import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Form, File, UploadFile, HTTPException, Header, BackgroundTasks
+from fastapi import APIRouter, Depends, Form, File, UploadFile, HTTPException, Header, BackgroundTasks, Body
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
 from app.config.database import get_db, get_db_context
 from app.config.settings import settings
@@ -25,6 +26,14 @@ from app.core.websocket import manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/content", tags=["Content"])
+
+
+# ==========================================
+# REQUEST MODELS
+# ==========================================
+
+class BulkDeleteRequest(BaseModel):
+    item_ids: List[str]
 
 
 # ==========================================
@@ -657,6 +666,82 @@ async def delete_content(
     except Exception as e:
         logger.error(f"Content deletion failed: {e}")
         raise
+
+
+@router.post("/bulk-delete")
+async def bulk_delete_content(
+    request: BulkDeleteRequest,
+    background_tasks: BackgroundTasks = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Bulk delete multiple content items at once.
+    - Deletes from PostgreSQL (Content and Resource tables)
+    - Deletes from Cloudflare R2 CDN
+    - Deletes from local uploads folder
+
+    Request Body (JSON):
+    {
+        "item_ids": ["id1", "id2", "id3", ...]
+    }
+
+    Returns:
+    - Summary of successful and failed deletions
+    """
+    service = ContentService(db)
+    cdn_service = CDNService()
+
+    item_ids = request.item_ids
+
+    results = {
+        "total": len(item_ids),
+        "success": [],
+        "failed": []
+    }
+
+    for item_id in item_ids:
+        try:
+            # Get content to find file URLs
+            content = service.get_content_by_id(item_id)
+
+            if content:
+                # Delete from CDN in background
+                if cdn_service.enabled and content.video_url:
+                    if background_tasks:
+                        background_tasks.add_task(cdn_service.delete_file, content.video_url)
+
+                # Delete local file
+                local_patterns = [
+                    os.path.join(settings.UPLOAD_DIR, f"{item_id}*"),
+                ]
+                for pattern in local_patterns:
+                    import glob
+                    for filepath in glob.glob(pattern):
+                        try:
+                            os.remove(filepath)
+                        except Exception as e:
+                            logger.warning(f"Failed to delete local file {filepath}: {e}")
+
+            # Delete from database
+            service.delete_content(item_id)
+            logger.info(f"Content deleted in bulk operation: {item_id}")
+            results["success"].append({
+                "id": item_id,
+                "title": content.title if content else item_id
+            })
+
+        except Exception as e:
+            logger.error(f"Failed to delete content {item_id}: {e}")
+            results["failed"].append({
+                "id": item_id,
+                "error": str(e)
+            })
+
+    return {
+        "status": "completed",
+        "message": f"Deleted {len(results['success'])} of {results['total']} items",
+        "results": results
+    }
 
 
 # ==========================================
