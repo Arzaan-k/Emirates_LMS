@@ -264,16 +264,29 @@ const EmployeeDetailReport = ({ email, onBack }) => {
             const header = "Timestamp,Action,Details\n";
             const rows = report.recent_activity.map(l => `${l.timestamp},${l.action},"${l.details}"`).join("\n");
             const csv = header + rows;
+            const fileName = `Activity_Log_${report.user_profile.name.replace(' ', '_')}.csv`;
 
-            const fileUri = FileSystem.documentDirectory + `Activity_Log_${report.user_profile.name.replace(' ', '_')}.csv`;
-            await FileSystem.writeAsStringAsync(fileUri, csv, { encoding: FileSystem.EncodingType.UTF8 });
-
-            if (await Sharing.isAvailableAsync()) {
-                await Sharing.shareAsync(fileUri);
+            if (Platform.OS === 'web') {
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                a.click();
+                URL.revokeObjectURL(url);
+                Alert.alert('Success', 'Downloaded');
             } else {
-                Alert.alert("Saved", "Report saved to documents");
+                const fileUri = FileSystem.documentDirectory + fileName;
+                await FileSystem.writeAsStringAsync(fileUri, csv, { encoding: FileSystem.EncodingType.UTF8 });
+
+                if (await Sharing.isAvailableAsync()) {
+                    await Sharing.shareAsync(fileUri);
+                } else {
+                    Alert.alert("Saved", "Report saved to documents");
+                }
             }
         } catch (e) {
+            console.error(e);
             Alert.alert("Error", "Export failed");
         }
     };
