@@ -3,18 +3,33 @@ Database Schema Migration Script
 Adds missing columns to make new modular backend compatible with existing database.
 """
 
+import os
 import sys
-sys.path.insert(0, '.')
 
-from app.config.database import engine
-from sqlalchemy import text
+# Ensure backend directory is in python path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from dotenv import load_dotenv
+load_dotenv()
+
+try:
+    from app.config.database import engine
+    from sqlalchemy import text
+except Exception as e:
+    print(f"Error importing app modules: {e}")
+    print("Ensure you are running this from the project root or backend directory.")
+    sys.exit(1)
 
 def migrate():
     print("Running database schema migration...")
     
-    conn = engine.connect()
+    try:
+        conn = engine.connect()
+    except Exception as e:
+        print(f"Failed to connect to database: {e}")
+        return
     
-    # Migrations for news_feed table
+    # Migrations for tables
     migrations = [
         # news_feed table
         "ALTER TABLE news_feed ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP",
@@ -22,19 +37,41 @@ def migrate():
         "ALTER TABLE news_feed ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT true",
         "ALTER TABLE news_feed ADD COLUMN IF NOT EXISTS likes TEXT",
         "ALTER TABLE news_feed ADD COLUMN IF NOT EXISTS comments TEXT",
-        
-        # live_quizzes table - check if it exists
-        # The old backend may have used different table names
+
+        # Users table - Add profile_data for extended employee info
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_data JSONB DEFAULT '{}'::jsonb",
+
+        # course_buckets table - Add nested bucket support for folder hierarchy
+        "ALTER TABLE course_buckets ADD COLUMN IF NOT EXISTS parent_bucket_id VARCHAR(100)",
+        "ALTER TABLE course_buckets ADD COLUMN IF NOT EXISTS folder_path VARCHAR(1000)",
+        "CREATE INDEX IF NOT EXISTS idx_bucket_parent ON course_buckets(parent_bucket_id)",
     ]
     
     for migration in migrations:
         try:
             conn.execute(text(migration))
-            print(f"  ✓ {migration[:50]}...")
+            print(f"  [OK] {migration.split('ADD COLUMN')[0]} ADD COLUMN...")
         except Exception as e:
-            print(f"  ⚠ {migration[:50]}... - {str(e)[:50]}")
+            # Check if error is because column already exists or simple syntax error fallback
+            if "duplicate column" in str(e).lower() or "already exists" in str(e).lower():
+                print(f"  [SKIP] Column already exists (skipped)")
+            elif "type \"jsonb\" does not exist" in str(e).lower():
+                # Fallback for SQLite or non-Postgres
+                print(f"  [WARN] JSONB not supported, trying partial fallback...")
+                try:
+                    fallback = migration.replace("JSONB DEFAULT '{}'::jsonb", "TEXT DEFAULT '{}'")
+                    conn.execute(text(fallback))
+                    print(f"  [OK] Fallback successful: {fallback}")
+                except Exception as fe:
+                    print(f"  [ERROR] Fallback failed: {fe}")
+            else:
+                print(f"  [WARN] Migration failed: {str(e)[:100]}...")
     
-    conn.commit()
+    try:
+        conn.commit()
+    except Exception as e:
+         print(f"Commit failed: {e}")
+         
     conn.close()
     
     print("\nMigration complete!")

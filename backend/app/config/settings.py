@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # ===========================================
     HOST: str = Field(default="0.0.0.0", env="HOST")
     PORT: int = Field(default=8000, env="PORT")
-    BASE_URL: str = Field(default="http://localhost:8000", env="RENDER_EXTERNAL_URL")
+    BASE_URL: str = Field(default="http://10.47.14.1:8000", env="RENDER_EXTERNAL_URL")
 
     # ===========================================
     # DATABASE
@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     # ===========================================
     # SECURITY
     # ===========================================
-    ALLOWED_ORIGINS: str = Field(default="*", env="ALLOWED_ORIGINS")
+    ALLOWED_ORIGINS: str = Field(default="http://localhost:8081,http://localhost:8000,http://192.168.29.119:8000,http://192.168.29.119:8081,*", env="ALLOWED_ORIGINS")
     RATE_LIMIT_DEFAULT: str = Field(default="100/minute", env="RATE_LIMIT_DEFAULT")
     RATE_LIMIT_LOGIN: str = Field(default="5/minute", env="RATE_LIMIT_LOGIN")
     RATE_LIMIT_REGISTER: str = Field(default="10/hour", env="RATE_LIMIT_REGISTER")

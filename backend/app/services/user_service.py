@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Set
 from datetime import datetime
 
 from sqlalchemy.orm import Session
+from sqlalchemy import func, or_
 
 from app.core.security import hash_password, verify_password, is_password_hashed
 from app.core.auth import (
@@ -71,6 +72,46 @@ class UserService:
     # ===========================================
     # AUTHENTICATION
     # ===========================================
+
+    def get_users_with_count(
+        self,
+        skip: int,
+        limit: int,
+        store: str | None,
+        role: str | None,
+        search: str | None,
+    ):
+        query = (
+            self.db.query(
+                User,
+                func.count().over().label("total_count")
+            )
+            .order_by(User.id)
+        )
+
+        if store:
+            query = query.filter(User.store == store)
+
+        if role:
+            query = query.filter(User.role == role)
+
+        if search:
+            query = query.filter(
+                or_(
+                    User.name.ilike(f"%{search}%"),
+                    User.email.ilike(f"%{search}%"),
+                )
+            )
+
+        rows = query.offset(skip).limit(limit).all()
+
+        if not rows:
+            return [], 0
+
+        users = [row[0] for row in rows]
+        total = rows[0][1]
+
+        return users, total
 
     def authenticate(self, email: str, password: str) -> Dict[str, Any]:
         """
@@ -282,9 +323,38 @@ class UserService:
         logger.info(f"Updated user: {email}")
         return user
 
+    def _delete_user_data(self, email: str):
+        """
+        Helper to delete all user related data from various tables.
+        Ensures data integrity by removing dependent records.
+        """
+        # Import models here to avoid circular imports at module level if any
+        from app.models.user import UserNodeProgress, UserLearningProfile, UserInteraction
+        from app.models.video_progress import VideoProgress, MidVideoQuizAttempt
+        # Assuming CourseCompletion, AssessmentSubmission, QuizSubmission are available via relationship or direct import
+        # If they are in other files, import them. 
+        # For now, we rely on cascade if configured, or manual delete where we know models.
+        
+        # Delete Video Progress
+        self.db.query(VideoProgress).filter(VideoProgress.user_email == email).delete()
+        self.db.query(MidVideoQuizAttempt).filter(MidVideoQuizAttempt.user_email == email).delete()
+        
+        # Delete User Node Progress
+        self.db.query(UserNodeProgress).filter(UserNodeProgress.user_email == email).delete()
+        
+        # Delete Learning Profile
+        self.db.query(UserLearningProfile).filter(UserLearningProfile.user_email == email).delete()
+        
+        # Delete Interactions
+        self.db.query(UserInteraction).filter(UserInteraction.user_email == email).delete()
+        
+        # Note: CourseCompletion and Submissions usually have relationships. 
+        # If cascading is not set, we should delete them too. 
+        # Attempting to delete via user.completions relationship is safer if loaded.
+        
     def delete_user(self, email: str) -> bool:
         """
-        Delete a user.
+        Delete a user and all associated data.
 
         Args:
             email: User email
@@ -296,11 +366,66 @@ class UserService:
             NotFoundError: If user not found
         """
         user = self.get_user_by_email(email)
+        
+        # Manually delete related data to ensure cleanup
+        self._delete_user_data(email)
+        
         self.db.delete(user)
         self.db.commit()
 
-        logger.info(f"Deleted user: {email}")
+        logger.info(f"Deleted user and data: {email}")
         return True
+
+    def bulk_delete_users(self, emails: List[str]) -> Dict[str, Any]:
+        """
+        Delete multiple users.
+
+        Args:
+            emails: List of user emails
+
+        Returns:
+            Dictionary with results
+        """
+        deleted_count = 0
+        errors = []
+        
+        for email in emails:
+            try:
+                # Get user to ensure existence and check superadmin
+                user = self.get_user_by_email_optional(email)
+                if user:
+                    if user.is_superadmin:
+                        errors.append(f"Cannot delete superadmin {email}")
+                        continue
+                    
+                    # Delete data and user
+                    self._delete_user_data(email)
+                    self.db.delete(user)
+                    deleted_count += 1
+                else:
+                    errors.append(f"User {email} not found")
+            except Exception as e:
+                errors.append(f"Error deleting {email}: {str(e)}")
+                # Continue preventing one failure from stopping all?
+                # Using savepoint or just continue. 
+                # With one transaction, one error might rollback all if not handled carefully.
+                # But here we commit at the end.
+                
+        try:
+            self.db.commit()
+        except Exception as e:
+            self.db.rollback()
+            return {
+                "status": "partial_error",
+                "deleted": 0,
+                "errors": [f"Database commit failed: {str(e)}"]
+            }
+        
+        return {
+            "status": "success",
+            "deleted": deleted_count,
+            "errors": errors
+        }
 
     def get_all_users(
         self,

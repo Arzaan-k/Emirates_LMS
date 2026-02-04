@@ -174,6 +174,33 @@ const RecommendedCourseCard = ({ course, index, onStart }) => {
                         </View>
                     )}
 
+                    {/* Content Type Indicator */}
+                    {course.course_data?.resource_type && (
+                        <View style={styles.contentTypeContainer}>
+                            <MaterialCommunityIcons
+                                name={
+                                    course.course_data.resource_type === 'Video' ? 'play-circle' :
+                                    course.course_data.resource_type === 'PDF' ? 'file-pdf-box' :
+                                    course.course_data.resource_type === 'Presentation' ? 'file-powerpoint' :
+                                    course.course_data.resource_type === 'Document' ? 'file-word' :
+                                    course.course_data.resource_type === 'Audio' ? 'volume-high' :
+                                    'file-document-outline'
+                                }
+                                size={12}
+                                color="#9CA3AF"
+                            />
+                            <Text style={styles.contentTypeText}>
+                                {course.course_data.resource_type}
+                            </Text>
+                            {course.course_data.duration && (
+                                <>
+                                    <Text style={styles.contentTypeDivider}>•</Text>
+                                    <Text style={styles.contentTypeText}>{course.course_data.duration}</Text>
+                                </>
+                            )}
+                        </View>
+                    )}
+
                     {/* Start Button */}
                     <TouchableOpacity
                         style={styles.startButton}
@@ -434,10 +461,11 @@ export default function Recommendations({ navigation }) {
         }
 
         // Navigate to Home with CoursesTab - Courses is a nested tab inside Home
-        // We navigate to Home and it will handle displaying the video/course
+        // We navigate to Home and it will handle displaying the content (video/document/etc.)
+        const hasContent = course.course_data?.videoUrl || course.course_data?.fileUrl;
         navigation.navigate("Home", {
             screen: "CoursesTab",
-            params: course.course_data?.videoUrl ? { autoPlay: course.course_data } : undefined,
+            params: hasContent ? { autoPlay: course.course_data } : undefined,
         });
     };
 
@@ -1004,6 +1032,27 @@ const styles = StyleSheet.create({
         color: "#FCD34D",
         fontSize: 12,
         lineHeight: 18,
+    },
+    contentTypeContainer: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        marginBottom: 12,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        backgroundColor: "rgba(156, 163, 175, 0.1)",
+        borderRadius: 6,
+        alignSelf: "flex-start",
+    },
+    contentTypeText: {
+        color: "#9CA3AF",
+        fontSize: 11,
+        fontFamily: "Poppins_500Medium",
+    },
+    contentTypeDivider: {
+        color: "#6B7280",
+        fontSize: 11,
+        marginHorizontal: 2,
     },
     startButton: {
         borderRadius: 14,

@@ -29,6 +29,10 @@ export default function AccessControlModal({ visible, onClose }) {
     const [levelData, setLevelData] = useState([]); // Full level objects from API
     const [hasLevelChanges, setHasLevelChanges] = useState(false);
 
+    // Web drag-and-drop state
+    const [draggedLevelIndex, setDraggedLevelIndex] = useState(null);
+    const [dragOverLevelIndex, setDragOverLevelIndex] = useState(null);
+
     // State for course assignments per level
     // Structure: { "level_0": ["course_id_1", "course_id_2"], "level_1": [...] }
     const [stagedAssignments, setStagedAssignments] = useState({});
@@ -194,6 +198,55 @@ export default function AccessControlModal({ visible, onClose }) {
 
     const countSelectedCourses = (levelId) => {
         return (stagedAssignments[levelId] || []).length;
+    };
+
+    // Web-specific drag handlers for levels
+    const handleWebLevelDragStart = (e, index) => {
+        if (Platform.OS !== 'web') return;
+        setDraggedLevelIndex(index);
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', index.toString());
+    };
+
+    const handleWebLevelDragOver = (e, index) => {
+        if (Platform.OS !== 'web') return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        setDragOverLevelIndex(index);
+    };
+
+    const handleWebLevelDrop = (e, dropIndex) => {
+        if (Platform.OS !== 'web' || draggedLevelIndex === null) return;
+        e.preventDefault();
+
+        const dragIndex = draggedLevelIndex;
+        if (dragIndex === dropIndex) {
+            setDraggedLevelIndex(null);
+            setDragOverLevelIndex(null);
+            return;
+        }
+
+        // Reorder levels
+        const newLevels = [...levelData];
+        const [draggedItem] = newLevels.splice(dragIndex, 1);
+        newLevels.splice(dropIndex, 0, draggedItem);
+
+        // Update order property
+        const reorderedLevels = newLevels.map((level, idx) => ({
+            ...level,
+            order: idx + 1
+        }));
+
+        setLevelData(reorderedLevels);
+        setHasLevelChanges(true);
+        setDraggedLevelIndex(null);
+        setDragOverLevelIndex(null);
+    };
+
+    const handleWebLevelDragEnd = () => {
+        if (Platform.OS !== 'web') return;
+        setDraggedLevelIndex(null);
+        setDragOverLevelIndex(null);
     };
 
     // =========================================================================
@@ -374,6 +427,187 @@ export default function AccessControlModal({ visible, onClose }) {
                             <ActivityIndicator size="large" color="#F59E0B" />
                             <Text style={{ marginTop: 10, color: '#6B7280' }}>Loading Hierarchy...</Text>
                         </View>
+                    ) : Platform.OS === 'web' ? (
+                        /* WEB: Simplified UI with Buttons for Reordering */
+                        <View style={styles.webContainer}>
+                            {levelData.map((level, index) => {
+                                const isExpanded = expandedRole === level.id;
+                                const selectedCount = countSelectedCourses(level.id);
+                                const assignedCourses = getAssignedCourses(level.id);
+                                const availableCourses = getAvailableCourses(level.id);
+
+                                return (
+                                    <View key={level.id} style={styles.levelContainer}>
+                                        {/* Level Header */}
+                                        <View style={[styles.levelHeader, isExpanded && styles.levelHeaderActive]}>
+                                            {/* Move Up/Down Buttons */}
+                                            <View style={styles.moveButtonsContainer}>
+                                                <TouchableOpacity
+                                                    onPress={() => {
+                                                        if (index > 0) {
+                                                            const newLevels = [...levelData];
+                                                            [newLevels[index - 1], newLevels[index]] = [newLevels[index], newLevels[index - 1]];
+                                                            const reordered = newLevels.map((l, i) => ({ ...l, order: i + 1 }));
+                                                            setLevelData(reordered);
+                                                            setHasLevelChanges(true);
+                                                        }
+                                                    }}
+                                                    disabled={index === 0}
+                                                    style={[styles.moveButton, index === 0 && styles.moveButtonDisabled]}
+                                                >
+                                                    <MaterialCommunityIcons name="chevron-up" size={18} color={index === 0 ? "#D1D5DB" : "#6B7280"} />
+                                                </TouchableOpacity>
+                                                <TouchableOpacity
+                                                    onPress={() => {
+                                                        if (index < levelData.length - 1) {
+                                                            const newLevels = [...levelData];
+                                                            [newLevels[index], newLevels[index + 1]] = [newLevels[index + 1], newLevels[index]];
+                                                            const reordered = newLevels.map((l, i) => ({ ...l, order: i + 1 }));
+                                                            setLevelData(reordered);
+                                                            setHasLevelChanges(true);
+                                                        }
+                                                    }}
+                                                    disabled={index === levelData.length - 1}
+                                                    style={[styles.moveButton, index === levelData.length - 1 && styles.moveButtonDisabled]}
+                                                >
+                                                    <MaterialCommunityIcons name="chevron-down" size={18} color={index === levelData.length - 1 ? "#D1D5DB" : "#6B7280"} />
+                                                </TouchableOpacity>
+                                            </View>
+
+                                            <TouchableOpacity
+                                                style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}
+                                                onPress={() => setExpandedRole(isExpanded ? null : level.id)}
+                                            >
+                                                <View style={[styles.levelIcon, { backgroundColor: level.color || '#6B7280' }]}>
+                                                    <MaterialCommunityIcons
+                                                        name={level.icon || 'medal-outline'}
+                                                        size={24}
+                                                        color="#FFF"
+                                                    />
+                                                </View>
+                                                <View style={{ flex: 1 }}>
+                                                    <Text style={styles.levelTitle}>{level.name}</Text>
+                                                    <Text style={styles.levelSubtitle}>
+                                                        {selectedCount} courses • Order: {level.order}
+                                                    </Text>
+                                                </View>
+                                                <Feather name={isExpanded ? "chevron-up" : "chevron-down"} size={20} color="#6B7280" />
+                                            </TouchableOpacity>
+                                        </View>
+
+                                        {/* Expanded Content - Course Assignment */}
+                                        {isExpanded && (
+                                            <View style={styles.levelContent}>
+                                                <Text style={styles.instructionText}>
+                                                    Use ↑↓ buttons to reorder levels • Click + to assign courses
+                                                </Text>
+
+                                                {/* Assigned Courses */}
+                                                <View style={styles.sectionContainer}>
+                                                    <Text style={styles.sectionTitle}>
+                                                        Assigned Courses ({assignedCourses.length})
+                                                    </Text>
+                                                    {assignedCourses.length === 0 ? (
+                                                        <Text style={styles.noCourses}>No courses assigned yet</Text>
+                                                    ) : (
+                                                        assignedCourses.map((course, courseIndex) => (
+                                                            <View key={course.id} style={[styles.courseItem, styles.assignedCourse]}>
+                                                                {/* Course Reorder Buttons */}
+                                                                <View style={styles.courseReorderButtons}>
+                                                                    <TouchableOpacity
+                                                                        onPress={() => {
+                                                                            if (courseIndex > 0) {
+                                                                                const currentIds = stagedAssignments[level.id] || [];
+                                                                                const newIds = [...currentIds];
+                                                                                [newIds[courseIndex - 1], newIds[courseIndex]] = [newIds[courseIndex], newIds[courseIndex - 1]];
+                                                                                setStagedAssignments(prev => ({ ...prev, [level.id]: newIds }));
+                                                                            }
+                                                                        }}
+                                                                        disabled={courseIndex === 0}
+                                                                        style={styles.smallMoveButton}
+                                                                    >
+                                                                        <MaterialCommunityIcons
+                                                                            name="chevron-up"
+                                                                            size={14}
+                                                                            color={courseIndex === 0 ? "#D1D5DB" : "#6B7280"}
+                                                                        />
+                                                                    </TouchableOpacity>
+                                                                    <TouchableOpacity
+                                                                        onPress={() => {
+                                                                            if (courseIndex < assignedCourses.length - 1) {
+                                                                                const currentIds = stagedAssignments[level.id] || [];
+                                                                                const newIds = [...currentIds];
+                                                                                [newIds[courseIndex], newIds[courseIndex + 1]] = [newIds[courseIndex + 1], newIds[courseIndex]];
+                                                                                setStagedAssignments(prev => ({ ...prev, [level.id]: newIds }));
+                                                                            }
+                                                                        }}
+                                                                        disabled={courseIndex === assignedCourses.length - 1}
+                                                                        style={styles.smallMoveButton}
+                                                                    >
+                                                                        <MaterialCommunityIcons
+                                                                            name="chevron-down"
+                                                                            size={14}
+                                                                            color={courseIndex === assignedCourses.length - 1 ? "#D1D5DB" : "#6B7280"}
+                                                                        />
+                                                                    </TouchableOpacity>
+                                                                </View>
+
+                                                                <View style={[styles.checkbox, styles.checkboxSelected]}>
+                                                                    <Feather name="check" size={12} color="#FFF" />
+                                                                </View>
+                                                                <Text style={[styles.courseTitle, { flex: 1 }]} numberOfLines={1}>
+                                                                    {course.title}
+                                                                </Text>
+                                                                <TouchableOpacity
+                                                                    onPress={() => toggleCourse(level.id, course.id)}
+                                                                    style={styles.removeButton}
+                                                                >
+                                                                    <Feather name="x" size={16} color="#EF4444" />
+                                                                </TouchableOpacity>
+                                                            </View>
+                                                        ))
+                                                    )}
+                                                </View>
+
+                                                {/* Available Courses */}
+                                                <View style={styles.sectionContainer}>
+                                                    <Text style={styles.sectionTitle}>
+                                                        Available Courses ({availableCourses.length - assignedCourses.length})
+                                                    </Text>
+                                                    {availableCourses
+                                                        .filter(c => !(stagedAssignments[level.id] || []).includes(c.id))
+                                                        .slice(0, 10)
+                                                        .map(course => (
+                                                            <TouchableOpacity
+                                                                key={course.id}
+                                                                style={styles.courseItem}
+                                                                onPress={() => toggleCourse(level.id, course.id)}
+                                                            >
+                                                                <View style={styles.checkbox} />
+                                                                <Text style={styles.courseTitle} numberOfLines={1}>
+                                                                    {course.title}
+                                                                </Text>
+                                                                <Text style={styles.courseBucket}>
+                                                                    {course.bucket || 'General'}
+                                                                </Text>
+                                                            </TouchableOpacity>
+                                                        ))
+                                                    }
+                                                </View>
+
+                                                {/* Save Button */}
+                                                <TouchableOpacity
+                                                    style={styles.saveBtn}
+                                                    onPress={() => handleSaveCourses(level)}
+                                                >
+                                                    <Text style={styles.saveBtnText}>Save {level.name} Curriculum</Text>
+                                                </TouchableOpacity>
+                                            </View>
+                                        )}
+                                    </View>
+                                );
+                            })}
+                        </View>
                     ) : (
                         <DraggableFlatList
                             data={levelData}
@@ -460,6 +694,87 @@ const styles = StyleSheet.create({
     listContainer: {
         padding: 16,
         paddingBottom: 150, // Increased for better scrolling
+    },
+    webContainer: {
+        flex: 1,
+        padding: 16,
+        maxHeight: '70vh',
+        overflowY: 'scroll',
+    },
+    moveButtonsContainer: {
+        flexDirection: 'column',
+        marginRight: 8,
+        gap: 4,
+    },
+    moveButton: {
+        width: 32,
+        height: 32,
+        borderRadius: 8,
+        backgroundColor: '#F3F4F6',
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    moveButtonDisabled: {
+        backgroundColor: '#FAFAFA',
+        opacity: 0.5,
+    },
+    courseReorderButtons: {
+        flexDirection: 'column',
+        marginRight: 6,
+        gap: 2,
+    },
+    smallMoveButton: {
+        width: 24,
+        height: 24,
+        borderRadius: 6,
+        backgroundColor: '#F9FAFB',
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    removeButton: {
+        padding: 4,
+        marginLeft: 8,
+    },
+    noCourses: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#9CA3AF',
+        fontStyle: 'italic',
+        textAlign: 'center',
+        paddingVertical: 12,
+    },
+    courseSectionTitle: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#374151',
+        marginTop: 12,
+        marginBottom: 8,
+    },
+    courseItemAvailable: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 10,
+        paddingHorizontal: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F3F4F6',
+        gap: 10,
+    },
+    levelInfo: {
+        flex: 1,
+    },
+    levelName: {
+        fontSize: 16,
+        fontFamily: 'Poppins_700Bold',
+        color: '#111827',
+    },
+    levelSubtext: {
+        fontSize: 12,
+        fontFamily: 'Poppins_500Medium',
+        color: '#6B7280',
     },
 
     // Level Card

@@ -39,6 +39,10 @@ export default function LevelManagementModal({ visible, onClose }) {
     const [allCourses, setAllCourses] = useState([]);
     const [hasChanges, setHasChanges] = useState(false);
 
+    // Web drag-and-drop state
+    const [draggedIndex, setDraggedIndex] = useState(null);
+    const [dragOverIndex, setDragOverIndex] = useState(null);
+
     // New level form state
     const [newLevel, setNewLevel] = useState({
         name: '',
@@ -202,6 +206,61 @@ export default function LevelManagementModal({ visible, onClose }) {
         } finally {
             setSaving(false);
         }
+    };
+
+    // Web-specific drag handlers using HTML5 Drag and Drop API
+    const handleWebDragStart = (e, index) => {
+        if (Platform.OS !== 'web') return;
+        setDraggedIndex(index);
+        e.dataTransfer.effectAllowed = 'move';
+        // Store index in dataTransfer for compatibility
+        e.dataTransfer.setData('text/plain', index.toString());
+    };
+
+    const handleWebDragOver = (e, index) => {
+        if (Platform.OS !== 'web') return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        setDragOverIndex(index);
+    };
+
+    const handleWebDragLeave = (e) => {
+        if (Platform.OS !== 'web') return;
+        setDragOverIndex(null);
+    };
+
+    const handleWebDrop = (e, dropIndex) => {
+        if (Platform.OS !== 'web' || draggedIndex === null) return;
+        e.preventDefault();
+
+        const dragIndex = draggedIndex;
+        if (dragIndex === dropIndex) {
+            setDraggedIndex(null);
+            setDragOverIndex(null);
+            return;
+        }
+
+        // Reorder the array
+        const newLevels = [...levels];
+        const [draggedItem] = newLevels.splice(dragIndex, 1);
+        newLevels.splice(dropIndex, 0, draggedItem);
+
+        // Update order property for each level
+        const reorderedLevels = newLevels.map((level, idx) => ({
+            ...level,
+            order: idx + 1
+        }));
+
+        setLevels(reorderedLevels);
+        setHasChanges(true);
+        setDraggedIndex(null);
+        setDragOverIndex(null);
+    };
+
+    const handleWebDragEnd = () => {
+        if (Platform.OS !== 'web') return;
+        setDraggedIndex(null);
+        setDragOverIndex(null);
     };
 
     // Delete level
@@ -737,6 +796,118 @@ export default function LevelManagementModal({ visible, onClose }) {
                             <ActivityIndicator size="large" color="#F59E0B" />
                             <Text style={styles.loadingText}>Loading levels...</Text>
                         </View>
+                    ) : Platform.OS === 'web' ? (
+                        /* WEB: Simplified UI with Buttons for Reordering */
+                        <ScrollView
+                            style={styles.webScrollContainer}
+                            contentContainerStyle={styles.listContainer}
+                            showsVerticalScrollIndicator={true}
+                            nestedScrollEnabled={true}
+                        >
+                            {levels.map((item, index) => {
+                                return (
+                                    <View
+                                        key={item.id}
+                                        style={[
+                                            styles.levelCard,
+                                            {
+                                                borderLeftColor: item.color,
+                                                borderLeftWidth: 4,
+                                            }
+                                        ]}
+                                    >
+                                        {/* Move Up/Down Buttons */}
+                                        <View style={styles.moveButtonsContainer}>
+                                            <TouchableOpacity
+                                                onPress={() => {
+                                                    if (index > 0) {
+                                                        const newLevels = [...levels];
+                                                        [newLevels[index - 1], newLevels[index]] = [newLevels[index], newLevels[index - 1]];
+                                                        const reordered = newLevels.map((l, i) => ({ ...l, order: i + 1 }));
+                                                        setLevels(reordered);
+                                                        setHasChanges(true);
+                                                    }
+                                                }}
+                                                disabled={index === 0}
+                                                style={[styles.moveButton, index === 0 && styles.moveButtonDisabled]}
+                                            >
+                                                <MaterialCommunityIcons name="chevron-up" size={18} color={index === 0 ? "#D1D5DB" : "#6B7280"} />
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                onPress={() => {
+                                                    if (index < levels.length - 1) {
+                                                        const newLevels = [...levels];
+                                                        [newLevels[index], newLevels[index + 1]] = [newLevels[index + 1], newLevels[index]];
+                                                        const reordered = newLevels.map((l, i) => ({ ...l, order: i + 1 }));
+                                                        setLevels(reordered);
+                                                        setHasChanges(true);
+                                                    }
+                                                }}
+                                                disabled={index === levels.length - 1}
+                                                style={[styles.moveButton, index === levels.length - 1 && styles.moveButtonDisabled]}
+                                            >
+                                                <MaterialCommunityIcons name="chevron-down" size={18} color={index === levels.length - 1 ? "#D1D5DB" : "#6B7280"} />
+                                            </TouchableOpacity>
+                                        </View>
+
+                                        {/* Level Info */}
+                                        <View style={styles.levelInfo}>
+                                            <View style={styles.levelHeader}>
+                                                <View style={[styles.levelIconContainer, { backgroundColor: `${item.color}20` }]}>
+                                                    <MaterialCommunityIcons name={item.icon} size={24} color={item.color} />
+                                                </View>
+                                                <View style={styles.levelTitleContainer}>
+                                                    <Text style={styles.levelName}>{item.name}</Text>
+                                                    <Text style={styles.levelDescription}>
+                                                        {item.description || 'No description'}
+                                                    </Text>
+                                                </View>
+                                            </View>
+
+                                            {/* Level Stats */}
+                                            <View style={styles.levelStats}>
+                                                <View style={styles.statBadge}>
+                                                    <MaterialCommunityIcons name="sort-numeric-ascending" size={12} color="#6B7280" />
+                                                    <Text style={styles.statText}>Order: {index + 1}</Text>
+                                                </View>
+                                                <View style={styles.statBadge}>
+                                                    <MaterialCommunityIcons name="book-multiple" size={12} color="#6B7280" />
+                                                    <Text style={styles.statText}>
+                                                        {(item.courses || []).length} courses
+                                                    </Text>
+                                                </View>
+                                                <View style={styles.statBadge}>
+                                                    <MaterialCommunityIcons name="target" size={12} color="#6B7280" />
+                                                    <Text style={styles.statText}>{item.min_nodes} nodes</Text>
+                                                </View>
+                                            </View>
+                                        </View>
+
+                                        {/* Actions */}
+                                        <View style={styles.levelActions}>
+                                            <TouchableOpacity
+                                                style={styles.actionBtn}
+                                                onPress={() => setShowCourseModal(item)}
+                                            >
+                                                <MaterialCommunityIcons name="playlist-edit" size={20} color="#3B82F6" />
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={styles.actionBtn}
+                                                onPress={() => setEditingLevel({ ...item })}
+                                            >
+                                                <Feather name="edit-2" size={18} color="#F59E0B" />
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={styles.actionBtn}
+                                                onPress={() => handleDeleteLevel(item)}
+                                            >
+                                                <Feather name="trash-2" size={18} color="#EF4444" />
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+                                );
+                            })}
+                        </ScrollView>
                     ) : (
                         <DraggableFlatList
                             data={levels}
@@ -837,6 +1008,30 @@ const styles = StyleSheet.create({
         padding: 16,
         paddingBottom: 100,
     },
+    webScrollContainer: {
+        flex: 1,
+        maxHeight: '70vh', // Ensure scrollable on web
+        minHeight: 400,
+    },
+    moveButtonsContainer: {
+        flexDirection: 'column',
+        marginRight: 12,
+        gap: 4,
+    },
+    moveButton: {
+        width: 32,
+        height: 32,
+        borderRadius: 8,
+        backgroundColor: '#F3F4F6',
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    moveButtonDisabled: {
+        backgroundColor: '#FAFAFA',
+        opacity: 0.5,
+    },
     loadingContainer: {
         flex: 1,
         justifyContent: 'center',
@@ -925,6 +1120,35 @@ const styles = StyleSheet.create({
     },
     actionBtn: {
         padding: 8,
+    },
+    dragHandle: {
+        marginRight: 8,
+        padding: 4,
+        cursor: 'grab',
+    },
+    dropIndicator: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+        borderWidth: 2,
+        borderColor: '#3B82F6',
+        borderRadius: 12,
+        borderStyle: 'dashed',
+        justifyContent: 'center',
+        alignItems: 'center',
+        pointerEvents: 'none',
+    },
+    dropIndicatorText: {
+        color: '#3B82F6',
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        backgroundColor: '#FFF',
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+        borderRadius: 8,
     },
 
     // Info Banner

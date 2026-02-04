@@ -117,22 +117,32 @@ export default function MeetingSchedulerModal({ visible, onClose, hostName, host
                 const inviteMsg = inviteAll
                     ? 'All users will be notified.'
                     : `${selectedUsers.length} user(s) will be notified.`;
-                Alert.alert(
-                    '✅ Meeting Scheduled!',
-                    `"${title}" is scheduled for ${scheduledDate.toLocaleString()}.\n\n${inviteMsg}`,
-                    [{
-                        text: 'OK', onPress: () => {
-                            resetForm();
-                            onClose();
-                        }
-                    }]
-                );
+
+                if (Platform.OS === 'web') {
+                    // WEB: Standard alert
+                    alert(`✅ Meeting Scheduled!\n\n"${title}" is scheduled for ${scheduledDate.toLocaleString()}.\n\n${inviteMsg}`);
+                    resetForm();
+                    onClose();
+                } else {
+                    Alert.alert(
+                        '✅ Meeting Scheduled!',
+                        `"${title}" is scheduled for ${scheduledDate.toLocaleString()}.\n\n${inviteMsg}`,
+                        [{
+                            text: 'OK', onPress: () => {
+                                resetForm();
+                                onClose();
+                            }
+                        }]
+                    );
+                }
             } else {
-                Alert.alert('Error', result.detail || 'Failed to schedule meeting.');
+                const errorMsg = result.detail || 'Failed to schedule meeting.';
+                Platform.OS === 'web' ? alert(errorMsg) : Alert.alert('Error', errorMsg);
             }
         } catch (error) {
             console.error('Schedule meeting error:', error);
-            Alert.alert('Error', 'Network error. Please try again.');
+            const errorMsg = 'Network error. Please try again.';
+            Platform.OS === 'web' ? alert(errorMsg) : Alert.alert('Error', errorMsg);
         } finally {
             setLoading(false);
         }
@@ -213,29 +223,89 @@ export default function MeetingSchedulerModal({ visible, onClose, hostName, host
                         {/* Date & Time Pickers */}
                         <Text style={styles.label}>Date & Time *</Text>
                         <View style={styles.dateTimeRow}>
-                            <TouchableOpacity
-                                style={styles.dateTimeBtn}
-                                onPress={() => setShowDatePicker(true)}
-                            >
-                                <Feather name="calendar" size={18} color="#6366F1" />
-                                <Text style={styles.dateTimeText}>
-                                    {scheduledDate.toLocaleDateString()}
-                                </Text>
-                            </TouchableOpacity>
+                            {Platform.OS === 'web' ? (
+                                /* WEB: Native HTML date input */
+                                <input
+                                    type="date"
+                                    value={(() => {
+                                        // Use local date string YYYY-MM-DD
+                                        const d = new Date(scheduledDate);
+                                        const year = d.getFullYear();
+                                        const month = String(d.getMonth() + 1).padStart(2, '0');
+                                        const day = String(d.getDate()).padStart(2, '0');
+                                        return `${year}-${month}-${day}`;
+                                    })()}
+                                    min={new Date().toLocaleDateString('en-CA')} // Local date YYYY-MM-DD
+                                    onChange={(e) => {
+                                        if (!e.target.value) return;
+                                        const [year, month, day] = e.target.value.split('-').map(Number);
+                                        const newDate = new Date(scheduledDate);
+                                        newDate.setFullYear(year, month - 1, day);
+                                        setScheduledDate(newDate);
+                                    }}
+                                    style={{
+                                        flex: 1,
+                                        padding: 14,
+                                        borderRadius: 12,
+                                        border: '1px solid #C7D2FE',
+                                        backgroundColor: '#EEF2FF',
+                                        fontSize: 15,
+                                        fontFamily: 'Poppins, sans-serif',
+                                        marginRight: 6,
+                                        cursor: 'pointer'
+                                    }}
+                                />
+                            ) : (
+                                <TouchableOpacity
+                                    style={styles.dateTimeBtn}
+                                    onPress={() => setShowDatePicker(true)}
+                                >
+                                    <Feather name="calendar" size={18} color="#6366F1" />
+                                    <Text style={styles.dateTimeText}>
+                                        {scheduledDate.toLocaleDateString()}
+                                    </Text>
+                                </TouchableOpacity>
+                            )}
 
-                            <TouchableOpacity
-                                style={styles.dateTimeBtn}
-                                onPress={() => setShowTimePicker(true)}
-                            >
-                                <Feather name="clock" size={18} color="#6366F1" />
-                                <Text style={styles.dateTimeText}>
-                                    {scheduledDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </Text>
-                            </TouchableOpacity>
+                            {Platform.OS === 'web' ? (
+                                /* WEB: Native HTML time input */
+                                <input
+                                    type="time"
+                                    value={`${String(scheduledDate.getHours()).padStart(2, '0')}:${String(scheduledDate.getMinutes()).padStart(2, '0')}`}
+                                    onChange={(e) => {
+                                        if (!e.target.value) return;
+                                        const [hours, minutes] = e.target.value.split(':').map(Number);
+                                        const newDate = new Date(scheduledDate);
+                                        newDate.setHours(hours, minutes);
+                                        setScheduledDate(newDate);
+                                    }}
+                                    style={{
+                                        flex: 1,
+                                        padding: 14,
+                                        borderRadius: 12,
+                                        border: '1px solid #C7D2FE',
+                                        backgroundColor: '#EEF2FF',
+                                        fontSize: 15,
+                                        fontFamily: 'Poppins, sans-serif',
+                                        marginLeft: 6,
+                                        cursor: 'pointer'
+                                    }}
+                                />
+                            ) : (
+                                <TouchableOpacity
+                                    style={styles.dateTimeBtn}
+                                    onPress={() => setShowTimePicker(true)}
+                                >
+                                    <Feather name="clock" size={18} color="#6366F1" />
+                                    <Text style={styles.dateTimeText}>
+                                        {scheduledDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </Text>
+                                </TouchableOpacity>
+                            )}
                         </View>
 
-                        {/* Date Picker Modal */}
-                        {showDatePicker && (
+                        {/* Date Picker Modal - Native Only */}
+                        {Platform.OS !== 'web' && showDatePicker && (
                             <DateTimePicker
                                 value={scheduledDate}
                                 mode="date"
@@ -245,8 +315,8 @@ export default function MeetingSchedulerModal({ visible, onClose, hostName, host
                             />
                         )}
 
-                        {/* Time Picker Modal */}
-                        {showTimePicker && (
+                        {/* Time Picker Modal - Native Only */}
+                        {Platform.OS !== 'web' && showTimePicker && (
                             <DateTimePicker
                                 value={scheduledDate}
                                 mode="time"

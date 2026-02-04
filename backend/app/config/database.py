@@ -1,6 +1,6 @@
 """
 Database Configuration and Session Management
-Production-ready PostgreSQL connection with connection pooling
+Optimized for Neon PostgreSQL + FastAPI
 """
 
 import logging
@@ -9,11 +9,9 @@ from contextlib import contextmanager
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.pool import QueuePool, NullPool
+from sqlalchemy.pool import QueuePool
 
 from app.config.settings import settings
-
-# Import Base from models to ensure all models share the same metadata
 from app.models.base import Base
 
 logger = logging.getLogger(__name__)
@@ -24,44 +22,30 @@ logger = logging.getLogger(__name__)
 
 def get_engine_args():
     """
-    Get SQLAlchemy engine arguments based on environment.
-    Uses NullPool for serverless (Render free tier) to avoid connection limits.
-    Uses QueuePool for production with connection pooling.
+    SQLAlchemy engine arguments optimized for Neon PostgreSQL.
+    IMPORTANT:
+    - Always use QueuePool with Neon
+    - Never use NullPool (causes 3–5s latency per request)
     """
-    connect_args = {}
 
-    # SSL configuration for PostgreSQL
-    if "sslmode" not in settings.DATABASE_URL:
-        connect_args["sslmode"] = "require"
+    connect_args = {
+        "sslmode": "require",
+        "connect_timeout": 3,  # Fail fast on cold starts
+    }
 
-    # Add connection timeout for Neon PostgreSQL (serverless)
-    # This prevents hanging connections on cold starts
-    connect_args["connect_timeout"] = 10  # 10 seconds connection timeout
-    # NOTE: Do NOT set connect_args["options"] here - it conflicts with Neon's endpoint ID
-    # Statement timeout is set via event handler instead (see set_statement_timeout below)
-
-    if settings.USE_SERVERLESS:
-        # Serverless: No connection pooling (each request gets a new connection)
-        return {
-            "poolclass": NullPool,
-            "connect_args": connect_args,
-            "echo": settings.DEBUG,
-        }
-    else:
-        # Production: Connection pooling optimized for Neon PostgreSQL
-        return {
-            "poolclass": QueuePool,
-            "pool_size": settings.DB_POOL_SIZE,
-            "max_overflow": settings.DB_MAX_OVERFLOW,
-            "pool_timeout": settings.DB_POOL_TIMEOUT,
-            "pool_pre_ping": True,  # Verify connections before use
-            "pool_recycle": 300,    # Recycle connections after 5 minutes (Neon closes idle connections)
-            "connect_args": connect_args,
-            "echo": settings.DEBUG,
-        }
+    return {
+        "poolclass": QueuePool,
+        "pool_size": settings.DB_POOL_SIZE or 5,
+        "max_overflow": settings.DB_MAX_OVERFLOW or 5,
+        "pool_timeout": settings.DB_POOL_TIMEOUT or 30,
+        "pool_pre_ping": True,
+        "pool_recycle": 300,  # Neon closes idle connections
+        "connect_args": connect_args,
+        "echo": settings.DEBUG,
+    }
 
 
-# Create the SQLAlchemy engine
+# Create SQLAlchemy engine
 engine = create_engine(
     settings.DATABASE_URL,
     **get_engine_args()
@@ -74,7 +58,7 @@ engine = create_engine(
 SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
-    bind=engine
+    bind=engine,
 )
 
 # ===========================================
@@ -83,30 +67,26 @@ SessionLocal = sessionmaker(
 
 @event.listens_for(engine, "connect")
 def set_connection_options(dbapi_connection, connection_record):
-    """Set search path and statement timeout on new connections."""
+    """
+    Apply per-connection settings.
+    Runs ONLY when a new DB connection is created.
+    """
     cursor = dbapi_connection.cursor()
     cursor.execute("SET search_path TO public")
-    cursor.execute("SET statement_timeout = '30s'")  # 30 second query timeout
+    cursor.execute("SET statement_timeout = '5s'")  # APIs should be fast
     cursor.close()
 
 
-# NOTE: Removed manual ping_connection handler as pool_pre_ping=True handles this
-# The manual handler was causing additional latency on every request
-
-
 # ===========================================
-# DEPENDENCY INJECTION
+# DEPENDENCY INJECTION (FASTAPI)
 # ===========================================
 
 def get_db() -> Generator[Session, None, None]:
     """
-    FastAPI dependency to get database session.
-    Yields a database session and ensures it's closed after use.
-
-    Usage:
-        @app.get("/items")
-        async def get_items(db: Session = Depends(get_db)):
-            return db.query(Item).all()
+    FastAPI dependency.
+    IMPORTANT:
+    - Do NOT use async def with sync SQLAlchemy
+    - FastAPI will run this in a threadpool automatically
     """
     db = SessionLocal()
     try:
@@ -119,15 +99,14 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
+# ===========================================
+# CONTEXT MANAGER (NON-FASTAPI USE)
+# ===========================================
+
 @contextmanager
 def get_db_context() -> Generator[Session, None, None]:
     """
-    Context manager for database sessions.
-    Use this when you need a session outside of FastAPI requests.
-
-    Usage:
-        with get_db_context() as db:
-            user = db.query(User).first()
+    Context manager for background jobs / scripts.
     """
     db = SessionLocal()
     try:
@@ -147,28 +126,27 @@ def get_db_context() -> Generator[Session, None, None]:
 
 def check_database_health() -> dict:
     """
-    Check database connectivity and health.
-    Returns status information for health check endpoints.
+    Lightweight DB health check.
+    NO commits, NO transactions.
     """
     try:
-        with get_db_context() as db:
-            result = db.execute(text("SELECT 1")).scalar()
+        with SessionLocal() as db:
+            db.execute(text("SELECT 1"))
 
-            # Get connection pool stats if using QueuePool
-            pool_status = {}
-            if hasattr(engine.pool, 'checkedout'):
-                pool_status = {
-                    "pool_size": engine.pool.size(),
-                    "checked_out": engine.pool.checkedout(),
-                    "overflow": engine.pool.overflow(),
-                    "checked_in": engine.pool.checkedin(),
-                }
+            pool = engine.pool
+            pool_status = {
+                "pool_size": pool.size(),
+                "checked_out": pool.checkedout(),
+                "checked_in": pool.checkedin(),
+                "overflow": pool.overflow(),
+            }
 
             return {
                 "status": "healthy",
                 "connected": True,
                 "pool": pool_status,
             }
+
     except Exception as e:
         logger.error(f"Database health check failed: {e}")
         return {
@@ -185,12 +163,18 @@ def check_database_health() -> dict:
 def init_db():
     """
     Initialize database tables.
-    Creates all tables defined in models if they don't exist.
     """
-    # Import all models to ensure they're registered with Base
     from app.models import (  # noqa: F401
-        user, content, assessment, quiz, crm,
-        notification, meeting, tracking, simulation, analytics
+        user,
+        content,
+        assessment,
+        quiz,
+        crm,
+        notification,
+        meeting,
+        tracking,
+        simulation,
+        analytics,
     )
 
     logger.info("Creating database tables...")
@@ -201,7 +185,7 @@ def init_db():
 def drop_all_tables():
     """
     Drop all database tables.
-    USE WITH CAUTION - This will delete all data!
+    USE WITH EXTREME CAUTION.
     """
     logger.warning("Dropping all database tables...")
     Base.metadata.drop_all(bind=engine)

@@ -761,8 +761,8 @@ class AnalyticsRepository:
                 # Build a safe parameterized query
                 placeholders = ','.join([f':id{i}' for i in range(len(completed_ids))])
                 query = text(f"""
-                    SELECT id, title, bucket, description, video_url, thumbnail, xp, resource_type, duration
-                    FROM content 
+                    SELECT id, title, bucket, description, video_url, file_url, thumbnail, xp, resource_type, duration
+                    FROM content
                     WHERE id NOT IN ({placeholders})
                     LIMIT 30
                 """)
@@ -770,8 +770,8 @@ class AnalyticsRepository:
                 result = self.db.execute(query, params)
             else:
                 result = self.db.execute(text("""
-                    SELECT id, title, bucket, description, video_url, thumbnail, xp, resource_type, duration
-                    FROM content 
+                    SELECT id, title, bucket, description, video_url, file_url, thumbnail, xp, resource_type, duration
+                    FROM content
                     LIMIT 30
                 """))
             
@@ -782,10 +782,11 @@ class AnalyticsRepository:
                     "bucket": row[2] or "",
                     "description": row[3] or "",
                     "video_url": row[4],
-                    "thumbnail": row[5],
-                    "xp": row[6] or 0,
-                    "resource_type": row[7] or "",
-                    "duration": row[8] or ""
+                    "file_url": row[5],
+                    "thumbnail": row[6],
+                    "xp": row[7] or 0,
+                    "resource_type": row[8] or "",
+                    "duration": row[9] or ""
                 })
         except Exception as e:
             logger.warning(f"Could not fetch candidate courses: {e}")
@@ -853,9 +854,11 @@ class AnalyticsRepository:
                     "description": course.get("description"),
                     "bucket": course.get("bucket"),
                     "videoUrl": course.get("video_url"),
+                    "fileUrl": course.get("file_url"),
                     "thumbnail": course.get("thumbnail"),
                     "xp": course.get("xp"),
                     "resource_type": course.get("resource_type"),
+                    "resourceType": course.get("resource_type"),  # camelCase for frontend
                     "duration": course.get("duration")
                 }
             })

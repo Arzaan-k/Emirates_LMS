@@ -10,7 +10,8 @@ import {
     Dimensions,
     ActivityIndicator,
     Alert,
-    FlatList
+    FlatList,
+    Platform
 } from 'react-native';
 import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -383,27 +384,77 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
             <View style={styles.row}>
                 <View style={{ flex: 1, marginRight: 10 }}>
                     <Text style={styles.inputLabel}>Date *</Text>
-                    <TouchableOpacity
-                        style={styles.pickerBtn}
-                        onPress={() => setShowDatePicker(true)}
-                    >
-                        <Feather name="calendar" size={18} color="#6366F1" />
-                        <Text style={styles.pickerBtnText}>{getFormattedDate()}</Text>
-                    </TouchableOpacity>
+                    {Platform.OS === 'web' ? (
+                        /* WEB: Native HTML date input */
+                        <input
+                            type="date"
+                            value={getFormattedDate()}
+                            min={new Date().toISOString().split('T')[0]}
+                            onChange={(e) => {
+                                const [year, month, day] = e.target.value.split('-');
+                                const newDate = new Date(date);
+                                newDate.setFullYear(parseInt(year), parseInt(month) - 1, parseInt(day));
+                                setDate(newDate);
+                            }}
+                            style={{
+                                width: '100%',
+                                padding: 14,
+                                borderRadius: 12,
+                                border: '1px solid #C7D2FE',
+                                backgroundColor: '#EEF2FF',
+                                fontSize: 15,
+                                fontFamily: 'Poppins, sans-serif',
+                                cursor: 'pointer'
+                            }}
+                        />
+                    ) : (
+                        <TouchableOpacity
+                            style={styles.pickerBtn}
+                            onPress={() => setShowDatePicker(true)}
+                        >
+                            <Feather name="calendar" size={18} color="#6366F1" />
+                            <Text style={styles.pickerBtnText}>{getFormattedDate()}</Text>
+                        </TouchableOpacity>
+                    )}
                 </View>
                 <View style={{ flex: 1 }}>
                     <Text style={styles.inputLabel}>Time *</Text>
-                    <TouchableOpacity
-                        style={styles.pickerBtn}
-                        onPress={() => setShowTimePicker(true)}
-                    >
-                        <Feather name="clock" size={18} color="#6366F1" />
-                        <Text style={styles.pickerBtnText}>{getFormattedTime()}</Text>
-                    </TouchableOpacity>
+                    {Platform.OS === 'web' ? (
+                        /* WEB: Native HTML time input */
+                        <input
+                            type="time"
+                            value={getFormattedTime()}
+                            onChange={(e) => {
+                                const [hours, minutes] = e.target.value.split(':');
+                                const newDate = new Date(date);
+                                newDate.setHours(parseInt(hours), parseInt(minutes));
+                                setDate(newDate);
+                            }}
+                            style={{
+                                width: '100%',
+                                padding: 14,
+                                borderRadius: 12,
+                                border: '1px solid #C7D2FE',
+                                backgroundColor: '#EEF2FF',
+                                fontSize: 15,
+                                fontFamily: 'Poppins, sans-serif',
+                                cursor: 'pointer'
+                            }}
+                        />
+                    ) : (
+                        <TouchableOpacity
+                            style={styles.pickerBtn}
+                            onPress={() => setShowTimePicker(true)}
+                        >
+                            <Feather name="clock" size={18} color="#6366F1" />
+                            <Text style={styles.pickerBtnText}>{getFormattedTime()}</Text>
+                        </TouchableOpacity>
+                    )}
                 </View>
             </View>
 
-            {(showDatePicker || showTimePicker) && (
+            {/* DateTimePicker - Native Only */}
+            {Platform.OS !== 'web' && (showDatePicker || showTimePicker) && (
                 <DateTimePicker
                     value={date}
                     mode={showDatePicker ? 'date' : 'time'}

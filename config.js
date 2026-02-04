@@ -7,8 +7,8 @@ const ENV = {
     // Local Development URLs
     dev: {
         web: "http://localhost:8000",
-        ios: "http://localhost:8000",
-        android: "http://10.0.2.2:8000", // Special alias for Android Emulator to access host localhost
+        ios: "http://192.168.29.119:8000",
+        android: "http://192.168.29.119:8000", // Special alias for Android Emulator to access host localhost
     },
     // Production URL (Render.com)
     prod: "https://newlms-backend.onrender.com"
