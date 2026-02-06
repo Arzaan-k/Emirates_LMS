@@ -411,18 +411,156 @@ export default function ContentLibraryModal({ visible, onClose }) {
 
     const tabs = Array.from(new Set(['All', ...availableBuckets.map(b => b.name)]));
 
+    // Recursively filter folders and items based on search query
+    const filterFolderTree = (folder) => {
+        const searchLower = searchQuery.toLowerCase();
+
+        // Filter items in this folder
+        const filteredItems = (folder.items || []).filter(item =>
+            !searchQuery ||
+            item.title.toLowerCase().includes(searchLower) ||
+            (item.description && item.description.toLowerCase().includes(searchLower))
+        );
+
+        // Recursively filter children
+        const filteredChildren = (folder.children || [])
+            .map(child => filterFolderTree(child))
+            .filter(child => child !== null);
+
+        // Include folder if:
+        // 1. It has matching items, OR
+        // 2. It has matching children, OR
+        // 3. No search query (show all)
+        if (!searchQuery || filteredItems.length > 0 || filteredChildren.length > 0) {
+            return {
+                ...folder,
+                items: filteredItems,
+                children: filteredChildren,
+                item_count: filteredItems.length,
+                total_count: filteredItems.length + filteredChildren.reduce((sum, child) => sum + (child.total_count || 0), 0)
+            };
+        }
+
+        return null; // Exclude this folder
+    };
+
+    // Filter by active tab - only filter at root level
     const filteredCategories = activeTab === 'All'
         ? contentCategories
         : contentCategories.filter(cat => cat.name === activeTab);
 
-    // Filter items inside categories based on search query
-    const displayCategories = filteredCategories.map(cat => ({
-        ...cat,
-        items: cat.items.filter(item =>
-            item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            item.description.toLowerCase().includes(searchQuery.toLowerCase())
-        )
-    })).filter(cat => cat.items.length > 0);
+    // Apply search filter recursively
+    const displayCategories = filteredCategories
+        .map(cat => filterFolderTree(cat))
+        .filter(cat => cat !== null);
+
+    /**
+     * Recursively renders folder tree with unlimited nesting depth
+     * @param {Object} folder - Folder object with children array
+     * @param {number} depth - Current nesting depth (0 = root)
+     */
+    const renderFolderTree = (folder, depth = 0) => {
+        const isExpanded = expandedFolders.has(folder.id);
+        const hasChildren = folder.children && folder.children.length > 0;
+        const hasItems = folder.items && folder.items.length > 0;
+
+        // Calculate indentation based on depth
+        const indentLeft = depth * 20;
+
+        // Icon sizes get slightly smaller at deeper levels
+        const iconSize = Math.max(18, 22 - depth * 2);
+        const chevronSize = Math.max(16, 20 - depth * 2);
+
+        return (
+            <View key={folder.id} style={[styles.folderContainer, { marginLeft: indentLeft }]}>
+                {/* Folder Header */}
+                <TouchableOpacity
+                    style={[
+                        styles.folderHeader,
+                        depth > 0 && styles.nestedFolderHeader
+                    ]}
+                    onPress={() => toggleFolder(folder.id)}
+                    activeOpacity={0.7}
+                >
+                    {/* Expand/Collapse Arrow */}
+                    <View style={styles.expandIconContainer}>
+                        <MaterialCommunityIcons
+                            name={isExpanded ? "chevron-down" : "chevron-right"}
+                            size={chevronSize}
+                            color={depth === 0 ? "#6B7280" : "#9CA3AF"}
+                        />
+                    </View>
+
+                    {/* Folder Icon */}
+                    {depth === 0 ? (
+                        <View style={[styles.folderIconBox, { backgroundColor: (folder.color || "#F59E0B") + '15' }]}>
+                            <MaterialCommunityIcons
+                                name={isExpanded ? "folder-open" : "folder"}
+                                size={iconSize}
+                                color={folder.color || "#F59E0B"}
+                            />
+                        </View>
+                    ) : (
+                        <MaterialCommunityIcons
+                            name={isExpanded ? "folder-open-outline" : "folder-outline"}
+                            size={iconSize}
+                            color={folder.color || "#9CA3AF"}
+                            style={{ marginLeft: 4, marginRight: 8 }}
+                        />
+                    )}
+
+                    {/* Folder Name */}
+                    <Text style={[
+                        depth === 0 ? styles.folderName : styles.nestedFolderName,
+                        { flex: 1 }
+                    ]}>
+                        {folder.name}
+                    </Text>
+
+                    {/* Item Count Badge */}
+                    <View style={[
+                        styles.folderBadge,
+                        { backgroundColor: (folder.color || "#F59E0B") + '20' }
+                    ]}>
+                        <Text style={[styles.folderBadgeText, { color: folder.color || "#F59E0B" }]}>
+                            {folder.total_count || folder.item_count || folder.items?.length || 0}
+                        </Text>
+                    </View>
+                </TouchableOpacity>
+
+                {/* Folder Contents (when expanded) */}
+                {isExpanded && (
+                    <View style={[
+                        styles.folderContents,
+                        depth > 0 && styles.nestedFolderContents
+                    ]}>
+                        {/* Recursively render child folders FIRST */}
+                        {hasChildren && folder.children.map(childFolder =>
+                            renderFolderTree(childFolder, depth + 1)
+                        )}
+
+                        {/* Then render content items in this folder */}
+                        {hasItems && folder.items.map((item, idx) => {
+                            const uniqueKey = `${folder.id}-${item.id}-${idx}`;
+                            return (
+                                <View key={uniqueKey}>
+                                    {renderContentItem(item, depth + 1, uniqueKey)}
+                                </View>
+                            );
+                        })}
+
+                        {/* Show empty state if no children and no items */}
+                        {!hasChildren && !hasItems && (
+                            <View style={styles.emptyFolderState}>
+                                <Feather name="inbox" size={24} color="#D1D5DB" />
+                                <Text style={styles.emptyFolderText}>Empty folder</Text>
+                            </View>
+                        )}
+                    </View>
+                )}
+            </View>
+        );
+    };
 
     const renderContentItem = (item, indentLevel = 0, keyPrefix = '') => {
         let iconName = 'file-document-outline';
@@ -621,103 +759,7 @@ export default function ContentLibraryModal({ visible, onClose }) {
                                     <Text style={styles.emptyStateText}>No content found</Text>
                                 </View>
                             ) : (
-                                displayCategories.map(category => {
-                                    const isExpanded = expandedFolders.has(category.id);
-                                    const hasNestedBuckets = category.children && category.children.length > 0;
-
-                                    return (
-                                        <View key={category.id} style={styles.folderContainer}>
-                                            {/* Folder Header (Clickable like desktop folder) */}
-                                            <TouchableOpacity
-                                                style={styles.folderHeader}
-                                                onPress={() => toggleFolder(category.id)}
-                                                activeOpacity={0.7}
-                                            >
-                                                {/* Expand/Collapse Arrow */}
-                                                <View style={styles.expandIconContainer}>
-                                                    <MaterialCommunityIcons
-                                                        name={isExpanded ? "chevron-down" : "chevron-right"}
-                                                        size={20}
-                                                        color="#6B7280"
-                                                    />
-                                                </View>
-
-                                                {/* Folder Icon (changes when opened) */}
-                                                <View style={[styles.folderIconBox, { backgroundColor: (category.color || "#F59E0B") + '15' }]}>
-                                                    <MaterialCommunityIcons
-                                                        name={isExpanded ? "folder-open" : "folder"}
-                                                        size={22}
-                                                        color={category.color || "#F59E0B"}
-                                                    />
-                                                </View>
-
-                                                {/* Folder Name */}
-                                                <Text style={styles.folderName}>{category.name}</Text>
-
-                                                {/* Item Count Badge */}
-                                                <View style={[styles.folderBadge, { backgroundColor: (category.color || "#F59E0B") + '20' }]}>
-                                                    <Text style={[styles.folderBadgeText, { color: category.color || "#F59E0B" }]}>
-                                                        {category.items.length}
-                                                    </Text>
-                                                </View>
-                                            </TouchableOpacity>
-
-                                            {/* Folder Contents (shown when expanded) */}
-                                            {isExpanded && (
-                                                <View style={styles.folderContents}>
-                                                    {/* Render nested buckets first (if any) */}
-                                                    {hasNestedBuckets && category.children.map(childBucket => (
-                                                        <View key={childBucket.id} style={styles.nestedFolder}>
-                                                            <TouchableOpacity
-                                                                style={styles.nestedFolderHeader}
-                                                                onPress={() => toggleFolder(childBucket.id)}
-                                                                activeOpacity={0.7}
-                                                            >
-                                                                <MaterialCommunityIcons
-                                                                    name={expandedFolders.has(childBucket.id) ? "chevron-down" : "chevron-right"}
-                                                                    size={18}
-                                                                    color="#9CA3AF"
-                                                                />
-                                                                <MaterialCommunityIcons
-                                                                    name={expandedFolders.has(childBucket.id) ? "folder-open-outline" : "folder-outline"}
-                                                                    size={20}
-                                                                    color={childBucket.color || "#9CA3AF"}
-                                                                    style={{ marginLeft: 8 }}
-                                                                />
-                                                                <Text style={styles.nestedFolderName}>{childBucket.name}</Text>
-                                                                <Text style={styles.nestedFolderCount}>({childBucket.items?.length || 0})</Text>
-                                                            </TouchableOpacity>
-
-                                                            {/* Nested folder contents */}
-                                                            {expandedFolders.has(childBucket.id) && (
-                                                                <View style={styles.nestedFolderContents}>
-                                                                    {(childBucket.items || []).map((item, idx) => {
-                                                                        const uniqueKey = `${childBucket.id}-${item.id}-${idx}`;
-                                                                        return (
-                                                                            <View key={uniqueKey}>
-                                                                                {renderContentItem(item, 2, uniqueKey)}
-                                                                            </View>
-                                                                        );
-                                                                    })}
-                                                                </View>
-                                                            )}
-                                                        </View>
-                                                    ))}
-
-                                                    {/* Render content items */}
-                                                    {category.items.map((item, idx) => {
-                                                        const uniqueKey = `${category.id}-${item.id}-${idx}`;
-                                                        return (
-                                                            <View key={uniqueKey}>
-                                                                {renderContentItem(item, 1, uniqueKey)}
-                                                            </View>
-                                                        );
-                                                    })}
-                                                </View>
-                                            )}
-                                        </View>
-                                    );
-                                })
+                                displayCategories.map(category => renderFolderTree(category, 0))
                             )}
                             <View style={{ height: 100 }} />
                         </ScrollView>
@@ -946,6 +988,20 @@ const styles = StyleSheet.create({
         marginTop: 10,
         fontFamily: 'Poppins_500Medium',
         color: '#6B7280'
+    },
+    emptyFolderState: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 20,
+        opacity: 0.4
+    },
+    emptyFolderText: {
+        marginLeft: 8,
+        fontFamily: 'Poppins_400Regular',
+        fontSize: 13,
+        color: '#9CA3AF',
+        fontStyle: 'italic'
     },
     // Folder-like structure styles
     folderContainer: {
