@@ -53,6 +53,10 @@ def migrate():
         "ALTER TABLE progression_levels ADD COLUMN IF NOT EXISTS exam_time_minutes INTEGER DEFAULT 15",
         "ALTER TABLE progression_levels ADD COLUMN IF NOT EXISTS pass_percent INTEGER DEFAULT 70",
         "ALTER TABLE progression_levels ADD COLUMN IF NOT EXISTS proctored BOOLEAN DEFAULT false",
+
+        # Password Reset
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token VARCHAR(100)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMP",
     ]
     
     for migration in migrations:

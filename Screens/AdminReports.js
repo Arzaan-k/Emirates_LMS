@@ -16,11 +16,15 @@ import {
     Platform,
     Alert,
     Linking,
+    TextInput,
+    Switch,
+    Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import API_URL from '../config';
 
 const { width } = Dimensions.get('window');
@@ -127,6 +131,119 @@ const AdminReports = ({ navigation }) => {
     const [reportData, setReportData] = useState(null);
     const [overviewData, setOverviewData] = useState(null);
 
+    // Filter states
+    const [showFilters, setShowFilters] = useState(false);
+    const [dateFrom, setDateFrom] = useState('');
+    const [dateTo, setDateTo] = useState('');
+    const [roleFilter, setRoleFilter] = useState('');
+    const [storeFilter, setStoreFilter] = useState('');
+    const [bucketFilter, setBucketFilter] = useState('');
+
+    // Subscription State
+    const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
+    const [subsLoading, setSubsLoading] = useState(false);
+    const [subscriptions, setSubscriptions] = useState({});
+    const [userEmail, setUserEmail] = useState('');
+
+    useEffect(() => {
+        const init = async () => {
+            try {
+                const email = await AsyncStorage.getItem('userEmail');
+                if (email) {
+                    setUserEmail(email);
+                    fetchSubscriptions(email);
+                }
+            } catch (e) { console.error(e); }
+        };
+        init();
+    }, []);
+
+    const fetchSubscriptions = async (email) => {
+        try {
+            const response = await fetch(`${API_URL}/api/v1/reports/subscriptions?user_email=${email}`);
+            if (response.ok) {
+                const data = await response.json();
+                const divMap = {};
+                data.forEach(sub => {
+                    divMap[sub.report_type] = {
+                        isActive: true, // Only active ones returned or check sub.is_active
+                        day: sub.day_of_week || 'Monday',
+                        time: sub.time_of_day || '09:00'
+                    };
+                });
+                setSubscriptions(divMap);
+            }
+        } catch (error) { console.error('Error fetching subscriptions:', error); }
+    };
+
+    const toggleSubscription = (reportId) => {
+        setSubscriptions(prev => {
+            const current = prev[reportId];
+            if (current && current.isActive) {
+                // If active, deactivate (remove or set isActive false - simplest is remove/toggle)
+                const newState = { ...prev };
+                delete newState[reportId];
+                return newState;
+            } else {
+                // Activate with defaults
+                return {
+                    ...prev,
+                    [reportId]: { isActive: true, day: 'Monday', time: '09:00' }
+                };
+            }
+        });
+    };
+
+    const updateSubscriptionDetail = (reportId, field, value) => {
+        setSubscriptions(prev => ({
+            ...prev,
+            [reportId]: {
+                ...prev[reportId],
+                [field]: value
+            }
+        }));
+    };
+
+    const saveSubscriptions = async () => {
+        setSubsLoading(true);
+        try {
+            // Build list of active subscriptions
+            const subList = [];
+            // Iterate all available categories to see which are checked
+            REPORT_CATEGORIES.forEach(cat => {
+                const sub = subscriptions[cat.id];
+                if (sub && sub.isActive) {
+                    subList.push({
+                        report_type: cat.id,
+                        frequency: 'weekly',
+                        day_of_week: sub.day,
+                        time_of_day: sub.time,
+                        format: 'pdf',
+                        is_active: true
+                    });
+                }
+            });
+
+            const response = await fetch(`${API_URL}/api/v1/reports/subscriptions?user_email=${userEmail}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ subscriptions: subList })
+            });
+
+            if (response.ok) {
+                Alert.alert('Success', 'Weekly report subscriptions updated!');
+                setShowSubscriptionModal(false);
+            } else {
+                Alert.alert('Error', 'Failed to update subscriptions');
+            }
+        } catch (error) {
+            console.error('Error updating subscriptions:', error);
+            Alert.alert('Error', 'Network error');
+        } finally {
+            setSubsLoading(false);
+        }
+    };
+
     // Fetch overview data on mount
     useEffect(() => {
         fetchOverviewData();
@@ -157,7 +274,16 @@ const AdminReports = ({ navigation }) => {
 
         setLoading(true);
         try {
-            const response = await fetch(`${API_URL}${categoryInfo.endpoint}`);
+            // Build query parameters with filters
+            const params = new URLSearchParams();
+            if (dateFrom) params.append('date_from', dateFrom);
+            if (dateTo) params.append('date_to', dateTo);
+            if (roleFilter) params.append('role_filter', roleFilter);
+            if (storeFilter) params.append('store_filter', storeFilter);
+            if (bucketFilter) params.append('bucket_filter', bucketFilter);
+
+            const url = `${API_URL}${categoryInfo.endpoint}${params.toString() ? '?' + params.toString() : ''}`;
+            const response = await fetch(url);
             if (response.ok) {
                 const data = await response.json();
                 setReportData(data);
@@ -181,7 +307,15 @@ const AdminReports = ({ navigation }) => {
 
         setDownloading(true);
         try {
-            const downloadUrl = `${API_URL}${categoryInfo.downloadEndpoint}`;
+            // Build query parameters with filters
+            const params = new URLSearchParams();
+            if (dateFrom) params.append('date_from', dateFrom);
+            if (dateTo) params.append('date_to', dateTo);
+            if (roleFilter) params.append('role_filter', roleFilter);
+            if (storeFilter) params.append('store_filter', storeFilter);
+            if (bucketFilter) params.append('bucket_filter', bucketFilter);
+
+            const downloadUrl = `${API_URL}${categoryInfo.downloadEndpoint}${params.toString() ? '?' + params.toString() : ''}`;
 
             if (isWeb) {
                 // On web, use fetch and blob to trigger actual file download
@@ -237,7 +371,15 @@ const AdminReports = ({ navigation }) => {
 
         setDownloading(true);
         try {
-            const downloadUrl = `${API_URL}${categoryInfo.pdfEndpoint}`;
+            // Build query parameters with filters
+            const params = new URLSearchParams();
+            if (dateFrom) params.append('date_from', dateFrom);
+            if (dateTo) params.append('date_to', dateTo);
+            if (roleFilter) params.append('role_filter', roleFilter);
+            if (storeFilter) params.append('store_filter', storeFilter);
+            if (bucketFilter) params.append('bucket_filter', bucketFilter);
+
+            const downloadUrl = `${API_URL}${categoryInfo.pdfEndpoint}${params.toString() ? '?' + params.toString() : ''}`;
 
             if (isWeb) {
                 // On web, use fetch and blob to trigger actual file download
@@ -310,6 +452,228 @@ const AdminReports = ({ navigation }) => {
             </Animated.View>
         );
     };
+
+    // Clear all filters
+    const handleClearFilters = () => {
+        setDateFrom('');
+        setDateTo('');
+        setRoleFilter('');
+        setStoreFilter('');
+        setBucketFilter('');
+    };
+
+    // Apply filters
+    const handleApplyFilters = () => {
+        fetchReportData(selectedCategory);
+        setShowFilters(false);
+    };
+
+    // Render filter panel
+    const renderFilterPanel = () => {
+        if (!showFilters) return null;
+
+        return (
+            <Animated.View entering={FadeInDown} style={styles.filterPanel}>
+                <View style={styles.filterHeader}>
+                    <Text style={styles.filterTitle}>Filter Reports</Text>
+                    <TouchableOpacity onPress={() => setShowFilters(false)}>
+                        <Feather name="x" size={24} color="#6B7280" />
+                    </TouchableOpacity>
+                </View>
+
+                {/* Date Range Filters */}
+                <View style={styles.filterSection}>
+                    <Text style={styles.filterSectionTitle}>Date Range</Text>
+                    <View style={styles.filterRow}>
+                        <View style={styles.filterInputWrapper}>
+                            <Text style={styles.filterLabel}>From</Text>
+                            <TextInput
+                                style={styles.filterInput}
+                                placeholder="YYYY-MM-DD"
+                                value={dateFrom}
+                                onChangeText={setDateFrom}
+                                placeholderTextColor="#9CA3AF"
+                            />
+                        </View>
+                        <View style={styles.filterInputWrapper}>
+                            <Text style={styles.filterLabel}>To</Text>
+                            <TextInput
+                                style={styles.filterInput}
+                                placeholder="YYYY-MM-DD"
+                                value={dateTo}
+                                onChangeText={setDateTo}
+                                placeholderTextColor="#9CA3AF"
+                            />
+                        </View>
+                    </View>
+                </View>
+
+                {/* Role Filter */}
+                {['users', 'attendance'].includes(selectedCategory) && (
+                    <View style={styles.filterSection}>
+                        <Text style={styles.filterSectionTitle}>Role</Text>
+                        <TextInput
+                            style={styles.filterInput}
+                            placeholder="e.g., Waffler, Store Manager"
+                            value={roleFilter}
+                            onChangeText={setRoleFilter}
+                            placeholderTextColor="#9CA3AF"
+                        />
+                    </View>
+                )}
+
+                {/* Store Filter */}
+                {['users', 'attendance', 'stores'].includes(selectedCategory) && (
+                    <View style={styles.filterSection}>
+                        <Text style={styles.filterSectionTitle}>Store</Text>
+                        <TextInput
+                            style={styles.filterInput}
+                            placeholder="e.g., Mumbai Central, Delhi CP"
+                            value={storeFilter}
+                            onChangeText={setStoreFilter}
+                            placeholderTextColor="#9CA3AF"
+                        />
+                    </View>
+                )}
+
+                {/* Bucket/Category Filter */}
+                {['training', 'content'].includes(selectedCategory) && (
+                    <View style={styles.filterSection}>
+                        <Text style={styles.filterSectionTitle}>Category</Text>
+                        <TextInput
+                            style={styles.filterInput}
+                            placeholder="e.g., Product Training, Skills"
+                            value={bucketFilter}
+                            onChangeText={setBucketFilter}
+                            placeholderTextColor="#9CA3AF"
+                        />
+                    </View>
+                )}
+
+                {/* Action Buttons */}
+                <View style={styles.filterActions}>
+                    <TouchableOpacity
+                        style={styles.filterClearBtn}
+                        onPress={handleClearFilters}
+                    >
+                        <Text style={styles.filterClearText}>Clear All</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={styles.filterApplyBtn}
+                        onPress={handleApplyFilters}
+                    >
+                        <Text style={styles.filterApplyText}>Apply Filters</Text>
+                    </TouchableOpacity>
+                </View>
+            </Animated.View>
+        );
+    };
+
+    // Render subscription modal
+    const renderSubscriptionModal = () => (
+        <Modal
+            visible={showSubscriptionModal}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setShowSubscriptionModal(false)}
+        >
+            <View style={styles.modalOverlay}>
+                <View style={styles.modalContent}>
+                    <View style={styles.modalHeader}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                            <MaterialCommunityIcons name="email-fast-outline" size={28} color="#F59E0B" />
+                            <Text style={styles.modalTitle}>Weekly Email Reports</Text>
+                        </View>
+                        <TouchableOpacity onPress={() => setShowSubscriptionModal(false)}>
+                            <Feather name="x" size={24} color="#6B7280" />
+                        </TouchableOpacity>
+                    </View>
+                    <Text style={styles.modalSubtitle}>
+                        Select reports you want to receive every Monday morning via email.
+                    </Text>
+
+                    <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+                        {REPORT_CATEGORIES.map(cat => (
+                            <View key={cat.id} style={styles.subItem}>
+                                <View style={styles.subRow}>
+                                    <View style={styles.subInfo}>
+                                        <View style={styles.subRowHeader}>
+                                            <View style={[styles.miniIcon, { backgroundColor: cat.color + '20' }]}>
+                                                <Feather name={cat.icon} size={14} color={cat.color} />
+                                            </View>
+                                            <Text style={styles.subName}>{cat.name}</Text>
+                                        </View>
+                                        <Text style={styles.subDesc}>{cat.description}</Text>
+                                    </View>
+                                    <Switch
+                                        value={subscriptions[cat.id]?.isActive || false}
+                                        onValueChange={() => toggleSubscription(cat.id)}
+                                        trackColor={{ false: '#D1D5DB', true: '#FCD34D' }}
+                                        thumbColor={subscriptions[cat.id]?.isActive ? '#F59E0B' : '#F3F4F6'}
+                                    />
+                                </View>
+
+                                {subscriptions[cat.id]?.isActive && (
+                                    <Animated.View entering={FadeInDown} style={styles.subConfig}>
+                                        <View style={styles.configItem}>
+                                            <Text style={styles.configLabel}>Day</Text>
+                                            <View style={styles.daysRow}>
+                                                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].map(d => {
+                                                    const fullDay = d === 'Mon' ? 'Monday' : d === 'Tue' ? 'Tuesday' : d === 'Wed' ? 'Wednesday' : d === 'Thu' ? 'Thursday' : 'Friday';
+                                                    const isSelected = subscriptions[cat.id].day === fullDay;
+                                                    return (
+                                                        <TouchableOpacity
+                                                            key={d}
+                                                            style={[styles.dayChip, isSelected && styles.dayChipActive]}
+                                                            onPress={() => updateSubscriptionDetail(cat.id, 'day', fullDay)}
+                                                        >
+                                                            <Text style={[styles.dayChipText, isSelected && styles.dayChipTextActive]}>{d}</Text>
+                                                        </TouchableOpacity>
+                                                    );
+                                                })}
+                                            </View>
+                                        </View>
+
+                                        <View style={styles.configItem}>
+                                            <Text style={styles.configLabel}>Time (24h)</Text>
+                                            <TextInput
+                                                style={styles.timeInput}
+                                                value={subscriptions[cat.id].time}
+                                                onChangeText={(t) => updateSubscriptionDetail(cat.id, 'time', t)}
+                                                placeholder="09:00"
+                                                maxLength={5}
+                                            />
+                                            <Text style={styles.timeHint}>e.g. 09:00, 14:30</Text>
+                                        </View>
+                                    </Animated.View>
+                                )}
+                            </View>
+                        ))}
+                    </ScrollView>
+
+                    <View style={styles.modalFooter}>
+                        <TouchableOpacity
+                            style={styles.btnCancel}
+                            onPress={() => setShowSubscriptionModal(false)}
+                        >
+                            <Text style={styles.btnCancelText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.btnSave}
+                            onPress={saveSubscriptions}
+                            disabled={subsLoading}
+                        >
+                            {subsLoading ? (
+                                <ActivityIndicator size="small" color="#FFF" />
+                            ) : (
+                                <Text style={styles.btnSaveText}>Save Preferences</Text>
+                            )}
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </View>
+        </Modal>
+    );
 
     // Render category tabs
     const renderCategoryTabs = () => (
@@ -765,6 +1129,36 @@ const AdminReports = ({ navigation }) => {
                 {/* Category Tabs */}
                 {renderCategoryTabs()}
 
+                {/* Filter & Subscription Buttons */}
+                <View style={styles.filterButtonContainer}>
+                    <TouchableOpacity
+                        style={styles.filterButton}
+                        onPress={() => setShowFilters(!showFilters)}
+                    >
+                        <Feather name="filter" size={16} color="#F59E0B" />
+                        <Text style={styles.filterButtonText}>Filters</Text>
+                        {(dateFrom || dateTo || roleFilter || storeFilter || bucketFilter) && (
+                            <View style={styles.filterBadge}>
+                                <Text style={styles.filterBadgeText}>•</Text>
+                            </View>
+                        )}
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={[styles.filterButton, { marginLeft: 12, borderColor: '#3B82F6' }]}
+                        onPress={() => setShowSubscriptionModal(true)}
+                    >
+                        <Feather name="mail" size={16} color="#3B82F6" />
+                        <Text style={[styles.filterButtonText, { color: '#3B82F6' }]}>Weekly Subscriptions</Text>
+                    </TouchableOpacity>
+                </View>
+
+                {/* Filter Panel */}
+                {renderFilterPanel()}
+
+                {/* Subscription Modal */}
+                {renderSubscriptionModal()}
+
                 {/* Report Content */}
                 {renderReportContent()}
 
@@ -1210,6 +1604,319 @@ const styles = StyleSheet.create({
         color: '#166534',
         lineHeight: 20,
     },
+
+    // FILTER STYLES
+    filterButtonContainer: {
+        paddingHorizontal: 16,
+        marginTop: 16,
+        flexDirection: 'row',
+    },
+    filterButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFF',
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#F59E0B',
+        alignSelf: 'flex-start',
+        gap: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+        elevation: 2,
+    },
+    filterButtonText: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#F59E0B',
+    },
+    filterBadge: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#EF4444',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    filterBadgeText: {
+        fontSize: 20,
+        color: '#FFF',
+        fontFamily: 'Poppins_700Bold',
+        lineHeight: 20,
+    },
+    filterPanel: {
+        backgroundColor: '#FFF',
+        marginHorizontal: 16,
+        marginTop: 12,
+        borderRadius: 16,
+        padding: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 12,
+        elevation: 5,
+    },
+    filterHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 16,
+        paddingBottom: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: '#E5E7EB',
+    },
+    filterTitle: {
+        fontSize: 18,
+        fontFamily: 'Poppins_700Bold',
+        color: '#111827',
+    },
+    filterSection: {
+        marginBottom: 16,
+    },
+    filterSectionTitle: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#374151',
+        marginBottom: 8,
+    },
+    filterRow: {
+        flexDirection: 'row',
+        gap: 12,
+    },
+    filterInputWrapper: {
+        flex: 1,
+    },
+    filterLabel: {
+        fontSize: 11,
+        fontFamily: 'Poppins_500Medium',
+        color: '#6B7280',
+        marginBottom: 4,
+    },
+    filterInput: {
+        backgroundColor: '#F9FAFB',
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        borderRadius: 10,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        fontSize: 13,
+        fontFamily: 'Poppins_400Regular',
+        color: '#111827',
+    },
+    filterActions: {
+        flexDirection: 'row',
+        gap: 12,
+        marginTop: 8,
+    },
+    filterClearBtn: {
+        flex: 1,
+        paddingVertical: 12,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        alignItems: 'center',
+        backgroundColor: '#FFF',
+    },
+    filterClearText: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#6B7280',
+    },
+    filterApplyBtn: {
+        flex: 1,
+        paddingVertical: 12,
+        borderRadius: 10,
+        backgroundColor: '#F59E0B',
+        alignItems: 'center',
+    },
+    filterApplyText: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF',
+    },
+
+    // SUBSCRIPTION MODAL STYLES
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20
+    },
+    modalContent: {
+        backgroundColor: '#FFF',
+        borderRadius: 20,
+        width: '100%',
+        maxWidth: 500,
+        maxHeight: '80%',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.25,
+        shadowRadius: 20,
+        elevation: 10,
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: 20,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F3F4F6'
+    },
+    modalTitle: {
+        fontSize: 18,
+        fontFamily: 'Poppins_700Bold',
+        color: '#111827',
+    },
+    modalSubtitle: {
+        fontSize: 13,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        paddingHorizontal: 20,
+        paddingTop: 12,
+        paddingBottom: 4
+    },
+    modalBody: {
+        padding: 20
+    },
+    subItem: {
+        borderBottomWidth: 1,
+        borderBottomColor: '#F3F4F6',
+        paddingVertical: 12,
+    },
+    subRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 8,
+        gap: 12
+    },
+    subConfig: {
+        marginTop: 8,
+        padding: 12,
+        backgroundColor: '#F9FAFB',
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    configItem: {
+        marginBottom: 12,
+    },
+    configLabel: {
+        fontSize: 12,
+        fontFamily: 'Poppins_500Medium',
+        color: '#374151',
+        marginBottom: 8,
+    },
+    daysRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    dayChip: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 20,
+        backgroundColor: '#FFF',
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    dayChipActive: {
+        backgroundColor: '#FDE68A',
+        borderColor: '#F59E0B',
+    },
+    dayChipText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_500Medium',
+        color: '#6B7280',
+    },
+    dayChipTextActive: {
+        color: '#92400E',
+    },
+    timeInput: {
+        backgroundColor: '#FFF',
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        borderRadius: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        fontSize: 14,
+        fontFamily: 'Poppins_400Regular',
+        color: '#111827',
+        width: 100,
+    },
+    timeHint: {
+        fontSize: 11,
+        fontFamily: 'Poppins_400Regular',
+        color: '#9CA3AF',
+        marginTop: 4,
+    },
+    subInfo: {
+        flex: 1
+    },
+    subRowHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 4
+    },
+    miniIcon: {
+        width: 24,
+        height: 24,
+        borderRadius: 8,
+        justifyContent: 'center',
+        alignItems: 'center'
+    },
+    subName: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#111827'
+    },
+    subDesc: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280'
+    },
+    modalFooter: {
+        flexDirection: 'row',
+        padding: 20,
+        borderTopWidth: 1,
+        borderTopColor: '#F3F4F6',
+        gap: 12
+    },
+    btnCancel: {
+        flex: 1,
+        paddingVertical: 12,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        alignItems: 'center',
+    },
+    btnCancelText: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#6B7280'
+    },
+    btnSave: {
+        flex: 1,
+        paddingVertical: 12,
+        borderRadius: 12,
+        backgroundColor: '#F59E0B',
+        alignItems: 'center',
+        shadowColor: '#F59E0B',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 4
+    },
+    btnSaveText: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF'
+    }
 });
 
 export default AdminReports;

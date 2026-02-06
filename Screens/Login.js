@@ -26,6 +26,8 @@ import { BlurView } from 'expo-blur';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import API_URL from '../config';
 
+import CustomAlert from '../Components/CustomAlert';
+
 const { width, height } = Dimensions.get('window');
 
 // Floating Waffle Component
@@ -136,9 +138,31 @@ export default function Login({ navigation }) {
     const [showRoleModal, setShowRoleModal] = useState(false);
     const [pendingUserData, setPendingUserData] = useState(null);
 
+    // Forgot Password State
+    const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
+    const [resetStage, setResetStage] = useState('email'); // 'email', 'reset'
+    const [resetEmail, setResetEmail] = useState('');
+    const [resetToken, setResetToken] = useState('');
+    const [newPassword, setNewPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [resetLoading, setResetLoading] = useState(false);
+
+    // Custom Alert State
+    const [alertVisible, setAlertVisible] = useState(false);
+    const [alertConfig, setAlertConfig] = useState({
+        title: '',
+        message: '',
+        type: 'error'
+    });
+
+    const showAlert = (title, message, type = 'error') => {
+        setAlertConfig({ title, message, type });
+        setAlertVisible(true);
+    };
+
     const handleLogin = async () => {
         if (!username || !password) {
-            Alert.alert('Missing Fields', 'Please enter both username and password.');
+            showAlert('Missing Fields', 'Please enter both username and password.', 'error');
             return;
         }
 
@@ -177,11 +201,13 @@ export default function Login({ navigation }) {
                     navigation.replace('Home', { userProfile: user });
                 }
             } else {
-                Alert.alert('Login Failed', data.message || 'Invalid credentials');
+                // Use specific error message from backend if available
+                const errorMsg = data.detail || data.message || 'Invalid credentials';
+                showAlert('Login Failed', errorMsg, 'error');
             }
         } catch (error) {
             console.error('Login error:', error);
-            Alert.alert('Error', 'Unable to connect to server. Please try again.');
+            showAlert('Connection Error', 'Unable to connect to server. Please try again.', 'error');
         } finally {
             if (!showRoleModal) {
                 setLoading(false);
@@ -213,12 +239,125 @@ export default function Login({ navigation }) {
         }
     };
 
+    const requestResetCode = async () => {
+        if (!resetEmail) {
+            showAlert('Missing Email', 'Please enter your email address', 'error');
+            return;
+        }
+
+        setResetLoading(true);
+        try {
+            const response = await fetch(`${API_URL}/api/v1/auth/forgot-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: resetEmail })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                // Email sent successfully
+                setResetStage('reset');
+                showAlert('Check Your Email', `A reset code has been sent to ${resetEmail}`, 'success');
+            } else {
+                showAlert('Request Failed', data.detail || 'Failed to send reset code', 'error');
+            }
+        } catch (error) {
+            console.error('Forgot password error:', error);
+            showAlert('Connection Error', 'Network error. Please try again.', 'error');
+        } finally {
+            setResetLoading(false);
+        }
+    };
+
+    const submitPasswordReset = async () => {
+        if (!resetToken || !newPassword || !confirmPassword) {
+            showAlert('Missing Fields', 'Please fill in all fields', 'error');
+            return;
+        }
+
+        if (newPassword !== confirmPassword) {
+            showAlert('Password Mismatch', 'Passwords do not match', 'error');
+            return;
+        }
+
+        // Strong password validation (Matching Backend Logic)
+        if (newPassword.length < 8) {
+            showAlert('Weak Password', 'Password must be at least 8 characters long.', 'error');
+            return;
+        }
+        if (!/[A-Z]/.test(newPassword)) {
+            showAlert('Weak Password', 'Password must contain at least one uppercase letter.', 'error');
+            return;
+        }
+        if (!/[a-z]/.test(newPassword)) {
+            showAlert('Weak Password', 'Password must contain at least one lowercase letter.', 'error');
+            return;
+        }
+        if (!/\d/.test(newPassword)) {
+            showAlert('Weak Password', 'Password must contain at least one number.', 'error');
+            return;
+        }
+        // Check for special characters (permissive list matching backend)
+        if (!/[!@#$%^&*(),.?":{}|<>]/.test(newPassword)) {
+            showAlert('Weak Password', 'Password must contain at least one special character (e.g. ! @ # $ %).', 'error');
+            return;
+        }
+
+        setResetLoading(true);
+        try {
+            const response = await fetch(`${API_URL}/api/v1/auth/reset-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: resetEmail,
+                    token: resetToken,
+                    new_password: newPassword
+                })
+            });
+
+            let data;
+            try {
+                data = await response.json();
+            } catch (e) {
+                // Fallback if response is not JSON
+                const text = await response.text();
+                // If text is empty or html, just say server error
+                data = { detail: text || 'Server returned an error' };
+            }
+
+            if (response.ok) {
+                showAlert('Success!', 'Password reset successfully. You can now login.', 'success');
+                setShowForgotPasswordModal(false);
+            } else {
+                // Try to extract the cleanest message
+                let message = data.detail || data.message || 'Failed to reset password';
+
+                // If detail is an array (FastAPI validation error), grab the first msg
+                if (Array.isArray(message)) {
+                    message = message[0]?.msg || JSON.stringify(message);
+                }
+
+                // If it looks like "Validation failed for field 'token': Invalid reset code"
+                // we keep it as is, or clean it up if needed.
+                console.log('[Login] Reset Failed Message:', message);
+                showAlert('Reset Failed', message, 'error');
+            }
+        } catch (error) {
+            console.error('Reset password error:', error);
+            showAlert('Connection Error', 'Network error. Please try again.', 'error');
+        } finally {
+            setResetLoading(false);
+        }
+    };
+
     const handleForgotPassword = () => {
-        Alert.alert(
-            'Reset Password',
-            'Please contact your Super Admin to reset your password.\n\nEmail: admin@belgianwaffle.com',
-            [{ text: 'OK', style: 'default' }]
-        );
+        setResetStage('email');
+        setResetEmail('');
+        setResetToken('');
+        setNewPassword('');
+        setConfirmPassword('');
+        setShowForgotPasswordModal(true);
     };
 
     return (
@@ -393,6 +532,144 @@ export default function Login({ navigation }) {
                     </View>
                 </View>
             </Modal>
+
+            {/* FORGOT PASSWORD MODAL */}
+            <Modal visible={showForgotPasswordModal} transparent animationType="fade">
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    style={{ flex: 1 }}
+                >
+                    <View style={styles.modalOverlay}>
+                        <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
+                        <Animated.ScrollView
+                            contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}
+                            showsVerticalScrollIndicator={false}
+                            keyboardShouldPersistTaps="handled"
+                        >
+                            <View style={styles.roleModalCard}>
+                                {/* Header */}
+                                <View style={styles.roleModalHeader}>
+                                    <MaterialCommunityIcons name="lock-reset" size={48} color="#F59E0B" />
+                                    <Text style={styles.roleModalTitle}>
+                                        {resetStage === 'email' ? 'Forgot Password?' : 'Reset Password'}
+                                    </Text>
+                                    <Text style={styles.roleModalSubtitle}>
+                                        {resetStage === 'email'
+                                            ? 'Enter your email to receive a reset code'
+                                            : `Enter the code sent to ${resetEmail}`}
+                                    </Text>
+                                </View>
+
+                                {resetStage === 'email' ? (
+                                    <View>
+                                        <View style={[styles.inputContainer, { backgroundColor: '#F3F4F6' }]}>
+                                            <Feather name="mail" size={20} color="#F59E0B" />
+                                            <TextInput
+                                                style={styles.input}
+                                                placeholder="Enter your email"
+                                                placeholderTextColor="#9CA3AF"
+                                                value={resetEmail}
+                                                onChangeText={setResetEmail}
+                                                autoCapitalize="none"
+                                                keyboardType="email-address"
+                                            />
+                                        </View>
+
+                                        <TouchableOpacity
+                                            style={styles.loginBtn}
+                                            onPress={requestResetCode}
+                                            disabled={resetLoading}
+                                        >
+                                            <LinearGradient
+                                                colors={['#F59E0B', '#D97706']}
+                                                start={{ x: 0, y: 0 }}
+                                                end={{ x: 1, y: 0 }}
+                                                style={styles.loginGradient}
+                                            >
+                                                <Text style={styles.loginText}>
+                                                    {resetLoading ? "Sending..." : "Send Reset Code"}
+                                                </Text>
+                                            </LinearGradient>
+                                        </TouchableOpacity>
+                                    </View>
+                                ) : (
+                                    <View>
+                                        <View style={[styles.inputContainer, { backgroundColor: '#F3F4F6' }]}>
+                                            <MaterialCommunityIcons name="numeric" size={20} color="#F59E0B" />
+                                            <TextInput
+                                                style={styles.input}
+                                                placeholder="6-digit Code"
+                                                placeholderTextColor="#9CA3AF"
+                                                value={resetToken}
+                                                onChangeText={setResetToken}
+                                                keyboardType="numeric"
+                                                maxLength={6}
+                                            />
+                                        </View>
+
+                                        <View style={[styles.inputContainer, { backgroundColor: '#F3F4F6' }]}>
+                                            <Feather name="lock" size={20} color="#F59E0B" />
+                                            <TextInput
+                                                style={styles.input}
+                                                placeholder="New Password"
+                                                placeholderTextColor="#9CA3AF"
+                                                value={newPassword}
+                                                onChangeText={setNewPassword}
+                                                secureTextEntry
+                                            />
+                                        </View>
+
+                                        <View style={[styles.inputContainer, { backgroundColor: '#F3F4F6' }]}>
+                                            <Feather name="lock" size={20} color="#F59E0B" />
+                                            <TextInput
+                                                style={styles.input}
+                                                placeholder="Confirm Password"
+                                                placeholderTextColor="#9CA3AF"
+                                                value={confirmPassword}
+                                                onChangeText={setConfirmPassword}
+                                                secureTextEntry
+                                            />
+                                        </View>
+
+                                        <TouchableOpacity
+                                            style={styles.loginBtn}
+                                            onPress={submitPasswordReset}
+                                            disabled={resetLoading}
+                                        >
+                                            <LinearGradient
+                                                colors={['#F59E0B', '#D97706']}
+                                                start={{ x: 0, y: 0 }}
+                                                end={{ x: 1, y: 0 }}
+                                                style={styles.loginGradient}
+                                            >
+                                                <Text style={styles.loginText}>
+                                                    {resetLoading ? "Resetting..." : "Reset Password"}
+                                                </Text>
+                                            </LinearGradient>
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
+
+                                <TouchableOpacity
+                                    onPress={() => setShowForgotPasswordModal(false)}
+                                    style={{ alignSelf: 'center', marginTop: 10, padding: 10 }}
+                                >
+                                    <Text style={{ color: '#6B7280', fontSize: 14, fontFamily: 'Poppins_500Medium' }}>Cancel</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </Animated.ScrollView>
+                    </View>
+                </KeyboardAvoidingView>
+            </Modal>
+
+            {/* CUSTOM ALERT COMPONENT */}
+            <CustomAlert
+                visible={alertVisible}
+                title={alertConfig.title}
+                message={alertConfig.message}
+                type={alertConfig.type}
+                onClose={() => setAlertVisible(false)}
+            />
         </View>
     );
 }

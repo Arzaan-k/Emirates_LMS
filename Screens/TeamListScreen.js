@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
     View,
     Text,
@@ -42,7 +42,8 @@ const TeamListScreen = ({ navigation, route }) => {
     const isSuperAdmin = userProfile?.is_superadmin || userProfile?.role === 'Super Admin';
 
     const [users, setUsers] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [initialLoading, setInitialLoading] = useState(true);
+    const [listLoading, setListLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [loadingMore, setLoadingMore] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
@@ -70,13 +71,13 @@ const TeamListScreen = ({ navigation, route }) => {
     useEffect(() => {
         fetchStores();
         fetchLevels(); // Fetch dynamic levels for role filters
-        fetchUsers(1, true);
+        fetchUsers(1, true, true);
     }, []);
 
     useEffect(() => {
         const timer = setTimeout(() => {
-            fetchUsers(1, true);
-        }, 300);
+            fetchUsers(1, true, false);
+        }, 800); // 800ms debounce for smoother typing
         return () => clearTimeout(timer);
     }, [searchQuery, selectedFilter, selectedStore]);
 
@@ -125,10 +126,11 @@ const TeamListScreen = ({ navigation, route }) => {
         }
     };
 
-    const fetchUsers = async (pageNum = 1, reset = false) => {
+    const fetchUsers = async (pageNum = 1, reset = false, isInitial = false) => {
         try {
             if (reset) {
-                setLoading(true);
+                if (isInitial) setInitialLoading(true);
+                else setListLoading(true);
                 setPage(1);
             } else {
                 setLoadingMore(true);
@@ -159,7 +161,8 @@ const TeamListScreen = ({ navigation, route }) => {
         } catch (error) {
             console.error('Failed to fetch users:', error);
         } finally {
-            setLoading(false);
+            setInitialLoading(false);
+            setListLoading(false);
             setRefreshing(false);
             setLoadingMore(false);
         }
@@ -167,7 +170,7 @@ const TeamListScreen = ({ navigation, route }) => {
 
     const onRefresh = () => {
         setRefreshing(true);
-        fetchUsers(1, true);
+        fetchUsers(1, true, false);
     };
 
     const loadMore = () => {
@@ -216,9 +219,6 @@ const TeamListScreen = ({ navigation, route }) => {
         // Confirm
         const confirmMsg = `Are you sure you want to delete ${selectedUsers.length} users?`;
         if (Platform.OS === 'web' && window.confirm && !window.confirm(confirmMsg)) return;
-        // For mobile, you'd typically use Alert.alert with async/await or callback, 
-        // strictly for web quick fix per request context:
-        // if (Platform.OS !== 'web') { ... callback logic ... }
 
         // --- OPTIMISTIC UPDATE START ---
         // 1. Snapshot current state for rollback
@@ -231,9 +231,6 @@ const TeamListScreen = ({ navigation, route }) => {
         setTotalUsers(prevTotal => Math.max(0, prevTotal - usersToDelete.length));
         setSelectionMode(false);
         setSelectedUsers([]);
-
-        // Minimal feedback for "smart" feel
-        // alert('Deleting in background...'); // Optional, maybe annoying if "smart". 
 
         // 3. Background API Call
         try {
@@ -252,8 +249,6 @@ const TeamListScreen = ({ navigation, route }) => {
             if (!response.ok) {
                 throw new Error(result.detail || 'Failed to delete users');
             }
-
-            // Success - UI is already correct, no need to refresh or alert
             console.log(`Successfully deleted ${result.deleted} users in background.`);
 
         } catch (error) {
@@ -378,8 +373,7 @@ const TeamListScreen = ({ navigation, route }) => {
             </TouchableOpacity>
         );
     }, [isSuperAdmin, selectionMode, selectedUsers]);
-
-    const renderHeader = () => (
+    const headerContent = useMemo(() => (
         <>
             {/* SELECTION BAR OVERLAY / HEADER */}
             {selectionMode ? (
@@ -519,7 +513,7 @@ const TeamListScreen = ({ navigation, route }) => {
                 </View>
             </View>
         </>
-    );
+    ), [selectionMode, selectedUsers, users.length, totalUsers, searchQuery, showFilters, selectedStore, selectedFilter, isSuperAdmin, stores, roleFilters]);
 
     const renderFooter = () => {
         if (!loadingMore) return null;
@@ -543,7 +537,7 @@ const TeamListScreen = ({ navigation, route }) => {
         </View>
     );
 
-    if (loading && users.length === 0) {
+    if (initialLoading && users.length === 0) {
         return (
             <SafeAreaView style={styles.container} edges={['top']}>
                 <View style={styles.loadingContainer}>
@@ -572,6 +566,11 @@ const TeamListScreen = ({ navigation, route }) => {
                     <Text style={styles.headerSubtitle}>Manage your waffle family</Text>
                 </View>
 
+                {/* Show spinner in header if refreshing lists in background */}
+                {listLoading && !refreshing && (
+                    <ActivityIndicator size="small" color="#FFF" style={{ marginRight: 10 }} />
+                )}
+
                 <TouchableOpacity onPress={onRefresh} style={styles.refreshBtn}>
                     <Feather name="refresh-cw" size={20} color="#FFF" />
                 </TouchableOpacity>
@@ -582,9 +581,9 @@ const TeamListScreen = ({ navigation, route }) => {
                     data={users}
                     renderItem={renderUserCard}
                     keyExtractor={(item) => item.email}
-                    ListHeaderComponent={renderHeader}
+                    ListHeaderComponent={headerContent}
                     ListFooterComponent={renderFooter}
-                    ListEmptyComponent={renderEmpty}
+                    ListEmptyComponent={initialLoading || listLoading ? null : renderEmpty}
                     onEndReached={loadMore}
                     onEndReachedThreshold={0.3}
                     refreshControl={
@@ -614,7 +613,7 @@ const TeamListScreen = ({ navigation, route }) => {
                 initialData={editingUser}
                 onUpdate={handleUpdateUser}
             />
-        </SafeAreaView>
+        </SafeAreaView >
     );
 };
 
