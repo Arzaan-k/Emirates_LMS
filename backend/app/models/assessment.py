@@ -6,7 +6,7 @@ Proctored assessments, scheduled exams, and submissions
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime,
-    Text, JSON, Float, ForeignKey, Index
+    Text, JSON, Float, ForeignKey, Index, Numeric
 )
 from sqlalchemy.orm import relationship
 
@@ -168,7 +168,7 @@ class ScheduledExam(Base):
     shift = Column(String(100))  # Legacy - kept for backward compatibility
     # Batch System Fields
     number_of_batches = Column(Integer, default=1)
-    batch_assignments = Column(JSON, default=[])  # [{batchNumber, startTime, endTime, maxUsers, users: [...]}]
+    batch_assignments = Column(JSON, default=[])  # [{batchNumber, startTime, endTime, examDate?, location?, supervisorEmail?, supervisorName?, maxUsers, users: [...], questions?: [...]}]
     supervisor_email = Column(String(255))
     supervisor_name = Column(String(255))
     assigned_users = Column(JSON, default=[])
@@ -179,6 +179,26 @@ class ScheduledExam(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     status = Column(String(100), default="scheduled")  # scheduled, in_progress, completed, cancelled
+
+    # Enhanced Batch System Fields
+    exam_status = Column(String(20), default="published")  # draft or published
+    scheduled_publish_at = Column(DateTime, nullable=True)  # Optional: auto-publish at this time
+    allow_different_questions_per_batch = Column(Boolean, default=False)  # If true, each batch can have different questions
+    randomize_question_order = Column(Boolean, default=False)  # Randomize question order for each user
+    randomize_option_order = Column(Boolean, default=False)  # Randomize option order (ABCD shuffled)
+
+    # Geofencing Fields
+    geofencing_enabled = Column(Boolean, default=False)  # Enable location-based validation
+    geofencing_radius = Column(Integer, default=100)  # Radius in meters
+    geofencing_latitude = Column(Numeric(10, 8), nullable=True)  # Exam location latitude
+    geofencing_longitude = Column(Numeric(11, 8), nullable=True)  # Exam location longitude
+
+    # PIN-Based Check-in Fields
+    pin_enabled = Column(Boolean, default=False)  # Enable PIN-based auto check-in
+    pin_generation_minutes = Column(Integer, default=5)  # Generate PIN X minutes before exam
+    pin_validity_minutes = Column(Integer, default=30)  # PIN valid for X minutes
+    generated_pin = Column(String(4), nullable=True)  # Auto-generated 4-digit PIN
+    pin_generated_at = Column(DateTime, nullable=True)  # When PIN was generated
 
     # Relationships
     attendance_records = relationship(
@@ -231,6 +251,38 @@ class ScheduledExam(Base):
             "created_by": self.created_by,
             "created_at": safe_iso(self.created_at),
             "updated_at": safe_iso(self.updated_at),
+            # Enhanced Batch System
+            "exam_status": getattr(self, 'exam_status', 'published'),
+            "scheduled_publish_at": safe_iso(getattr(self, 'scheduled_publish_at', None)),
+            "allow_different_questions_per_batch": getattr(self, 'allow_different_questions_per_batch', False),
+            "randomize_question_order": getattr(self, 'randomize_question_order', False),
+            "randomize_option_order": getattr(self, 'randomize_option_order', False),
+            # CamelCase for enhanced fields
+            "examStatus": getattr(self, 'exam_status', 'published'),
+            "scheduledPublishAt": safe_iso(getattr(self, 'scheduled_publish_at', None)),
+            "allowDifferentQuestionsPerBatch": getattr(self, 'allow_different_questions_per_batch', False),
+            "randomizeQuestionOrder": getattr(self, 'randomize_question_order', False),
+            "randomizeOptionOrder": getattr(self, 'randomize_option_order', False),
+            # Geofencing Fields
+            "geofencing_enabled": getattr(self, 'geofencing_enabled', False),
+            "geofencing_radius": getattr(self, 'geofencing_radius', 100),
+            "geofencing_latitude": float(self.geofencing_latitude) if self.geofencing_latitude else None,
+            "geofencing_longitude": float(self.geofencing_longitude) if self.geofencing_longitude else None,
+            "geofencingEnabled": getattr(self, 'geofencing_enabled', False),
+            "geofencingRadius": getattr(self, 'geofencing_radius', 100),
+            "geofencingLatitude": float(self.geofencing_latitude) if self.geofencing_latitude else None,
+            "geofencingLongitude": float(self.geofencing_longitude) if self.geofencing_longitude else None,
+            # PIN Fields
+            "pin_enabled": getattr(self, 'pin_enabled', False),
+            "pin_generation_minutes": getattr(self, 'pin_generation_minutes', 5),
+            "pin_validity_minutes": getattr(self, 'pin_validity_minutes', 30),
+            "generated_pin": getattr(self, 'generated_pin', None),
+            "pin_generated_at": safe_iso(getattr(self, 'pin_generated_at', None)),
+            "pinEnabled": getattr(self, 'pin_enabled', False),
+            "pinGenerationMinutes": getattr(self, 'pin_generation_minutes', 5),
+            "pinValidityMinutes": getattr(self, 'pin_validity_minutes', 30),
+            "generatedPin": getattr(self, 'generated_pin', None),
+            "pinGeneratedAt": safe_iso(getattr(self, 'pin_generated_at', None)),
         }
 
 

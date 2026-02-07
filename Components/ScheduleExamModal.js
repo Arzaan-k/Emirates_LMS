@@ -20,6 +20,7 @@ import API_URL from '../config';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as XLSX from 'xlsx';
+import * as Location from 'expo-location';
 
 const { width, height } = Dimensions.get('window');
 
@@ -68,6 +69,23 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
     const [generatingQuestions, setGeneratingQuestions] = useState(false);
     const [importingQuestions, setImportingQuestions] = useState(false);
 
+    // Enhanced Features State (NEW)
+    const [examStatus, setExamStatus] = useState('published'); // 'draft' or 'published'
+    const [scheduledPublishAt, setScheduledPublishAt] = useState(null);
+    const [showScheduledPublishPicker, setShowScheduledPublishPicker] = useState(false);
+    const [randomizeQuestions, setRandomizeQuestions] = useState(false);
+    const [randomizeOptions, setRandomizeOptions] = useState(false);
+    const [allowDifferentQuestions, setAllowDifferentQuestions] = useState(false);
+
+    // Geofencing State
+    const [geofencingEnabled, setGeofencingEnabled] = useState(false);
+    const [geofencingRadius, setGeofencingRadius] = useState('100'); // meters
+
+    // PIN Check-in State
+    const [pinEnabled, setPinEnabled] = useState(false);
+    const [pinGenerationMinutes, setPinGenerationMinutes] = useState('5'); // minutes before exam
+    const [pinValidityMinutes, setPinValidityMinutes] = useState('30'); // PIN valid for X minutes
+
     // UI State
     const [activeStep, setActiveStep] = useState(1); // 1: Details, 2: Users, 3: Questions, 4: Review
     const [searchQuery, setSearchQuery] = useState(''); // NEW
@@ -89,39 +107,67 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
         }
     }, [visible]);
 
+    // Helper functions for date/time formatting
+    const getFormattedDate = () => {
+        const d = new Date(date);
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
+    const getFormattedTime = () => {
+        const d = new Date(date);
+        const hours = String(d.getHours()).padStart(2, '0');
+        const minutes = String(d.getMinutes()).padStart(2, '0');
+        return `${hours}:${minutes}`;
+    };
+
     // Calculate batch timings with 30-min breaks
     const calculateBatchTimings = (numBatches, perBatch = null) => {
         const timeLimitMins = parseInt(timeLimit) || 30;
         const breakMins = 30;
         const startHour = date.getHours();
         const startMin = date.getMinutes();
-        
+
         const batches = [];
         let currentTime = startHour * 60 + startMin; // Convert to minutes
-        
+
         // Calculate users per batch
         const totalUsers = selectedUsers.length;
         const actualPerBatch = perBatch || (totalUsers > 0 ? Math.ceil(totalUsers / numBatches) : 0);
-        
+
         for (let i = 0; i < numBatches; i++) {
             const batchStartHour = Math.floor(currentTime / 60) % 24;
             const batchStartMin = currentTime % 60;
             const batchEndTime = currentTime + timeLimitMins;
             const batchEndHour = Math.floor(batchEndTime / 60) % 24;
             const batchEndMin = batchEndTime % 60;
-            
+
             batches.push({
                 batchNumber: i + 1,
                 startTime: `${String(batchStartHour).padStart(2, '0')}:${String(batchStartMin).padStart(2, '0')}`,
                 endTime: `${String(batchEndHour).padStart(2, '0')}:${String(batchEndMin).padStart(2, '0')}`,
                 maxUsers: actualPerBatch,
-                users: []
+                users: [],
+                // Per-batch configuration
+                date: getFormattedDate(), // Default to exam date, can be changed per batch
+                location: location || '', // Default to exam location, can be changed per batch
+                supervisorEmail: supervisorEmail || '',
+                supervisorName: supervisorName || '',
+                // Geofencing configuration (per-batch)
+                geofencing: {
+                    enabled: false,
+                    latitude: null,
+                    longitude: null,
+                    radius: parseInt(geofencingRadius) || 100
+                }
             });
-            
+
             // Next batch starts after exam duration + 30 min break
             currentTime = batchEndTime + breakMins;
         }
-        
+
         return batches;
     };
 
@@ -131,20 +177,25 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
             setBatchAssignments([]);
             return;
         }
-        
+
         const perBatch = forcedPerBatch || (usersPerBatch ? parseInt(usersPerBatch) : Math.ceil(selectedUsers.length / numberOfBatches));
         const batchTimings = calculateBatchTimings(numberOfBatches, perBatch);
-        
+
+        // Convert email strings to full user objects
+        const selectedUserObjects = selectedUsers.map(email =>
+            allUsers.find(u => u.email === email)
+        ).filter(Boolean); // Remove any undefined values
+
         const newBatchAssignments = batchTimings.map((batch, idx) => {
             const startIdx = idx * perBatch;
-            const endIdx = Math.min(startIdx + perBatch, selectedUsers.length);
+            const endIdx = Math.min(startIdx + perBatch, selectedUserObjects.length);
             return {
                 ...batch,
                 maxUsers: perBatch,
-                users: selectedUsers.slice(startIdx, endIdx)
+                users: selectedUserObjects.slice(startIdx, endIdx)
             };
         });
-        
+
         setBatchAssignments(newBatchAssignments);
     };
 
@@ -152,7 +203,7 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
     const updateBatchTiming = (batchIndex, field, value) => {
         const updated = [...batchAssignments];
         updated[batchIndex] = { ...updated[batchIndex], [field]: value };
-        
+
         // If startTime changed, auto-calculate endTime based on exam duration
         if (field === 'startTime') {
             const [hours, mins] = value.split(':').map(Number);
@@ -162,7 +213,7 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
             const endMin = endMins % 60;
             updated[batchIndex].endTime = `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`;
         }
-        
+
         setBatchAssignments(updated);
     };
 
@@ -170,7 +221,7 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
     const moveUserToBatch = (userEmail, fromBatchIdx, toBatchIdx) => {
         const updated = [...batchAssignments];
         const userToMove = updated[fromBatchIdx].users.find(u => u.email === userEmail);
-        
+
         if (userToMove) {
             updated[fromBatchIdx].users = updated[fromBatchIdx].users.filter(u => u.email !== userEmail);
             updated[toBatchIdx].users = [...updated[toBatchIdx].users, userToMove];
@@ -509,6 +560,22 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
             formData.append('passing_score', passingScore);
             formData.append('created_by', userProfile?.email || 'admin');
 
+            // Enhanced Features
+            formData.append('exam_status', examStatus);
+            formData.append('scheduled_publish_at', scheduledPublishAt ? scheduledPublishAt.toISOString() : '');
+            formData.append('allow_different_questions_per_batch', allowDifferentQuestions.toString());
+            formData.append('randomize_question_order', randomizeQuestions.toString());
+            formData.append('randomize_option_order', randomizeOptions.toString());
+
+            // Geofencing Fields
+            formData.append('geofencing_enabled', geofencingEnabled.toString());
+            formData.append('geofencing_radius', geofencingRadius);
+
+            // PIN Check-in Fields
+            formData.append('pin_enabled', pinEnabled.toString());
+            formData.append('pin_generation_minutes', pinGenerationMinutes);
+            formData.append('pin_validity_minutes', pinValidityMinutes);
+
             const res = await fetch(`${API_URL}/api/v1/assessments/scheduled`, {
                 method: 'POST',
                 body: formData
@@ -557,22 +624,6 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
         if (showDatePicker) setShowDatePicker(false);
         if (showTimePicker) setShowTimePicker(false);
         setDate(currentDate);
-    };
-
-    const getFormattedDate = () => {
-        // Use local time, not UTC (toISOString)
-        const d = new Date(date);
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-    };
-
-    const getFormattedTime = () => {
-        const d = new Date(date);
-        const hours = String(d.getHours()).padStart(2, '0');
-        const minutes = String(d.getMinutes()).padStart(2, '0');
-        return `${hours}:${minutes}`;
     };
 
     const loadSampleQuestions = () => {
@@ -788,7 +839,7 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
                 {(!supervisorEmail) && <Text style={styles.helperText}>Select a supervisor to proctor this exam.</Text>}
             </View>
 
-{/* Shift removed - replaced with Batch System in Step 2 */}
+            {/* Shift removed - replaced with Batch System in Step 2 */}
 
             <View style={styles.row}>
                 <View style={{ flex: 1, marginRight: 10 }}>
@@ -812,6 +863,132 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
                     />
                 </View>
             </View>
+
+            {/* ENHANCED FEATURES: Draft/Publish & Scheduled Visibility */}
+            <View style={styles.enhancedFeaturesContainer}>
+                <Text style={styles.sectionTitle}>Visibility Controls</Text>
+
+                {/* Draft/Published Toggle */}
+                <View style={styles.toggleRow}>
+                    <View style={styles.toggleLabelContainer}>
+                        <Feather name={examStatus === 'draft' ? 'eye-off' : 'eye'} size={18} color="#6366F1" />
+                        <Text style={styles.toggleLabel}>Status</Text>
+                    </View>
+                    <View style={styles.statusSwitchContainer}>
+                        <Text style={[styles.statusLabel, examStatus === 'draft' && styles.statusLabelActive]}>Draft</Text>
+                        <TouchableOpacity
+                            style={[styles.switchButton, examStatus === 'published' && styles.switchButtonActive]}
+                            onPress={() => setExamStatus(examStatus === 'draft' ? 'published' : 'draft')}
+                        >
+                            <View style={[styles.switchCircle, examStatus === 'published' && styles.switchCircleActive]} />
+                        </TouchableOpacity>
+                        <Text style={[styles.statusLabel, examStatus === 'published' && styles.statusLabelActive]}>Published</Text>
+                    </View>
+                </View>
+                <Text style={styles.helperText}>
+                    {examStatus === 'draft'
+                        ? '📝 Draft exams are hidden from users until published'
+                        : '👁️ Published exams are visible to assigned users'}
+                </Text>
+
+                {/* Scheduled Publish (only if published) */}
+                {examStatus === 'published' && (
+                    <View style={{ marginTop: 15 }}>
+                        <View style={styles.toggleRow}>
+                            <View style={styles.toggleLabelContainer}>
+                                <Feather name="clock" size={18} color="#6366F1" />
+                                <Text style={styles.toggleLabel}>Schedule Visibility</Text>
+                            </View>
+                            <TouchableOpacity
+                                style={[styles.switchButton, scheduledPublishAt && styles.switchButtonActive]}
+                                onPress={() => {
+                                    if (scheduledPublishAt) {
+                                        setScheduledPublishAt(null);
+                                    } else {
+                                        setScheduledPublishAt(new Date());
+                                        setShowScheduledPublishPicker(true);
+                                    }
+                                }}
+                            >
+                                <View style={[styles.switchCircle, scheduledPublishAt && styles.switchCircleActive]} />
+                            </TouchableOpacity>
+                        </View>
+
+                        {scheduledPublishAt && (
+                            <View style={{ marginTop: 10 }}>
+                                {Platform.OS === 'web' ? (
+                                    <input
+                                        type="datetime-local"
+                                        value={(() => {
+                                            const d = new Date(scheduledPublishAt);
+                                            const year = d.getFullYear();
+                                            const month = String(d.getMonth() + 1).padStart(2, '0');
+                                            const day = String(d.getDate()).padStart(2, '0');
+                                            const hours = String(d.getHours()).padStart(2, '0');
+                                            const minutes = String(d.getMinutes()).padStart(2, '0');
+                                            return `${year}-${month}-${day}T${hours}:${minutes}`;
+                                        })()}
+                                        min={(() => {
+                                            const d = new Date();
+                                            const year = d.getFullYear();
+                                            const month = String(d.getMonth() + 1).padStart(2, '0');
+                                            const day = String(d.getDate()).padStart(2, '0');
+                                            const hours = String(d.getHours()).padStart(2, '0');
+                                            const minutes = String(d.getMinutes()).padStart(2, '0');
+                                            return `${year}-${month}-${day}T${hours}:${minutes}`;
+                                        })()}
+                                        onChange={(e) => {
+                                            const dateTimeStr = e.target.value;
+                                            setScheduledPublishAt(new Date(dateTimeStr));
+                                        }}
+                                        style={{
+                                            width: '100%',
+                                            padding: 14,
+                                            borderRadius: 12,
+                                            border: '1px solid #C7D2FE',
+                                            backgroundColor: '#EEF2FF',
+                                            fontSize: 15,
+                                            fontFamily: 'Poppins, sans-serif',
+                                            cursor: 'pointer'
+                                        }}
+                                    />
+                                ) : (
+                                    <TouchableOpacity
+                                        style={styles.pickerBtn}
+                                        onPress={() => setShowScheduledPublishPicker(true)}
+                                    >
+                                        <Feather name="calendar" size={18} color="#6366F1" />
+                                        <Text style={styles.pickerBtnText}>
+                                            {scheduledPublishAt.toLocaleString()}
+                                        </Text>
+                                    </TouchableOpacity>
+                                )}
+                                <Text style={styles.helperText}>
+                                    ⏰ Exam will become visible at this date/time
+                                </Text>
+                            </View>
+                        )}
+
+                        {Platform.OS !== 'web' && showScheduledPublishPicker && (
+                            <DateTimePicker
+                                value={scheduledPublishAt || new Date()}
+                                mode="datetime"
+                                display="default"
+                                onChange={(event, selectedDate) => {
+                                    setShowScheduledPublishPicker(false);
+                                    if (selectedDate) {
+                                        setScheduledPublishAt(selectedDate);
+                                    }
+                                }}
+                                minimumDate={new Date()}
+                            />
+                        )}
+                    </View>
+                )}
+            </View>
+
+            {/* Add padding at bottom for scrolling */}
+            <View style={{ height: 150 }} />
         </ScrollView>
     );
 
@@ -825,12 +1002,12 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
                     <MaterialCommunityIcons name="account-group-outline" size={20} color="#6366F1" />
                     <Text style={styles.batchTitle}>Batch Configuration</Text>
                 </View>
-                
+
                 {/* Config Row 1: Number of Batches + Users Per Batch */}
                 <View style={styles.batchConfigRow}>
                     <View style={styles.batchConfigItem}>
                         <Text style={styles.batchConfigLabel}>Batches</Text>
-                        <TouchableOpacity 
+                        <TouchableOpacity
                             style={styles.batchDropdown}
                             onPress={() => setShowBatchDropdown(!showBatchDropdown)}
                         >
@@ -838,7 +1015,7 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
                             <Feather name={showBatchDropdown ? "chevron-up" : "chevron-down"} size={16} color="#6366F1" />
                         </TouchableOpacity>
                     </View>
-                    
+
                     <View style={styles.batchConfigItem}>
                         <Text style={styles.batchConfigLabel}>Users/Batch</Text>
                         <TextInput
@@ -854,8 +1031,8 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
                             keyboardType="numeric"
                         />
                     </View>
-                    
-                    <TouchableOpacity 
+
+                    <TouchableOpacity
                         style={styles.redistributeBtn}
                         onPress={redistributeUsersEqually}
                     >
@@ -863,11 +1040,11 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
                         <Text style={styles.redistributeBtnText}>Auto</Text>
                     </TouchableOpacity>
                 </View>
-                
+
                 {showBatchDropdown && (
                     <View style={styles.dropdownList}>
                         <ScrollView style={{ maxHeight: 200 }} nestedScrollEnabled>
-                            {[1,2,3,4,5,6,7,8,9,10].map(num => (
+                            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(num => (
                                 <TouchableOpacity
                                     key={num}
                                     style={[styles.dropdownItem, numberOfBatches === num && styles.dropdownItemActive]}
@@ -913,56 +1090,61 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
                             <Text style={styles.batchCardsTitle}>📋 Batch Schedule</Text>
                             <Text style={styles.batchCardsSubtitle}>Tap to edit timings</Text>
                         </View>
-                        
+
                         {batchAssignments.map((batch, idx) => (
                             <View key={idx} style={styles.editableBatchCard}>
                                 <View style={styles.editableBatchHeader}>
                                     <View style={styles.batchBadge}>
                                         <Text style={styles.batchBadgeText}>Batch {batch.batchNumber}</Text>
                                     </View>
-                                    <View style={styles.batchUsersBadge}>
-                                        <Feather name="users" size={12} color="#6366F1" />
-                                        <Text style={styles.batchUsersText}>{batch.users.length} users</Text>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                        <View style={styles.batchUsersBadge}>
+                                            <Feather name="users" size={12} color="#6366F1" />
+                                            <Text style={styles.batchUsersText}>{batch.users.length}/{batch.maxUsers}</Text>
+                                        </View>
+                                        <TouchableOpacity
+                                            style={styles.editBatchBtn}
+                                            onPress={() => {
+                                                setEditingBatchIndex(idx);
+                                                setShowBatchEditModal(true);
+                                            }}
+                                        >
+                                            <Feather name="edit-2" size={14} color="#6366F1" />
+                                            <Text style={styles.editBatchBtnText}>Edit</Text>
+                                        </TouchableOpacity>
                                     </View>
                                 </View>
-                                
-                                {/* Editable Timing Row */}
-                                <View style={styles.batchTimingEditRow}>
-                                    <View style={styles.timeInputGroup}>
-                                        <Text style={styles.timeInputLabel}>Start</Text>
-                                        <TextInput
-                                            style={styles.timeInput}
-                                            value={batch.startTime}
-                                            onChangeText={(val) => updateBatchTiming(idx, 'startTime', val)}
-                                            placeholder="HH:MM"
-                                            maxLength={5}
-                                        />
+
+                                {/* Quick Info Summary */}
+                                <View style={styles.batchQuickInfo}>
+                                    <View style={styles.batchInfoItem}>
+                                        <Feather name="calendar" size={12} color="#6B7280" />
+                                        <Text style={styles.batchInfoText}>{batch.date || getFormattedDate()}</Text>
                                     </View>
-                                    
-                                    <Feather name="arrow-right" size={16} color="#9CA3AF" style={{ marginHorizontal: 8 }} />
-                                    
-                                    <View style={styles.timeInputGroup}>
-                                        <Text style={styles.timeInputLabel}>End</Text>
-                                        <TextInput
-                                            style={[styles.timeInput, { backgroundColor: '#F3F4F6' }]}
-                                            value={batch.endTime}
-                                            editable={false}
-                                            placeholder="HH:MM"
-                                        />
-                                    </View>
-                                    
-                                    <View style={styles.timeInputGroup}>
-                                        <Text style={styles.timeInputLabel}>Max</Text>
-                                        <TextInput
-                                            style={styles.timeInput}
-                                            value={String(batch.maxUsers || '')}
-                                            onChangeText={(val) => updateBatchMaxUsers(idx, val)}
-                                            keyboardType="numeric"
-                                            placeholder="#"
-                                        />
+                                    <View style={styles.batchInfoItem}>
+                                        <Feather name="clock" size={12} color="#6B7280" />
+                                        <Text style={styles.batchInfoText}>{batch.startTime} - {batch.endTime}</Text>
                                     </View>
                                 </View>
-                                
+
+                                <View style={styles.batchQuickInfo}>
+                                    <View style={styles.batchInfoItem}>
+                                        <Feather name="map-pin" size={12} color="#6B7280" />
+                                        <Text style={styles.batchInfoText} numberOfLines={1}>
+                                            {batch.location || location || 'Not set'}
+                                        </Text>
+                                    </View>
+                                </View>
+
+                                <View style={styles.batchQuickInfo}>
+                                    <View style={styles.batchInfoItem}>
+                                        <Feather name="user" size={12} color="#6B7280" />
+                                        <Text style={styles.batchInfoText} numberOfLines={1}>
+                                            {batch.supervisorName || supervisorName || 'Not set'}
+                                        </Text>
+                                    </View>
+                                </View>
+
                                 {/* User list preview */}
                                 {batch.users.length > 0 && (
                                     <View style={styles.batchUserPreview}>
@@ -982,11 +1164,15 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
                                         </ScrollView>
                                     </View>
                                 )}
+
+                                {batch.users.length === 0 && (
+                                    <Text style={styles.batchNoUsers}>No users assigned - Tap Edit to assign</Text>
+                                )}
                             </View>
                         ))}
                     </View>
                 )}
-                
+
                 {/* Empty State */}
                 {selectedUsers.length === 0 && (
                     <View style={styles.batchEmptyState}>
@@ -1017,68 +1203,68 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
                     >
                         <View style={styles.categoriesGrid}>
                             {smartCategories.map(category => {
-                            const isSelected = selectedCategories.includes(category.id);
-                            const getCategoryColor = () => {
-                                switch (category.type) {
-                                    case 'role': return '#3B82F6';
-                                    case 'store': return '#10B981';
-                                    case 'completion': return '#F59E0B';
-                                    case 'promotion': return '#8B5CF6';
-                                    case 'progress': return '#06B6D4';
-                                    default: return '#6B7280';
-                                }
-                            };
-                            const iconMap = {
-                                'users': 'account-group',
-                                'map-pin': 'map-marker',
-                                'award': 'trophy',
-                                'trending-up': 'trending-up',
-                                'activity': 'chart-line'
-                            };
+                                const isSelected = selectedCategories.includes(category.id);
+                                const getCategoryColor = () => {
+                                    switch (category.type) {
+                                        case 'role': return '#3B82F6';
+                                        case 'store': return '#10B981';
+                                        case 'completion': return '#F59E0B';
+                                        case 'promotion': return '#8B5CF6';
+                                        case 'progress': return '#06B6D4';
+                                        default: return '#6B7280';
+                                    }
+                                };
+                                const iconMap = {
+                                    'users': 'account-group',
+                                    'map-pin': 'map-marker',
+                                    'award': 'trophy',
+                                    'trending-up': 'trending-up',
+                                    'activity': 'chart-line'
+                                };
 
-                            return (
-                                <TouchableOpacity
-                                    key={category.id}
-                                    style={[
-                                        styles.smartCategoryChip,
-                                        isSelected && {
-                                            backgroundColor: getCategoryColor() + '15',
-                                            borderColor: getCategoryColor(),
-                                            borderWidth: 2
-                                        }
-                                    ]}
-                                    onPress={() => toggleCategorySelection(category.id)}
-                                >
-                                    <View style={[styles.categoryIconBadge, { backgroundColor: getCategoryColor() }]}>
-                                        <MaterialCommunityIcons
-                                            name={iconMap[category.icon] || 'account-group'}
-                                            size={16}
-                                            color="#FFF"
-                                        />
-                                    </View>
-                                    <View style={{ flex: 1 }}>
-                                        <Text
-                                            style={[
-                                                styles.smartCategoryName,
-                                                isSelected && { color: getCategoryColor() }
-                                            ]}
-                                            numberOfLines={2}
-                                            ellipsizeMode="tail"
-                                        >
-                                            {category.name}
-                                        </Text>
-                                        <Text style={styles.smartCategoryCount}>
-                                            {category.count} {category.count === 1 ? 'user' : 'users'}
-                                        </Text>
-                                    </View>
-                                    {isSelected && (
-                                        <View style={[styles.categoryCheckmark, { backgroundColor: getCategoryColor() }]}>
-                                            <Feather name="check" size={12} color="#FFF" />
+                                return (
+                                    <TouchableOpacity
+                                        key={category.id}
+                                        style={[
+                                            styles.smartCategoryChip,
+                                            isSelected && {
+                                                backgroundColor: `${getCategoryColor()}15`,
+                                                borderColor: getCategoryColor(),
+                                                borderWidth: 2
+                                            }
+                                        ]}
+                                        onPress={() => toggleCategorySelection(category.id)}
+                                    >
+                                        <View style={[styles.categoryIconBadge, { backgroundColor: getCategoryColor() }]}>
+                                            <MaterialCommunityIcons
+                                                name={iconMap[category.icon] || 'account-group'}
+                                                size={16}
+                                                color="#FFF"
+                                            />
                                         </View>
-                                    )}
-                                </TouchableOpacity>
-                            );
-                        })}
+                                        <View style={{ flex: 1 }}>
+                                            <Text
+                                                style={[
+                                                    styles.smartCategoryName,
+                                                    isSelected && { color: getCategoryColor() }
+                                                ]}
+                                                numberOfLines={2}
+                                                ellipsizeMode="tail"
+                                            >
+                                                {category.name}
+                                            </Text>
+                                            <Text style={styles.smartCategoryCount}>
+                                                {category.count} {category.count === 1 ? 'user' : 'users'}
+                                            </Text>
+                                        </View>
+                                        {isSelected && (
+                                            <View style={[styles.categoryCheckmark, { backgroundColor: getCategoryColor() }]}>
+                                                <Feather name="check" size={12} color="#FFF" />
+                                            </View>
+                                        )}
+                                    </TouchableOpacity>
+                                );
+                            })}
                         </View>
                     </ScrollView>
                 </View>
@@ -1365,6 +1551,246 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
                     <Text style={styles.addQuestionText}>Add Question Manually</Text>
                 </TouchableOpacity>
 
+                {/* ========== EXAM SETTINGS SECTION ========== */}
+                <View style={styles.examSettingsSection}>
+                    <Text style={styles.examSettingsSectionTitle}>⚙️ Exam Settings</Text>
+
+                    {/* 🎲 RANDOMIZATION CARD */}
+                    <View style={styles.featureCard}>
+                        <LinearGradient
+                            colors={['#667EEA', '#764BA2']}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.featureCardGradient}
+                        >
+                            <View style={styles.featureCardHeader}>
+                                <View style={styles.featureCardIconContainer}>
+                                    <Feather name="shuffle" size={22} color="#FFFFFF" />
+                                </View>
+                                <View style={styles.featureCardTitleContainer}>
+                                    <Text style={styles.featureCardTitle}>Randomization</Text>
+                                    <Text style={styles.featureCardSubtitle}>Shuffle questions & options</Text>
+                                </View>
+                            </View>
+                        </LinearGradient>
+
+                        <View style={styles.featureCardBody}>
+                            {/* Randomize Question Order */}
+                            <View style={styles.premiumToggleRow}>
+                                <View style={styles.premiumToggleInfo}>
+                                    <View style={[styles.premiumToggleIcon, { backgroundColor: '#EEF2FF' }]}>
+                                        <Feather name="list" size={16} color="#6366F1" />
+                                    </View>
+                                    <View style={styles.premiumToggleText}>
+                                        <Text style={styles.premiumToggleLabel}>Shuffle Question Order</Text>
+                                        <Text style={styles.premiumToggleDesc}>Each user sees questions differently</Text>
+                                    </View>
+                                </View>
+                                <TouchableOpacity
+                                    style={[styles.premiumSwitch, randomizeQuestions && styles.premiumSwitchActive]}
+                                    onPress={() => setRandomizeQuestions(!randomizeQuestions)}
+                                    activeOpacity={0.8}
+                                >
+                                    <View style={[styles.premiumSwitchThumb, randomizeQuestions && styles.premiumSwitchThumbActive]} />
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.premiumToggleDivider} />
+
+                            {/* Randomize Option Order */}
+                            <View style={styles.premiumToggleRow}>
+                                <View style={styles.premiumToggleInfo}>
+                                    <View style={[styles.premiumToggleIcon, { backgroundColor: '#F3E8FF' }]}>
+                                        <MaterialCommunityIcons name="shuffle-variant" size={16} color="#8B5CF6" />
+                                    </View>
+                                    <View style={styles.premiumToggleText}>
+                                        <Text style={styles.premiumToggleLabel}>Shuffle Options (A,B,C,D)</Text>
+                                        <Text style={styles.premiumToggleDesc}>Answer choices appear randomly</Text>
+                                    </View>
+                                </View>
+                                <TouchableOpacity
+                                    style={[styles.premiumSwitch, randomizeOptions && styles.premiumSwitchActive]}
+                                    onPress={() => setRandomizeOptions(!randomizeOptions)}
+                                    activeOpacity={0.8}
+                                >
+                                    <View style={[styles.premiumSwitchThumb, randomizeOptions && styles.premiumSwitchThumbActive]} />
+                                </TouchableOpacity>
+                            </View>
+
+                            {numberOfBatches > 1 && (
+                                <>
+                                    <View style={styles.premiumToggleDivider} />
+                                    {/* Different Questions Per Batch */}
+                                    <View style={styles.premiumToggleRow}>
+                                        <View style={styles.premiumToggleInfo}>
+                                            <View style={[styles.premiumToggleIcon, { backgroundColor: '#FEF3C7' }]}>
+                                                <Feather name="layers" size={16} color="#D97706" />
+                                            </View>
+                                            <View style={styles.premiumToggleText}>
+                                                <Text style={styles.premiumToggleLabel}>Different Questions Per Batch</Text>
+                                                <Text style={styles.premiumToggleDesc}>Each batch gets unique set</Text>
+                                            </View>
+                                        </View>
+                                        <TouchableOpacity
+                                            style={[styles.premiumSwitch, allowDifferentQuestions && styles.premiumSwitchActive]}
+                                            onPress={() => setAllowDifferentQuestions(!allowDifferentQuestions)}
+                                            activeOpacity={0.8}
+                                        >
+                                            <View style={[styles.premiumSwitchThumb, allowDifferentQuestions && styles.premiumSwitchThumbActive]} />
+                                        </TouchableOpacity>
+                                    </View>
+                                </>
+                            )}
+                        </View>
+                    </View>
+
+                    {/* 📍 GEOFENCING CARD */}
+                    <View style={styles.featureCard}>
+                        <LinearGradient
+                            colors={['#10B981', '#059669']}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.featureCardGradient}
+                        >
+                            <View style={styles.featureCardHeader}>
+                                <View style={styles.featureCardIconContainer}>
+                                    <Feather name="map-pin" size={22} color="#FFFFFF" />
+                                </View>
+                                <View style={styles.featureCardTitleContainer}>
+                                    <Text style={styles.featureCardTitle}>Geofencing</Text>
+                                    <Text style={styles.featureCardSubtitle}>Location-based validation</Text>
+                                </View>
+                            </View>
+                        </LinearGradient>
+
+                        <View style={styles.featureCardBody}>
+                            <View style={styles.premiumToggleRow}>
+                                <View style={styles.premiumToggleInfo}>
+                                    <View style={[styles.premiumToggleIcon, { backgroundColor: '#ECFDF5' }]}>
+                                        <Feather name="target" size={16} color="#10B981" />
+                                    </View>
+                                    <View style={styles.premiumToggleText}>
+                                        <Text style={styles.premiumToggleLabel}>Enable Location Check</Text>
+                                        <Text style={styles.premiumToggleDesc}>User must be at exam location</Text>
+                                    </View>
+                                </View>
+                                <TouchableOpacity
+                                    style={[styles.premiumSwitch, geofencingEnabled && styles.premiumSwitchActiveGreen]}
+                                    onPress={() => setGeofencingEnabled(!geofencingEnabled)}
+                                    activeOpacity={0.8}
+                                >
+                                    <View style={[styles.premiumSwitchThumb, geofencingEnabled && styles.premiumSwitchThumbActive]} />
+                                </TouchableOpacity>
+                            </View>
+
+                            {geofencingEnabled && (
+                                <View style={styles.premiumInputSection}>
+                                    <Text style={styles.premiumInputLabel}>📏 Allowed Radius (meters)</Text>
+                                    <View style={styles.premiumInputRow}>
+                                        <TextInput
+                                            style={styles.premiumInput}
+                                            value={geofencingRadius}
+                                            onChangeText={setGeofencingRadius}
+                                            keyboardType="numeric"
+                                            placeholder="100"
+                                            placeholderTextColor="#9CA3AF"
+                                        />
+                                        <Text style={styles.premiumInputUnit}>m</Text>
+                                    </View>
+                                    <View style={styles.premiumHintBox}>
+                                        <Feather name="info" size={14} color="#10B981" />
+                                        <Text style={styles.premiumHintText}>
+                                            Configure exact GPS coordinates per batch in Step 2 (Batch Management)
+                                        </Text>
+                                    </View>
+                                </View>
+                            )}
+                        </View>
+                    </View>
+
+                    {/* 🔑 PIN CHECK-IN CARD */}
+                    <View style={styles.featureCard}>
+                        <LinearGradient
+                            colors={['#8B5CF6', '#6D28D9']}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.featureCardGradient}
+                        >
+                            <View style={styles.featureCardHeader}>
+                                <View style={styles.featureCardIconContainer}>
+                                    <Feather name="key" size={22} color="#FFFFFF" />
+                                </View>
+                                <View style={styles.featureCardTitleContainer}>
+                                    <Text style={styles.featureCardTitle}>PIN Check-in</Text>
+                                    <Text style={styles.featureCardSubtitle}>Auto attendance marking</Text>
+                                </View>
+                            </View>
+                        </LinearGradient>
+
+                        <View style={styles.featureCardBody}>
+                            <View style={styles.premiumToggleRow}>
+                                <View style={styles.premiumToggleInfo}>
+                                    <View style={[styles.premiumToggleIcon, { backgroundColor: '#F3E8FF' }]}>
+                                        <MaterialCommunityIcons name="numeric" size={16} color="#8B5CF6" />
+                                    </View>
+                                    <View style={styles.premiumToggleText}>
+                                        <Text style={styles.premiumToggleLabel}>Enable PIN Check-in</Text>
+                                        <Text style={styles.premiumToggleDesc}>4-digit code for attendance</Text>
+                                    </View>
+                                </View>
+                                <TouchableOpacity
+                                    style={[styles.premiumSwitch, pinEnabled && styles.premiumSwitchActivePurple]}
+                                    onPress={() => setPinEnabled(!pinEnabled)}
+                                    activeOpacity={0.8}
+                                >
+                                    <View style={[styles.premiumSwitchThumb, pinEnabled && styles.premiumSwitchThumbActive]} />
+                                </TouchableOpacity>
+                            </View>
+
+                            {pinEnabled && (
+                                <View style={styles.premiumInputSection}>
+                                    <View style={styles.premiumInputGroup}>
+                                        <Text style={styles.premiumInputLabel}>⏰ Generate PIN Before Exam</Text>
+                                        <View style={styles.premiumInputRow}>
+                                            <TextInput
+                                                style={styles.premiumInput}
+                                                value={pinGenerationMinutes}
+                                                onChangeText={setPinGenerationMinutes}
+                                                keyboardType="numeric"
+                                                placeholder="5"
+                                                placeholderTextColor="#9CA3AF"
+                                            />
+                                            <Text style={styles.premiumInputUnit}>min</Text>
+                                        </View>
+                                    </View>
+
+                                    <View style={[styles.premiumInputGroup, { marginTop: 12 }]}>
+                                        <Text style={styles.premiumInputLabel}>⌛ PIN Valid For</Text>
+                                        <View style={styles.premiumInputRow}>
+                                            <TextInput
+                                                style={styles.premiumInput}
+                                                value={pinValidityMinutes}
+                                                onChangeText={setPinValidityMinutes}
+                                                keyboardType="numeric"
+                                                placeholder="30"
+                                                placeholderTextColor="#9CA3AF"
+                                            />
+                                            <Text style={styles.premiumInputUnit}>min</Text>
+                                        </View>
+                                    </View>
+
+                                    <View style={styles.premiumHintBox}>
+                                        <Feather name="info" size={14} color="#8B5CF6" />
+                                        <Text style={styles.premiumHintText}>
+                                            PIN will be auto-generated and shown to supervisor to announce
+                                        </Text>
+                                    </View>
+                                </View>
+                            )}
+                        </View>
+                    </View>
+                </View>
+
                 <View style={{ height: 100 }} />
             </ScrollView>
         </View>
@@ -1438,91 +1864,422 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
     );
 
     return (
-        <Modal visible={visible} animationType="slide" transparent>
-            <View style={styles.overlay}>
-                <BlurView intensity={20} style={StyleSheet.absoluteFill} />
-                <View style={styles.container}>
-                    {/* Header */}
-                    <LinearGradient
-                        colors={['#6366F1', '#4F46E5']}
-                        style={styles.header}
-                        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-                    >
-                        <View style={styles.headerTop}>
-                            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-                                <Feather name="x" size={22} color="#FFF" />
-                            </TouchableOpacity>
-                            <View style={styles.headerTitleRow}>
-                                <MaterialCommunityIcons name="calendar-clock" size={24} color="#FFF" />
-                                <Text style={styles.headerTitle}>Schedule Exam</Text>
-                            </View>
-                            <View style={{ width: 40 }} />
-                        </View>
-
-                        {/* Steps Indicator */}
-                        <View style={styles.stepsRow}>
-                            {['Details', 'Users', 'Questions', 'Review'].map((step, idx) => (
-                                <TouchableOpacity
-                                    key={idx}
-                                    style={[styles.stepIndicator, activeStep === idx + 1 && styles.stepIndicatorActive]}
-                                    onPress={() => setActiveStep(idx + 1)}
-                                >
-                                    <Text style={[styles.stepNum, activeStep === idx + 1 && styles.stepNumActive]}>
-                                        {idx + 1}
-                                    </Text>
+        <>
+            <Modal visible={visible} animationType="slide" transparent>
+                <View style={styles.overlay}>
+                    <BlurView intensity={20} style={StyleSheet.absoluteFill} />
+                    <View style={styles.container}>
+                        {/* Header */}
+                        <LinearGradient
+                            colors={['#6366F1', '#4F46E5']}
+                            style={styles.header}
+                            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                        >
+                            <View style={styles.headerTop}>
+                                <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+                                    <Feather name="x" size={22} color="#FFF" />
                                 </TouchableOpacity>
-                            ))}
+                                <View style={styles.headerTitleRow}>
+                                    <MaterialCommunityIcons name="calendar-clock" size={24} color="#FFF" />
+                                    <Text style={styles.headerTitle}>Schedule Exam</Text>
+                                </View>
+                                <View style={{ width: 40 }} />
+                            </View>
+
+                            {/* Steps Indicator */}
+                            <View style={styles.stepsRow}>
+                                {['Details', 'Users', 'Questions', 'Review'].map((step, idx) => (
+                                    <TouchableOpacity
+                                        key={idx}
+                                        style={[styles.stepIndicator, activeStep === idx + 1 && styles.stepIndicatorActive]}
+                                        onPress={() => setActiveStep(idx + 1)}
+                                    >
+                                        <Text style={[styles.stepNum, activeStep === idx + 1 && styles.stepNumActive]}>
+                                            {idx + 1}
+                                        </Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        </LinearGradient>
+
+                        {/* Content */}
+                        <View style={styles.content}>
+                            {activeStep === 1 && renderStep1()}
+                            {activeStep === 2 && renderStep2()}
+                            {activeStep === 3 && renderStep3()}
+                            {activeStep === 4 && renderStep4()}
                         </View>
-                    </LinearGradient>
 
-                    {/* Content */}
-                    <View style={styles.content}>
-                        {activeStep === 1 && renderStep1()}
-                        {activeStep === 2 && renderStep2()}
-                        {activeStep === 3 && renderStep3()}
-                        {activeStep === 4 && renderStep4()}
-                    </View>
+                        {/* Footer */}
+                        <View style={styles.footer}>
+                            {activeStep > 1 && (
+                                <TouchableOpacity
+                                    style={styles.backBtn}
+                                    onPress={() => setActiveStep(activeStep - 1)}
+                                >
+                                    <Feather name="arrow-left" size={20} color="#6366F1" />
+                                    <Text style={styles.backBtnText}>Back</Text>
+                                </TouchableOpacity>
+                            )}
 
-                    {/* Footer */}
-                    <View style={styles.footer}>
-                        {activeStep > 1 && (
-                            <TouchableOpacity
-                                style={styles.backBtn}
-                                onPress={() => setActiveStep(activeStep - 1)}
-                            >
-                                <Feather name="arrow-left" size={20} color="#6366F1" />
-                                <Text style={styles.backBtnText}>Back</Text>
-                            </TouchableOpacity>
-                        )}
-
-                        {activeStep < 4 ? (
-                            <TouchableOpacity
-                                style={styles.nextBtn}
-                                onPress={() => setActiveStep(activeStep + 1)}
-                            >
-                                <Text style={styles.nextBtnText}>Next</Text>
-                                <Feather name="arrow-right" size={20} color="#FFF" />
-                            </TouchableOpacity>
-                        ) : (
-                            <TouchableOpacity
-                                style={[styles.nextBtn, { backgroundColor: '#10B981' }]}
-                                onPress={handleSubmit}
-                                disabled={submitting}
-                            >
-                                {submitting ? (
-                                    <ActivityIndicator color="#FFF" />
-                                ) : (
-                                    <>
-                                        <MaterialCommunityIcons name="calendar-check" size={20} color="#FFF" />
-                                        <Text style={styles.nextBtnText}>Schedule Exam</Text>
-                                    </>
-                                )}
-                            </TouchableOpacity>
-                        )}
+                            {activeStep < 4 ? (
+                                <TouchableOpacity
+                                    style={styles.nextBtn}
+                                    onPress={() => setActiveStep(activeStep + 1)}
+                                >
+                                    <Text style={styles.nextBtnText}>Next</Text>
+                                    <Feather name="arrow-right" size={20} color="#FFF" />
+                                </TouchableOpacity>
+                            ) : (
+                                <TouchableOpacity
+                                    style={[styles.nextBtn, { backgroundColor: '#10B981' }]}
+                                    onPress={handleSubmit}
+                                    disabled={submitting}
+                                >
+                                    {submitting ? (
+                                        <ActivityIndicator color="#FFF" />
+                                    ) : (
+                                        <>
+                                            <MaterialCommunityIcons name="calendar-check" size={20} color="#FFF" />
+                                            <Text style={styles.nextBtnText}>Schedule Exam</Text>
+                                        </>
+                                    )}
+                                </TouchableOpacity>
+                            )}
+                        </View>
                     </View>
                 </View>
-            </View>
-        </Modal>
+            </Modal>
+
+            {/* Batch Edit Modal */}
+            <Modal
+                visible={showBatchEditModal}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setShowBatchEditModal(false)}
+            >
+                <View style={styles.overlay}>
+                    <View style={[styles.container, { height: height * 0.85 }]}>
+                        <LinearGradient
+                            colors={['#6366F1', '#8B5CF6']}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.header}
+                        >
+                            <View style={styles.headerTop}>
+                                <View style={styles.headerTitleRow}>
+                                    <MaterialCommunityIcons name="pencil" size={24} color="#FFF" />
+                                    <Text style={styles.headerTitle}>
+                                        Edit Batch {editingBatchIndex !== null ? batchAssignments[editingBatchIndex]?.batchNumber : ''}
+                                    </Text>
+                                </View>
+                                <TouchableOpacity
+                                    style={styles.closeBtn}
+                                    onPress={() => setShowBatchEditModal(false)}
+                                >
+                                    <Feather name="x" size={24} color="#FFF" />
+                                </TouchableOpacity>
+                            </View>
+                        </LinearGradient>
+
+                        {editingBatchIndex !== null && batchAssignments[editingBatchIndex] && (
+                            <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+                                {/* Date & Time */}
+                                <Text style={styles.sectionTitle}>📅 Date & Time</Text>
+                                <View style={styles.row}>
+                                    <View style={{ flex: 1, marginRight: 10 }}>
+                                        <Text style={styles.inputLabel}>Date</Text>
+                                        {Platform.OS === 'web' ? (
+                                            <input
+                                                type="date"
+                                                value={batchAssignments[editingBatchIndex].date || getFormattedDate()}
+                                                min={new Date().toISOString().split('T')[0]}
+                                                onChange={(e) => updateBatchTiming(editingBatchIndex, 'date', e.target.value)}
+                                                style={{
+                                                    width: '100%',
+                                                    padding: 14,
+                                                    borderRadius: 12,
+                                                    border: '1px solid #E5E7EB',
+                                                    backgroundColor: '#FFF',
+                                                    fontSize: 15,
+                                                    fontFamily: 'Poppins, sans-serif'
+                                                }}
+                                            />
+                                        ) : (
+                                            <TextInput
+                                                style={styles.input}
+                                                value={batchAssignments[editingBatchIndex].date || getFormattedDate()}
+                                                onChangeText={(val) => updateBatchTiming(editingBatchIndex, 'date', val)}
+                                                placeholder="YYYY-MM-DD"
+                                            />
+                                        )}
+                                    </View>
+                                </View>
+
+                                <View style={styles.row}>
+                                    <View style={{ flex: 1, marginRight: 10 }}>
+                                        <Text style={styles.inputLabel}>Start Time</Text>
+                                        <TextInput
+                                            style={styles.input}
+                                            value={batchAssignments[editingBatchIndex].startTime}
+                                            onChangeText={(val) => updateBatchTiming(editingBatchIndex, 'startTime', val)}
+                                            placeholder="HH:MM"
+                                            maxLength={5}
+                                        />
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.inputLabel}>End Time</Text>
+                                        <TextInput
+                                            style={[styles.input, { backgroundColor: '#F3F4F6' }]}
+                                            value={batchAssignments[editingBatchIndex].endTime}
+                                            editable={false}
+                                            placeholder="Auto-calculated"
+                                        />
+                                    </View>
+                                </View>
+
+                                {/* Location */}
+                                <Text style={styles.sectionTitle}>📍 Location</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    value={batchAssignments[editingBatchIndex].location || ''}
+                                    onChangeText={(val) => updateBatchTiming(editingBatchIndex, 'location', val)}
+                                    placeholder="e.g. Room 101, Mumbai HQ"
+                                />
+
+                                {/* Supervisor */}
+                                <Text style={styles.sectionTitle}>👤 Supervisor</Text>
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+                                    {allUsers
+                                        .filter(u => ['Manager', 'Supervisor', 'Super Admin'].includes(u.category) || u.role === 'Supervisor' || u.is_superadmin)
+                                        .map(u => (
+                                            <TouchableOpacity
+                                                key={u.email}
+                                                style={[
+                                                    styles.supervisorChip,
+                                                    batchAssignments[editingBatchIndex].supervisorEmail === u.email && styles.supervisorChipActive
+                                                ]}
+                                                onPress={() => {
+                                                    const updated = [...batchAssignments];
+                                                    updated[editingBatchIndex].supervisorEmail = u.email;
+                                                    updated[editingBatchIndex].supervisorName = u.name;
+                                                    setBatchAssignments(updated);
+                                                }}
+                                            >
+                                                <View style={[styles.avatarSmall, { backgroundColor: u.category === 'Manager' ? '#EF4444' : '#10B981' }]}>
+                                                    <Text style={styles.avatarTextSmall}>{u.name?.charAt(0)}</Text>
+                                                </View>
+                                                <Text style={[
+                                                    styles.supervisorName,
+                                                    batchAssignments[editingBatchIndex].supervisorEmail === u.email && styles.supervisorNameActive
+                                                ]}>
+                                                    {u.name}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                </ScrollView>
+
+                                {/* Max Users */}
+                                <Text style={styles.sectionTitle}>👥 Capacity</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    value={String(batchAssignments[editingBatchIndex].maxUsers || '')}
+                                    onChangeText={(val) => updateBatchMaxUsers(editingBatchIndex, val)}
+                                    keyboardType="numeric"
+                                    placeholder="Maximum users for this batch"
+                                />
+
+                                {/* Geofencing (Per-Batch) */}
+                                {geofencingEnabled && (
+                                    <View style={{ marginTop: 20 }}>
+                                        <Text style={styles.sectionTitle}>📍 Geofencing for this Batch</Text>
+                                        <View style={styles.toggleRow}>
+                                            <Text style={styles.toggleLabel}>Enable for this batch</Text>
+                                            <TouchableOpacity
+                                                style={[styles.switchButton, batchAssignments[editingBatchIndex].geofencing?.enabled && styles.switchButtonActive]}
+                                                onPress={() => {
+                                                    const updated = [...batchAssignments];
+                                                    if (!updated[editingBatchIndex].geofencing) {
+                                                        updated[editingBatchIndex].geofencing = { enabled: false, latitude: null, longitude: null, radius: parseInt(geofencingRadius) || 100 };
+                                                    }
+                                                    updated[editingBatchIndex].geofencing.enabled = !updated[editingBatchIndex].geofencing.enabled;
+                                                    setBatchAssignments(updated);
+                                                }}
+                                            >
+                                                <View style={[styles.switchCircle, batchAssignments[editingBatchIndex].geofencing?.enabled && styles.switchCircleActive]} />
+                                            </TouchableOpacity>
+                                        </View>
+
+                                        {batchAssignments[editingBatchIndex].geofencing?.enabled && (
+                                            <View style={{ marginTop: 10 }}>
+                                                <Text style={styles.inputLabel}>Latitude</Text>
+                                                <TextInput
+                                                    style={styles.input}
+                                                    value={String(batchAssignments[editingBatchIndex].geofencing?.latitude || '')}
+                                                    onChangeText={(val) => {
+                                                        const updated = [...batchAssignments];
+                                                        if (!updated[editingBatchIndex].geofencing) {
+                                                            updated[editingBatchIndex].geofencing = { enabled: true, latitude: null, longitude: null, radius: 100 };
+                                                        }
+                                                        updated[editingBatchIndex].geofencing.latitude = parseFloat(val) || null;
+                                                        setBatchAssignments(updated);
+                                                    }}
+                                                    keyboardType="decimal-pad"
+                                                    placeholder="e.g. 18.5204"
+                                                />
+
+                                                <Text style={[styles.inputLabel, { marginTop: 8 }]}>Longitude</Text>
+                                                <TextInput
+                                                    style={styles.input}
+                                                    value={String(batchAssignments[editingBatchIndex].geofencing?.longitude || '')}
+                                                    onChangeText={(val) => {
+                                                        const updated = [...batchAssignments];
+                                                        if (!updated[editingBatchIndex].geofencing) {
+                                                            updated[editingBatchIndex].geofencing = { enabled: true, latitude: null, longitude: null, radius: 100 };
+                                                        }
+                                                        updated[editingBatchIndex].geofencing.longitude = parseFloat(val) || null;
+                                                        setBatchAssignments(updated);
+                                                    }}
+                                                    keyboardType="decimal-pad"
+                                                    placeholder="e.g. 73.8567"
+                                                />
+
+                                                <Text style={[styles.inputLabel, { marginTop: 8 }]}>Radius (meters)</Text>
+                                                <TextInput
+                                                    style={styles.input}
+                                                    value={String(batchAssignments[editingBatchIndex].geofencing?.radius || geofencingRadius)}
+                                                    onChangeText={(val) => {
+                                                        const updated = [...batchAssignments];
+                                                        if (!updated[editingBatchIndex].geofencing) {
+                                                            updated[editingBatchIndex].geofencing = { enabled: true, latitude: null, longitude: null, radius: 100 };
+                                                        }
+                                                        updated[editingBatchIndex].geofencing.radius = parseInt(val) || 100;
+                                                        setBatchAssignments(updated);
+                                                    }}
+                                                    keyboardType="numeric"
+                                                    placeholder="100"
+                                                />
+
+                                                <TouchableOpacity
+                                                    style={styles.getCurrentLocationBtn}
+                                                    onPress={async () => {
+                                                        try {
+                                                            const { status } = await Location.requestForegroundPermissionsAsync();
+                                                            if (status !== 'granted') {
+                                                                Alert.alert('Permission Denied', 'Location access required to set coordinates');
+                                                                return;
+                                                            }
+
+                                                            const { coords } = await Location.getCurrentPositionAsync({});
+                                                            const updated = [...batchAssignments];
+                                                            if (!updated[editingBatchIndex].geofencing) {
+                                                                updated[editingBatchIndex].geofencing = { enabled: true, latitude: null, longitude: null, radius: 100 };
+                                                            }
+                                                            updated[editingBatchIndex].geofencing.latitude = coords.latitude;
+                                                            updated[editingBatchIndex].geofencing.longitude = coords.longitude;
+                                                            setBatchAssignments(updated);
+                                                            Alert.alert('Location Set', `Lat: ${coords.latitude.toFixed(6)}\nLong: ${coords.longitude.toFixed(6)}`);
+                                                        } catch (error) {
+                                                            Alert.alert('Error', 'Failed to get location. Please enable GPS.');
+                                                        }
+                                                    }}
+                                                >
+                                                    <Feather name="map-pin" size={16} color="#FFF" />
+                                                    <Text style={styles.getCurrentLocationText}>Use Current Location</Text>
+                                                </TouchableOpacity>
+                                            </View>
+                                        )}
+                                    </View>
+                                )}
+
+                                {/* Assigned Users */}
+                                <Text style={[styles.sectionTitle, { marginTop: 20 }]}>
+                                    👤 Assigned Users ({batchAssignments[editingBatchIndex].users.length}/{batchAssignments[editingBatchIndex].maxUsers})
+                                </Text>
+
+                                {batchAssignments[editingBatchIndex].users.length > 0 ? (
+                                    <View>
+                                        {batchAssignments[editingBatchIndex].users.map((user, uIdx) => (
+                                            <View key={uIdx} style={styles.userItem}>
+                                                <View style={styles.userAvatar}>
+                                                    <Text style={styles.userAvatarText}>{user.name?.charAt(0) || '?'}</Text>
+                                                </View>
+                                                <View style={{ flex: 1 }}>
+                                                    <Text style={styles.userName}>{user.name}</Text>
+                                                    <Text style={styles.userEmail}>{user.email}</Text>
+                                                </View>
+                                                <TouchableOpacity
+                                                    onPress={() => {
+                                                        const updated = [...batchAssignments];
+                                                        updated[editingBatchIndex].users = updated[editingBatchIndex].users.filter((_, i) => i !== uIdx);
+                                                        setBatchAssignments(updated);
+                                                    }}
+                                                >
+                                                    <Feather name="x-circle" size={20} color="#EF4444" />
+                                                </TouchableOpacity>
+                                            </View>
+                                        ))}
+                                    </View>
+                                ) : (
+                                    <Text style={styles.emptyText}>No users assigned yet</Text>
+                                )}
+
+                                {/* Available Users to Add */}
+                                {allUsers.filter(u => selectedUsers.includes(u.email) && !batchAssignments[editingBatchIndex].users.some(bu => bu.email === u.email)).length > 0 && (
+                                    <>
+                                        <Text style={[styles.sectionTitle, { marginTop: 20 }]}>➕ Add Users from Selection</Text>
+                                        {allUsers
+                                            .filter(u => selectedUsers.includes(u.email) && !batchAssignments[editingBatchIndex].users.some(bu => bu.email === u.email))
+                                            .map((user, uIdx) => (
+                                                <View key={uIdx} style={styles.userItem}>
+                                                    <View style={styles.userAvatar}>
+                                                        <Text style={styles.userAvatarText}>{user.name?.charAt(0) || '?'}</Text>
+                                                    </View>
+                                                    <View style={{ flex: 1 }}>
+                                                        <Text style={styles.userName}>{user.name}</Text>
+                                                        <Text style={styles.userEmail}>{user.email}</Text>
+                                                    </View>
+                                                    <TouchableOpacity
+                                                        onPress={() => {
+                                                            if (batchAssignments[editingBatchIndex].users.length < batchAssignments[editingBatchIndex].maxUsers) {
+                                                                const updated = [...batchAssignments];
+                                                                updated[editingBatchIndex].users.push(user);
+                                                                setBatchAssignments(updated);
+                                                            } else {
+                                                                Alert.alert('Batch Full', 'This batch has reached its maximum capacity. Increase max users or remove someone first.');
+                                                            }
+                                                        }}
+                                                        disabled={batchAssignments[editingBatchIndex].users.length >= batchAssignments[editingBatchIndex].maxUsers}
+                                                    >
+                                                        <Feather name="plus-circle" size={20} color={
+                                                            batchAssignments[editingBatchIndex].users.length >= batchAssignments[editingBatchIndex].maxUsers
+                                                                ? "#D1D5DB"
+                                                                : "#10B981"
+                                                        } />
+                                                    </TouchableOpacity>
+                                                </View>
+                                            ))}
+                                    </>
+                                )}
+
+                                <View style={{ height: 100 }} />
+                            </ScrollView>
+                        )}
+
+                        {/* Footer */}
+                        <View style={styles.footer}>
+                            <TouchableOpacity
+                                style={[styles.nextBtn, { backgroundColor: '#10B981' }]}
+                                onPress={() => setShowBatchEditModal(false)}
+                            >
+                                <Feather name="check" size={20} color="#FFF" />
+                                <Text style={styles.nextBtnText}>Done</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+        </>
     );
 }
 
@@ -2210,5 +2967,353 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_400Regular',
         color: '#9CA3AF',
         textAlign: 'center'
+    },
+
+    // Enhanced Features Styles (NEW)
+    enhancedFeaturesContainer: {
+        backgroundColor: '#FFF',
+        borderRadius: 14,
+        padding: 16,
+        marginTop: 16,
+        borderWidth: 1,
+        borderColor: '#E5E7EB'
+    },
+    sectionTitle: {
+        fontSize: 15,
+        fontFamily: 'Poppins_700Bold',
+        color: '#111827',
+        marginBottom: 12
+    },
+    toggleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 8
+    },
+    toggleLabelContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+        gap: 10
+    },
+    toggleLabel: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#374151'
+    },
+    toggleDescription: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#9CA3AF',
+        marginTop: 2
+    },
+    statusSwitchContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8
+    },
+    statusLabel: {
+        fontSize: 13,
+        fontFamily: 'Poppins_500Medium',
+        color: '#9CA3AF'
+    },
+    statusLabelActive: {
+        color: '#6366F1',
+        fontFamily: 'Poppins_700Bold'
+    },
+    switchButton: {
+        width: 48,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: '#D1D5DB',
+        justifyContent: 'center',
+        paddingHorizontal: 2,
+        position: 'relative'
+    },
+    switchButtonActive: {
+        backgroundColor: '#6366F1'
+    },
+    switchCircle: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        backgroundColor: '#FFF',
+        position: 'absolute',
+        left: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2,
+        elevation: 2
+    },
+    switchCircleActive: {
+        left: 22
+    },
+    warningBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFFBEB',
+        borderRadius: 10,
+        padding: 12,
+        marginTop: 12,
+        gap: 8,
+        borderWidth: 1,
+        borderColor: '#FDE68A'
+    },
+    warningText: {
+        flex: 1,
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#92400E',
+        lineHeight: 18
+    },
+
+    // Batch Edit Button & Info
+    editBatchBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#EEF2FF',
+        paddingVertical: 6,
+        paddingHorizontal: 10,
+        borderRadius: 8,
+        gap: 4,
+        borderWidth: 1,
+        borderColor: '#C7D2FE'
+    },
+    editBatchBtnText: {
+        fontSize: 12,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#6366F1'
+    },
+    batchQuickInfo: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 8,
+        gap: 12
+    },
+    batchInfoItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        flex: 1
+    },
+    batchInfoText: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        flex: 1
+    },
+    batchNoUsers: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#9CA3AF',
+        fontStyle: 'italic',
+        textAlign: 'center',
+        marginTop: 8,
+        paddingVertical: 8
+    },
+    getCurrentLocationBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#10B981',
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderRadius: 8,
+        marginTop: 12,
+        gap: 8
+    },
+    getCurrentLocationText: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFFFFF'
+    },
+
+    // ========== PREMIUM EXAM SETTINGS STYLES ==========
+    examSettingsSection: {
+        marginTop: 24,
+        marginBottom: 16
+    },
+    examSettingsSectionTitle: {
+        fontSize: 18,
+        fontFamily: 'Poppins_700Bold',
+        color: '#111827',
+        marginBottom: 16
+    },
+    featureCard: {
+        backgroundColor: '#FFFFFF',
+        borderRadius: 16,
+        marginBottom: 16,
+        overflow: 'hidden',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 12,
+        elevation: 5,
+        borderWidth: 1,
+        borderColor: '#E5E7EB'
+    },
+    featureCardGradient: {
+        paddingVertical: 16,
+        paddingHorizontal: 18
+    },
+    featureCardHeader: {
+        flexDirection: 'row',
+        alignItems: 'center'
+    },
+    featureCardIconContainer: {
+        width: 44,
+        height: 44,
+        borderRadius: 12,
+        backgroundColor: 'rgba(255, 255, 255, 0.25)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 14
+    },
+    featureCardTitleContainer: {
+        flex: 1
+    },
+    featureCardTitle: {
+        fontSize: 17,
+        fontFamily: 'Poppins_700Bold',
+        color: '#FFFFFF',
+        marginBottom: 2
+    },
+    featureCardSubtitle: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: 'rgba(255, 255, 255, 0.85)'
+    },
+    featureCardBody: {
+        paddingHorizontal: 18,
+        paddingVertical: 16
+    },
+
+    // Premium Toggle Styles
+    premiumToggleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 10
+    },
+    premiumToggleInfo: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+        marginRight: 12
+    },
+    premiumToggleIcon: {
+        width: 36,
+        height: 36,
+        borderRadius: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12
+    },
+    premiumToggleText: {
+        flex: 1
+    },
+    premiumToggleLabel: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#1F2937',
+        marginBottom: 2
+    },
+    premiumToggleDesc: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280'
+    },
+    premiumToggleDivider: {
+        height: 1,
+        backgroundColor: '#F3F4F6',
+        marginVertical: 6
+    },
+
+    // Premium Switch (Toggle Button)
+    premiumSwitch: {
+        width: 52,
+        height: 30,
+        borderRadius: 15,
+        backgroundColor: '#E5E7EB',
+        justifyContent: 'center',
+        paddingHorizontal: 3
+    },
+    premiumSwitchActive: {
+        backgroundColor: '#6366F1'
+    },
+    premiumSwitchActiveGreen: {
+        backgroundColor: '#10B981'
+    },
+    premiumSwitchActivePurple: {
+        backgroundColor: '#8B5CF6'
+    },
+    premiumSwitchThumb: {
+        width: 26,
+        height: 26,
+        borderRadius: 13,
+        backgroundColor: '#FFFFFF',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 3,
+        elevation: 3
+    },
+    premiumSwitchThumbActive: {
+        transform: [{ translateX: 20 }]
+    },
+
+    // Premium Input Section
+    premiumInputSection: {
+        marginTop: 16,
+        paddingTop: 16,
+        borderTopWidth: 1,
+        borderTopColor: '#F3F4F6'
+    },
+    premiumInputGroup: {},
+    premiumInputLabel: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#374151',
+        marginBottom: 8
+    },
+    premiumInputRow: {
+        flexDirection: 'row',
+        alignItems: 'center'
+    },
+    premiumInput: {
+        flex: 1,
+        backgroundColor: '#F9FAFB',
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        borderRadius: 10,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        fontSize: 15,
+        fontFamily: 'Poppins_500Medium',
+        color: '#111827'
+    },
+    premiumInputUnit: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#6B7280',
+        marginLeft: 10,
+        minWidth: 30
+    },
+    premiumHintBox: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        backgroundColor: '#F9FAFB',
+        borderRadius: 10,
+        padding: 12,
+        marginTop: 14,
+        gap: 10
+    },
+    premiumHintText: {
+        flex: 1,
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        lineHeight: 18
     }
 });
