@@ -560,7 +560,11 @@ async def create_scheduled_exam(
     exam_date: str = Form(...),
     exam_time: str = Form(...),
     location: str = Form(...),
-    shift: str = Form("Morning"),
+    # Batch System (new)
+    batch_assignments: str = Form("[]"),
+    number_of_batches: int = Form(1),
+    # Legacy shift (optional, for backward compatibility)
+    shift: str = Form(None),
     supervisor_email: str = Form(...),
     supervisor_name: str = Form(...),
     assigned_users: str = Form("[]"),
@@ -571,13 +575,14 @@ async def create_scheduled_exam(
     db: Session = Depends(get_db)
 ):
     """
-    Create a new scheduled exam.
+    Create a new scheduled exam with batch assignments.
     """
     service = AssessmentService(db)
     
     try:
         assigned_users_list = json.loads(assigned_users)
         questions_list = json.loads(questions)
+        batch_assignments_list = json.loads(batch_assignments)
     except:
         raise HTTPException(status_code=400, detail="Invalid JSON format")
     
@@ -588,7 +593,9 @@ async def create_scheduled_exam(
         "exam_date": exam_date,
         "exam_time": exam_time,
         "location": location,
-        "shift": shift,
+        "shift": shift,  # Legacy - can be None
+        "number_of_batches": number_of_batches,
+        "batch_assignments": batch_assignments_list,
         "supervisor_email": supervisor_email,
         "supervisor_name": supervisor_name,
         "assigned_users": assigned_users_list,
@@ -600,11 +607,12 @@ async def create_scheduled_exam(
     
     try:
         exam = service.create_scheduled_exam(exam_data)
-        logger.info(f"Scheduled exam created: {exam_data['id']}")
+        logger.info(f"Scheduled exam created: {exam_data['id']} with {number_of_batches} batches")
         return exam.to_dict() if hasattr(exam, 'to_dict') else dict(exam)
     except Exception as e:
         logger.error(f"Scheduled exam creation failed: {e}")
         raise
+
 
 
 @router.get("/scheduled/{exam_id}/attendance")

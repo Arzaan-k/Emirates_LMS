@@ -165,7 +165,10 @@ class ScheduledExam(Base):
     exam_time = Column(String(100))
     exam_datetime = Column(DateTime)  # Combined date and time
     location = Column(String(255))
-    shift = Column(String(100))
+    shift = Column(String(100))  # Legacy - kept for backward compatibility
+    # Batch System Fields
+    number_of_batches = Column(Integer, default=1)
+    batch_assignments = Column(JSON, default=[])  # [{batchNumber, startTime, endTime, maxUsers, users: [...]}]
     supervisor_email = Column(String(255))
     supervisor_name = Column(String(255))
     assigned_users = Column(JSON, default=[])
@@ -212,7 +215,12 @@ class ScheduledExam(Base):
             "exam_time": self.exam_time,
             "exam_datetime": safe_iso(self.exam_datetime),
             "location": self.location,
-            "shift": self.shift,
+            "shift": self.shift,  # Legacy - kept for backward compatibility
+            "number_of_batches": self.number_of_batches or 1,
+            "batch_assignments": self.batch_assignments or [],
+            # CamelCase aliases for frontend
+            "numberOfBatches": self.number_of_batches or 1,
+            "batchAssignments": self.batch_assignments or [],
             "supervisor_email": self.supervisor_email,
             "supervisor_name": self.supervisor_name,
             "assigned_users": self.assigned_users or [],

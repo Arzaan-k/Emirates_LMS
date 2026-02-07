@@ -32,8 +32,15 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showTimePicker, setShowTimePicker] = useState(false);
     const [location, setLocation] = useState('');
-    const [shift, setShift] = useState('Morning');
     const [supervisorEmail, setSupervisorEmail] = useState('');
+
+    // Batch System State
+    const [numberOfBatches, setNumberOfBatches] = useState(1);
+    const [batchAssignments, setBatchAssignments] = useState([]);
+    const [showBatchDropdown, setShowBatchDropdown] = useState(false);
+    const [usersPerBatch, setUsersPerBatch] = useState(''); // Empty = auto-calculate
+    const [editingBatchIndex, setEditingBatchIndex] = useState(null);
+    const [showBatchEditModal, setShowBatchEditModal] = useState(false);
     const [supervisorName, setSupervisorName] = useState('');
     const [timeLimit, setTimeLimit] = useState('30');
     const [passingScore, setPassingScore] = useState('70');
@@ -81,6 +88,116 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
             }
         }
     }, [visible]);
+
+    // Calculate batch timings with 30-min breaks
+    const calculateBatchTimings = (numBatches, perBatch = null) => {
+        const timeLimitMins = parseInt(timeLimit) || 30;
+        const breakMins = 30;
+        const startHour = date.getHours();
+        const startMin = date.getMinutes();
+        
+        const batches = [];
+        let currentTime = startHour * 60 + startMin; // Convert to minutes
+        
+        // Calculate users per batch
+        const totalUsers = selectedUsers.length;
+        const actualPerBatch = perBatch || (totalUsers > 0 ? Math.ceil(totalUsers / numBatches) : 0);
+        
+        for (let i = 0; i < numBatches; i++) {
+            const batchStartHour = Math.floor(currentTime / 60) % 24;
+            const batchStartMin = currentTime % 60;
+            const batchEndTime = currentTime + timeLimitMins;
+            const batchEndHour = Math.floor(batchEndTime / 60) % 24;
+            const batchEndMin = batchEndTime % 60;
+            
+            batches.push({
+                batchNumber: i + 1,
+                startTime: `${String(batchStartHour).padStart(2, '0')}:${String(batchStartMin).padStart(2, '0')}`,
+                endTime: `${String(batchEndHour).padStart(2, '0')}:${String(batchEndMin).padStart(2, '0')}`,
+                maxUsers: actualPerBatch,
+                users: []
+            });
+            
+            // Next batch starts after exam duration + 30 min break
+            currentTime = batchEndTime + breakMins;
+        }
+        
+        return batches;
+    };
+
+    // Distribute users into batches based on usersPerBatch or auto-calculate
+    const distributeBatches = (forcedPerBatch = null) => {
+        if (selectedUsers.length === 0 || numberOfBatches < 1) {
+            setBatchAssignments([]);
+            return;
+        }
+        
+        const perBatch = forcedPerBatch || (usersPerBatch ? parseInt(usersPerBatch) : Math.ceil(selectedUsers.length / numberOfBatches));
+        const batchTimings = calculateBatchTimings(numberOfBatches, perBatch);
+        
+        const newBatchAssignments = batchTimings.map((batch, idx) => {
+            const startIdx = idx * perBatch;
+            const endIdx = Math.min(startIdx + perBatch, selectedUsers.length);
+            return {
+                ...batch,
+                maxUsers: perBatch,
+                users: selectedUsers.slice(startIdx, endIdx)
+            };
+        });
+        
+        setBatchAssignments(newBatchAssignments);
+    };
+
+    // Update single batch timing
+    const updateBatchTiming = (batchIndex, field, value) => {
+        const updated = [...batchAssignments];
+        updated[batchIndex] = { ...updated[batchIndex], [field]: value };
+        
+        // If startTime changed, auto-calculate endTime based on exam duration
+        if (field === 'startTime') {
+            const [hours, mins] = value.split(':').map(Number);
+            const startMins = hours * 60 + mins;
+            const endMins = startMins + (parseInt(timeLimit) || 30);
+            const endHour = Math.floor(endMins / 60) % 24;
+            const endMin = endMins % 60;
+            updated[batchIndex].endTime = `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`;
+        }
+        
+        setBatchAssignments(updated);
+    };
+
+    // Move user between batches
+    const moveUserToBatch = (userEmail, fromBatchIdx, toBatchIdx) => {
+        const updated = [...batchAssignments];
+        const userToMove = updated[fromBatchIdx].users.find(u => u.email === userEmail);
+        
+        if (userToMove) {
+            updated[fromBatchIdx].users = updated[fromBatchIdx].users.filter(u => u.email !== userEmail);
+            updated[toBatchIdx].users = [...updated[toBatchIdx].users, userToMove];
+            setBatchAssignments(updated);
+        }
+    };
+
+    // Update max users per batch
+    const updateBatchMaxUsers = (batchIndex, newMax) => {
+        const updated = [...batchAssignments];
+        updated[batchIndex].maxUsers = parseInt(newMax) || 1;
+        setBatchAssignments(updated);
+    };
+
+    // Redistribute users equally
+    const redistributeUsersEqually = () => {
+        distributeBatches();
+    };
+
+    // Auto-distribute when batches or users change
+    useEffect(() => {
+        if (selectedUsers.length > 0 && numberOfBatches > 0) {
+            distributeBatches();
+        } else if (selectedUsers.length === 0) {
+            setBatchAssignments([]);
+        }
+    }, [selectedUsers.length, numberOfBatches, timeLimit, date]);
 
     // NEW: Filter Logic
     const getFilteredUsers = () => {
@@ -382,7 +499,8 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
             formData.append('exam_date', getFormattedDate());
             formData.append('exam_time', getFormattedTime());
             formData.append('location', location);
-            formData.append('shift', shift);
+            formData.append('batch_assignments', JSON.stringify(batchAssignments));
+            formData.append('number_of_batches', numberOfBatches.toString());
             formData.append('supervisor_email', supervisorEmail);
             formData.append('supervisor_name', supervisorName);
             formData.append('assigned_users', JSON.stringify(selectedUsers));
@@ -417,7 +535,9 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
         setDescription('');
         setDate(new Date());
         setLocation('');
-        setShift('Morning');
+        setNumberOfBatches(1);
+        setBatchAssignments([]);
+        setUsersPerBatch('');
         setSelectedUsers([]);
         setSelectedCategories([]);
         setQuestions([]);
@@ -668,18 +788,7 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
                 {(!supervisorEmail) && <Text style={styles.helperText}>Select a supervisor to proctor this exam.</Text>}
             </View>
 
-            <Text style={styles.inputLabel}>Shift</Text>
-            <View style={styles.shiftRow}>
-                {['Morning', 'Afternoon', 'Evening'].map(s => (
-                    <TouchableOpacity
-                        key={s}
-                        style={[styles.shiftBtn, shift === s && styles.shiftBtnActive]}
-                        onPress={() => setShift(s)}
-                    >
-                        <Text style={[styles.shiftText, shift === s && styles.shiftTextActive]}>{s}</Text>
-                    </TouchableOpacity>
-                ))}
-            </View>
+{/* Shift removed - replaced with Batch System in Step 2 */}
 
             <View style={styles.row}>
                 <View style={{ flex: 1, marginRight: 10 }}>
@@ -709,6 +818,183 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
     const renderStep2 = () => (
         <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
             <Text style={styles.stepTitle}>Select Participants</Text>
+
+            {/* BATCH CONFIGURATION SYSTEM */}
+            <View style={styles.batchSystemContainer}>
+                <View style={styles.batchHeader}>
+                    <MaterialCommunityIcons name="account-group-outline" size={20} color="#6366F1" />
+                    <Text style={styles.batchTitle}>Batch Configuration</Text>
+                </View>
+                
+                {/* Config Row 1: Number of Batches + Users Per Batch */}
+                <View style={styles.batchConfigRow}>
+                    <View style={styles.batchConfigItem}>
+                        <Text style={styles.batchConfigLabel}>Batches</Text>
+                        <TouchableOpacity 
+                            style={styles.batchDropdown}
+                            onPress={() => setShowBatchDropdown(!showBatchDropdown)}
+                        >
+                            <Text style={styles.batchDropdownText}>{numberOfBatches}</Text>
+                            <Feather name={showBatchDropdown ? "chevron-up" : "chevron-down"} size={16} color="#6366F1" />
+                        </TouchableOpacity>
+                    </View>
+                    
+                    <View style={styles.batchConfigItem}>
+                        <Text style={styles.batchConfigLabel}>Users/Batch</Text>
+                        <TextInput
+                            style={styles.batchConfigInput}
+                            placeholder="Auto"
+                            value={usersPerBatch}
+                            onChangeText={(val) => {
+                                setUsersPerBatch(val);
+                                if (val && selectedUsers.length > 0) {
+                                    distributeBatches(parseInt(val));
+                                }
+                            }}
+                            keyboardType="numeric"
+                        />
+                    </View>
+                    
+                    <TouchableOpacity 
+                        style={styles.redistributeBtn}
+                        onPress={redistributeUsersEqually}
+                    >
+                        <Feather name="refresh-cw" size={16} color="#FFF" />
+                        <Text style={styles.redistributeBtnText}>Auto</Text>
+                    </TouchableOpacity>
+                </View>
+                
+                {showBatchDropdown && (
+                    <View style={styles.dropdownList}>
+                        <ScrollView style={{ maxHeight: 200 }} nestedScrollEnabled>
+                            {[1,2,3,4,5,6,7,8,9,10].map(num => (
+                                <TouchableOpacity
+                                    key={num}
+                                    style={[styles.dropdownItem, numberOfBatches === num && styles.dropdownItemActive]}
+                                    onPress={() => {
+                                        setNumberOfBatches(num);
+                                        setShowBatchDropdown(false);
+                                    }}
+                                >
+                                    <Text style={[styles.dropdownItemText, numberOfBatches === num && styles.dropdownItemTextActive]}>
+                                        {num} {num === 1 ? 'Batch' : 'Batches'}
+                                    </Text>
+                                    {numberOfBatches === num && <Feather name="check" size={16} color="#6366F1" />}
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </View>
+                )}
+
+                {/* Summary Stats */}
+                {selectedUsers.length > 0 && (
+                    <View style={styles.batchStatsRow}>
+                        <View style={styles.batchStat}>
+                            <Text style={styles.batchStatValue}>{selectedUsers.length}</Text>
+                            <Text style={styles.batchStatLabel}>Total Users</Text>
+                        </View>
+                        <View style={styles.batchStatDivider} />
+                        <View style={styles.batchStat}>
+                            <Text style={styles.batchStatValue}>{numberOfBatches}</Text>
+                            <Text style={styles.batchStatLabel}>Batches</Text>
+                        </View>
+                        <View style={styles.batchStatDivider} />
+                        <View style={styles.batchStat}>
+                            <Text style={styles.batchStatValue}>~{Math.ceil(selectedUsers.length / numberOfBatches)}</Text>
+                            <Text style={styles.batchStatLabel}>Per Batch</Text>
+                        </View>
+                    </View>
+                )}
+
+                {/* Editable Batch Cards */}
+                {batchAssignments.length > 0 && selectedUsers.length > 0 && (
+                    <View style={styles.batchCardsContainer}>
+                        <View style={styles.batchCardsHeader}>
+                            <Text style={styles.batchCardsTitle}>📋 Batch Schedule</Text>
+                            <Text style={styles.batchCardsSubtitle}>Tap to edit timings</Text>
+                        </View>
+                        
+                        {batchAssignments.map((batch, idx) => (
+                            <View key={idx} style={styles.editableBatchCard}>
+                                <View style={styles.editableBatchHeader}>
+                                    <View style={styles.batchBadge}>
+                                        <Text style={styles.batchBadgeText}>Batch {batch.batchNumber}</Text>
+                                    </View>
+                                    <View style={styles.batchUsersBadge}>
+                                        <Feather name="users" size={12} color="#6366F1" />
+                                        <Text style={styles.batchUsersText}>{batch.users.length} users</Text>
+                                    </View>
+                                </View>
+                                
+                                {/* Editable Timing Row */}
+                                <View style={styles.batchTimingEditRow}>
+                                    <View style={styles.timeInputGroup}>
+                                        <Text style={styles.timeInputLabel}>Start</Text>
+                                        <TextInput
+                                            style={styles.timeInput}
+                                            value={batch.startTime}
+                                            onChangeText={(val) => updateBatchTiming(idx, 'startTime', val)}
+                                            placeholder="HH:MM"
+                                            maxLength={5}
+                                        />
+                                    </View>
+                                    
+                                    <Feather name="arrow-right" size={16} color="#9CA3AF" style={{ marginHorizontal: 8 }} />
+                                    
+                                    <View style={styles.timeInputGroup}>
+                                        <Text style={styles.timeInputLabel}>End</Text>
+                                        <TextInput
+                                            style={[styles.timeInput, { backgroundColor: '#F3F4F6' }]}
+                                            value={batch.endTime}
+                                            editable={false}
+                                            placeholder="HH:MM"
+                                        />
+                                    </View>
+                                    
+                                    <View style={styles.timeInputGroup}>
+                                        <Text style={styles.timeInputLabel}>Max</Text>
+                                        <TextInput
+                                            style={styles.timeInput}
+                                            value={String(batch.maxUsers || '')}
+                                            onChangeText={(val) => updateBatchMaxUsers(idx, val)}
+                                            keyboardType="numeric"
+                                            placeholder="#"
+                                        />
+                                    </View>
+                                </View>
+                                
+                                {/* User list preview */}
+                                {batch.users.length > 0 && (
+                                    <View style={styles.batchUserPreview}>
+                                        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                                            {batch.users.slice(0, 5).map((user, uIdx) => (
+                                                <View key={uIdx} style={styles.miniUserChip}>
+                                                    <Text style={styles.miniUserChipText} numberOfLines={1}>
+                                                        {user.name?.split(' ')[0] || user.email?.split('@')[0]}
+                                                    </Text>
+                                                </View>
+                                            ))}
+                                            {batch.users.length > 5 && (
+                                                <View style={styles.miniUserChipMore}>
+                                                    <Text style={styles.miniUserChipMoreText}>+{batch.users.length - 5}</Text>
+                                                </View>
+                                            )}
+                                        </ScrollView>
+                                    </View>
+                                )}
+                            </View>
+                        ))}
+                    </View>
+                )}
+                
+                {/* Empty State */}
+                {selectedUsers.length === 0 && (
+                    <View style={styles.batchEmptyState}>
+                        <Feather name="users" size={32} color="#D1D5DB" />
+                        <Text style={styles.batchEmptyText}>Select users below to configure batches</Text>
+                    </View>
+                )}
+            </View>
 
             {/* SMART CATEGORIES - Improved Grid Layout */}
             {smartCategories.length > 0 && (
@@ -1105,9 +1391,9 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
                     <Text style={styles.reviewValue}>{location}</Text>
                 </View>
                 <View style={styles.reviewRow}>
-                    <Feather name="clock" size={18} color="#6B7280" />
-                    <Text style={styles.reviewLabel}>Shift:</Text>
-                    <Text style={styles.reviewValue}>{shift}</Text>
+                    <MaterialCommunityIcons name="account-group" size={18} color="#6B7280" />
+                    <Text style={styles.reviewLabel}>Batches:</Text>
+                    <Text style={styles.reviewValue}>{numberOfBatches} {numberOfBatches === 1 ? 'batch' : 'batches'}</Text>
                 </View>
                 <View style={styles.reviewRow}>
                     <Feather name="users" size={18} color="#6B7280" />
@@ -1131,8 +1417,22 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
                 </View>
             </View>
 
+            {/* Batch Schedule Summary */}
+            {batchAssignments.length > 0 && (
+                <View style={styles.batchReviewContainer}>
+                    <Text style={styles.batchReviewTitle}>📋 Batch Schedule</Text>
+                    {batchAssignments.map((batch, idx) => (
+                        <View key={idx} style={styles.batchReviewRow}>
+                            <Text style={styles.batchReviewLabel}>Batch {batch.batchNumber}:</Text>
+                            <Text style={styles.batchReviewTime}>{batch.startTime} - {batch.endTime}</Text>
+                            <Text style={styles.batchReviewUsers}>({batch.users.length} users)</Text>
+                        </View>
+                    ))}
+                </View>
+            )}
+
             <Text style={styles.noteText}>
-                📢 Notifications will be sent to all selected participants with exam details.
+                📢 Notifications will be sent to all selected participants with their batch timings.
             </Text>
         </ScrollView>
     );
@@ -1520,6 +1820,395 @@ const styles = StyleSheet.create({
         color: '#9CA3AF',
         marginTop: 8,
         fontStyle: 'italic',
+        textAlign: 'center'
+    },
+
+    // Batch System Styles
+    batchSystemContainer: {
+        marginBottom: 16,
+        backgroundColor: '#EEF2FF',
+        padding: 14,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#C7D2FE'
+    },
+    batchHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 12
+    },
+    batchTitle: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#4338CA',
+        marginLeft: 8
+    },
+    batchRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 8
+    },
+    batchLabel: {
+        fontSize: 13,
+        fontFamily: 'Poppins_500Medium',
+        color: '#374151'
+    },
+    batchDropdown: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFF',
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#C7D2FE',
+        minWidth: 100,
+        justifyContent: 'space-between'
+    },
+    batchDropdownText: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#6366F1',
+        marginRight: 8
+    },
+    dropdownList: {
+        backgroundColor: '#FFF',
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        marginTop: 4,
+        overflow: 'hidden',
+        elevation: 4,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4
+    },
+    dropdownItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F3F4F6'
+    },
+    dropdownItemActive: {
+        backgroundColor: '#EEF2FF'
+    },
+    dropdownItemText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_500Medium',
+        color: '#374151'
+    },
+    dropdownItemTextActive: {
+        color: '#6366F1',
+        fontFamily: 'Poppins_600SemiBold'
+    },
+    batchPreview: {
+        marginTop: 12,
+        backgroundColor: '#FFF',
+        padding: 12,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#E5E7EB'
+    },
+    batchPreviewTitle: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#111827',
+        marginBottom: 2
+    },
+    batchPreviewSubtitle: {
+        fontSize: 11,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280'
+    },
+    batchCard: {
+        backgroundColor: '#F9FAFB',
+        padding: 12,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        marginRight: 10,
+        minWidth: 110
+    },
+    batchCardHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 6
+    },
+    batchCardTitle: {
+        fontSize: 12,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#4338CA'
+    },
+    batchUserCount: {
+        backgroundColor: '#6366F1',
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        justifyContent: 'center',
+        alignItems: 'center'
+    },
+    batchUserCountText: {
+        fontSize: 10,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF'
+    },
+    batchTimeRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4
+    },
+    batchTimeText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_500Medium',
+        color: '#6366F1'
+    },
+
+    // Batch Review Styles (Step 4)
+    batchReviewContainer: {
+        backgroundColor: '#EEF2FF',
+        padding: 14,
+        borderRadius: 12,
+        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: '#C7D2FE'
+    },
+    batchReviewTitle: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#4338CA',
+        marginBottom: 10
+    },
+    batchReviewRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 6,
+        borderBottomWidth: 1,
+        borderBottomColor: '#C7D2FE'
+    },
+    batchReviewLabel: {
+        fontSize: 12,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#4338CA',
+        width: 70
+    },
+    batchReviewTime: {
+        fontSize: 12,
+        fontFamily: 'Poppins_500Medium',
+        color: '#374151',
+        flex: 1
+    },
+    batchReviewUsers: {
+        fontSize: 11,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280'
+    },
+
+    // NEW: Customizable Batch System Styles
+    batchConfigRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-end',
+        gap: 12,
+        marginTop: 12
+    },
+    batchConfigItem: {
+        flex: 1
+    },
+    batchConfigLabel: {
+        fontSize: 11,
+        fontFamily: 'Poppins_500Medium',
+        color: '#6B7280',
+        marginBottom: 4
+    },
+    batchConfigInput: {
+        backgroundColor: '#FFF',
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        borderRadius: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        fontSize: 14,
+        fontFamily: 'Poppins_500Medium',
+        color: '#111827',
+        textAlign: 'center'
+    },
+    redistributeBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#6366F1',
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        borderRadius: 8,
+        gap: 6
+    },
+    redistributeBtnText: {
+        fontSize: 12,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF'
+    },
+    batchStatsRow: {
+        flexDirection: 'row',
+        backgroundColor: '#FFF',
+        borderRadius: 10,
+        padding: 12,
+        marginTop: 12,
+        borderWidth: 1,
+        borderColor: '#E5E7EB'
+    },
+    batchStat: {
+        flex: 1,
+        alignItems: 'center'
+    },
+    batchStatValue: {
+        fontSize: 18,
+        fontFamily: 'Poppins_700Bold',
+        color: '#6366F1'
+    },
+    batchStatLabel: {
+        fontSize: 10,
+        fontFamily: 'Poppins_400Regular',
+        color: '#9CA3AF',
+        marginTop: 2
+    },
+    batchStatDivider: {
+        width: 1,
+        backgroundColor: '#E5E7EB',
+        marginHorizontal: 8
+    },
+    batchCardsContainer: {
+        marginTop: 14
+    },
+    batchCardsHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 10
+    },
+    batchCardsTitle: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#111827'
+    },
+    batchCardsSubtitle: {
+        fontSize: 11,
+        fontFamily: 'Poppins_400Regular',
+        color: '#9CA3AF'
+    },
+    editableBatchCard: {
+        backgroundColor: '#FFF',
+        borderRadius: 12,
+        padding: 14,
+        marginBottom: 10,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        shadowColor: '#6366F1',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 4,
+        elevation: 2
+    },
+    editableBatchHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 12
+    },
+    batchBadge: {
+        backgroundColor: '#6366F1',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 6
+    },
+    batchBadgeText: {
+        fontSize: 12,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF'
+    },
+    batchUsersBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#EEF2FF',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 6,
+        gap: 4
+    },
+    batchUsersText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_500Medium',
+        color: '#6366F1'
+    },
+    batchTimingEditRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 10
+    },
+    timeInputGroup: {
+        flex: 1
+    },
+    timeInputLabel: {
+        fontSize: 10,
+        fontFamily: 'Poppins_500Medium',
+        color: '#9CA3AF',
+        marginBottom: 4,
+        textAlign: 'center'
+    },
+    timeInput: {
+        backgroundColor: '#F9FAFB',
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        borderRadius: 8,
+        paddingHorizontal: 8,
+        paddingVertical: 8,
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#111827',
+        textAlign: 'center'
+    },
+    batchUserPreview: {
+        marginTop: 8,
+        paddingTop: 10,
+        borderTopWidth: 1,
+        borderTopColor: '#F3F4F6'
+    },
+    miniUserChip: {
+        backgroundColor: '#F3F4F6',
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 16,
+        marginRight: 6
+    },
+    miniUserChipText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_500Medium',
+        color: '#4B5563',
+        maxWidth: 60
+    },
+    miniUserChipMore: {
+        backgroundColor: '#6366F1',
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 16
+    },
+    miniUserChipMoreText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF'
+    },
+    batchEmptyState: {
+        alignItems: 'center',
+        paddingVertical: 24,
+        gap: 8
+    },
+    batchEmptyText: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#9CA3AF',
         textAlign: 'center'
     }
 });
