@@ -52,7 +52,7 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
     const pickFiles = async () => {
         try {
             const result = await DocumentPicker.getDocumentAsync({
-                type: "video/*", // Focus on videos
+                type: "*/*", // Allow all file types
                 multiple: true,
                 copyToCacheDirectory: true
             });
@@ -124,14 +124,14 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                         // On web, fetch the blob from the uri and create a proper File object
                         const response = await fetch(file.uri);
                         const blob = await response.blob();
-                        const webFile = new File([blob], file.name, { type: file.mimeType || 'video/mp4' });
+                        const webFile = new File([blob], file.name, { type: file.mimeType || 'application/octet-stream' });
                         formData.append('file', webFile);
                     } else {
                         // On mobile, use the React Native format
                         formData.append('file', {
                             uri: file.uri,
                             name: file.name,
-                            type: file.mimeType || 'video/mp4'
+                            type: file.mimeType || 'application/octet-stream'
                         });
                     }
 
@@ -241,7 +241,7 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                     {/* ADD FILES BTN */}
                     <TouchableOpacity style={styles.addBtn} onPress={pickFiles}>
                         <MaterialCommunityIcons name="cloud-upload-outline" size={28} color="#F59E0B" />
-                        <Text style={styles.addBtnText}>Select Videos</Text>
+                        <Text style={styles.addBtnText}>Select Files</Text>
                     </TouchableOpacity>
 
                     <Text style={styles.sectionLabel}>Course Bucket (Optional)</Text>

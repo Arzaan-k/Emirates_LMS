@@ -37,6 +37,8 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=True)
     last_active = Column(DateTime, nullable=True)
     xp_points = Column(Integer, default=0, nullable=True)
+    reset_token = Column(String(100), nullable=True)
+    reset_token_expires = Column(DateTime, nullable=True)
 
     # Relationships
     completions = relationship(

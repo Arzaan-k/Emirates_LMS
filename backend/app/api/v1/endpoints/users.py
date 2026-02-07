@@ -122,9 +122,9 @@ async def update_user_alias(
     email = data.get("email")
     if not email:
         raise HTTPException(status_code=400, detail="Email is required")
-    
+
     service = UserService(db)
-    
+
     updates = {}
     if "name" in data:
         updates["name"] = data["name"]
@@ -138,7 +138,9 @@ async def update_user_alias(
         updates["privileges"] = data["privileges"]
     if "has_admin_access" in data:
         updates["has_admin_access"] = data["has_admin_access"]
-    
+    if "password" in data and data["password"]:
+        updates["password"] = data["password"]
+
     try:
         user = service.update_user(email, updates)
         logger.info(f"User updated via alias: {email}")
@@ -678,6 +680,317 @@ async def get_bulk_upload_template():
     }
 
 # ==========================================
+# SMART USER CATEGORIZATION FOR SCHEDULE EXAMS
+# (Must come BEFORE /{email} catch-all route)
+# ==========================================
+
+@router.get("/smart-categories")
+async def get_smart_user_categories(db: Session = Depends(get_db)):
+    """
+    Get smart user categories based on learning progress, roles, and stores.
+    Used for intelligent user selection in Schedule Exams feature.
+
+    Returns categories like:
+    - Completed All Waffler Courses
+    - Completed All Silver Waffler Courses
+    - Ready for Promotion (eligible for next level)
+    - All Current Wafflers (by role)
+    - Mumbai Central Store (by location)
+    """
+    from app.models.user import User, UserNodeProgress
+    from app.models.content import Content
+    from app.repositories.content_repository import AccessRuleRepository
+
+    service = UserService(db)
+    categories = []
+
+    try:
+        # Get all users
+        all_users = db.query(User).all()
+
+        # Category 1: By Current Role
+        role_counts = {}
+        for user in all_users:
+            role = user.role or "Waffler"
+            if role not in role_counts:
+                role_counts[role] = []
+            role_counts[role].append(user.email)
+
+        for role, emails in role_counts.items():
+            categories.append({
+                "id": f"role_{role.lower().replace(' ', '_')}",
+                "name": f"All Current {role}s",
+                "description": f"All users with {role} designation",
+                "type": "role",
+                "user_emails": emails,
+                "count": len(emails),
+                "icon": "users",
+                "color": "#3B82F6"
+            })
+
+        # Category 2: By Store Location
+        store_counts = {}
+        for user in all_users:
+            store = user.store or "Unassigned"
+            if store != "Unassigned" and store.strip():
+                if store not in store_counts:
+                    store_counts[store] = []
+                store_counts[store].append(user.email)
+
+        for store, emails in store_counts.items():
+            categories.append({
+                "id": f"store_{store.lower().replace(' ', '_').replace('/', '_')}",
+                "name": f"{store}",
+                "description": f"All users from {store}",
+                "type": "store",
+                "user_emails": emails,
+                "count": len(emails),
+                "icon": "map-pin",
+                "color": "#10B981"
+            })
+
+        # Category 3: By Course Completion (Career Progression)
+        # Get all career progression courses grouped by role
+        career_courses = db.query(Content).filter(
+            Content.is_path_node == True,
+            Content.learning_path_type == "career_progression"
+        ).all()
+
+        # Group courses by role (from access rules or course metadata)
+        access_repo = AccessRuleRepository(db)
+        access_rules = access_repo.get_all_rules_dict()
+
+        # Define role levels for career progression
+        role_levels = [
+            "Waffler", "Silver Waffler", "Gold Waffler",
+            "Shift Manager", "Assistant Store Manager", "Store Manager"
+        ]
+
+        for role_level in role_levels:
+            # Get courses accessible to this role
+            if role_level in access_rules:
+                accessible_course_ids = access_rules[role_level].get("accessible_courses", [])
+            else:
+                # Fallback: all courses
+                accessible_course_ids = [c.id for c in career_courses]
+
+            if not accessible_course_ids:
+                continue
+
+            # Find users who completed ALL courses for this role
+            completed_users = []
+            for user in all_users:
+                # Get user's completed courses
+                completed_nodes = db.query(UserNodeProgress).filter(
+                    UserNodeProgress.user_email == user.email,
+                    UserNodeProgress.completed == True,
+                    UserNodeProgress.node_id.in_(accessible_course_ids)
+                ).all()
+
+                completed_node_ids = {node.node_id for node in completed_nodes}
+
+                # Check if user completed ALL courses for this role
+                if set(accessible_course_ids).issubset(completed_node_ids):
+                    completed_users.append(user.email)
+
+            if completed_users:
+                categories.append({
+                    "id": f"completed_{role_level.lower().replace(' ', '_')}",
+                    "name": f"Completed All {role_level} Courses",
+                    "description": f"Users who completed all {role_level} career progression courses",
+                    "type": "completion",
+                    "user_emails": completed_users,
+                    "count": len(completed_users),
+                    "icon": "award",
+                    "color": "#F59E0B"
+                })
+
+        # Category 4: Ready for Promotion (completed current role + eligible for next)
+        for i, current_role in enumerate(role_levels[:-1]):  # Exclude last role (Store Manager)
+            next_role = role_levels[i + 1]
+
+            # Get courses for current role
+            if current_role in access_rules:
+                current_courses = access_rules[current_role].get("accessible_courses", [])
+            else:
+                current_courses = []
+
+            if not current_courses:
+                continue
+
+            # Find users who completed current role and are at that designation
+            eligible_users = []
+            for user in all_users:
+                if user.role == current_role:
+                    # Check if completed all current role courses
+                    completed_nodes = db.query(UserNodeProgress).filter(
+                        UserNodeProgress.user_email == user.email,
+                        UserNodeProgress.completed == True,
+                        UserNodeProgress.node_id.in_(current_courses)
+                    ).all()
+
+                    completed_node_ids = {node.node_id for node in completed_nodes}
+
+                    if set(current_courses).issubset(completed_node_ids):
+                        eligible_users.append(user.email)
+
+            if eligible_users:
+                categories.append({
+                    "id": f"promotion_ready_{next_role.lower().replace(' ', '_')}",
+                    "name": f"Ready for {next_role} Exam",
+                    "description": f"Completed {current_role} courses, eligible for {next_role} promotion",
+                    "type": "promotion",
+                    "user_emails": eligible_users,
+                    "count": len(eligible_users),
+                    "icon": "trending-up",
+                    "color": "#8B5CF6"
+                })
+
+        # Category 5: By Progress Percentage (50%, 75%, etc.)
+        progress_thresholds = [
+            {"min": 50, "max": 74, "label": "50-75% Progress"},
+            {"min": 75, "max": 99, "label": "75-99% Progress"}
+        ]
+
+        for threshold in progress_thresholds:
+            threshold_users = []
+            for user in all_users:
+                # Calculate overall progress
+                total_courses = len(career_courses)
+                if total_courses == 0:
+                    continue
+
+                completed_count = db.query(UserNodeProgress).filter(
+                    UserNodeProgress.user_email == user.email,
+                    UserNodeProgress.completed == True,
+                    UserNodeProgress.node_id.in_([c.id for c in career_courses])
+                ).count()
+
+                progress_percent = (completed_count / total_courses) * 100
+
+                if threshold["min"] <= progress_percent <= threshold["max"]:
+                    threshold_users.append(user.email)
+
+            if threshold_users:
+                categories.append({
+                    "id": f"progress_{threshold['min']}_{threshold['max']}",
+                    "name": f"{threshold['label']}",
+                    "description": f"Users with {threshold['label']} in career progression",
+                    "type": "progress",
+                    "user_emails": threshold_users,
+                    "count": len(threshold_users),
+                    "icon": "activity",
+                    "color": "#06B6D4"
+                })
+
+        # Sort categories: Role -> Store -> Completion -> Promotion -> Progress
+        type_order = {"role": 1, "store": 2, "completion": 3, "promotion": 4, "progress": 5}
+        categories.sort(key=lambda x: (type_order.get(x["type"], 99), -x["count"]))
+
+        logger.info(f"Generated {len(categories)} smart user categories")
+        return {"categories": categories, "total": len(categories)}
+
+    except Exception as e:
+        logger.error(f"Smart categories generation failed: {e}")
+        return {"categories": [], "total": 0, "error": str(e)}
+
+
+@router.post("/validate-employee-codes")
+async def validate_employee_codes(
+    data: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    Validate employee codes from bulk upload and return matching user emails.
+    Used for bulk user selection in Schedule Exams feature.
+
+    Request body:
+    {
+        "employee_codes": ["BWCO-0028", "BWCO-0029", ...]
+    }
+
+    Returns:
+    {
+        "matched": ["email1@example.com", "email2@example.com"],
+        "not_found": ["BWCO-9999"],
+        "matched_count": 2,
+        "not_found_count": 1
+    }
+    """
+    from app.models.user import User
+
+    try:
+        employee_codes = data.get("employee_codes", [])
+        if not employee_codes:
+            raise HTTPException(status_code=400, detail="No employee codes provided")
+
+        # Clean and normalize employee codes
+        employee_codes = [str(code).strip() for code in employee_codes if code]
+
+        logger.info(f"Validating {len(employee_codes)} employee codes")
+
+        # Get all users
+        all_users = db.query(User).all()
+
+        # Match employee codes with users
+        # The employee code might be stored in profile_data JSON field or email prefix
+        matched_emails = []
+        not_found_codes = []
+
+        for code in employee_codes:
+            found = False
+
+            # Try multiple matching strategies:
+            # 1. Check if code is in profile_data
+            # 2. Check if email starts with code
+            # 3. Check if name contains code
+
+            for user in all_users:
+                # Strategy 1: Check profile_data for employee_code
+                if user.profile_data and isinstance(user.profile_data, dict):
+                    profile_emp_code = user.profile_data.get("employee_code") or user.profile_data.get("Employee Code")
+                    if profile_emp_code and str(profile_emp_code).strip().upper() == code.upper():
+                        matched_emails.append(user.email)
+                        found = True
+                        break
+
+                # Strategy 2: Check if email starts with employee code (common pattern)
+                if user.email.upper().startswith(code.upper()):
+                    matched_emails.append(user.email)
+                    found = True
+                    break
+
+                # Strategy 3: Check if name contains the code
+                if user.name and code.upper() in user.name.upper():
+                    matched_emails.append(user.email)
+                    found = True
+                    break
+
+            if not found:
+                not_found_codes.append(code)
+
+        # Remove duplicates while preserving order
+        matched_emails = list(dict.fromkeys(matched_emails))
+
+        result = {
+            "matched": matched_emails,
+            "not_found": not_found_codes,
+            "matched_count": len(matched_emails),
+            "not_found_count": len(not_found_codes),
+            "total_codes": len(employee_codes)
+        }
+
+        logger.info(f"Matched {len(matched_emails)}/{len(employee_codes)} employee codes")
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Employee code validation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
+
+
+# ==========================================
 # USER CRUD BY EMAIL (MOVED TO END TO AVOID SHADOWING)
 # ==========================================
 
@@ -719,7 +1032,7 @@ async def update_user(
     Updates an existing user's privileges, role, and store assignment.
     """
     service = UserService(db)
-    
+
     updates = {}
     if "name" in data:
         updates["name"] = data["name"]
@@ -733,7 +1046,9 @@ async def update_user(
         updates["privileges"] = data["privileges"]
     if "has_admin_access" in data:
         updates["has_admin_access"] = data["has_admin_access"]
-    
+    if "password" in data and data["password"]:
+        updates["password"] = data["password"]
+
     try:
         user = service.update_user(email, updates)
         logger.info(f"User updated: {email}")
@@ -776,7 +1091,7 @@ async def bulk_delete_users(
     emails = data.get("emails", [])
     if not emails:
         raise HTTPException(status_code=400, detail="No emails provided")
-        
+
     service = UserService(db)
     try:
         result = service.bulk_delete_users(emails)

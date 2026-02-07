@@ -401,6 +401,19 @@ async def general_exception_handler(request: Request, exc: Exception):
     )
 
 
+from fastapi.exceptions import RequestValidationError
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle validation errors with detailed logging."""
+    error_details = exc.errors()
+    logger.error(f"Validation error for {request.url}: {error_details}")
+    return JSONResponse(
+        status_code=422,
+        content={"detail": error_details}
+    )
+
+
 # ==========================================
 # RUN APPLICATION
 # ==========================================

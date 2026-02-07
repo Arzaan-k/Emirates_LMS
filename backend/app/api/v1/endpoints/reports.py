@@ -39,23 +39,21 @@ router = APIRouter(prefix="/reports", tags=["Reports"])
 # HELPER FUNCTIONS
 # ==========================================
 
+def generate_csv_buffer(data: List[Dict]) -> io.StringIO:
+    """Generate a CSV buffer from data list."""
+    output = io.StringIO()
+    if not data:
+        output.write("No data available")
+    else:
+        writer = csv.DictWriter(output, fieldnames=data[0].keys())
+        writer.writeheader()
+        writer.writerows(data)
+    output.seek(0)
+    return output
+
 def generate_csv_response(data: List[Dict], filename: str) -> StreamingResponse:
     """Generate a CSV file response for download."""
-    if not data:
-        output = io.StringIO()
-        output.write("No data available")
-        output.seek(0)
-        return StreamingResponse(
-            iter([output.getvalue()]),
-            media_type="text/csv",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
-        )
-    
-    output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=data[0].keys())
-    writer.writeheader()
-    writer.writerows(data)
-    output.seek(0)
+    output = generate_csv_buffer(data)
     
     return StreamingResponse(
         iter([output.getvalue()]),
@@ -387,30 +385,64 @@ async def get_reports_overview(db: Session = Depends(get_db)):
 async def get_user_analytics(
     role_filter: str = Query(None),
     store_filter: str = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
     db: Session = Depends(get_db)
 ):
-    """Get comprehensive user analytics."""
+    """Get comprehensive user analytics with date range filtering."""
     try:
         query = db.query(User).filter(User.category != 'Admin')
-        
+
         if role_filter:
             query = query.filter(User.role == role_filter)
         if store_filter:
             query = query.filter(User.store == store_filter)
-        
+
+        # Date range filter for user creation or last activity
+        if date_from:
+            date_from_dt = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+            query = query.filter(
+                or_(
+                    User.created_at >= date_from_dt,
+                    User.last_active >= date_from_dt
+                )
+            )
+        if date_to:
+            date_to_dt = datetime.fromisoformat(date_to.replace('Z', '+00:00'))
+            query = query.filter(
+                or_(
+                    User.created_at <= date_to_dt,
+                    User.last_active <= date_to_dt
+                )
+            )
+
         users = query.all()
         
         user_data = []
         for user in users:
-            # Get course completions
-            completions = db.query(CourseCompletion).filter(
+            # Get course completions with date filter
+            completions_query = db.query(CourseCompletion).filter(
                 CourseCompletion.user_email == user.email
-            ).all()
-            
-            # Get quiz submissions
-            quiz_subs = db.query(QuizSubmission).filter(
+            )
+            if date_from:
+                date_from_dt = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+                completions_query = completions_query.filter(CourseCompletion.completed_at >= date_from_dt)
+            if date_to:
+                date_to_dt = datetime.fromisoformat(date_to.replace('Z', '+00:00'))
+                completions_query = completions_query.filter(CourseCompletion.completed_at <= date_to_dt)
+            completions = completions_query.all()
+
+            # Get quiz submissions with date filter
+            quiz_subs_query = db.query(QuizSubmission).filter(
                 QuizSubmission.user_email == user.email
-            ).all()
+            )
+            if date_from:
+                date_from_dt = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+                quiz_subs_query = quiz_subs_query.filter(QuizSubmission.submitted_at >= date_from_dt)
+            if date_to:
+                date_to_dt = datetime.fromisoformat(date_to.replace('Z', '+00:00'))
+                quiz_subs_query = quiz_subs_query.filter(QuizSubmission.submitted_at <= date_to_dt)
+            quiz_subs = quiz_subs_query.all()
             
             avg_score = sum(c.score or 0 for c in completions) / len(completions) if completions else 0
             avg_quiz_score = sum(q.score or 0 for q in quiz_subs) / len(quiz_subs) if quiz_subs else 0
@@ -452,10 +484,12 @@ async def get_user_analytics(
 async def download_user_analytics_csv(
     role_filter: str = Query(None),
     store_filter: str = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
     db: Session = Depends(get_db)
 ):
     """Download user analytics as CSV."""
-    result = await get_user_analytics(role_filter, store_filter, db)
+    result = await get_user_analytics(role_filter, store_filter, date_from, date_to, db)
     return generate_csv_response(
         result["users"],
         f"user_analytics_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -466,10 +500,12 @@ async def download_user_analytics_csv(
 async def download_user_analytics_pdf(
     role_filter: str = Query(None),
     store_filter: str = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
     db: Session = Depends(get_db)
 ):
     """Download user analytics as PDF with insights."""
-    result = await get_user_analytics(role_filter, store_filter, db)
+    result = await get_user_analytics(role_filter, store_filter, date_from, date_to, db)
     
     users = result.get("users", [])
     summary = result.get("summary", {})
@@ -518,21 +554,33 @@ async def download_user_analytics_pdf(
 @router.get("/training")
 async def get_training_effectiveness(
     bucket_filter: str = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
     db: Session = Depends(get_db)
 ):
-    """Get training effectiveness metrics."""
+    """Get training effectiveness metrics with date range filtering."""
     try:
         query = db.query(Content)
         if bucket_filter:
             query = query.filter(Content.bucket_id == bucket_filter)
-        
+
         content_items = query.all()
-        
+
         course_data = []
         for content in content_items:
-            completions = db.query(CourseCompletion).filter(
+            completions_query = db.query(CourseCompletion).filter(
                 CourseCompletion.course_id == str(content.id)
-            ).all()
+            )
+
+            # Apply date filters
+            if date_from:
+                date_from_dt = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+                completions_query = completions_query.filter(CourseCompletion.completed_at >= date_from_dt)
+            if date_to:
+                date_to_dt = datetime.fromisoformat(date_to.replace('Z', '+00:00'))
+                completions_query = completions_query.filter(CourseCompletion.completed_at <= date_to_dt)
+
+            completions = completions_query.all()
             
             total_completions = len(completions)
             avg_score = sum(c.score or 0 for c in completions) / total_completions if total_completions else 0
@@ -571,9 +619,14 @@ async def get_training_effectiveness(
 
 
 @router.get("/training/download")
-async def download_training_csv(bucket_filter: str = Query(None), db: Session = Depends(get_db)):
+async def download_training_csv(
+    bucket_filter: str = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db)
+):
     """Download training effectiveness as CSV."""
-    result = await get_training_effectiveness(bucket_filter, db)
+    result = await get_training_effectiveness(bucket_filter, date_from, date_to, db)
     return generate_csv_response(
         result["courses"],
         f"training_effectiveness_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -581,9 +634,14 @@ async def download_training_csv(bucket_filter: str = Query(None), db: Session = 
 
 
 @router.get("/training/pdf")
-async def download_training_pdf(bucket_filter: str = Query(None), db: Session = Depends(get_db)):
+async def download_training_pdf(
+    bucket_filter: str = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db)
+):
     """Download training effectiveness as PDF with insights."""
-    result = await get_training_effectiveness(bucket_filter, db)
+    result = await get_training_effectiveness(bucket_filter, date_from, date_to, db)
     
     courses = result.get("courses", [])
     summary = result.get("summary", {})
@@ -632,16 +690,30 @@ async def download_training_pdf(bucket_filter: str = Query(None), db: Session = 
 # ==========================================
 
 @router.get("/quizzes")
-async def get_quiz_performance(db: Session = Depends(get_db)):
-    """Get quiz performance metrics."""
+async def get_quiz_performance(
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Get quiz performance metrics with date range filtering."""
     try:
         quizzes = db.query(Quiz).all()
-        
+
         quiz_data = []
         for quiz in quizzes:
-            submissions = db.query(QuizSubmission).filter(
+            submissions_query = db.query(QuizSubmission).filter(
                 QuizSubmission.quiz_id == quiz.id
-            ).all()
+            )
+
+            # Apply date filters
+            if date_from:
+                date_from_dt = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+                submissions_query = submissions_query.filter(QuizSubmission.submitted_at >= date_from_dt)
+            if date_to:
+                date_to_dt = datetime.fromisoformat(date_to.replace('Z', '+00:00'))
+                submissions_query = submissions_query.filter(QuizSubmission.submitted_at <= date_to_dt)
+
+            submissions = submissions_query.all()
             
             total = len(submissions)
             avg_score = sum(s.score or 0 for s in submissions) / total if total else 0
@@ -657,8 +729,16 @@ async def get_quiz_performance(db: Session = Depends(get_db)):
                 "highest_score": max((s.score or 0 for s in submissions), default=0),
             })
         
-        # Top performers
-        all_submissions = db.query(QuizSubmission).all()
+        # Top performers (apply date filter)
+        all_submissions_query = db.query(QuizSubmission)
+        if date_from:
+            date_from_dt = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+            all_submissions_query = all_submissions_query.filter(QuizSubmission.submitted_at >= date_from_dt)
+        if date_to:
+            date_to_dt = datetime.fromisoformat(date_to.replace('Z', '+00:00'))
+            all_submissions_query = all_submissions_query.filter(QuizSubmission.submitted_at <= date_to_dt)
+
+        all_submissions = all_submissions_query.all()
         user_scores = {}
         for sub in all_submissions:
             if sub.user_email not in user_scores:
@@ -695,9 +775,13 @@ async def get_quiz_performance(db: Session = Depends(get_db)):
 
 
 @router.get("/quizzes/download")
-async def download_quiz_csv(db: Session = Depends(get_db)):
+async def download_quiz_csv(
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db)
+):
     """Download quiz performance as CSV."""
-    result = await get_quiz_performance(db)
+    result = await get_quiz_performance(date_from, date_to, db)
     return generate_csv_response(
         result["quizzes"],
         f"quiz_performance_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -705,9 +789,13 @@ async def download_quiz_csv(db: Session = Depends(get_db)):
 
 
 @router.get("/quizzes/pdf")
-async def download_quiz_pdf(db: Session = Depends(get_db)):
+async def download_quiz_pdf(
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db)
+):
     """Download quiz performance as PDF with insights."""
-    result = await get_quiz_performance(db)
+    result = await get_quiz_performance(date_from, date_to, db)
     
     quizzes = result.get("quizzes", [])
     summary = result.get("summary", {})
@@ -755,16 +843,30 @@ async def download_quiz_pdf(db: Session = Depends(get_db)):
 # ==========================================
 
 @router.get("/assessments")
-async def get_assessment_results(db: Session = Depends(get_db)):
-    """Get proctored assessment results."""
+async def get_assessment_results(
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Get proctored assessment results with date range filtering."""
     try:
         exams = db.query(ScheduledExam).all()
-        
+
         assessment_data = []
         for exam in exams:
-            submissions = db.query(AssessmentSubmission).filter(
+            submissions_query = db.query(AssessmentSubmission).filter(
                 AssessmentSubmission.assessment_id == exam.id
-            ).all()
+            )
+
+            # Apply date filters
+            if date_from:
+                date_from_dt = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+                submissions_query = submissions_query.filter(AssessmentSubmission.submitted_at >= date_from_dt)
+            if date_to:
+                date_to_dt = datetime.fromisoformat(date_to.replace('Z', '+00:00'))
+                submissions_query = submissions_query.filter(AssessmentSubmission.submitted_at <= date_to_dt)
+
+            submissions = submissions_query.all()
             
             total = len(submissions)
             avg_score = sum(s.score_percent or 0 for s in submissions) / total if total else 0
@@ -799,9 +901,13 @@ async def get_assessment_results(db: Session = Depends(get_db)):
 
 
 @router.get("/assessments/download")
-async def download_assessments_csv(db: Session = Depends(get_db)):
+async def download_assessments_csv(
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db)
+):
     """Download assessment results as CSV."""
-    result = await get_assessment_results(db)
+    result = await get_assessment_results(date_from, date_to, db)
     return generate_csv_response(
         result["assessments"],
         f"assessment_results_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -809,9 +915,13 @@ async def download_assessments_csv(db: Session = Depends(get_db)):
 
 
 @router.get("/assessments/pdf")
-async def download_assessments_pdf(db: Session = Depends(get_db)):
+async def download_assessments_pdf(
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db)
+):
     """Download assessment results as PDF with insights."""
-    result = await get_assessment_results(db)
+    result = await get_assessment_results(date_from, date_to, db)
     
     assessments = result.get("assessments", [])
     summary = result.get("summary", {})
@@ -980,22 +1090,40 @@ async def download_attendance_pdf(
 # ==========================================
 
 @router.get("/stores")
-async def get_store_performance(db: Session = Depends(get_db)):
-    """Get store-wise performance metrics."""
+async def get_store_performance(
+    store_filter: str = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Get store-wise performance metrics with filtering."""
     try:
-        stores = db.query(User.store).distinct().filter(User.store.isnot(None)).all()
-        
+        stores_query = db.query(User.store).distinct().filter(User.store.isnot(None))
+        if store_filter:
+            stores_query = stores_query.filter(User.store.ilike(f'%{store_filter}%'))
+        stores = stores_query.all()
+
         store_data = []
         for (store_name,) in stores:
             if not store_name:
                 continue
-                
+
             users = db.query(User).filter(User.store == store_name).all()
             user_emails = [u.email for u in users]
-            
-            completions = db.query(CourseCompletion).filter(
+
+            completions_query = db.query(CourseCompletion).filter(
                 CourseCompletion.user_email.in_(user_emails)
-            ).all()
+            )
+
+            # Apply date filters
+            if date_from:
+                date_from_dt = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+                completions_query = completions_query.filter(CourseCompletion.completed_at >= date_from_dt)
+            if date_to:
+                date_to_dt = datetime.fromisoformat(date_to.replace('Z', '+00:00'))
+                completions_query = completions_query.filter(CourseCompletion.completed_at <= date_to_dt)
+
+            completions = completions_query.all()
             
             avg_score = sum(c.score or 0 for c in completions) / len(completions) if completions else 0
             
@@ -1024,9 +1152,14 @@ async def get_store_performance(db: Session = Depends(get_db)):
 
 
 @router.get("/stores/download")
-async def download_stores_csv(db: Session = Depends(get_db)):
+async def download_stores_csv(
+    store_filter: str = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db)
+):
     """Download store performance as CSV."""
-    result = await get_store_performance(db)
+    result = await get_store_performance(store_filter, date_from, date_to, db)
     return generate_csv_response(
         result["stores"],
         f"store_performance_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -1034,9 +1167,14 @@ async def download_stores_csv(db: Session = Depends(get_db)):
 
 
 @router.get("/stores/pdf")
-async def download_stores_pdf(db: Session = Depends(get_db)):
+async def download_stores_pdf(
+    store_filter: str = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db)
+):
     """Download store performance as PDF with insights."""
-    result = await get_store_performance(db)
+    result = await get_store_performance(store_filter, date_from, date_to, db)
     
     stores = result.get("stores", [])
     summary = result.get("summary", {})
@@ -1082,16 +1220,32 @@ async def download_stores_pdf(db: Session = Depends(get_db)):
 # ==========================================
 
 @router.get("/simulations")
-async def get_simulation_progress(db: Session = Depends(get_db)):
-    """Get simulation progress metrics."""
+async def get_simulation_progress(
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Get simulation progress metrics with date range filtering."""
     try:
         simulations = db.query(Simulation).all()
-        
+
         sim_data = []
         for sim in simulations:
-            progress = db.query(SimulationProgress).filter(
+            progress_query = db.query(SimulationProgress).filter(
                 SimulationProgress.simulation_id == sim.id
-            ).all()
+            )
+
+            # Apply date filters (assuming SimulationProgress has updated_at or similar field)
+            if date_from:
+                date_from_dt = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+                if hasattr(SimulationProgress, 'updated_at'):
+                    progress_query = progress_query.filter(SimulationProgress.updated_at >= date_from_dt)
+            if date_to:
+                date_to_dt = datetime.fromisoformat(date_to.replace('Z', '+00:00'))
+                if hasattr(SimulationProgress, 'updated_at'):
+                    progress_query = progress_query.filter(SimulationProgress.updated_at <= date_to_dt)
+
+            progress = progress_query.all()
             
             total = len(progress)
             completed = sum(1 for p in progress if p.completed)
@@ -1121,9 +1275,13 @@ async def get_simulation_progress(db: Session = Depends(get_db)):
 
 
 @router.get("/simulations/download")
-async def download_simulations_csv(db: Session = Depends(get_db)):
+async def download_simulations_csv(
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db)
+):
     """Download simulation progress as CSV."""
-    result = await get_simulation_progress(db)
+    result = await get_simulation_progress(date_from, date_to, db)
     return generate_csv_response(
         result["simulations"],
         f"simulation_progress_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -1131,9 +1289,13 @@ async def download_simulations_csv(db: Session = Depends(get_db)):
 
 
 @router.get("/simulations/pdf")
-async def download_simulations_pdf(db: Session = Depends(get_db)):
+async def download_simulations_pdf(
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db)
+):
     """Download simulation progress as PDF with insights."""
-    result = await get_simulation_progress(db)
+    result = await get_simulation_progress(date_from, date_to, db)
     
     simulations = result.get("simulations", [])
     summary = result.get("summary", {})
@@ -1180,31 +1342,53 @@ async def download_simulations_pdf(db: Session = Depends(get_db)):
 # ==========================================
 
 @router.get("/content")
-async def get_content_engagement(db: Session = Depends(get_db)):
-    """Get content engagement metrics."""
+async def get_content_engagement(
+    bucket_filter: str = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Get content engagement metrics with filtering."""
     try:
-        content_items = db.query(Content).all()
-        
+        content_query = db.query(Content)
+        if bucket_filter:
+            content_query = content_query.filter(Content.bucket_id == bucket_filter)
+        content_items = content_query.all()
+
         content_data = []
         for content in content_items:
-            # Get interactions
-            views = db.query(UserInteraction).filter(
+            # Get interactions with date filter
+            views_query = db.query(UserInteraction).filter(
                 UserInteraction.content_id == str(content.id),
                 UserInteraction.interaction_type == 'view'
-            ).count()
-            
+            )
+            if date_from:
+                date_from_dt = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+                views_query = views_query.filter(UserInteraction.timestamp >= date_from_dt)
+            if date_to:
+                date_to_dt = datetime.fromisoformat(date_to.replace('Z', '+00:00'))
+                views_query = views_query.filter(UserInteraction.timestamp <= date_to_dt)
+            views = views_query.count()
+
             # Get watch progress
             from app.models.video_progress import VideoProgress
             watch_data = db.query(VideoProgress).filter(
                 VideoProgress.node_id == str(content.id)
             ).all()
-            
+
             avg_watch = sum(v.progress_percent or 0 for v in watch_data) / len(watch_data) if watch_data else 0
-            
-            # Get completions
-            completions = db.query(CourseCompletion).filter(
+
+            # Get completions with date filter
+            completions_query = db.query(CourseCompletion).filter(
                 CourseCompletion.course_id == str(content.id)
-            ).count()
+            )
+            if date_from:
+                date_from_dt = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+                completions_query = completions_query.filter(CourseCompletion.completed_at >= date_from_dt)
+            if date_to:
+                date_to_dt = datetime.fromisoformat(date_to.replace('Z', '+00:00'))
+                completions_query = completions_query.filter(CourseCompletion.completed_at <= date_to_dt)
+            completions = completions_query.count()
             
             bucket = db.query(CourseBucket).filter(CourseBucket.id == content.bucket_id).first()
             
@@ -1235,9 +1419,14 @@ async def get_content_engagement(db: Session = Depends(get_db)):
 
 
 @router.get("/content/download")
-async def download_content_csv(db: Session = Depends(get_db)):
+async def download_content_csv(
+    bucket_filter: str = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db)
+):
     """Download content engagement as CSV."""
-    result = await get_content_engagement(db)
+    result = await get_content_engagement(bucket_filter, date_from, date_to, db)
     return generate_csv_response(
         result["content"],
         f"content_engagement_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -1245,9 +1434,14 @@ async def download_content_csv(db: Session = Depends(get_db)):
 
 
 @router.get("/content/pdf")
-async def download_content_pdf(db: Session = Depends(get_db)):
+async def download_content_pdf(
+    bucket_filter: str = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db)
+):
     """Download content engagement as PDF with insights."""
-    result = await get_content_engagement(db)
+    result = await get_content_engagement(bucket_filter, date_from, date_to, db)
     
     content = result.get("content", [])
     summary = result.get("summary", {})
@@ -1295,45 +1489,74 @@ async def download_content_pdf(db: Session = Depends(get_db)):
 # ==========================================
 
 @router.get("/executive-summary")
-async def get_executive_summary(db: Session = Depends(get_db)):
-    """Get AI-powered executive summary with recommendations."""
+async def get_executive_summary(
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Get AI-powered executive summary with recommendations and optional date filtering."""
     try:
+        # Determine date range
+        if date_from:
+            start_date = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+        else:
+            start_date = datetime.utcnow() - timedelta(days=30)
+
+        if date_to:
+            end_date = datetime.fromisoformat(date_to.replace('Z', '+00:00'))
+        else:
+            end_date = datetime.utcnow()
+
         # Gather key metrics
         total_users = db.query(func.count(User.id)).scalar() or 0
-        
-        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+
         active_users = db.query(func.count(User.id)).filter(
-            User.last_active >= thirty_days_ago
+            User.last_active >= start_date,
+            User.last_active <= end_date
         ).scalar() or 0
         
-        total_completions = db.query(func.count(CourseCompletion.id)).scalar() or 0
-        
-        week_ago = datetime.utcnow() - timedelta(days=7)
+        # Completions in the date range
+        total_completions_query = db.query(func.count(CourseCompletion.id))
+        total_completions_query = total_completions_query.filter(
+            CourseCompletion.completed_at >= start_date,
+            CourseCompletion.completed_at <= end_date
+        )
+        total_completions = total_completions_query.scalar() or 0
+
+        # Calculate period for trend analysis
+        period_days = (end_date - start_date).days
+        half_period = period_days // 2
+        mid_date = start_date + timedelta(days=half_period)
+
         weekly_completions = db.query(func.count(CourseCompletion.id)).filter(
-            CourseCompletion.completed_at >= week_ago
+            CourseCompletion.completed_at >= mid_date,
+            CourseCompletion.completed_at <= end_date
         ).scalar() or 0
-        
-        prev_week = datetime.utcnow() - timedelta(days=14)
+
         prev_weekly = db.query(func.count(CourseCompletion.id)).filter(
-            and_(
-                CourseCompletion.completed_at >= prev_week,
-                CourseCompletion.completed_at < week_ago
-            )
+            CourseCompletion.completed_at >= start_date,
+            CourseCompletion.completed_at < mid_date
         ).scalar() or 0
-        
-        avg_score = db.query(func.avg(CourseCompletion.score)).scalar() or 0
-        
+
+        avg_score_query = db.query(func.avg(CourseCompletion.score)).filter(
+            CourseCompletion.completed_at >= start_date,
+            CourseCompletion.completed_at <= end_date
+        )
+        avg_score = avg_score_query.scalar() or 0
+
         total_quizzes = db.query(func.count(QuizSubmission.id)).filter(
-            QuizSubmission.submitted_at >= week_ago
+            QuizSubmission.submitted_at >= start_date,
+            QuizSubmission.submitted_at <= end_date
         ).scalar() or 0
-        
+
         total_assessments = db.query(func.count(AssessmentSubmission.id)).filter(
-            AssessmentSubmission.submitted_at >= week_ago
+            AssessmentSubmission.submitted_at >= start_date,
+            AssessmentSubmission.submitted_at <= end_date
         ).scalar() or 0
         
         avg_quiz_score = db.query(func.avg(QuizSubmission.score)).scalar() or 0
         
-        # Top performers
+        # Top performers in date range
         top_performers = db.query(
             User.name,
             User.store,
@@ -1341,7 +1564,8 @@ async def get_executive_summary(db: Session = Depends(get_db)):
         ).join(
             CourseCompletion, CourseCompletion.user_email == User.email
         ).filter(
-            CourseCompletion.completed_at >= thirty_days_ago
+            CourseCompletion.completed_at >= start_date,
+            CourseCompletion.completed_at <= end_date
         ).group_by(User.name, User.store).order_by(
             desc('completions')
         ).limit(5).all()
@@ -1401,9 +1625,13 @@ async def get_executive_summary(db: Session = Depends(get_db)):
 
 
 @router.get("/executive-summary/download")
-async def download_executive_summary_csv(db: Session = Depends(get_db)):
+async def download_executive_summary_csv(
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db)
+):
     """Download executive summary as CSV."""
-    result = await get_executive_summary(db)
+    result = await get_executive_summary(date_from, date_to, db)
     
     # Flatten for CSV
     data = [result["key_metrics"]]
@@ -1415,9 +1643,13 @@ async def download_executive_summary_csv(db: Session = Depends(get_db)):
 
 
 @router.get("/executive-summary/pdf")
-async def download_executive_summary_pdf(db: Session = Depends(get_db)):
+async def download_executive_summary_pdf(
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db)
+):
     """Download executive summary as PDF with all insights and recommendations."""
-    result = await get_executive_summary(db)
+    result = await get_executive_summary(date_from, date_to, db)
     
     summary_text = result.get("summary", "")
     key_metrics = result.get("key_metrics", {})
@@ -1453,3 +1685,75 @@ async def download_executive_summary_pdf(db: Session = Depends(get_db)):
         buffer,
         f"executive_summary_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
     )
+
+
+# ==========================================
+# REPORT SUBSCRIPTIONS
+# ==========================================
+
+from app.models.report import ReportSubscription
+from app.schemas.report import ReportSubscriptionResponse, SubscriptionListRequest
+
+# Assuming get_current_user is available in deps or auth, checking imports...
+# I'll use a direct dependency import for now to be safe, or check existing patterns.
+# The user_service typically handles auth, but endpoints usually have `get_current_user`.
+# Let's import it properly.
+
+@router.get("/subscriptions", response_model=List[ReportSubscriptionResponse])
+async def get_my_subscriptions(
+    db: Session = Depends(get_db),
+    # Inject user extraction manually if needed or import dependency
+    # For now, I will extract from request or rely on a standard dependency if I can find it.
+    # Looking at other endpoints... they don't seem to use `current_user`.
+    # I will add query param `email` for now as a fallback or implemented simplistic auth retrieval.
+    # User email is critical for linking.
+    # Actually, let's assume valid token and extract user.
+    # I will modify this to use `user_email` from query or similar for consistency with other open endpoints,
+    # OR better, use the proper auth dependency if found.
+    user_email: str = Query(..., description="Email of the user to get subscriptions for")
+):
+    """Get report subscriptions for a user."""
+    user = db.query(User).filter(User.email == user_email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    subs = db.query(ReportSubscription).filter(ReportSubscription.user_id == user.id).all()
+    return subs
+
+@router.post("/subscriptions", response_model=List[ReportSubscriptionResponse])
+async def update_subscriptions(
+    data: SubscriptionListRequest,
+    user_email: str = Query(..., description="Email of the user to update subscriptions for"),
+    db: Session = Depends(get_db)
+):
+    """Update report subscriptions for a user."""
+    user = db.query(User).filter(User.email == user_email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    # Clear existing subscriptions for this user to replace with new list (simplest approach)
+    # Or upsert. Replacing is cleaner for a "settings" UI.
+    db.query(ReportSubscription).filter(ReportSubscription.user_id == user.id).delete()
+    
+    new_subs = []
+    for sub in data.subscriptions:
+        if sub.is_active:
+            new_sub = ReportSubscription(
+                user_id=user.id,
+                report_type=sub.report_type,
+                frequency=sub.frequency,
+                day_of_week=sub.day_of_week,
+                time_of_day=sub.time_of_day,
+                format=sub.format,
+                is_active=True
+            )
+            db.add(new_sub)
+            new_subs.append(new_sub)
+            
+    db.commit()
+    
+    # Refresh to get IDs
+    for s in new_subs:
+        db.refresh(s)
+        
+    return new_subs

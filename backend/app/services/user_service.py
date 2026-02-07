@@ -6,7 +6,8 @@ Business logic for user management, authentication, and authorization
 import uuid
 import logging
 from typing import Any, Dict, List, Optional, Set
-from datetime import datetime
+from datetime import datetime, timedelta
+import secrets
 
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
@@ -136,8 +137,7 @@ class UserService:
         if not user:
             logger.warning(f"Login attempt for non-existent user: {email}")
             raise AuthenticationError(
-                detail="Invalid email or password",
-                error_code="INVALID_CREDENTIALS"
+                detail="Invalid Credentials"
             )
 
         # Verify password
@@ -148,15 +148,13 @@ class UserService:
             if not verify_password(password, stored_password):
                 logger.warning(f"Failed login attempt for user: {email}")
                 raise AuthenticationError(
-                    detail="Invalid email or password",
-                    error_code="INVALID_CREDENTIALS"
+                    detail="User id /password incorrect"
                 )
         else:
             # Legacy plain text password - migrate to hash
             if password != stored_password:
                 raise AuthenticationError(
-                    detail="Invalid email or password",
-                    error_code="INVALID_CREDENTIALS"
+                    detail="User id /password incorrect"
                 )
             # Hash and save the password
             user.password = hash_password(password)
@@ -257,6 +255,16 @@ class UserService:
         user_data["email"] = email
         user_data["password"] = hash_password(password)
 
+        # Check for Super Admin privileges (Role OR Category)
+        role = user_data.get("role", "").strip()
+        category = user_data.get("category", "").strip()
+        
+        if role == "Super Admin" or category == "Super Admin":
+            user_data["is_superadmin"] = True
+            user_data["has_admin_access"] = True
+            user_data["role"] = "Super Admin" # Enforce role consistency
+            logger.info(f"Elevating privileges for new user {email} (Role: {role}, Category: {category})")
+            
         # Set defaults
         user_data.setdefault("role", "Waffler")
         user_data.setdefault("category", "Employee")
@@ -456,6 +464,88 @@ class UserService:
     # ===========================================
     # PASSWORD MANAGEMENT
     # ===========================================
+
+    def validate_password_strength(self, password: str):
+        """
+        Validate password strength.
+        Rules:
+        - At least 8 chars
+        - At least one uppercase
+        - At least one lowercase
+        - At least one digit
+        - At least one special char
+        """
+        import re
+        if len(password) < 8:
+            raise ValidationError(detail="Password must be at least 8 characters long", field="new_password")
+        if not re.search(r"[A-Z]", password):
+            raise ValidationError(detail="Password must contain at least one uppercase letter", field="new_password")
+        if not re.search(r"[a-z]", password):
+            raise ValidationError(detail="Password must contain at least one lowercase letter", field="new_password")
+        if not re.search(r"\d", password):
+            raise ValidationError(detail="Password must contain at least one digit", field="new_password")
+        if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):
+            raise ValidationError(detail="Password must contain at least one special character", field="new_password")
+
+    def generate_password_reset_token(self, email: str) -> str:
+        """
+        Generate and save a password reset token.
+        
+        Args:
+            email: User email
+            
+        Returns:
+            The generated token (OTP)
+        """
+        user = self.get_user_by_email(email)
+        
+        # Generate 6-digit OTP
+        token = secrets.randbelow(1000000)
+        token = f"{token:06d}"
+        
+        # Save to DB with expiration (15 minutes)
+        user.reset_token = token
+        user.reset_token_expires = datetime.utcnow() + timedelta(minutes=15)
+        
+        self.db.commit()
+        return token
+
+    def reset_password_with_token(self, email: str, token: str, new_password: str) -> bool:
+        """
+        Reset password using a valid token.
+        
+        Args:
+            email: User email
+            token: The OTP token
+            new_password: New password
+            
+        Returns:
+            True if successful
+            
+        Raises:
+            ValidationError: If token is invalid or expired
+        """
+        user = self.get_user_by_email(email)
+        
+        if not user.reset_token or user.reset_token != token:
+            raise ValidationError(detail="Invalid reset code", field="token")
+            
+        if not user.reset_token_expires or user.reset_token_expires < datetime.utcnow():
+            raise ValidationError(detail="Reset code has expired", field="token")
+
+        # Validate password strength
+        self.validate_password_strength(new_password)
+            
+        # Update password
+        user.password = hash_password(new_password)
+        
+        # Clear token
+        user.reset_token = None
+        user.reset_token_expires = None
+        
+        self.db.commit()
+        logger.info(f"Password reset successfully for user: {email}")
+        return True
 
     def change_password(
         self,

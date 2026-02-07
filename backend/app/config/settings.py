@@ -115,6 +115,17 @@ class Settings(BaseSettings):
     )
 
     # ===========================================
+    # EMAIL (SMTP)
+    # ===========================================
+    SMTP_SERVER: Optional[str] = Field(default="smtp.gmail.com", env="SMTP_SERVER")
+    SMTP_PORT: int = Field(default=587, env="SMTP_PORT")
+    SMTP_USERNAME: Optional[str] = Field(default=None, env="SMTP_USERNAME")
+    SMTP_PASSWORD: Optional[str] = Field(default=None, env="SMTP_PASSWORD")
+    EMAIL_FROM: str = Field(default="noreply@belgianwaffle.com", env="EMAIL_FROM")
+    EMAIL_FROM_NAME: str = Field(default="BWC LMS Support", env="EMAIL_FROM_NAME")
+    USE_TLS: bool = Field(default=True, env="USE_TLS")
+
+    # ===========================================
     # REDIS (Optional - for caching/token blacklist)
     # ===========================================
     REDIS_URL: Optional[str] = Field(default=None, env="REDIS_URL")

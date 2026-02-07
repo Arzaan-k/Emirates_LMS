@@ -284,7 +284,7 @@ async def bulk_folder_upload(
     background_tasks: BackgroundTasks,
     learning_path_type: str = Form("career_progression"),
     root_bucket_name: str = Form(...),
-    files: List[UploadFile] = File(...),
+    files: List[UploadFile] = File(default=[]),
     file_paths: str = Form(...),  # JSON string of relative paths
     db: Session = Depends(get_db)
 ):
@@ -306,6 +306,10 @@ async def bulk_folder_upload(
     cdn_service = CDNService()
 
     try:
+        if not files:
+            logger.error(f"Bulk upload failed: No files received. Content-Type: {type(files)}")
+            raise HTTPException(status_code=400, detail="No files provided in request")
+
         # Parse file paths
         paths_list = json.loads(file_paths)
 
@@ -1064,29 +1068,107 @@ async def update_content_progress(
 @router.get("/library/all")
 async def get_content_library(db: Session = Depends(get_db)):
     """
-    Get content grouped by bucket/category for ContentLibraryModal.
+    Get content grouped by bucket/category with hierarchical folder structure.
+    Returns nested tree matching the folder upload hierarchy.
     """
+    from app.models.content import CourseBucket
+
     service = ContentService(db)
-    
+
     # Get all content
     content_list = service.get_all_content()
-    
-    # Group by bucket
-    grouped = {}
-    for content in content_list:
-        bucket = content.bucket or "Uncategorized"
-        if bucket not in grouped:
-            grouped[bucket] = {
-                "id": content.bucket_id or bucket,
-                "name": bucket,
-                "items": []
-            }
-        
-        grouped[bucket]["items"].append(
+
+    # Get all buckets (folders)
+    all_buckets = db.query(CourseBucket).filter(CourseBucket.is_active == True).all()
+
+    # Build bucket lookup map
+    bucket_map = {bucket.id: bucket for bucket in all_buckets}
+
+    # Helper function to build hierarchical tree
+    def build_bucket_tree(bucket_id):
+        """Recursively build tree structure for a bucket and its children"""
+        bucket = bucket_map.get(bucket_id)
+        if not bucket:
+            return None
+
+        # Get direct content items in this bucket
+        bucket_items = [
             content.to_dict() if hasattr(content, 'to_dict') else dict(content)
-        )
-    
-    return list(grouped.values())
+            for content in content_list
+            if content.bucket_id == bucket_id
+        ]
+
+        # Find child buckets
+        child_buckets = [
+            b for b in all_buckets
+            if b.parent_bucket_id == bucket_id
+        ]
+
+        # Recursively build children
+        children = []
+        for child in child_buckets:
+            child_tree = build_bucket_tree(child.id)
+            if child_tree:
+                children.append(child_tree)
+
+        # Sort children by name
+        children.sort(key=lambda x: x.get('name', '').lower())
+
+        return {
+            "id": bucket.id,
+            "name": bucket.name,
+            "description": bucket.description,
+            "parent_bucket_id": bucket.parent_bucket_id,
+            "folder_path": bucket.folder_path,
+            "color": bucket.color,
+            "icon": bucket.icon,
+            "order_index": bucket.order_index,
+            "items": bucket_items,
+            "children": children,  # Nested child folders
+            "has_children": len(children) > 0,
+            "item_count": len(bucket_items),
+            "total_count": len(bucket_items) + sum(child.get('total_count', 0) for child in children)
+        }
+
+    # Find root buckets (no parent)
+    root_buckets = [b for b in all_buckets if not b.parent_bucket_id]
+
+    # Build tree for each root bucket
+    result = []
+    for root in root_buckets:
+        tree = build_bucket_tree(root.id)
+        if tree:
+            result.append(tree)
+
+    # Sort root buckets by order_index then name
+    result.sort(key=lambda x: (x.get('order_index', 0), x.get('name', '').lower()))
+
+    # Add uncategorized items (content without bucket)
+    uncategorized_items = [
+        content.to_dict() if hasattr(content, 'to_dict') else dict(content)
+        for content in content_list
+        if not content.bucket_id or content.bucket_id not in bucket_map
+    ]
+
+    if uncategorized_items:
+        result.append({
+            "id": "uncategorized",
+            "name": "Uncategorized",
+            "description": "Content without a folder",
+            "parent_bucket_id": None,
+            "folder_path": "Uncategorized",
+            "color": "#9CA3AF",
+            "icon": "folder-outline",
+            "order_index": 9999,
+            "items": uncategorized_items,
+            "children": [],
+            "has_children": False,
+            "item_count": len(uncategorized_items),
+            "total_count": len(uncategorized_items)
+        })
+
+    logger.info(f"Returning {len(result)} root buckets with hierarchical structure")
+    return result
 # ==========================================
 # BACKGROUND TASKS
 # ==========================================
