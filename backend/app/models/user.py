@@ -32,6 +32,8 @@ class User(Base):
     is_superadmin = Column(Boolean, default=False, nullable=True)
     has_admin_access = Column(Boolean, default=False, nullable=True)
     store = Column(String(255), default="Unassigned", nullable=True)
+    is_external = Column(Boolean, default=False, nullable=True)
+    joined_at_level = Column(String(100), nullable=True)  # Level at which external user joined the org
     self_learning_completed = Column(Boolean, default=False, nullable=True)
     profile_data = Column(JSON, default={}, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=True)
@@ -103,6 +105,8 @@ class User(Base):
             "has_admin_access": self.has_admin_access or False,
             "store": self.store,
             "self_learning_completed": self.self_learning_completed or False,
+            "is_external": self.is_external or False,
+            "joined_at_level": self.joined_at_level,
             "profile_data": self.profile_data or {},
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

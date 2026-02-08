@@ -41,6 +41,14 @@ class Content(Base):
     xp = Column(Integer, default=50)
     order_index = Column(Integer, default=0)  # For ordering in learning paths
     extra_data = Column(JSON, default={})
+
+    # Self-Learning Course Settings
+    allow_fast_forward = Column(Boolean, default=True)  # Allow playback speed control
+    enable_feedback = Column(Boolean, default=False)  # Show feedback form after completion
+    enable_certificate = Column(Boolean, default=False)  # Auto-generate certificate on completion
+    scheduled_at = Column(DateTime, nullable=True)  # Scheduled launch date (null = instant/published)
+    is_published = Column(Boolean, default=True)  # Whether course is visible to users
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -88,6 +96,11 @@ class Content(Base):
             "skippable": self.skippable,
             "xp": self.xp,
             "order_index": self.order_index,
+            "allow_fast_forward": self.allow_fast_forward if self.allow_fast_forward is not None else True,
+            "enable_feedback": self.enable_feedback or False,
+            "enable_certificate": self.enable_certificate or False,
+            "scheduled_at": self.scheduled_at.isoformat() if self.scheduled_at else None,
+            "is_published": self.is_published if self.is_published is not None else True,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
@@ -112,6 +125,12 @@ class CourseBucket(Base):
     keywords = Column(JSON, default=list)  # Keywords for matching courses to this category
     order_index = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
+    thumbnail = Column(String(1000))  # Bucket thumbnail/cover image URL
+
+    # Self-Learning Settings
+    is_linear = Column(Boolean, default=False)  # True = sequential, False = random access
+    assigned_users = Column(JSON, default=list)  # Filter: {"emails":[], "roles":[], "stores":[], "categories":[]}
+    
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -139,6 +158,9 @@ class CourseBucket(Base):
             "keywords": self.keywords or [],
             "order_index": self.order_index,
             "is_active": self.is_active,
+            "thumbnail": self.thumbnail,
+            "is_linear": self.is_linear or False,
+            "assigned_users": self.assigned_users or [],
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

@@ -283,6 +283,55 @@ const TeamListScreen = ({ navigation, route }) => {
         }
     };
 
+    const handleToggleExternal = async (user) => {
+        const newExternal = !user.is_external;
+        const confirmMsg = newExternal
+            ? `Mark ${user.name} as an External User? Their learning path will merge all levels up to ${user.role}.`
+            : `Mark ${user.name} as a Normal User? Their learning path will return to standard progression.`;
+
+        if (Platform.OS === 'web') {
+            if (!window.confirm(confirmMsg)) return;
+        }
+
+        // Optimistic update
+        setUsers(prev => prev.map(u =>
+            u.email === user.email
+                ? { ...u, is_external: newExternal, joined_at_level: newExternal ? u.role : null }
+                : u
+        ));
+
+        try {
+            const token = await AsyncStorage.getItem('userToken');
+            const response = await fetch(`${API_URL}/api/v1/users/toggle-external`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    email: user.email,
+                    is_external: newExternal,
+                    joined_at_level: newExternal ? user.role : null,
+                })
+            });
+            const result = await response.json();
+            if (result.status !== 'success') {
+                // Rollback
+                setUsers(prev => prev.map(u =>
+                    u.email === user.email ? { ...u, is_external: user.is_external, joined_at_level: user.joined_at_level } : u
+                ));
+                Alert.alert('Error', result.detail || 'Failed to update external status');
+            }
+        } catch (error) {
+            console.error('Toggle external error:', error);
+            // Rollback
+            setUsers(prev => prev.map(u =>
+                u.email === user.email ? { ...u, is_external: user.is_external, joined_at_level: user.joined_at_level } : u
+            ));
+            Alert.alert('Error', 'Failed to update external status');
+        }
+    };
+
     const getRoleColor = (role) => {
         // First check dynamic colors from API
         if (levelColorMap[role]) {
@@ -349,6 +398,12 @@ const TeamListScreen = ({ navigation, route }) => {
                                     {user.role}
                                 </Text>
                             </View>
+                            {user.is_external && (
+                                <View style={{ backgroundColor: '#FEF3C7', borderColor: '#F59E0B', borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                                    <MaterialCommunityIcons name="account-arrow-right" size={11} color="#B45309" />
+                                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#B45309' }}>EXTERNAL</Text>
+                                </View>
+                            )}
                             {user.store && user.store !== 'Unassigned' && (
                                 <View style={styles.storeBadge}>
                                     <MaterialCommunityIcons name="store" size={12} color="#78350F" />
@@ -361,12 +416,24 @@ const TeamListScreen = ({ navigation, route }) => {
                     <View style={styles.actionsColumn}>
                         <View style={[styles.statusDot, { backgroundColor: user.has_admin_access ? '#10B981' : '#D1D5DB' }]} />
                         {isSuperAdmin && !selectionMode && (
-                            <TouchableOpacity
-                                style={styles.editBtn}
-                                onPress={() => handleEditUser(user)}
-                            >
-                                <Feather name="edit-2" size={16} color="#78350F" />
-                            </TouchableOpacity>
+                            <>
+                                <TouchableOpacity
+                                    style={{ padding: 4, marginBottom: 2 }}
+                                    onPress={() => handleToggleExternal(user)}
+                                >
+                                    <MaterialCommunityIcons
+                                        name={user.is_external ? "account-convert" : "account-arrow-right-outline"}
+                                        size={16}
+                                        color={user.is_external ? '#F59E0B' : '#9CA3AF'}
+                                    />
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.editBtn}
+                                    onPress={() => handleEditUser(user)}
+                                >
+                                    <Feather name="edit-2" size={16} color="#78350F" />
+                                </TouchableOpacity>
+                            </>
                         )}
                     </View>
                 </Animated.View>

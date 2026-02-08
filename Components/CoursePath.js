@@ -522,11 +522,6 @@ export default function CoursePath(props) {
 
                 const pathCourses = learningPathData.courses || [];
 
-                if (learningPathData.is_locked) {
-                    setLevels([]);
-                    return;
-                }
-
                 // Filter & Sort
                 const relevantCourses = pathCourses.filter(c =>
                     c.learning_path_type === 'self_learning' ||
@@ -604,11 +599,6 @@ export default function CoursePath(props) {
             setHierarchy(hierarchyNames);
             setUserProgress(progressData);
 
-            if (learningPathData.is_locked) {
-                setLevels([]);
-                return;
-            }
-
             const pathCourses = learningPathData.courses || [];
             // Merge completions
             const completedIds = new Set(
@@ -625,13 +615,26 @@ export default function CoursePath(props) {
             if (userLevelIdx === -1) userLevelIdx = hierarchyNames.findIndex(h => h.toLowerCase() === userLevel.toLowerCase());
             if (userLevelIdx === -1) userLevelIdx = 0;
 
+            // =========================================================
+            //  EXTERNAL USER: Determine merged level range
+            // =========================================================
+            const isExternalUser = progressData.is_external === true;
+            const joinedAtLevel = progressData.joined_at_level || null;
+            let mergedLevelEndIdx = -1; // Index up to which levels are merged (inclusive)
+            if (isExternalUser && joinedAtLevel) {
+                mergedLevelEndIdx = hierarchyNames.indexOf(joinedAtLevel);
+                if (mergedLevelEndIdx === -1) {
+                    mergedLevelEndIdx = hierarchyNames.findIndex(h => h.toLowerCase() === joinedAtLevel.toLowerCase());
+                }
+            }
+            const mergedLevelLabel = joinedAtLevel || userLevel; // Display name for the merged super-level
+
             let builtPath = [];
             let cumulativeIndex = 0;
             let foundFirstIncomplete = false;
 
             hierarchyNames.forEach((levelName) => {
                 // ROBUST RULE LOOKUP: Exact name -> Lowercase name
-                // This fixes the "Blank Interface" if cases mismatch (e.g. Waffler vs waffler)
                 const levelRules = rulesData[levelName] || rulesData[levelName.toLowerCase()] || {};
                 const courseIds = levelRules.accessible_courses || [];
 
@@ -643,18 +646,38 @@ export default function CoursePath(props) {
                 let levelCompletedCount = 0;
 
                 const thisLevelIdx = hierarchyNames.indexOf(levelName);
-                const isPastLevel = userLevelIdx > thisLevelIdx;
-                const isCurrentLevel = userLevelIdx === thisLevelIdx;
-                // const isFutureLevel = userLevelIdx < thisLevelIdx;
+
+                // EXTERNAL USER LOGIC: levels 0..mergedLevelEndIdx are treated as one merged level
+                const isInMergedRange = isExternalUser && mergedLevelEndIdx >= 0 && thisLevelIdx <= mergedLevelEndIdx;
+                const isAfterMergedRange = isExternalUser && mergedLevelEndIdx >= 0 && thisLevelIdx > mergedLevelEndIdx;
+
+                // For external users in merged range, treat all merged levels as "current level"
+                // For levels after merged range, use normal logic relative to userLevelIdx
+                let isPastLevel, isCurrentLevel;
+                if (isInMergedRange) {
+                    // All merged levels are treated as the user's current working level
+                    isPastLevel = false;
+                    isCurrentLevel = true;
+                } else if (isAfterMergedRange) {
+                    // Levels after the merged range use standard logic
+                    isPastLevel = userLevelIdx > thisLevelIdx;
+                    isCurrentLevel = userLevelIdx === thisLevelIdx;
+                } else {
+                    // Normal (non-external) user logic
+                    isPastLevel = userLevelIdx > thisLevelIdx;
+                    isCurrentLevel = userLevelIdx === thisLevelIdx;
+                }
+
+                // For external users, use the merged label for all levels in the merged range
+                const displayLevelContext = isInMergedRange ? mergedLevelLabel : levelName;
 
                 levelCourses.forEach((course) => {
                     const isCompleted = completedIds.has(course.id);
                     if (isCompleted) levelCompletedCount++;
 
                     let status = "locked";
-                    // Only unlock if current or past level
                     if (isCompleted) status = "completed";
-                    else if (isPastLevel) status = "completed"; // Assume passed levels are accessible/done
+                    else if (isPastLevel) status = "completed";
                     else if (isCurrentLevel) {
                         if (!foundFirstIncomplete) {
                             status = "active";
@@ -666,48 +689,62 @@ export default function CoursePath(props) {
                         ...course,
                         icon: ICONS[cumulativeIndex % ICONS.length],
                         status: status,
-                        levelContext: levelName,
-                        isFirstInLevel: builtPath.length === 0 || builtPath[builtPath.length - 1].levelContext !== levelName
+                        levelContext: displayLevelContext,
+                        isFirstInLevel: builtPath.length === 0 || builtPath[builtPath.length - 1].levelContext !== displayLevelContext
                     });
                     cumulativeIndex++;
                 });
 
-                // Exam Node
-                if (levelTotal > 0) {
-                    const allLevelCoursesDone = levelCompletedCount >= levelTotal;
+                // Exam Node - SKIP intermediate exams for external users in merged range
+                // Only add exam at the END of the merged range (the joined_at_level) or for normal levels
+                const shouldAddExam = isInMergedRange
+                    ? (thisLevelIdx === mergedLevelEndIdx) // Only add exam at the end of merged range
+                    : true; // Normal behavior for non-merged levels
+
+                if (levelTotal > 0 && shouldAddExam) {
+                    // For merged range final exam, check ALL merged courses are done
+                    let allLevelCoursesDone;
+                    if (isInMergedRange && thisLevelIdx === mergedLevelEndIdx) {
+                        // Check all courses across ALL merged levels
+                        let totalMergedCourses = 0;
+                        let completedMergedCourses = 0;
+                        for (let mi = 0; mi <= mergedLevelEndIdx; mi++) {
+                            const mLevelName = hierarchyNames[mi];
+                            const mRules = rulesData[mLevelName] || rulesData[mLevelName.toLowerCase()] || {};
+                            const mCourseIds = mRules.accessible_courses || [];
+                            const mCourses = mCourseIds.map(id => pathCourses.find(c => c.id === id))
+                                .filter(c => c && c.learning_path_type !== 'self_learning');
+                            totalMergedCourses += mCourses.length;
+                            completedMergedCourses += mCourses.filter(c => completedIds.has(c.id)).length;
+                        }
+                        allLevelCoursesDone = completedMergedCourses >= totalMergedCourses && totalMergedCourses > 0;
+                    } else {
+                        allLevelCoursesDone = levelCompletedCount >= levelTotal;
+                    }
+
                     if (allLevelCoursesDone) {
                         let examStatus = "locked";
                         if (isPastLevel) examStatus = "completed";
                         else if (isCurrentLevel) {
-                            // If all courses done, exam is next
-                            // If foundFirstIncomplete is false (all courses were complete), then exam is active
-                            // If foundFirstIncomplete was set true by a course, then exam is inactive?
-                            // WAIT: If allLevelCoursesDone is TRUE, then all course loops set 'completed'.
-                            // foundFirstIncomplete would still be FALSE (because no course set it to active, they were all completed).
-                            // So Exam becomes active here.
                             if (!foundFirstIncomplete) {
                                 examStatus = "active";
                                 foundFirstIncomplete = true;
                             } else {
-                                // If a course was found active (incomplete), we shouldn't be here?
-                                // Actually, levelCompletedCount < levelTotal if any course is incomplete.
-                                // So allLevelCoursesDone is False.
-                                // So this block is skipped.
-                                // So this else is unreachable safely.
                                 examStatus = "active";
                             }
                         }
 
+                        const examLevelLabel = isInMergedRange ? mergedLevelLabel : levelName;
                         builtPath.push({
-                            id: `exam-${levelName}`,
-                            title: `${levelName} Assessment`,
-                            desc: `Assesment for ${levelName}.`,
+                            id: `exam-${examLevelLabel}`,
+                            title: `${examLevelLabel} Assessment`,
+                            desc: `Assessment for ${examLevelLabel}.`,
                             icon: "shield-star",
                             status: examStatus,
                             type: "EXAM",
-                            levelContext: levelName,
+                            levelContext: examLevelLabel,
                             isFirstInLevel: false,
-                            roleTarget: levelName
+                            roleTarget: examLevelLabel
                         });
                         cumulativeIndex++;
                     }

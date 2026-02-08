@@ -60,11 +60,20 @@ const CreateUser = ({
     const [bulkResult, setBulkResult] = useState(null);
 
     // Dynamic display roles (fetched from backend - progression levels)
-    const [displayRoles, setDisplayRoles] = useState(['Waffler', 'Silver Waffler', 'Gold Waffler', 'Shift Manager', 'Store Manager']);
+    const [displayRoles, setDisplayRoles] = useState([]);
     const [showNewRole, setShowNewRole] = useState(false);
     const [newRoleName, setNewRoleName] = useState('');
     const [creatingRole, setCreatingRole] = useState(false);
     const [showAllColumns, setShowAllColumns] = useState(false);
+
+    // External user state
+    const [isExternal, setIsExternal] = useState(false);
+    const [joinedAtLevel, setJoinedAtLevel] = useState('');
+
+    // Store management state
+    const [showNewStore, setShowNewStore] = useState(false);
+    const [newStoreName, setNewStoreName] = useState('');
+    const [newStoreCity, setNewStoreCity] = useState('');
 
     // Comprehensive list of supported columns from EXPORT_USERS format
     const allColumns = [
@@ -76,7 +85,7 @@ const CreateUser = ({
         "Date of Leaving", "Reason for Leaving", "Franchise", "Store Name", "Store Code",
         "Region", "City", "State", "Designation", "User Status", "Grade", "Concept",
         "Department", "Sub Department", "Function", "Sub Function", "Job Role",
-        "Career Job Roles", "User Created On"
+        "Career Job Roles", "User Created On", "Is External", "Joined At Level"
     ];
 
     const isSuperAdmin = userProfile?.is_superadmin || userProfile?.role === 'Super Admin';
@@ -107,6 +116,8 @@ const CreateUser = ({
                 setCategory(initialData.category || 'Employee');
                 setSelectedPrivileges(initialData.privileges || []);
                 setSelectedStore(initialData.store || '');
+                setIsExternal(initialData.is_external || false);
+                setJoinedAtLevel(initialData.joined_at_level || '');
                 setPassword('');
             } else {
                 setName('');
@@ -116,6 +127,8 @@ const CreateUser = ({
                 setCategory('Employee');
                 setSelectedPrivileges([]);
                 setSelectedStore('');
+                setIsExternal(false);
+                setJoinedAtLevel('');
             }
         }
     }, [visible, isEditing, initialData]);
@@ -138,20 +151,31 @@ const CreateUser = ({
         }
     };
 
+    // Helper for cross-platform alerts (Web compatibility)
+    const showAlert = (title, message, buttons) => {
+        if (Platform.OS === 'web') {
+            const confirm = window.confirm(`${title}\n\n${message}`);
+            if (confirm) {
+                const deleteBtn = buttons.find(b => b.style === 'destructive');
+                if (deleteBtn && deleteBtn.onPress) deleteBtn.onPress();
+            }
+        } else {
+            Alert.alert(title, message, buttons);
+        }
+    };
+
     // Fetch dynamic progression levels for Display Role
     const fetchDisplayRoles = async () => {
         try {
             const response = await fetch(`${API_URL}/api/v1/levels/`);
             const data = await response.json();
             if (data.levels && Array.isArray(data.levels)) {
-                // Sort by order and extract names
+                // Sort by order and keep full objects
                 const sortedLevels = data.levels.sort((a, b) => a.order - b.order);
-                const levelNames = sortedLevels.map(l => l.name);
-                setDisplayRoles(levelNames);
+                setDisplayRoles(sortedLevels.map(l => ({ id: l.id, name: l.name })));
             }
         } catch (error) {
             console.error('Error fetching display roles:', error);
-            // Keep default displayRoles on error
         }
     };
 
@@ -248,11 +272,13 @@ const CreateUser = ({
             setRole('Super Admin');
             selectAllPrivileges();
         } else if (newCategory === 'Manager') {
-            setRole(displayRoles[displayRoles.length - 1] || 'Store Manager'); // Highest progression level
+            setRole(displayRoles[displayRoles.length - 1]?.name || 'Store Manager'); // Highest progression level
         } else if (newCategory === 'Supervisor') {
-            setRole(displayRoles[Math.floor(displayRoles.length / 2)] || 'Gold Waffler'); // Middle level
+            // Find middle level
+            const midIndex = Math.floor(displayRoles.length / 2);
+            setRole(displayRoles[midIndex]?.name || 'Gold Waffler');
         } else {
-            setRole(displayRoles[0] || 'Waffler'); // Entry level (first progression role)
+            setRole(displayRoles[0]?.name || 'Waffler'); // Entry level (first progression role)
             clearAllPrivileges();
         }
     };
@@ -277,6 +303,145 @@ const CreateUser = ({
         }
     };
 
+    const handleCreateStore = async () => {
+        if (!newStoreName.trim()) return;
+        try {
+            const response = await fetch(`${API_URL}/api/v1/users/stores`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: newStoreName.trim(),
+                    city: newStoreCity.trim() || 'Mumbai', // Default to Mumbai if empty
+                    region: 'West'
+                })
+            });
+            const result = await response.json();
+            if (result.status === 'success') {
+                fetchStores();
+                setSelectedStore(newStoreName.trim());
+                setNewStoreName('');
+                setNewStoreCity('');
+                setShowNewStore(false);
+            } else {
+                Alert.alert('Error', 'Failed to create store');
+            }
+        } catch (error) {
+            console.error('Error creating store:', error);
+            Alert.alert('Error', 'Failed to create store');
+        }
+    };
+
+    const handleDeleteStore = (store) => {
+        if (store.id === '1') {
+            Alert.alert('Cannot Delete', 'HQ Store cannot be deleted.');
+            return;
+        }
+
+        showAlert(
+            'Delete Store',
+            `Are you sure you want to delete "${store.name}"?`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            const response = await fetch(`${API_URL}/api/v1/users/stores/${store.id}`, {
+                                method: 'DELETE'
+                            });
+                            const result = await response.json();
+                            if (result.status === 'success') {
+                                if (selectedStore === store.name) {
+                                    setSelectedStore('');
+                                }
+                                fetchStores();
+                            } else {
+                                Alert.alert('Error', result.detail || 'Failed to delete store');
+                            }
+                        } catch (error) {
+                            console.error('Delete store error:', error);
+                            Alert.alert('Error', 'Failed to delete store');
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
+    const handleDeleteCategory = (cat) => {
+        // Prevent deleting Super Admin (1) and Employee (4) as they are critical
+        if (['1', '4'].includes(cat.id)) {
+            Alert.alert('Cannot Delete', 'System default categories (Super Admin, Employee) cannot be deleted.');
+            return;
+        }
+
+        showAlert(
+            'Delete Category',
+            `Are you sure you want to delete "${cat.name}"?`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            const response = await fetch(`${API_URL}/api/v1/users/categories/${cat.id}`, {
+                                method: 'DELETE'
+                            });
+                            const result = await response.json();
+                            if (result.status === 'success') {
+                                // If current category deleted, reset to Employee
+                                if (category === cat.name) {
+                                    setCategory('Employee');
+                                }
+                                fetchCategories();
+                            } else {
+                                Alert.alert('Error', result.detail || 'Failed to delete category');
+                            }
+                        } catch (error) {
+                            console.error('Delete category error:', error);
+                            Alert.alert('Error', 'Failed to delete category');
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
+    const handleDeleteRole = (roleObj) => {
+        showAlert(
+            'Delete Role',
+            `Are you sure you want to delete "${roleObj.name}"?`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            const response = await fetch(`${API_URL}/api/v1/levels/${roleObj.id}`, {
+                                method: 'DELETE'
+                            });
+                            if (response.ok) {
+                                // If current role deleted, reset to default
+                                if (role === roleObj.name) {
+                                    setRole('Waffler');
+                                }
+                                fetchDisplayRoles();
+                            } else {
+                                Alert.alert('Error', 'Failed to delete role');
+                            }
+                        } catch (error) {
+                            console.error('Delete role error:', error);
+                            Alert.alert('Error', 'Failed to delete role');
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
     const handleSubmit = async () => {
         if (!name || !email) return;
         if (!isEditing && !password) return;
@@ -288,7 +453,9 @@ const CreateUser = ({
             role,
             category,
             privileges: selectedPrivileges,
-            store: selectedStore
+            store: selectedStore,
+            is_external: isExternal,
+            joined_at_level: isExternal ? (joinedAtLevel || role) : null,
         };
 
         if (password) {
@@ -686,36 +853,86 @@ const CreateUser = ({
                                         </View>
                                     ) : null}
 
-                                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.storeScroll}>
-                                        {filteredStores.map((store) => (
+                                    {!showNewStore ? (
+                                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.storeScroll}>
+                                            {filteredStores.map((store) => (
+                                                <TouchableOpacity
+                                                    key={store.id}
+                                                    style={[
+                                                        styles.storeChip,
+                                                        selectedStore === store.name && styles.storeChipActive
+                                                    ]}
+                                                    onPress={() => setSelectedStore(store.name)}
+                                                    onLongPress={() => handleDeleteStore(store)}
+                                                    delayLongPress={500}
+                                                >
+                                                    <MaterialCommunityIcons
+                                                        name="store"
+                                                        size={14}
+                                                        color={selectedStore === store.name ? '#451A03' : '#92400E'}
+                                                    />
+                                                    <Text style={[
+                                                        styles.storeText,
+                                                        selectedStore === store.name && styles.storeTextActive
+                                                    ]}>
+                                                        {store.name}
+                                                    </Text>
+                                                    <Text style={[
+                                                        styles.storeCityText,
+                                                        selectedStore === store.name && styles.storeCityTextActive
+                                                    ]}>
+                                                        {store.city}
+                                                    </Text>
+
+                                                    {/* Delete Button (Web friendly) */}
+                                                    {store.id !== '1' && (
+                                                        <TouchableOpacity
+                                                            style={{ marginLeft: 6, opacity: 0.6 }}
+                                                            onPress={() => handleDeleteStore(store)}
+                                                        >
+                                                            <Feather name="x" size={12} color={selectedStore === store.name ? '#451A03' : '#EF4444'} />
+                                                        </TouchableOpacity>
+                                                    )}
+                                                </TouchableOpacity>
+                                            ))}
+
+                                            {/* New Store Button */}
                                             <TouchableOpacity
-                                                key={store.id}
-                                                style={[
-                                                    styles.storeChip,
-                                                    selectedStore === store.name && styles.storeChipActive
-                                                ]}
-                                                onPress={() => setSelectedStore(store.name)}
+                                                style={styles.addCategoryBtn}
+                                                onPress={() => setShowNewStore(true)}
                                             >
-                                                <MaterialCommunityIcons
-                                                    name="store"
-                                                    size={14}
-                                                    color={selectedStore === store.name ? '#451A03' : '#92400E'}
-                                                />
-                                                <Text style={[
-                                                    styles.storeText,
-                                                    selectedStore === store.name && styles.storeTextActive
-                                                ]}>
-                                                    {store.name}
-                                                </Text>
-                                                <Text style={[
-                                                    styles.storeCityText,
-                                                    selectedStore === store.name && styles.storeCityTextActive
-                                                ]}>
-                                                    {store.city}
-                                                </Text>
+                                                <Feather name="plus" size={16} color={THEME.primaryDark} />
+                                                <Text style={styles.addCategoryText}>New</Text>
                                             </TouchableOpacity>
-                                        ))}
-                                    </ScrollView>
+                                        </ScrollView>
+                                    ) : (
+                                        <View style={styles.newCategoryRow}>
+                                            <View style={{ flex: 1, gap: 8 }}>
+                                                <TextInput
+                                                    style={styles.newCategoryInput}
+                                                    placeholder="Store Name"
+                                                    placeholderTextColor="#92400E"
+                                                    value={newStoreName}
+                                                    onChangeText={setNewStoreName}
+                                                />
+                                                <TextInput
+                                                    style={styles.newCategoryInput}
+                                                    placeholder="City (e.g. Mumbai)"
+                                                    placeholderTextColor="#92400E"
+                                                    value={newStoreCity}
+                                                    onChangeText={setNewStoreCity}
+                                                />
+                                            </View>
+                                            <View style={{ flexDirection: 'column', gap: 4 }}>
+                                                <TouchableOpacity style={styles.newCatBtnSave} onPress={handleCreateStore}>
+                                                    <Feather name="check" size={18} color="#FFF" />
+                                                </TouchableOpacity>
+                                                <TouchableOpacity style={styles.newCatBtnCancel} onPress={() => setShowNewStore(false)}>
+                                                    <Feather name="x" size={18} color="#FFF" />
+                                                </TouchableOpacity>
+                                            </View>
+                                        </View>
+                                    )}
                                 </View>
 
                                 {/* Category Section */}
@@ -745,6 +962,16 @@ const CreateUser = ({
                                                         ]}>
                                                             {cat.name}
                                                         </Text>
+
+                                                        {/* Delete Button (Allow blocking only 1 and 4) */}
+                                                        {!['1', '4'].includes(cat.id) && (
+                                                            <TouchableOpacity
+                                                                style={{ marginLeft: 6, opacity: 0.7 }}
+                                                                onPress={() => handleDeleteCategory(cat)}
+                                                            >
+                                                                <Feather name="x" size={14} color={category === cat.name ? '#FFF' : '#EF4444'} />
+                                                            </TouchableOpacity>
+                                                        )}
                                                     </TouchableOpacity>
                                                 ))}
                                                 <TouchableOpacity
@@ -786,13 +1013,23 @@ const CreateUser = ({
                                         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.roleScroll}>
                                             {displayRoles.map(r => (
                                                 <TouchableOpacity
-                                                    key={r}
-                                                    style={[styles.roleBtn, role === r && styles.roleActive]}
-                                                    onPress={() => setRole(r)}
+                                                    key={r.id}
+                                                    style={[styles.roleBtn, role === r.name && styles.roleActive]}
+                                                    onPress={() => setRole(r.name)}
+                                                    onLongPress={() => handleDeleteRole(r)}
+                                                    delayLongPress={500}
                                                 >
-                                                    <Text style={[styles.roleText, role === r && styles.roleTextActive]}>
-                                                        {r}
+                                                    <Text style={[styles.roleText, role === r.name && styles.roleTextActive]}>
+                                                        {r.name}
                                                     </Text>
+
+                                                    {/* Delete Button (Web friendly) */}
+                                                    <TouchableOpacity
+                                                        style={{ marginLeft: 6, opacity: 0.6 }}
+                                                        onPress={() => handleDeleteRole(r)}
+                                                    >
+                                                        <Feather name="x" size={12} color={role === r.name ? '#FFF' : '#EF4444'} />
+                                                    </TouchableOpacity>
                                                 </TouchableOpacity>
                                             ))}
                                             {/* Add New Role Button */}
@@ -833,6 +1070,68 @@ const CreateUser = ({
                                             }}>
                                                 <Feather name="x" size={18} color="#FFF" />
                                             </TouchableOpacity>
+                                        </View>
+                                    )}
+                                </View>
+
+                                {/* External User Section */}
+                                <View style={styles.section}>
+                                    <Text style={styles.sectionTitle}>
+                                        <MaterialCommunityIcons name="account-arrow-right" size={16} color={THEME.primaryDark} /> External User (New Joiner)
+                                    </Text>
+                                    <Text style={styles.sectionDesc}>
+                                        Mark if this user joined the organization at a higher level. They will see all prior levels merged into one learning path.
+                                    </Text>
+
+                                    <TouchableOpacity
+                                        style={{
+                                            flexDirection: 'row', alignItems: 'center', gap: 10,
+                                            backgroundColor: isExternal ? '#FEF3C7' : '#F9FAFB',
+                                            padding: 12, borderRadius: 12,
+                                            borderWidth: 1, borderColor: isExternal ? '#F59E0B' : '#E5E7EB',
+                                        }}
+                                        onPress={() => {
+                                            const next = !isExternal;
+                                            setIsExternal(next);
+                                            if (next && !joinedAtLevel) setJoinedAtLevel(role);
+                                        }}
+                                    >
+                                        <View style={{
+                                            width: 22, height: 22, borderRadius: 6,
+                                            backgroundColor: isExternal ? '#F59E0B' : '#E5E7EB',
+                                            justifyContent: 'center', alignItems: 'center',
+                                        }}>
+                                            {isExternal && <Feather name="check" size={14} color="#FFF" />}
+                                        </View>
+                                        <Text style={{ fontSize: 14, fontWeight: '600', color: '#451A03' }}>
+                                            External User
+                                        </Text>
+                                        {isExternal && (
+                                            <View style={{ backgroundColor: '#F59E0B', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, marginLeft: 'auto' }}>
+                                                <Text style={{ fontSize: 11, color: '#FFF', fontWeight: '700' }}>EXTERNAL</Text>
+                                            </View>
+                                        )}
+                                    </TouchableOpacity>
+
+                                    {isExternal && (
+                                        <View style={{ marginTop: 12 }}>
+                                            <Text style={styles.label}>Joined At Level</Text>
+                                            <Text style={{ fontSize: 11, color: '#92400E', marginBottom: 8 }}>
+                                                All levels from the start up to this level will be merged into one unified learning path.
+                                            </Text>
+                                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.roleScroll}>
+                                                {displayRoles.map(r => (
+                                                    <TouchableOpacity
+                                                        key={r.id}
+                                                        style={[styles.roleBtn, (joinedAtLevel || role) === r.name && styles.roleActive]}
+                                                        onPress={() => setJoinedAtLevel(r.name)}
+                                                    >
+                                                        <Text style={[styles.roleText, (joinedAtLevel || role) === r.name && styles.roleTextActive]}>
+                                                            {r.name}
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                ))}
+                                            </ScrollView>
                                         </View>
                                     )}
                                 </View>
@@ -1124,6 +1423,8 @@ const styles = StyleSheet.create({
         marginBottom: 8,
     },
     categoryChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
         paddingHorizontal: 16,
         paddingVertical: 10,
         borderRadius: 20,
@@ -1131,6 +1432,7 @@ const styles = StyleSheet.create({
         borderColor: '#FDE68A',
         marginRight: 8,
         backgroundColor: '#FFFFFF',
+        gap: 6,
     },
     categoryText: {
         fontSize: 13,

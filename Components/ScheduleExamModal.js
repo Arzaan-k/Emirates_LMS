@@ -800,28 +800,40 @@ export default function ScheduleExamModal({ visible, onClose, userProfile, editi
                 <View style={{ flex: 1, marginRight: 10 }}>
                     <Text style={styles.inputLabel}>Date *</Text>
                     {Platform.OS === 'web' ? (
-                        /* WEB: Native HTML date input */
-                        <input
-                            type="date"
-                            value={getFormattedDate()}
-                            min={new Date().toISOString().split('T')[0]}
-                            onChange={(e) => {
-                                const [year, month, day] = e.target.value.split('-');
-                                const newDate = new Date(date);
-                                newDate.setFullYear(parseInt(year), parseInt(month) - 1, parseInt(day));
-                                setDate(newDate);
-                            }}
-                            style={{
-                                width: '100%',
-                                padding: 14,
-                                borderRadius: 12,
-                                border: '1px solid #C7D2FE',
-                                backgroundColor: '#EEF2FF',
-                                fontSize: 15,
-                                fontFamily: 'Poppins, sans-serif',
-                                cursor: 'pointer'
-                            }}
-                        />
+                        <View style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            height: 52,
+                            backgroundColor: '#FFF',
+                            borderWidth: 1,
+                            borderColor: '#E5E7EB',
+                            borderRadius: 12,
+                            paddingHorizontal: 12
+                        }}>
+                            <Feather name="calendar" size={18} color="#6366F1" style={{ marginRight: 8 }} />
+                            <input
+                                type="date"
+                                value={getFormattedDate()}
+                                min={new Date().toISOString().split('T')[0]}
+                                onChange={(e) => {
+                                    if (!e.target.value) return;
+                                    const [year, month, day] = e.target.value.split('-');
+                                    const newDate = new Date(date);
+                                    newDate.setFullYear(parseInt(year), parseInt(month) - 1, parseInt(day));
+                                    setDate(newDate);
+                                }}
+                                style={{
+                                    border: 'none',
+                                    backgroundColor: 'transparent',
+                                    flex: 1,
+                                    height: '100%',
+                                    fontSize: 14,
+                                    fontFamily: 'Poppins, sans-serif',
+                                    color: '#111827',
+                                    outline: 'none'
+                                }}
+                            />
+                        </View>
                     ) : (
                         <TouchableOpacity
                             style={styles.pickerBtn}
@@ -835,27 +847,39 @@ export default function ScheduleExamModal({ visible, onClose, userProfile, editi
                 <View style={{ flex: 1 }}>
                     <Text style={styles.inputLabel}>Time *</Text>
                     {Platform.OS === 'web' ? (
-                        /* WEB: Native HTML time input */
-                        <input
-                            type="time"
-                            value={getFormattedTime()}
-                            onChange={(e) => {
-                                const [hours, minutes] = e.target.value.split(':');
-                                const newDate = new Date(date);
-                                newDate.setHours(parseInt(hours), parseInt(minutes));
-                                setDate(newDate);
-                            }}
-                            style={{
-                                width: '100%',
-                                padding: 14,
-                                borderRadius: 12,
-                                border: '1px solid #C7D2FE',
-                                backgroundColor: '#EEF2FF',
-                                fontSize: 15,
-                                fontFamily: 'Poppins, sans-serif',
-                                cursor: 'pointer'
-                            }}
-                        />
+                        <View style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            height: 52,
+                            backgroundColor: '#FFF',
+                            borderWidth: 1,
+                            borderColor: '#E5E7EB',
+                            borderRadius: 12,
+                            paddingHorizontal: 12
+                        }}>
+                            <Feather name="clock" size={18} color="#6366F1" style={{ marginRight: 8 }} />
+                            <input
+                                type="time"
+                                value={getFormattedTime()}
+                                onChange={(e) => {
+                                    if (!e.target.value) return;
+                                    const [hours, minutes] = e.target.value.split(':');
+                                    const newDate = new Date(date);
+                                    newDate.setHours(parseInt(hours), parseInt(minutes));
+                                    setDate(newDate);
+                                }}
+                                style={{
+                                    border: 'none',
+                                    backgroundColor: 'transparent',
+                                    flex: 1,
+                                    height: '100%',
+                                    fontSize: 14,
+                                    fontFamily: 'Poppins, sans-serif',
+                                    color: '#111827',
+                                    outline: 'none'
+                                }}
+                            />
+                        </View>
                     ) : (
                         <TouchableOpacity
                             style={styles.pickerBtn}
@@ -992,41 +1016,47 @@ export default function ScheduleExamModal({ visible, onClose, userProfile, editi
                         {scheduledPublishAt && (
                             <View style={{ marginTop: 10 }}>
                                 {Platform.OS === 'web' ? (
-                                    <input
-                                        type="datetime-local"
-                                        value={(() => {
-                                            const d = new Date(scheduledPublishAt);
-                                            const year = d.getFullYear();
-                                            const month = String(d.getMonth() + 1).padStart(2, '0');
-                                            const day = String(d.getDate()).padStart(2, '0');
-                                            const hours = String(d.getHours()).padStart(2, '0');
-                                            const minutes = String(d.getMinutes()).padStart(2, '0');
-                                            return `${year}-${month}-${day}T${hours}:${minutes}`;
-                                        })()}
-                                        min={(() => {
-                                            const d = new Date();
-                                            const year = d.getFullYear();
-                                            const month = String(d.getMonth() + 1).padStart(2, '0');
-                                            const day = String(d.getDate()).padStart(2, '0');
-                                            const hours = String(d.getHours()).padStart(2, '0');
-                                            const minutes = String(d.getMinutes()).padStart(2, '0');
-                                            return `${year}-${month}-${day}T${hours}:${minutes}`;
-                                        })()}
-                                        onChange={(e) => {
-                                            const dateTimeStr = e.target.value;
-                                            setScheduledPublishAt(new Date(dateTimeStr));
-                                        }}
-                                        style={{
-                                            width: '100%',
-                                            padding: 14,
-                                            borderRadius: 12,
-                                            border: '1px solid #C7D2FE',
-                                            backgroundColor: '#EEF2FF',
-                                            fontSize: 15,
-                                            fontFamily: 'Poppins, sans-serif',
-                                            cursor: 'pointer'
-                                        }}
-                                    />
+                                    <View style={{
+                                        marginTop: 10,
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        height: 52,
+                                        backgroundColor: '#FFF',
+                                        borderWidth: 1,
+                                        borderColor: '#E5E7EB',
+                                        borderRadius: 12,
+                                        paddingHorizontal: 12
+                                    }}>
+                                        <Feather name="calendar" size={18} color="#6366F1" style={{ marginRight: 8 }} />
+                                        <input
+                                            type="datetime-local"
+                                            value={(() => {
+                                                const d = new Date(scheduledPublishAt);
+                                                const year = d.getFullYear();
+                                                const month = String(d.getMonth() + 1).padStart(2, '0');
+                                                const day = String(d.getDate()).padStart(2, '0');
+                                                const hours = String(d.getHours()).padStart(2, '0');
+                                                const minutes = String(d.getMinutes()).padStart(2, '0');
+                                                return `${year}-${month}-${day}T${hours}:${minutes}`;
+                                            })()}
+                                            min={new Date().toISOString().slice(0, 16)}
+                                            onChange={(e) => {
+                                                if (!e.target.value) return;
+                                                const dateTimeStr = e.target.value;
+                                                setScheduledPublishAt(new Date(dateTimeStr));
+                                            }}
+                                            style={{
+                                                border: 'none',
+                                                backgroundColor: 'transparent',
+                                                flex: 1,
+                                                height: '100%',
+                                                fontSize: 14,
+                                                fontFamily: 'Poppins, sans-serif',
+                                                color: '#111827',
+                                                outline: 'none'
+                                            }}
+                                        />
+                                    </View>
                                 ) : (
                                     <TouchableOpacity
                                         style={styles.pickerBtn}

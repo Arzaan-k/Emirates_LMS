@@ -159,23 +159,21 @@ async def upload_content(
     bucket: str = Form(None),
     is_path_node: str = Form("false"),
     learning_path_type: str = Form("career_progression"),
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    file: UploadFile = File(...)
 ):
     """
     Receives new content (Files + Metadata) from Managers.
     Uploads video to Cloudflare R2 CDN, stores metadata in database.
     """
-    service = ContentService(db)
     cdn_service = CDNService()
-    
+
     # Generate unique ID
     content_id = f"content_{uuid.uuid4().hex[:8]}"
-    
+
     # Determine resource type
     filename = file.filename or "unknown"
     ext = os.path.splitext(filename)[1].lower()
-    
+
     resource_types = {
         '.mp4': 'Video', '.webm': 'Video', '.mov': 'Video', '.avi': 'Video',
         '.mp3': 'Audio', '.wav': 'Audio',
@@ -184,59 +182,54 @@ async def upload_content(
         '.jpg': 'Image', '.jpeg': 'Image', '.png': 'Image', '.gif': 'Image',
     }
     resource_type = resource_types.get(ext, 'Other')
-    
+
     # Save file locally first
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     local_path = os.path.join(settings.UPLOAD_DIR, f"{content_id}{ext}")
 
-    # Resolve bucket name if ID is provided
-    # Frontend sends bucket ID, we need to store both bucket name and ID
+    # Resolve bucket name if ID is provided (use fresh db connection)
     bucket_name = bucket
     bucket_id_val = bucket if bucket else None
 
     if bucket:
         try:
-            # Try to get bucket object to resolve name
-            bucket_obj = service.get_bucket_by_id(bucket)
-            bucket_name = bucket_obj.name
-            bucket_id_val = bucket_obj.id
-            logger.info(f"Resolved bucket: ID={bucket_id_val}, Name={bucket_name}")
+            with get_db_context() as db:
+                service = ContentService(db)
+                bucket_obj = service.get_bucket_by_id(bucket)
+                bucket_name = bucket_obj.name
+                bucket_id_val = bucket_obj.id
+                logger.info(f"Resolved bucket: ID={bucket_id_val}, Name={bucket_name}")
         except Exception as e:
-            # If lookup fails, treat bucket as both name and ID (backward compatibility)
             logger.warning(f"Could not resolve bucket '{bucket}': {e}. Using as-is.")
             bucket_name = bucket
             bucket_id_val = bucket
-    
+
     try:
         content_bytes = await file.read()
         with open(local_path, "wb") as f:
             f.write(content_bytes)
 
-        # Optimize documents for preview (compress or convert to PDF if too large)
+        # Optimize documents for preview (convert to PDF if too large)
         pdf_url = None
         optimized_url = None
         converter = get_converter()
 
         if converter.needs_conversion(filename):
-            logger.info(f"Optimizing {filename} for preview...")
+            logger.info(f"Checking {filename} for preview optimization...")
             success, output_path, message = await converter.convert_to_pdf(local_path)
             logger.info(f"Optimization result: {message}")
 
             if success and output_path:
-                # We got an optimized/converted file - upload it
+                # We got a converted PDF file - upload it
                 with open(output_path, "rb") as opt_file:
                     opt_bytes = opt_file.read()
 
-                # Determine if it's a PDF or compressed original
-                is_pdf = output_path.lower().endswith('.pdf')
-                opt_ext = '.pdf' if is_pdf else ext
-
                 if cdn_service.enabled:
-                    opt_cdn_key = f"content/{content_id}_optimized{opt_ext}"
+                    opt_cdn_key = f"content/{content_id}_optimized.pdf"
                     opt_cdn_result = cdn_service.upload_file(
                         opt_bytes,
                         opt_cdn_key,
-                        "application/pdf" if is_pdf else file.content_type
+                        "application/pdf"
                     )
                     if opt_cdn_result:
                         if isinstance(opt_cdn_result, dict):
@@ -246,17 +239,12 @@ async def upload_content(
 
                 if not optimized_url:
                     # Save locally
-                    opt_local_path = os.path.join(settings.UPLOAD_DIR, f"{content_id}_optimized{opt_ext}")
+                    opt_local_path = os.path.join(settings.UPLOAD_DIR, f"{content_id}_optimized.pdf")
                     shutil.copy(output_path, opt_local_path)
-                    optimized_url = f"{settings.BASE_URL}/uploads/{content_id}_optimized{opt_ext}"
+                    optimized_url = f"{settings.BASE_URL}/uploads/{content_id}_optimized.pdf"
 
-                # If it's a PDF conversion, store as pdf_url
-                if is_pdf:
-                    pdf_url = optimized_url
-                    logger.info(f"PDF conversion uploaded: {pdf_url}")
-                else:
-                    # It's a compressed version of the original format
-                    logger.info(f"Compressed file uploaded: {optimized_url}")
+                pdf_url = optimized_url
+                logger.info(f"PDF conversion uploaded: {pdf_url}")
 
                 # Cleanup temp file
                 if output_path != local_path:
@@ -266,19 +254,30 @@ async def upload_content(
                         pass
             elif success:
                 # success=True but output_path=None means file is small enough for direct preview
-                logger.info(f"File is small enough for direct preview - no optimization needed")
+                logger.info(f"File is small enough for direct preview - no conversion needed")
 
         # Upload original file to CDN
+        # OPTIMIZATION: Skip uploading large original files if we have a PDF conversion
+        # This saves significant upload time (e.g., 197MB takes ~2 mins to upload)
         video_url = None
-        if cdn_service.enabled:
+        file_size_mb = len(content_bytes) / (1024 * 1024)
+
+        # Only upload original if: no PDF conversion OR file is small (< 25MB)
+        should_upload_original = not pdf_url or file_size_mb < 25
+
+        if cdn_service.enabled and should_upload_original:
+            logger.info(f"Uploading original file ({file_size_mb:.2f} MB) to CDN...")
             cdn_key = f"content/{content_id}{ext}"
             cdn_result = cdn_service.upload_file(content_bytes, cdn_key, file.content_type)
             if cdn_result:
-                # Handle both dict (from R2) and possibly str (if implementation changes)
                 if isinstance(cdn_result, dict):
                     video_url = cdn_result.get("url")
                 else:
                     video_url = str(cdn_result)
+        elif pdf_url and not should_upload_original:
+            logger.info(f"Skipping original file upload ({file_size_mb:.2f} MB) - PDF version available")
+            # Use PDF URL as the file URL since we're not uploading original
+            video_url = pdf_url
 
         if not video_url:
             video_url = f"{settings.BASE_URL}/uploads/{content_id}{ext}"
@@ -288,8 +287,8 @@ async def upload_content(
 
         logger.info(f"[UPLOAD DEBUG] Title={title}, isPathNode_raw={is_path_node}, isPathNode_bool={is_path_node_bool}, learning_path_type={learning_path_type}, bucket={bucket_name}")
 
-        # Create content record
-        # Priority for viewing: PDF > optimized/compressed > original
+        # Create content record with FRESH database connection
+        # This avoids timeout issues from long-running CloudConvert operations
         viewing_url = pdf_url or optimized_url or video_url
         content_data = {
             "id": content_id,
@@ -306,10 +305,13 @@ async def upload_content(
             "timestamp": datetime.utcnow(),
         }
 
-        content = service.create_content(content_data)
-        logger.info(f"Content created: {content_id}, is_path_node stored as: {content.is_path_node}")
+        # Use fresh database connection for the insert
+        with get_db_context() as db:
+            service = ContentService(db)
+            content = service.create_content(content_data)
+            logger.info(f"Content created: {content_id}, is_path_node stored as: {content.is_path_node}")
+            response = content.to_dict() if hasattr(content, 'to_dict') else dict(content)
 
-        response = content.to_dict() if hasattr(content, 'to_dict') else dict(content)
         response["status"] = "success"
 
         # Broadcast new content notification to all connected clients
@@ -331,13 +333,110 @@ async def upload_content(
             )
 
         return response
-        
+
     except Exception as e:
         logger.error(f"Content upload failed: {e}")
         # Cleanup local file on error
         if os.path.exists(local_path):
             os.remove(local_path)
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
+@router.post("/bulk-folder-upload/check-duplicates")
+async def check_folder_duplicates(
+    root_bucket_name: str = Form(...),
+    file_paths: str = Form(...),  # JSON string of relative paths
+    learning_path_type: str = Form("career_progression")
+):
+    """
+    Check for duplicate files before uploading.
+    Returns list of duplicate files with options to skip or replace.
+
+    Args:
+        root_bucket_name: Name of the root folder
+        file_paths: JSON array of relative file paths
+        learning_path_type: 'self_learning' or 'career_progression'
+
+    Returns:
+        Duplicate detection results with recommendations
+    """
+    try:
+        paths_list = json.loads(file_paths)
+
+        with get_db_context() as db:
+            service = ContentService(db)
+
+            # Find root bucket
+            try:
+                root_bucket = service.get_bucket_by_name(root_bucket_name)
+                root_bucket_exists = True
+            except:
+                root_bucket_exists = False
+
+            duplicates = []
+            new_files = []
+
+            if not root_bucket_exists:
+                # All files are new since folder doesn't exist
+                return {
+                    "has_duplicates": False,
+                    "folder_exists": False,
+                    "duplicates": [],
+                    "new_files": len(paths_list),
+                    "message": "New folder - all files will be uploaded"
+                }
+
+            # Check each file for duplicates
+            from app.models.content import Content
+
+            for file_path in paths_list:
+                filename = os.path.basename(file_path)
+
+                # Build bucket path from file path
+                path_parts = file_path.split('/')
+                if len(path_parts) > 1:
+                    folder_path = f"{root_bucket_name}/{'/'.join(path_parts[:-1])}"
+                else:
+                    folder_path = root_bucket_name
+
+                # Check if file exists in this bucket with same name
+                try:
+                    bucket = service.get_bucket_by_path(folder_path)
+
+                    # Find content with same title in this bucket
+                    title = os.path.splitext(filename)[0]
+                    existing_content = db.query(Content).filter(
+                        Content.bucket_id == bucket.id,
+                        Content.title == title,
+                        Content.learning_path_type == learning_path_type
+                    ).first()
+
+                    if existing_content:
+                        duplicates.append({
+                            "path": file_path,
+                            "filename": filename,
+                            "title": title,
+                            "existing_id": existing_content.id,
+                            "folder_path": folder_path
+                        })
+                    else:
+                        new_files.append(file_path)
+                except:
+                    # Bucket doesn't exist, file is new
+                    new_files.append(file_path)
+
+            return {
+                "has_duplicates": len(duplicates) > 0,
+                "folder_exists": True,
+                "duplicates": duplicates,
+                "new_files": len(new_files),
+                "total_files": len(paths_list),
+                "message": f"Found {len(duplicates)} duplicate(s) and {len(new_files)} new file(s)"
+            }
+
+    except Exception as e:
+        logger.error(f"Duplicate check failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Duplicate check failed: {str(e)}")
 
 
 @router.post("/bulk-folder-upload")
@@ -347,23 +446,24 @@ async def bulk_folder_upload(
     root_bucket_name: str = Form(...),
     files: List[UploadFile] = File(default=[]),
     file_paths: str = Form(...),  # JSON string of relative paths
-    db: Session = Depends(get_db)
+    skip_duplicates: str = Form("false"),  # "true" to skip, "false" to replace
+    duplicate_action: str = Form("skip")  # "skip" or "replace"
 ):
     """
-    Bulk upload files with folder hierarchy.
-    Creates nested buckets matching folder structure.
-    Processes all file types including documents (PDF, Word, PPT).
+    Bulk upload files with folder hierarchy and duplicate handling.
+    Intelligently reuses existing buckets and handles duplicate files.
 
     Args:
         learning_path_type: 'self_learning' or 'career_progression'
         root_bucket_name: Name of the root folder being uploaded
         files: List of files to upload
         file_paths: JSON array of relative file paths (e.g., ['file1.pdf', 'subfolder/file2.docx'])
+        skip_duplicates: "true" to skip duplicates, "false" to replace
+        duplicate_action: "skip" or "replace" for handling duplicates
 
     Returns:
-        Upload status with progress information
+        Upload status with progress information including skipped/replaced files
     """
-    service = ContentService(db)
     cdn_service = CDNService()
 
     try:
@@ -382,42 +482,54 @@ async def bulk_folder_upload(
 
         logger.info(f"Starting bulk folder upload: {root_bucket_name} with {len(files)} files")
 
-        # Dictionary to cache created buckets
+        # Dictionary to cache created buckets (store bucket info, not ORM objects)
         bucket_cache = {}
+
+        # Parse duplicate action
+        should_skip_duplicates = skip_duplicates.lower() == "true" or duplicate_action == "skip"
 
         # Results tracking
         results = {
             "total": len(files),
             "successful": 0,
             "failed": 0,
+            "skipped": 0,
+            "replaced": 0,
             "buckets_created": 0,
+            "buckets_reused": 0,
             "items": []
         }
 
-        # Create or get root bucket
-        root_bucket = None
-        try:
-            root_bucket = service.get_bucket_by_name(root_bucket_name)
-            logger.info(f"Root bucket already exists: {root_bucket_name}")
-        except:
-            # Create root bucket
-            root_bucket_id = f"bucket_{uuid.uuid4().hex[:8]}"
-            root_bucket_data = {
-                "id": root_bucket_id,
-                "name": root_bucket_name,
-                "description": f"Auto-created from folder upload",
-                "parent_bucket_id": None,
-                "folder_path": root_bucket_name,
-                "color": "#3B82F6",
-                "icon": "folder-outline",
-                "keywords": [],
-                "is_active": True
-            }
-            root_bucket = service.create_bucket(root_bucket_data)
-            results["buckets_created"] += 1
-            logger.info(f"Created root bucket: {root_bucket_name}")
+        # Create or get root bucket using fresh db connection
+        root_bucket_info = None
+        with get_db_context() as db:
+            service = ContentService(db)
+            try:
+                root_bucket = service.get_bucket_by_name(root_bucket_name)
+                root_bucket_info = {"id": root_bucket.id, "name": root_bucket.name}
+                results["buckets_reused"] += 1
+                logger.info(f"Root bucket already exists: {root_bucket_name} (reusing)")
+            except:
+                # Create root bucket with learning_path_type
+                root_bucket_id = f"bucket_{uuid.uuid4().hex[:8]}"
+                root_bucket_data = {
+                    "id": root_bucket_id,
+                    "name": root_bucket_name,
+                    "description": f"Auto-created from folder upload",
+                    "parent_bucket_id": None,
+                    "folder_path": root_bucket_name,
+                    "learning_path_type": learning_path_type,
+                    "color": "#3B82F6",
+                    "icon": "folder-outline",
+                    "keywords": [],
+                    "is_active": True
+                }
+                root_bucket = service.create_bucket(root_bucket_data)
+                root_bucket_info = {"id": root_bucket.id, "name": root_bucket.name}
+                results["buckets_created"] += 1
+                logger.info(f"Created root bucket: {root_bucket_name}")
 
-        bucket_cache[root_bucket_name] = root_bucket
+        bucket_cache[root_bucket_name] = root_bucket_info
 
         # Process each file
         for idx, (file, relative_path) in enumerate(zip(files, paths_list)):
@@ -428,7 +540,7 @@ async def bulk_folder_upload(
                 folder_parts = path_parts[:-1] if len(path_parts) > 1 else []
 
                 # Build nested bucket structure
-                current_parent = root_bucket
+                current_parent_info = root_bucket_info
                 current_path = root_bucket_name
 
                 for folder_name in folder_parts:
@@ -437,35 +549,37 @@ async def bulk_folder_upload(
                     # Check if bucket already exists in cache
                     if current_path not in bucket_cache:
                         # Try to find existing bucket or create new
-                        try:
-                            existing_bucket = service.get_bucket_by_path(current_path)
-                            bucket_cache[current_path] = existing_bucket
-                        except:
-                            # Create new nested bucket
-                            nested_bucket_id = f"bucket_{uuid.uuid4().hex[:8]}"
-                            nested_bucket_data = {
-                                "id": nested_bucket_id,
-                                "name": folder_name,
-                                "description": f"Auto-created subfolder",
-                                "parent_bucket_id": current_parent.id,
-                                "folder_path": current_path,
-                                "color": "#3B82F6",
-                                "icon": "folder-outline",
-                                "keywords": [],
-                                "is_active": True
-                            }
-                            new_bucket = service.create_bucket(nested_bucket_data)
-                            bucket_cache[current_path] = new_bucket
-                            results["buckets_created"] += 1
-                            logger.info(f"Created nested bucket: {current_path}")
+                        with get_db_context() as db:
+                            service = ContentService(db)
+                            try:
+                                existing_bucket = service.get_bucket_by_path(current_path)
+                                bucket_cache[current_path] = {"id": existing_bucket.id, "name": existing_bucket.name}
+                                results["buckets_reused"] += 1
+                                logger.info(f"Reusing existing nested bucket: {current_path}")
+                            except:
+                                # Create new nested bucket
+                                nested_bucket_id = f"bucket_{uuid.uuid4().hex[:8]}"
+                                nested_bucket_data = {
+                                    "id": nested_bucket_id,
+                                    "name": folder_name,
+                                    "description": f"Auto-created subfolder",
+                                    "parent_bucket_id": current_parent_info["id"],
+                                    "folder_path": current_path,
+                                    "color": "#3B82F6",
+                                    "icon": "folder-outline",
+                                    "keywords": [],
+                                    "is_active": True,
+                                    "learning_path_type": learning_path_type
+                                }
+                                new_bucket = service.create_bucket(nested_bucket_data)
+                                bucket_cache[current_path] = {"id": new_bucket.id, "name": new_bucket.name}
+                                results["buckets_created"] += 1
+                                logger.info(f"Created nested bucket: {current_path}")
 
-                    current_parent = bucket_cache[current_path]
+                    current_parent_info = bucket_cache[current_path]
 
                 # Now upload the file to the deepest bucket
-                target_bucket = current_parent
-
-                # Generate unique content ID
-                content_id = f"content_{uuid.uuid4().hex[:8]}"
+                target_bucket_info = current_parent_info
 
                 # Determine resource type
                 ext = os.path.splitext(filename)[1].lower()
@@ -479,11 +593,49 @@ async def bulk_folder_upload(
                 }
                 resource_type = resource_types.get(ext, 'Other')
 
+                # Read file content
+                content_bytes = await file.read()
+                file_size = len(content_bytes)
+
+                # Check for duplicate if skip_duplicates is enabled
+                title = os.path.splitext(filename)[0]
+                existing_content = None
+
+                if skip_duplicates:
+                    with get_db_context() as db:
+                        service = ContentService(db)
+                        # Check if content with same title exists in target bucket
+                        existing_content = service.get_content_by_title_and_bucket(title, target_bucket_info["id"])
+
+                if existing_content and skip_duplicates:
+                    if duplicate_action == "skip":
+                        # Skip this file
+                        logger.info(f"Skipping duplicate file: {filename} in bucket {target_bucket_info['name']}")
+                        results["skipped"] += 1
+                        results["items"].append({
+                            "filename": filename,
+                            "path": relative_path,
+                            "bucket": target_bucket_info["name"],
+                            "status": "skipped",
+                            "reason": "duplicate"
+                        })
+                        continue
+                    elif duplicate_action == "replace":
+                        # Delete old content
+                        logger.info(f"Replacing duplicate file: {filename} in bucket {target_bucket_info['name']}")
+                        with get_db_context() as db:
+                            service = ContentService(db)
+                            service.delete_content(existing_content.id)
+                        results["replaced"] += 1
+                        # Continue to upload new version
+
+                # Generate unique content ID
+                content_id = f"content_{uuid.uuid4().hex[:8]}"
+
                 # Save file locally
                 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
                 local_path = os.path.join(settings.UPLOAD_DIR, f"{content_id}{ext}")
 
-                content_bytes = await file.read()
                 with open(local_path, "wb") as f:
                     f.write(content_bytes)
 
@@ -532,8 +684,12 @@ async def bulk_folder_upload(
                                 pass
 
                 # Upload original file to CDN
+                # OPTIMIZATION: Skip uploading large original files if we have a PDF conversion
                 video_url = None
-                if cdn_service.enabled:
+                file_size_mb = len(content_bytes) / (1024 * 1024)
+                should_upload_original = not pdf_url or file_size_mb < 25
+
+                if cdn_service.enabled and should_upload_original:
                     cdn_key = f"content/{content_id}{ext}"
                     cdn_result = cdn_service.upload_file(content_bytes, cdn_key, file.content_type)
                     if cdn_result:
@@ -541,20 +697,21 @@ async def bulk_folder_upload(
                             video_url = cdn_result.get("url")
                         else:
                             video_url = str(cdn_result)
+                elif pdf_url and not should_upload_original:
+                    video_url = pdf_url
 
                 if not video_url:
                     video_url = f"{settings.BASE_URL}/uploads/{content_id}{ext}"
 
-                # Create content record
+                # Create content record with fresh db connection
                 # Priority for viewing: PDF > optimized/compressed > original
                 viewing_url = pdf_url or optimized_url or video_url
-                title = os.path.splitext(filename)[0]
                 content_data = {
                     "id": content_id,
                     "title": title,
                     "description": f"Uploaded from folder: {root_bucket_name}",
-                    "bucket": target_bucket.name,
-                    "bucket_id": target_bucket.id,
+                    "bucket": target_bucket_info["name"],
+                    "bucket_id": target_bucket_info["id"],
                     "resource_type": resource_type,
                     "video_url": viewing_url,  # URL for viewing (optimized if available)
                     "file_url": video_url,  # Keep original file URL
@@ -565,8 +722,10 @@ async def bulk_folder_upload(
                     "timestamp": datetime.utcnow(),
                 }
 
-                content = service.create_content(content_data)
-                logger.info(f"Content created: {content_id} in bucket {target_bucket.name}")
+                with get_db_context() as db:
+                    service = ContentService(db)
+                    content = service.create_content(content_data)
+                    logger.info(f"Content created: {content_id} in bucket {target_bucket_info['name']}")
 
                 # Trigger background processing for supported types
                 if resource_type in ["Video", "Audio", "Document", "Presentation", "PDF"]:
@@ -583,7 +742,7 @@ async def bulk_folder_upload(
                     "id": content_id,
                     "filename": filename,
                     "path": relative_path,
-                    "bucket": target_bucket.name,
+                    "bucket": target_bucket_info["name"],
                     "status": "success"
                 })
 
@@ -597,12 +756,24 @@ async def bulk_folder_upload(
                     "error": str(file_error)
                 })
 
-        # Broadcast notification
+        # Broadcast notification with detailed summary
+        summary_parts = []
+        if results['successful'] > 0:
+            summary_parts.append(f"{results['successful']} uploaded")
+        if results['skipped'] > 0:
+            summary_parts.append(f"{results['skipped']} skipped")
+        if results['replaced'] > 0:
+            summary_parts.append(f"{results['replaced']} replaced")
+        if results['failed'] > 0:
+            summary_parts.append(f"{results['failed']} failed")
+
+        summary_message = ", ".join(summary_parts) if summary_parts else "No changes"
+
         await manager.broadcast_notification(
             notification_type="BULK_UPLOAD_COMPLETE",
             data=results,
             title="Bulk Folder Upload Complete",
-            message=f"Uploaded {results['successful']} files from {root_bucket_name}"
+            message=f"{root_bucket_name}: {summary_message}"
         )
 
         return {
@@ -883,14 +1054,16 @@ async def create_course_bucket(
     color: str = Form("#6366F1"),
     icon: str = Form("folder"),
     learning_path_type: str = Form("career_progression"),
+    parent_bucket_id: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     """
     Create a new course bucket.
     learning_path_type: 'career_progression' or 'self_learning'
+    parent_bucket_id: Optional parent bucket ID for nested buckets
     """
     service = ContentService(db)
-    
+
     bucket_data = {
         "id": f"bucket_{uuid.uuid4().hex[:8]}",
         "name": name,
@@ -898,12 +1071,13 @@ async def create_course_bucket(
         "color": color,
         "icon": icon,
         "learning_path_type": learning_path_type,
+        "parent_bucket_id": parent_bucket_id,
     }
-    
+
     try:
         bucket = service.create_bucket(bucket_data)
-        logger.info(f"Bucket created: {bucket_data['id']} for {learning_path_type}")
-        
+        logger.info(f"Bucket created: {bucket_data['id']} for {learning_path_type} (parent: {parent_bucket_id})")
+
         response = bucket.to_dict() if hasattr(bucket, 'to_dict') else dict(bucket)
         response["status"] = "success"
         return response
@@ -920,14 +1094,16 @@ async def update_course_bucket(
     color: str = Form(None),
     icon: str = Form(None),
     learning_path_type: str = Form(None),
+    parent_bucket_id: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     """
     Update an existing course bucket.
     learning_path_type: 'career_progression' or 'self_learning'
+    parent_bucket_id: Optional parent bucket ID for nested buckets (use empty string to remove parent)
     """
     service = ContentService(db)
-    
+
     updates = {}
     if name is not None:
         updates["name"] = name
@@ -939,11 +1115,14 @@ async def update_course_bucket(
         updates["icon"] = icon
     if learning_path_type is not None:
         updates["learning_path_type"] = learning_path_type
-    
+    if parent_bucket_id is not None:
+        # Allow setting to None by sending empty string
+        updates["parent_bucket_id"] = parent_bucket_id if parent_bucket_id else None
+
     try:
         bucket = service.update_bucket(bucket_id, updates)
-        logger.info(f"Bucket updated: {bucket_id}")
-        
+        logger.info(f"Bucket updated: {bucket_id} (parent: {parent_bucket_id})")
+
         response = bucket.to_dict() if hasattr(bucket, 'to_dict') else dict(bucket)
         response["status"] = "success"
         return response
@@ -1274,6 +1453,9 @@ async def get_content_library(db: Session = Depends(get_db)):
                 "color": get_attr(bucket, 'color'),
                 "icon": get_attr(bucket, 'icon'),
                 "order_index": get_attr(bucket, 'order_index', 0),
+                "is_linear": get_attr(bucket, 'is_linear', False) or False,
+                "assigned_users": get_attr(bucket, 'assigned_users', []) or [],
+                "thumbnail": get_attr(bucket, 'thumbnail'),
                 "items": bucket_items,
                 "children": children,
                 "has_children": len(children) > 0,
@@ -1281,23 +1463,31 @@ async def get_content_library(db: Session = Depends(get_db)):
                 "total_count": len(bucket_items) + sum(child.get('total_count', 0) for child in children)
             }
 
-        # Find root buckets (no parent)
+        # Find root buckets (no parent) and separate by learning path type
         root_buckets = [b for b in all_buckets if not get_attr(b, 'parent_bucket_id')]
 
-        # Build tree for each root bucket FOR BOTH learning path types
-        # This ensures content with self_learning type in career_progression buckets still shows up
+        # Filter root buckets by learning path type
+        career_root_buckets = [
+            b for b in root_buckets
+            if get_attr(b, 'learning_path_type') == 'career_progression' or not get_attr(b, 'learning_path_type')
+        ]
+        self_learning_root_buckets = [
+            b for b in root_buckets
+            if get_attr(b, 'learning_path_type') == 'self_learning'
+        ]
+
+        # Build trees for career progression buckets only
         career_progression_buckets = []
-        self_learning_buckets = []
-
-        for root in root_buckets:
+        for root in career_root_buckets:
             root_id = get_attr(root, 'id')
-
-            # Build tree for CAREER PROGRESSION content in this bucket
             career_tree = build_bucket_tree(root_id, "career_progression")
             if career_tree and career_tree.get('total_count', 0) > 0:
                 career_progression_buckets.append(career_tree)
 
-            # Build tree for SELF LEARNING content in this bucket
+        # Build trees for self learning buckets only
+        self_learning_buckets = []
+        for root in self_learning_root_buckets:
+            root_id = get_attr(root, 'id')
             self_tree = build_bucket_tree(root_id, "self_learning")
             if self_tree and self_tree.get('total_count', 0) > 0:
                 self_learning_buckets.append(self_tree)
