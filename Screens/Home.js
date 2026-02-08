@@ -22,6 +22,7 @@ import { BlurView } from "expo-blur";
 import { Feather, Octicons, Ionicons, MaterialIcons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as ScreenOrientation from 'expo-screen-orientation';
 import Animated, {
   FadeInDown,
   FadeInRight,
@@ -75,6 +76,18 @@ const FloatingWaffle = ({ delay, duration, size, top, left, rotate }) => {
       <MaterialCommunityIcons name="grid" size={size} color="#D97706" />
     </Animated.View>
   );
+};
+
+// --- SHARED: FULLSCREEN HANDLER FOR VIDEO COMPONENTS ---
+const handleVideoFullscreenUpdate = async ({ fullscreenUpdate }) => {
+  switch (fullscreenUpdate) {
+    case 1: // FULLSCREEN_UPDATE_PLAYER_WILL_PRESENT
+      await ScreenOrientation.unlockAsync();
+      break;
+    case 3: // FULLSCREEN_UPDATE_PLAYER_WILL_DISMISS
+      await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+      break;
+  }
 };
 
 // --- NEW: NOTIFICATIONS LIST MODAL ---
@@ -157,6 +170,7 @@ function NotificationDetailModal({ visible, notification, onClose }) {
                   useNativeControls
                   resizeMode={ResizeMode.CONTAIN}
                   shouldPlay
+                  onFullscreenUpdate={handleVideoFullscreenUpdate}
                 />
               ) : (
                 <Image
@@ -278,6 +292,7 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
             resizeMode={ResizeMode.CONTAIN}
             shouldPlay
             onError={(e) => console.log("Video Error:", e)}
+            onFullscreenUpdate={handleVideoFullscreenUpdate}
           />
         )}
 
@@ -757,6 +772,7 @@ function CrucialNotificationModal({ notification, onAcknowledge }) {
                       resizeMode={ResizeMode.COVER}
                       useNativeControls
                       shouldPlay={false}
+                      onFullscreenUpdate={handleVideoFullscreenUpdate}
                     />
                   ) : (
                     <Image

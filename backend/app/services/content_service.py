@@ -260,6 +260,11 @@ class ContentService:
                 "xp": course.xp or 50,
                 "timestamp": course.timestamp.isoformat() if course.timestamp else None,
                 "authorRole": "Store Manager",  # Default from old backend
+                
+                # Transcript/Quiz availability flags
+                # If no transcript exists, quiz was never generated → user can complete via video progress alone
+                "has_transcript": bool(course.transcript and len(course.transcript.strip()) > 0),
+                "has_quiz": bool(course.quiz and (isinstance(course.quiz, list) and len(course.quiz) > 0)),
             }
 
             # Determine status: completed, active, or locked

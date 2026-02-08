@@ -24,7 +24,10 @@ import * as Location from 'expo-location';
 
 const { width, height } = Dimensions.get('window');
 
-export default function ScheduleExamModal({ visible, onClose, userProfile }) {
+export default function ScheduleExamModal({ visible, onClose, userProfile, editingExam = null }) {
+    // Edit Mode Detection
+    const isEditMode = !!editingExam;
+
     // Form State
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
@@ -99,13 +102,76 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
             fetchUsers();
             fetchStores();
             fetchSmartCategories();
-            // Default supervisor to self only if empty
-            if (userProfile && !supervisorEmail) {
-                setSupervisorEmail(userProfile.email || '');
-                setSupervisorName(userProfile.name || '');
+
+            // Edit Mode: Populate form with existing data
+            if (isEditMode && editingExam) {
+                console.log('[ScheduleExamModal] Loading exam for edit:', editingExam);
+
+                // Basic Info
+                setTitle(editingExam.title || '');
+                setDescription(editingExam.description || '');
+                setLocation(editingExam.location || '');
+                setTimeLimit(String(editingExam.time_limit_minutes || 30));
+                setPassingScore(String(editingExam.passing_score || 70));
+
+                // Supervisor
+                setSupervisorEmail(editingExam.supervisor_email || '');
+                setSupervisorName(editingExam.supervisor_name || '');
+
+                // Date & Time
+                try {
+                    const examDateTime = new Date(`${editingExam.exam_date} ${editingExam.exam_time}`);
+                    if (!isNaN(examDateTime.getTime())) {
+                        setDate(examDateTime);
+                    }
+                } catch (e) {
+                    console.error('[ScheduleExamModal] Error parsing date:', e);
+                }
+
+                // Questions
+                if (editingExam.questions && Array.isArray(editingExam.questions)) {
+                    setQuestions(editingExam.questions);
+                }
+
+                // Users
+                if (editingExam.assigned_users && Array.isArray(editingExam.assigned_users)) {
+                    setSelectedUsers(editingExam.assigned_users);
+                }
+
+                // Randomization
+                setRandomizeQuestions(editingExam.randomize_question_order || editingExam.randomizeQuestionOrder || false);
+                setRandomizeOptions(editingExam.randomize_option_order || editingExam.randomizeOptionOrder || false);
+                setAllowDifferentQuestions(editingExam.allow_different_questions_per_batch || false);
+
+                // Status
+                setExamStatus(editingExam.exam_status || 'published');
+                if (editingExam.scheduled_publish_at) {
+                    setScheduledPublishAt(new Date(editingExam.scheduled_publish_at));
+                }
+
+                // PIN Settings
+                setPinEnabled(editingExam.pin_enabled || editingExam.pinEnabled || false);
+                setPinGenerationMinutes(String(editingExam.pin_generation_minutes || editingExam.pinGenerationMinutes || 5));
+                setPinValidityMinutes(String(editingExam.pin_validity_minutes || editingExam.pinValidityMinutes || 30));
+
+                // Geofencing
+                setGeofencingEnabled(editingExam.geofencing_enabled || editingExam.geofencingEnabled || false);
+                setGeofencingRadius(String(editingExam.geofencing_radius || editingExam.geofencingRadius || 100));
+
+                // Batch Data (if exists)
+                if (editingExam.batch_data && Array.isArray(editingExam.batch_data)) {
+                    setNumberOfBatches(editingExam.batch_data.length);
+                    setBatchAssignments(editingExam.batch_data);
+                }
+            } else {
+                // Create Mode: Default supervisor to self only if empty
+                if (userProfile && !supervisorEmail) {
+                    setSupervisorEmail(userProfile.email || '');
+                    setSupervisorName(userProfile.name || '');
+                }
             }
         }
-    }, [visible]);
+    }, [visible, editingExam]);
 
     // Helper functions for date/time formatting
     const getFormattedDate = () => {
@@ -576,19 +642,28 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
             formData.append('pin_generation_minutes', pinGenerationMinutes);
             formData.append('pin_validity_minutes', pinValidityMinutes);
 
-            const res = await fetch(`${API_URL}/api/v1/assessments/scheduled`, {
-                method: 'POST',
+            // Determine API endpoint and method
+            const endpoint = isEditMode
+                ? `${API_URL}/api/v1/assessments/scheduled/${editingExam.id}`
+                : `${API_URL}/api/v1/assessments/scheduled`;
+            const method = isEditMode ? 'PUT' : 'POST';
+
+            const res = await fetch(endpoint, {
+                method: method,
                 body: formData
             });
 
             const data = await res.json();
 
             if (res.ok && (data.id || data.status === 'success')) {
-                Alert.alert('Success', `Exam "${title}" scheduled successfully! Notifications sent to ${selectedUsers.length} users.`);
+                const successMessage = isEditMode
+                    ? `Exam "${title}" updated successfully!`
+                    : `Exam "${title}" scheduled successfully! Notifications sent to ${selectedUsers.length} users.`;
+                Alert.alert('Success', successMessage);
                 resetForm();
                 onClose();
             } else {
-                Alert.alert('Error', data.detail || 'Failed to schedule exam');
+                Alert.alert('Error', data.detail || `Failed to ${isEditMode ? 'update' : 'schedule'} exam`);
             }
         } catch (e) {
             console.error('Error scheduling exam:', e);
@@ -1880,8 +1955,8 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
                                     <Feather name="x" size={22} color="#FFF" />
                                 </TouchableOpacity>
                                 <View style={styles.headerTitleRow}>
-                                    <MaterialCommunityIcons name="calendar-clock" size={24} color="#FFF" />
-                                    <Text style={styles.headerTitle}>Schedule Exam</Text>
+                                    <MaterialCommunityIcons name={isEditMode ? "pencil" : "calendar-clock"} size={24} color="#FFF" />
+                                    <Text style={styles.headerTitle}>{isEditMode ? "Edit Exam" : "Schedule Exam"}</Text>
                                 </View>
                                 <View style={{ width: 40 }} />
                             </View>
@@ -1940,8 +2015,8 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
                                         <ActivityIndicator color="#FFF" />
                                     ) : (
                                         <>
-                                            <MaterialCommunityIcons name="calendar-check" size={20} color="#FFF" />
-                                            <Text style={styles.nextBtnText}>Schedule Exam</Text>
+                                            <MaterialCommunityIcons name={isEditMode ? "content-save" : "calendar-check"} size={20} color="#FFF" />
+                                            <Text style={styles.nextBtnText}>{isEditMode ? "Update Exam" : "Schedule Exam"}</Text>
                                         </>
                                     )}
                                 </TouchableOpacity>

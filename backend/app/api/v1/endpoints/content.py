@@ -7,6 +7,7 @@ import os
 import uuid
 import json
 import logging
+import shutil
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
@@ -22,6 +23,7 @@ from app.services.content_service import ContentService
 from app.services.cdn_service import CDNService
 from app.services.ai_service import AIService
 from app.services.document_service import DocumentService
+from app.services.document_converter import get_converter
 from app.core.websocket import manager
 
 logger = logging.getLogger(__name__)
@@ -210,7 +212,63 @@ async def upload_content(
         with open(local_path, "wb") as f:
             f.write(content_bytes)
 
-        # Upload to CDN
+        # Optimize documents for preview (compress or convert to PDF if too large)
+        pdf_url = None
+        optimized_url = None
+        converter = get_converter()
+
+        if converter.needs_conversion(filename):
+            logger.info(f"Optimizing {filename} for preview...")
+            success, output_path, message = await converter.convert_to_pdf(local_path)
+            logger.info(f"Optimization result: {message}")
+
+            if success and output_path:
+                # We got an optimized/converted file - upload it
+                with open(output_path, "rb") as opt_file:
+                    opt_bytes = opt_file.read()
+
+                # Determine if it's a PDF or compressed original
+                is_pdf = output_path.lower().endswith('.pdf')
+                opt_ext = '.pdf' if is_pdf else ext
+
+                if cdn_service.enabled:
+                    opt_cdn_key = f"content/{content_id}_optimized{opt_ext}"
+                    opt_cdn_result = cdn_service.upload_file(
+                        opt_bytes,
+                        opt_cdn_key,
+                        "application/pdf" if is_pdf else file.content_type
+                    )
+                    if opt_cdn_result:
+                        if isinstance(opt_cdn_result, dict):
+                            optimized_url = opt_cdn_result.get("url")
+                        else:
+                            optimized_url = str(opt_cdn_result)
+
+                if not optimized_url:
+                    # Save locally
+                    opt_local_path = os.path.join(settings.UPLOAD_DIR, f"{content_id}_optimized{opt_ext}")
+                    shutil.copy(output_path, opt_local_path)
+                    optimized_url = f"{settings.BASE_URL}/uploads/{content_id}_optimized{opt_ext}"
+
+                # If it's a PDF conversion, store as pdf_url
+                if is_pdf:
+                    pdf_url = optimized_url
+                    logger.info(f"PDF conversion uploaded: {pdf_url}")
+                else:
+                    # It's a compressed version of the original format
+                    logger.info(f"Compressed file uploaded: {optimized_url}")
+
+                # Cleanup temp file
+                if output_path != local_path:
+                    try:
+                        os.remove(output_path)
+                    except:
+                        pass
+            elif success:
+                # success=True but output_path=None means file is small enough for direct preview
+                logger.info(f"File is small enough for direct preview - no optimization needed")
+
+        # Upload original file to CDN
         video_url = None
         if cdn_service.enabled:
             cdn_key = f"content/{content_id}{ext}"
@@ -231,6 +289,8 @@ async def upload_content(
         logger.info(f"[UPLOAD DEBUG] Title={title}, isPathNode_raw={is_path_node}, isPathNode_bool={is_path_node_bool}, learning_path_type={learning_path_type}, bucket={bucket_name}")
 
         # Create content record
+        # Priority for viewing: PDF > optimized/compressed > original
+        viewing_url = pdf_url or optimized_url or video_url
         content_data = {
             "id": content_id,
             "title": title,
@@ -238,8 +298,9 @@ async def upload_content(
             "bucket": bucket_name,
             "bucket_id": bucket_id_val,
             "resource_type": resource_type,
-            "video_url": video_url,
-            "file_url": video_url,
+            "video_url": viewing_url,  # URL for viewing (optimized if available)
+            "file_url": video_url,  # Keep original file URL
+            "pdf_url": pdf_url,  # Store PDF URL if converted
             "is_path_node": is_path_node_bool,
             "learning_path_type": learning_path_type,
             "timestamp": datetime.utcnow(),
@@ -426,7 +487,51 @@ async def bulk_folder_upload(
                 with open(local_path, "wb") as f:
                     f.write(content_bytes)
 
-                # Upload to CDN
+                # Optimize documents for preview (compress or convert if too large)
+                pdf_url = None
+                optimized_url = None
+                converter = get_converter()
+
+                if converter.needs_conversion(filename):
+                    logger.info(f"Optimizing {filename} for preview...")
+                    success, output_path, message = await converter.convert_to_pdf(local_path)
+                    logger.info(f"Optimization: {message}")
+
+                    if success and output_path:
+                        with open(output_path, "rb") as opt_file:
+                            opt_bytes = opt_file.read()
+
+                        is_pdf = output_path.lower().endswith('.pdf')
+                        opt_ext = '.pdf' if is_pdf else ext
+
+                        if cdn_service.enabled:
+                            opt_cdn_key = f"content/{content_id}_optimized{opt_ext}"
+                            opt_cdn_result = cdn_service.upload_file(
+                                opt_bytes,
+                                opt_cdn_key,
+                                "application/pdf" if is_pdf else file.content_type
+                            )
+                            if opt_cdn_result:
+                                if isinstance(opt_cdn_result, dict):
+                                    optimized_url = opt_cdn_result.get("url")
+                                else:
+                                    optimized_url = str(opt_cdn_result)
+
+                        if not optimized_url:
+                            opt_local_path = os.path.join(settings.UPLOAD_DIR, f"{content_id}_optimized{opt_ext}")
+                            shutil.copy(output_path, opt_local_path)
+                            optimized_url = f"{settings.BASE_URL}/uploads/{content_id}_optimized{opt_ext}"
+
+                        if is_pdf:
+                            pdf_url = optimized_url
+
+                        if output_path != local_path:
+                            try:
+                                os.remove(output_path)
+                            except:
+                                pass
+
+                # Upload original file to CDN
                 video_url = None
                 if cdn_service.enabled:
                     cdn_key = f"content/{content_id}{ext}"
@@ -441,6 +546,8 @@ async def bulk_folder_upload(
                     video_url = f"{settings.BASE_URL}/uploads/{content_id}{ext}"
 
                 # Create content record
+                # Priority for viewing: PDF > optimized/compressed > original
+                viewing_url = pdf_url or optimized_url or video_url
                 title = os.path.splitext(filename)[0]
                 content_data = {
                     "id": content_id,
@@ -449,8 +556,9 @@ async def bulk_folder_upload(
                     "bucket": target_bucket.name,
                     "bucket_id": target_bucket.id,
                     "resource_type": resource_type,
-                    "video_url": video_url,
-                    "file_url": video_url,
+                    "video_url": viewing_url,  # URL for viewing (optimized if available)
+                    "file_url": video_url,  # Keep original file URL
+                    "pdf_url": pdf_url,  # Store PDF URL if converted
                     "is_path_node": True,
                     "learning_path_type": learning_path_type,
                     "order_index": idx,

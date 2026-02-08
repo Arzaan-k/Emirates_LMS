@@ -748,6 +748,109 @@ async def get_exam_attendance(
     return result
 
 
+@router.put("/scheduled/{exam_id}")
+async def update_scheduled_exam(
+    exam_id: str,
+    title: str = Form(...),
+    description: str = Form(""),
+    exam_date: str = Form(...),
+    exam_time: str = Form(...),
+    location: str = Form(...),
+    batch_assignments: str = Form("[]"),
+    number_of_batches: int = Form(1),
+    shift: str = Form(None),
+    supervisor_email: str = Form(...),
+    supervisor_name: str = Form(...),
+    assigned_users: str = Form("[]"),
+    questions: str = Form(...),
+    time_limit_minutes: int = Form(30),
+    passing_score: int = Form(70),
+    created_by: str = Form("Admin"),
+    exam_status: str = Form("published"),
+    scheduled_publish_at: str = Form(None),
+    allow_different_questions_per_batch: bool = Form(False),
+    randomize_question_order: bool = Form(False),
+    randomize_option_order: bool = Form(False),
+    geofencing_enabled: bool = Form(False),
+    geofencing_radius: int = Form(100),
+    geofencing_latitude: float = Form(None),
+    geofencing_longitude: float = Form(None),
+    pin_enabled: bool = Form(False),
+    pin_generation_minutes: int = Form(5),
+    pin_validity_minutes: int = Form(30),
+    db: Session = Depends(get_db)
+):
+    """
+    Update an existing scheduled exam.
+    """
+    try:
+        service = AssessmentService(db)
+        exam = service.get_scheduled_exam_by_id(exam_id)
+
+        if not exam:
+            raise HTTPException(status_code=404, detail="Exam not found")
+
+        # Parse JSON fields
+        questions_list = json.loads(questions) if isinstance(questions, str) else questions
+        assigned_users_list = json.loads(assigned_users) if isinstance(assigned_users, str) else assigned_users
+        batch_assignments_list = json.loads(batch_assignments) if isinstance(batch_assignments, str) else batch_assignments
+
+        # Update exam fields
+        exam.title = title
+        exam.description = description
+        exam.exam_date = exam_date
+        exam.exam_time = exam_time
+        exam.location = location
+        exam.supervisor_email = supervisor_email
+        exam.supervisor_name = supervisor_name
+        exam.assigned_users = assigned_users_list
+        exam.questions = questions_list
+        exam.time_limit_minutes = time_limit_minutes
+        exam.passing_score = passing_score
+        exam.number_of_batches = number_of_batches
+        exam.batch_data = batch_assignments_list if batch_assignments_list else []
+
+        # Enhanced Features
+        exam.exam_status = exam_status
+        if scheduled_publish_at:
+            exam.scheduled_publish_at = datetime.fromisoformat(scheduled_publish_at.replace('Z', '+00:00'))
+        exam.allow_different_questions_per_batch = allow_different_questions_per_batch
+        exam.randomize_question_order = randomize_question_order
+        exam.randomize_option_order = randomize_option_order
+
+        # Geofencing
+        exam.geofencing_enabled = geofencing_enabled
+        exam.geofencing_radius = geofencing_radius
+        if geofencing_latitude is not None:
+            exam.geofencing_latitude = geofencing_latitude
+        if geofencing_longitude is not None:
+            exam.geofencing_longitude = geofencing_longitude
+
+        # PIN Check-in
+        exam.pin_enabled = pin_enabled
+        exam.pin_generation_minutes = pin_generation_minutes
+        exam.pin_validity_minutes = pin_validity_minutes
+
+        db.commit()
+        db.refresh(exam)
+
+        logger.info(f"Exam updated: {exam_id} - {title}")
+
+        return {
+            "status": "success",
+            "message": "Exam updated successfully",
+            "id": exam.id,
+            "title": exam.title
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Update exam error: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update exam: {str(e)}")
+
+
 @router.post("/scheduled/{exam_id}/mark-present")
 async def mark_user_present(
     exam_id: str,

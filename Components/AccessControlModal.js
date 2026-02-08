@@ -9,8 +9,15 @@ import {
     Alert,
     Dimensions,
     Platform,
+    TextInput,
+    ScrollView,
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import * as XLSX from 'xlsx';
 import API_URL from '../config';
 import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -23,6 +30,7 @@ const DEFAULT_LEVELS = ['Waffler', 'Silver Waffler', 'Gold Waffler', 'Shift Mana
 export default function AccessControlModal({ visible, onClose }) {
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [savingCurriculum, setSavingCurriculum] = useState(null); // Track which level curriculum is being saved
     const [buckets, setBuckets] = useState([]);
     const [allCourses, setAllCourses] = useState([]);
     const [accessRules, setAccessRules] = useState({});
@@ -39,11 +47,44 @@ export default function AccessControlModal({ visible, onClose }) {
 
     const [expandedRole, setExpandedRole] = useState(null);
 
+    // Quiz management state (per-level)
+    const [levelQuizzes, setLevelQuizzes] = useState({}); // { levelName: { questions: [], source: '', loading: false } }
+    const [quizSaving, setQuizSaving] = useState(null); // levelName currently saving
+    const [editingQuestionKey, setEditingQuestionKey] = useState(null); // "levelName:index"
+    const [editForm, setEditForm] = useState({ question: '', options: ['', '', '', ''], correctIndex: 0 });
+
+    // Toast notification state
+    const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
+
+    // Show toast notification (works on web and mobile)
+    const showToast = (message, type = 'success') => {
+        console.log('Showing toast:', message, type); // Debug log
+        setToast({ visible: true, message, type });
+        setTimeout(() => {
+            setToast({ visible: false, message: '', type: 'success' });
+        }, 4000);
+    };
+
+    // AI generation controls per level
+    const [aiGenConfigByLevel, setAiGenConfigByLevel] = useState({}); // { [levelName]: { numQuestions: number, difficulty: 'easy'|'medium'|'hard' } }
+
+    // Bulk upload state
+    const [bulkUploadLevelName, setBulkUploadLevelName] = useState(null);
+    const [bulkUploadText, setBulkUploadText] = useState('');
+
     useEffect(() => {
         if (visible) {
             fetchData();
         }
     }, [visible]);
+
+    const getAuthHeaders = async () => {
+        const token = (await AsyncStorage.getItem('userToken')) || (await AsyncStorage.getItem('accessToken'));
+        return {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        };
+    };
 
     const fetchData = async () => {
         setLoading(true);
@@ -117,10 +158,10 @@ export default function AccessControlModal({ visible, onClose }) {
             const data = await response.json();
             setLevelData(data.levels);
             setHasLevelChanges(false);
-            Alert.alert('Success', 'Level order saved!');
+            showToast('Level order saved successfully!', 'success');
         } catch (error) {
             console.error('Failed to save level order:', error);
-            Alert.alert('Error', 'Failed to save level order');
+            showToast('Failed to save level order. Please try again.', 'error');
         } finally {
             setSaving(false);
         }
@@ -141,35 +182,620 @@ export default function AccessControlModal({ visible, onClose }) {
     };
 
     const handleSaveCourses = async (level) => {
+        console.log('=== handleSaveCourses called ===');
+        console.log('Level:', level);
+        setSavingCurriculum(level.id);
         try {
             const courses = stagedAssignments[level.id] || [];
             const existingRules = accessRules[level.name] || {};
+            console.log('Courses to save:', courses);
 
             const formData = new FormData();
             formData.append('accessible_courses', JSON.stringify(courses));
             formData.append('accessible_buckets', JSON.stringify(existingRules.accessible_buckets || []));
             formData.append('max_courses_visible', String(existingRules.max_courses_visible || -1));
 
+            console.log('Calling API:', `${API_URL}/api/v1/levels/access-rules/${level.name}`);
             const res = await fetch(`${API_URL}/api/v1/levels/access-rules/${level.name}`, {
                 method: 'PUT',
                 body: formData
             });
 
             const result = await res.json();
+            console.log('API Response:', result);
+
             if (result.status === 'success') {
-                Alert.alert("Success", `${level.name} curriculum updated!`);
+                console.log('Calling showToast for success');
+                showToast(`${level.name} curriculum saved successfully! ${courses.length} courses assigned.`, 'success');
                 setAccessRules({
                     ...accessRules,
                     [level.name]: { ...existingRules, accessible_courses: courses }
                 });
             } else {
-                Alert.alert("Error", "Failed to save changes.");
+                console.log('Calling showToast for error:', result.message);
+                showToast(result.message || 'Failed to save changes.', 'error');
             }
         } catch (e) {
-            console.error(e);
-            Alert.alert("Error", "Network error while saving.");
+            console.error('Error saving curriculum:', e);
+            showToast('Failed to save curriculum. Please check your connection and try again.', 'error');
+        } finally {
+            setSavingCurriculum(null);
         }
     };
+
+    // =========================================================================
+    // QUIZ MANAGEMENT FUNCTIONS
+    // =========================================================================
+    const confirmAction = (title, message, onConfirm) => {
+        if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.confirm === 'function') {
+            const ok = window.confirm(`${title}\n\n${message}`);
+            if (ok) {
+                // Handle both sync and async callbacks
+                Promise.resolve(onConfirm()).catch(err => {
+                    console.error('confirmAction callback error:', err);
+                });
+            }
+            return;
+        }
+
+        // For mobile, use Alert.alert
+        import('react-native').then(({ Alert }) => {
+            Alert.alert(
+                title,
+                message,
+                [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                        text: 'Confirm', style: 'destructive', onPress: () => {
+                            Promise.resolve(onConfirm()).catch(err => {
+                                console.error('confirmAction callback error:', err);
+                            });
+                        }
+                    },
+                ]
+            );
+        });
+    };
+
+    const fetchQuizForLevel = async (levelName) => {
+        setLevelQuizzes(prev => ({ ...prev, [levelName]: { ...(prev[levelName] || {}), loading: true } }));
+        try {
+            const headers = await getAuthHeaders();
+            const response = await fetch(`${API_URL}/api/v1/levels/exam-questions/${encodeURIComponent(levelName)}`, { headers });
+            if (!response.ok) {
+                const txt = await response.text();
+                throw new Error(`Fetch failed (${response.status}): ${txt}`);
+            }
+            const data = await response.json();
+            if (data.status === 'success' && data.data) {
+                setAiGenConfigByLevel(prev => ({
+                    ...prev,
+                    [levelName]: prev[levelName] || { numQuestions: Math.max(1, Math.min(50, (data.data.questions || []).length || 10)), difficulty: 'medium' }
+                }));
+                setLevelQuizzes(prev => ({
+                    ...prev,
+                    [levelName]: {
+                        questions: data.data.questions || [],
+                        source: data.data.source || null,
+                        loading: false,
+                    }
+                }));
+            } else {
+                setLevelQuizzes(prev => ({ ...prev, [levelName]: { questions: [], source: null, loading: false } }));
+            }
+        } catch (error) {
+            console.error('Failed to fetch quiz for', levelName, error);
+            if (`${error?.message || ''}`.includes('401') || `${error?.message || ''}`.includes('403')) {
+                Alert.alert('Unauthorized', 'Your session may have expired. Please log in again.');
+            }
+            setLevelQuizzes(prev => ({ ...prev, [levelName]: { questions: [], source: null, loading: false } }));
+        }
+    };
+
+    const saveQuizPayload = async (levelName, questions) => {
+        const headers = await getAuthHeaders();
+        if (!headers.Authorization) {
+            Alert.alert('Unauthorized', 'Missing auth token. Please log in again.');
+            return { ok: false };
+        }
+
+        const response = await fetch(`${API_URL}/api/v1/levels/exam-questions/${encodeURIComponent(levelName)}`, {
+            method: 'PUT',
+            headers,
+            body: JSON.stringify({ questions, updated_by: 'admin' }),
+        });
+
+        if (!response.ok) {
+            const txt = await response.text();
+            throw new Error(`Save failed (${response.status}): ${txt}`);
+        }
+        return await response.json();
+    };
+
+    const saveQuizForLevel = async (levelName) => {
+        const quizData = levelQuizzes[levelName];
+        if (!quizData) return;
+        setQuizSaving(levelName);
+        try {
+            const data = await saveQuizPayload(levelName, quizData.questions);
+            if (data.status === 'success') {
+                showToast(`Quiz questions saved for ${levelName}! ${quizData.questions.length} questions.`, 'success');
+                setLevelQuizzes(prev => ({
+                    ...prev,
+                    [levelName]: { ...prev[levelName], source: data.data?.source || 'manual' }
+                }));
+            } else {
+                showToast(data.message || 'Failed to save questions', 'error');
+            }
+        } catch (error) {
+            console.error('Failed to save quiz:', error);
+            showToast('Failed to save quiz questions. Please try again.', 'error');
+        } finally {
+            setQuizSaving(null);
+        }
+    };
+
+    const regenerateQuizForLevel = async (levelName) => {
+        const cfg = aiGenConfigByLevel[levelName] || { numQuestions: 10, difficulty: 'medium' };
+        const numQuestions = Math.max(1, Math.min(50, parseInt(cfg.numQuestions, 10) || 10));
+        const difficulty = (cfg.difficulty || 'medium').toString().toLowerCase();
+
+        confirmAction(
+            'Regenerate Questions',
+            `This will overwrite all existing questions for ${levelName} with AI-generated ones.\n\nQuestions: ${numQuestions}\nDifficulty: ${difficulty}\n\nContinue?`,
+            async () => {
+                setLevelQuizzes(prev => ({ ...prev, [levelName]: { ...(prev[levelName] || {}), loading: true } }));
+                try {
+                    const headers = await getAuthHeaders();
+                    const qs = `?num_questions=${encodeURIComponent(numQuestions)}&difficulty=${encodeURIComponent(difficulty)}`;
+                    const response = await fetch(`${API_URL}/api/v1/levels/exam-questions/${encodeURIComponent(levelName)}/regenerate${qs}`, {
+                        method: 'POST',
+                        headers,
+                    });
+                    if (!response.ok) {
+                        const txt = await response.text();
+                        throw new Error(`AI generate failed (${response.status}): ${txt}`);
+                    }
+                    const data = await response.json();
+                    if (data.status === 'success' && data.data) {
+                        setLevelQuizzes(prev => ({
+                            ...prev,
+                            [levelName]: { questions: data.data.questions || [], source: 'ai_generated', loading: false }
+                        }));
+                        showToast(`Generated ${data.data.question_count} questions for ${levelName}!`, 'success');
+                    } else {
+                        showToast(data.message || 'Failed to regenerate', 'error');
+                        setLevelQuizzes(prev => ({ ...prev, [levelName]: { ...(prev[levelName] || {}), loading: false } }));
+                    }
+                } catch (error) {
+                    console.error('Failed to regenerate quiz:', error);
+                    const msg = error?.message || 'Failed to regenerate questions';
+                    showToast(msg, 'error');
+                    setLevelQuizzes(prev => ({ ...prev, [levelName]: { ...(prev[levelName] || {}), loading: false } }));
+                }
+            }
+        );
+    };
+
+    const openBulkUpload = (levelName) => {
+        setBulkUploadLevelName(levelName);
+        setBulkUploadText('');
+    };
+
+    const parseQuizRows = (rows) => {
+        // rows: [{question, option_a, option_b, option_c, option_d, correct_index}] or CSV equivalents
+        const normalized = rows
+            .filter(r => r && Object.values(r).some(v => (v ?? '').toString().trim() !== ''))
+            .map((r, idx) => {
+                const question = (r.question ?? r.Question ?? '').toString();
+                const options = [
+                    (r.option_a ?? r.OptionA ?? r.optionA ?? r.a ?? r.A ?? '').toString(),
+                    (r.option_b ?? r.OptionB ?? r.optionB ?? r.b ?? r.B ?? '').toString(),
+                    (r.option_c ?? r.OptionC ?? r.optionC ?? r.c ?? r.C ?? '').toString(),
+                    (r.option_d ?? r.OptionD ?? r.optionD ?? r.d ?? r.D ?? '').toString(),
+                ].filter(o => o !== undefined);
+
+                let correctIndexRaw = r.correct_index ?? r.correctIndex ?? r.CorrectIndex ?? r.correct ?? r.Correct ?? 0;
+                const correctIndex = Number.parseInt(correctIndexRaw, 10);
+
+                if (!question.trim()) {
+                    throw new Error(`Row ${idx + 1}: missing question`);
+                }
+
+                const cleanedOptions = options.map(o => (o ?? '').toString());
+                const nonEmptyOptions = cleanedOptions.filter(o => o.trim()).length;
+                if (nonEmptyOptions < 2) {
+                    throw new Error(`Row ${idx + 1}: must have at least 2 options`);
+                }
+                if (!Number.isInteger(correctIndex) || correctIndex < 0 || correctIndex >= cleanedOptions.length) {
+                    throw new Error(`Row ${idx + 1}: correct_index must be 0-${cleanedOptions.length - 1}`);
+                }
+
+                return {
+                    question,
+                    options: cleanedOptions,
+                    correctIndex,
+                };
+            });
+
+        return normalized;
+    };
+
+    const parseCsvTextToRows = (csvText) => {
+        // Minimal CSV parser (supports quoted values)
+        const lines = csvText.split(/\r?\n/).filter(l => l.trim() !== '');
+        if (lines.length === 0) return [];
+
+        const parseLine = (line) => {
+            const result = [];
+            let current = '';
+            let inQuotes = false;
+            for (let i = 0; i < line.length; i++) {
+                const ch = line[i];
+                if (ch === '"') {
+                    if (inQuotes && line[i + 1] === '"') {
+                        current += '"';
+                        i++;
+                    } else {
+                        inQuotes = !inQuotes;
+                    }
+                } else if (ch === ',' && !inQuotes) {
+                    result.push(current);
+                    current = '';
+                } else {
+                    current += ch;
+                }
+            }
+            result.push(current);
+            return result.map(v => v.trim());
+        };
+
+        const headers = parseLine(lines[0]);
+        return lines.slice(1).map((line) => {
+            const values = parseLine(line);
+            const obj = {};
+            headers.forEach((h, idx) => {
+                obj[h] = values[idx] ?? '';
+            });
+            return obj;
+        });
+    };
+
+    const pickAndImportQuizFile = async () => {
+        try {
+            const result = await DocumentPicker.getDocumentAsync({
+                type: [
+                    'text/csv',
+                    'application/vnd.ms-excel',
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    '*/*'
+                ],
+                copyToCacheDirectory: true,
+                multiple: false,
+            });
+
+            if (result.canceled || !result.assets || !result.assets[0]) return;
+            const file = result.assets[0];
+            const name = file.name || '';
+            const ext = name.split('.').pop()?.toLowerCase();
+
+            let rows = [];
+            if (ext === 'csv') {
+                const csvText = await FileSystem.readAsStringAsync(file.uri);
+                rows = parseCsvTextToRows(csvText);
+            } else if (ext === 'xlsx' || ext === 'xls') {
+                // Read file as base64, then parse via XLSX
+                const base64 = await FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.Base64 });
+                const workbook = XLSX.read(base64, { type: 'base64' });
+                const sheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[sheetName];
+                rows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+            } else {
+                Alert.alert('Unsupported File', 'Please upload a .csv or .xlsx file.');
+                return;
+            }
+
+            const questions = parseQuizRows(rows);
+            setLevelQuizzes(prev => ({
+                ...prev,
+                [bulkUploadLevelName]: {
+                    ...(prev[bulkUploadLevelName] || {}),
+                    questions,
+                    source: 'manual',
+                    loading: false,
+                }
+            }));
+            setEditingQuestionKey(null);
+
+            // Auto-publish to backend so app can read it immediately
+            setQuizSaving(bulkUploadLevelName);
+            try {
+                const data = await saveQuizPayload(bulkUploadLevelName, questions);
+                if (data?.status === 'success') {
+                    setLevelQuizzes(prev => ({
+                        ...prev,
+                        [bulkUploadLevelName]: { ...prev[bulkUploadLevelName], source: data.data?.source || 'manual' }
+                    }));
+                    Alert.alert('Imported & Published', `Imported ${questions.length} questions and published to app.`);
+                } else {
+                    Alert.alert('Imported', `Imported ${questions.length} questions. Please click "Save Quiz" to publish.`);
+                }
+            } finally {
+                setQuizSaving(null);
+            }
+        } catch (e) {
+            console.error('Bulk import failed', e);
+            Alert.alert('Import Failed', e?.message || 'Failed to import file');
+        }
+    };
+
+    const getQuizTemplateRows = () => ([
+        {
+            question: 'Example question?',
+            option_a: 'Option A',
+            option_b: 'Option B',
+            option_c: 'Option C',
+            option_d: 'Option D',
+            correct_index: 0,
+        }
+    ]);
+
+    const getCurrentQuizRows = () => {
+        const qs = levelQuizzes[bulkUploadLevelName]?.questions || [];
+        return qs.map(q => ({
+            question: q.question,
+            option_a: q.options?.[0] ?? '',
+            option_b: q.options?.[1] ?? '',
+            option_c: q.options?.[2] ?? '',
+            option_d: q.options?.[3] ?? '',
+            correct_index: q.correctIndex ?? 0,
+        }));
+    };
+
+    const downloadTextFileWeb = (filename, text, mimeType) => {
+        const blob = new Blob([text], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    };
+
+    const downloadUtf8FileNative = async (filename, text, mimeType) => {
+        const targetUri = `${FileSystem.cacheDirectory}${filename}`;
+        await FileSystem.writeAsStringAsync(targetUri, text, { encoding: FileSystem.EncodingType.UTF8 });
+        if (await Sharing.isAvailableAsync()) {
+            await Sharing.shareAsync(targetUri, { mimeType });
+        } else {
+            Alert.alert('Sharing Unavailable', `File saved to cache: ${targetUri}`);
+        }
+    };
+
+    const downloadBase64FileNative = async (filename, base64, mimeType) => {
+        const targetUri = `${FileSystem.cacheDirectory}${filename}`;
+        await FileSystem.writeAsStringAsync(targetUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+        if (await Sharing.isAvailableAsync()) {
+            await Sharing.shareAsync(targetUri, { mimeType });
+        } else {
+            Alert.alert('Sharing Unavailable', `File saved to cache: ${targetUri}`);
+        }
+    };
+
+    const exportQuizAsCsv = async (mode) => {
+        if (!bulkUploadLevelName) return;
+        const rows = mode === 'current' ? getCurrentQuizRows() : getQuizTemplateRows();
+        const headers = ['question', 'option_a', 'option_b', 'option_c', 'option_d', 'correct_index'];
+        const escape = (v) => {
+            const s = (v ?? '').toString();
+            if (s.includes('"') || s.includes(',') || s.includes('\n')) {
+                return '"' + s.replace(/"/g, '""') + '"';
+            }
+            return s;
+        };
+        const lines = [headers.join(',')].concat(
+            rows.map(r => headers.map(h => escape(r[h])).join(','))
+        );
+        const csv = lines.join('\n');
+        const filename = `${bulkUploadLevelName}_${mode === 'current' ? 'quiz_export' : 'quiz_template'}.csv`;
+
+        if (Platform.OS === 'web') {
+            downloadTextFileWeb(filename, csv, 'text/csv');
+            return;
+        }
+
+        await downloadUtf8FileNative(filename, csv, 'text/csv');
+    };
+
+    const exportQuizAsExcel = async (mode) => {
+        if (!bulkUploadLevelName) return;
+        const rows = mode === 'current' ? getCurrentQuizRows() : getQuizTemplateRows();
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Quiz');
+        const base64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+        const filename = `${bulkUploadLevelName}_${mode === 'current' ? 'quiz_export' : 'quiz_template'}.xlsx`;
+
+        if (Platform.OS === 'web') {
+            const binary = atob(base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            return;
+        }
+
+        await downloadBase64FileNative(
+            filename,
+            base64,
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        );
+    };
+
+    const applyBulkUpload = () => {
+        if (!bulkUploadLevelName) return;
+
+        let parsed;
+        try {
+            parsed = JSON.parse(bulkUploadText);
+        } catch (e) {
+            Alert.alert('Invalid JSON', 'Please paste a valid JSON array of questions.');
+            return;
+        }
+
+        if (!Array.isArray(parsed)) {
+            Alert.alert('Invalid Format', 'Bulk upload must be a JSON array.');
+            return;
+        }
+
+        const normalized = parsed.map((q, idx) => {
+            const question = (q?.question ?? '').toString();
+            const options = Array.isArray(q?.options) ? q.options.map(o => (o ?? '').toString()) : [];
+            const correctIndex = Number.isInteger(q?.correctIndex) ? q.correctIndex : 0;
+
+            if (!question.trim()) {
+                throw new Error(`Question ${idx + 1}: missing 'question'`);
+            }
+            if (options.length < 2) {
+                throw new Error(`Question ${idx + 1}: must have at least 2 options`);
+            }
+            if (correctIndex < 0 || correctIndex >= options.length) {
+                throw new Error(`Question ${idx + 1}: 'correctIndex' out of range`);
+            }
+            return { question, options, correctIndex };
+        });
+
+        setLevelQuizzes(prev => ({
+            ...prev,
+            [bulkUploadLevelName]: {
+                ...(prev[bulkUploadLevelName] || {}),
+                questions: normalized,
+                source: 'manual',
+                loading: false,
+            }
+        }));
+
+        setEditingQuestionKey(null);
+
+        // Auto-publish to backend so app can read it immediately
+        (async () => {
+            setQuizSaving(bulkUploadLevelName);
+            try {
+                const data = await saveQuizPayload(bulkUploadLevelName, normalized);
+                if (data?.status === 'success') {
+                    setLevelQuizzes(prev => ({
+                        ...prev,
+                        [bulkUploadLevelName]: { ...prev[bulkUploadLevelName], source: data.data?.source || 'manual' }
+                    }));
+                    Alert.alert('Imported & Published', `Imported ${normalized.length} questions and published to app.`);
+                    setBulkUploadLevelName(null);
+                    setBulkUploadText('');
+                } else {
+                    Alert.alert('Imported', `Imported ${normalized.length} questions. Please click "Save Quiz" to publish.`);
+                }
+            } catch (e) {
+                Alert.alert('Publish Failed', e?.message || 'Failed to publish imported questions');
+            } finally {
+                setQuizSaving(null);
+            }
+        })();
+    };
+
+    const updateQuizQuestion = (levelName, index, updatedQuestion) => {
+        setLevelQuizzes(prev => {
+            const current = prev[levelName] || { questions: [] };
+            const updated = [...current.questions];
+            updated[index] = { ...updated[index], ...updatedQuestion };
+            return { ...prev, [levelName]: { ...current, questions: updated } };
+        });
+    };
+
+    const addQuizQuestion = (levelName) => {
+        const newQ = { question: 'New Question', options: ['Option A', 'Option B', 'Option C', 'Option D'], correctIndex: 0 };
+        setLevelQuizzes(prev => {
+            const current = prev[levelName] || { questions: [] };
+            return { ...prev, [levelName]: { ...current, questions: [...current.questions, newQ] } };
+        });
+        const newIdx = (levelQuizzes[levelName]?.questions || []).length;
+        setEditForm({ question: 'New Question', options: ['Option A', 'Option B', 'Option C', 'Option D'], correctIndex: 0 });
+        setEditingQuestionKey(`${levelName}:${newIdx}`);
+    };
+
+    const deleteQuizQuestion = (levelName, index) => {
+        confirmAction(
+            'Delete Question',
+            `Delete question ${index + 1}?`,
+            async () => {
+                // Get current questions and filter out the deleted one
+                const current = levelQuizzes[levelName] || { questions: [] };
+                const updatedQuestions = current.questions.filter((_, i) => i !== index);
+
+                // Update local state first
+                setLevelQuizzes(prev => ({
+                    ...prev,
+                    [levelName]: { ...current, questions: updatedQuestions }
+                }));
+                if (editingQuestionKey === `${levelName}:${index}`) setEditingQuestionKey(null);
+
+                // Now persist to database
+                try {
+                    setQuizSaving(levelName);
+                    const data = await saveQuizPayload(levelName, updatedQuestions);
+                    if (data.status === 'success') {
+                        showToast(`Question deleted successfully! ${updatedQuestions.length} questions remaining.`, 'success');
+                    } else {
+                        showToast('Failed to save deletion to database.', 'error');
+                    }
+                } catch (error) {
+                    console.error('Failed to save quiz after deletion:', error);
+                    showToast('Failed to save deletion. Please try again.', 'error');
+                } finally {
+                    setQuizSaving(null);
+                }
+            }
+        );
+    };
+
+    const startEditQuestion = (levelName, index) => {
+        const q = levelQuizzes[levelName]?.questions[index];
+        if (!q) return;
+        setEditForm({
+            question: q.question || '',
+            options: [...(q.options || ['', '', '', ''])],
+            correctIndex: q.correctIndex || 0,
+        });
+        setEditingQuestionKey(`${levelName}:${index}`);
+    };
+
+    const saveEditQuestion = (levelName, index) => {
+        if (!editForm.question.trim()) { Alert.alert('Error', 'Question text is required'); return; }
+        if (editForm.options.filter(o => o.trim()).length < 2) { Alert.alert('Error', 'At least 2 options required'); return; }
+        updateQuizQuestion(levelName, index, {
+            question: editForm.question,
+            options: editForm.options,
+            correctIndex: editForm.correctIndex,
+        });
+        setEditingQuestionKey(null);
+    };
+
+    // Auto-fetch quiz when a level is expanded
+    useEffect(() => {
+        if (expandedRole) {
+            const level = levelData.find(l => l.id === expandedRole);
+            if (level && !levelQuizzes[level.name]) {
+                fetchQuizForLevel(level.name);
+            }
+        }
+    }, [expandedRole]);
 
     // Handle course reorder within a level via drag-and-drop
     const handleCourseDragEnd = useCallback((levelId, newCourseOrder) => {
@@ -366,10 +992,21 @@ export default function AccessControlModal({ visible, onClose }) {
 
                             {/* Save Button */}
                             <TouchableOpacity
-                                style={styles.saveBtn}
+                                style={[styles.saveBtn, savingCurriculum === level.id && styles.saveBtnDisabled]}
                                 onPress={() => handleSaveCourses(level)}
+                                disabled={savingCurriculum === level.id}
                             >
-                                <Text style={styles.saveBtnText}>Save {level.name} Curriculum</Text>
+                                {savingCurriculum === level.id ? (
+                                    <>
+                                        <ActivityIndicator size="small" color="#FFF" />
+                                        <Text style={[styles.saveBtnText, { marginLeft: 8 }]}>Saving...</Text>
+                                    </>
+                                ) : (
+                                    <>
+                                        <MaterialCommunityIcons name="content-save" size={18} color="#FFF" />
+                                        <Text style={[styles.saveBtnText, { marginLeft: 8 }]}>Save {level.name} Curriculum</Text>
+                                    </>
+                                )}
                             </TouchableOpacity>
                         </View>
                     )}
@@ -595,6 +1232,195 @@ export default function AccessControlModal({ visible, onClose }) {
                                                     }
                                                 </View>
 
+                                                {/* ============================================ */}
+                                                {/* QUIZ MANAGEMENT SECTION (Inline) */}
+                                                {/* ============================================ */}
+                                                <View style={[styles.sectionContainer, { marginTop: 16 }]}>
+                                                    <View style={qStyles.quizHeader}>
+                                                        <View style={{ flex: 1 }}>
+                                                            <Text style={styles.sectionTitle}>
+                                                                Level Advancement Quiz
+                                                            </Text>
+                                                            <Text style={{ fontSize: 11, color: '#6B7280', fontFamily: 'Poppins_400Regular' }}>
+                                                                {(levelQuizzes[level.name]?.questions || []).length} questions
+                                                                {levelQuizzes[level.name]?.source ? ` • ${levelQuizzes[level.name].source === 'ai_generated' ? 'AI Generated' : levelQuizzes[level.name].source === 'manual' ? 'Edited' : 'Mixed'}` : ''}
+                                                            </Text>
+                                                        </View>
+                                                        <View style={qStyles.quizActions}>
+                                                            <TouchableOpacity
+                                                                style={qStyles.addQBtn}
+                                                                onPress={() => addQuizQuestion(level.name)}
+                                                            >
+                                                                <Feather name="plus" size={14} color="#FFF" />
+                                                                <Text style={qStyles.addQBtnText}>Add</Text>
+                                                            </TouchableOpacity>
+                                                            <TouchableOpacity
+                                                                style={qStyles.bulkBtn}
+                                                                onPress={() => openBulkUpload(level.name)}
+                                                            >
+                                                                <MaterialCommunityIcons name="database-import-outline" size={14} color="#0EA5E9" />
+                                                                <Text style={qStyles.bulkBtnText}>Bulk Upload</Text>
+                                                            </TouchableOpacity>
+
+                                                            <View style={qStyles.aiConfigWrap}>
+                                                                <TextInput
+                                                                    style={qStyles.aiNumInput}
+                                                                    value={String(aiGenConfigByLevel[level.name]?.numQuestions ?? 10)}
+                                                                    onChangeText={(t) => setAiGenConfigByLevel(prev => ({
+                                                                        ...prev,
+                                                                        [level.name]: {
+                                                                            ...(prev[level.name] || { difficulty: 'medium' }),
+                                                                            numQuestions: t.replace(/[^0-9]/g, ''),
+                                                                        }
+                                                                    }))}
+                                                                    keyboardType="numeric"
+                                                                    placeholder="#"
+                                                                />
+                                                                <TouchableOpacity
+                                                                    style={qStyles.aiDiffBtn}
+                                                                    onPress={() => {
+                                                                        const current = (aiGenConfigByLevel[level.name]?.difficulty || 'medium');
+                                                                        const order = ['easy', 'medium', 'hard'];
+                                                                        const next = order[(order.indexOf(current) + 1) % order.length];
+                                                                        setAiGenConfigByLevel(prev => ({
+                                                                            ...prev,
+                                                                            [level.name]: {
+                                                                                ...(prev[level.name] || { numQuestions: 10 }),
+                                                                                difficulty: next,
+                                                                            }
+                                                                        }));
+                                                                    }}
+                                                                >
+                                                                    <Text style={qStyles.aiDiffBtnText}>
+                                                                        {(aiGenConfigByLevel[level.name]?.difficulty || 'medium').toUpperCase()}
+                                                                    </Text>
+                                                                </TouchableOpacity>
+                                                            </View>
+
+                                                            <TouchableOpacity
+                                                                style={qStyles.regenBtn}
+                                                                onPress={() => regenerateQuizForLevel(level.name)}
+                                                                disabled={levelQuizzes[level.name]?.loading}
+                                                            >
+                                                                <MaterialCommunityIcons name="robot" size={14} color="#6366F1" />
+                                                                <Text style={qStyles.regenBtnText}>AI Generate</Text>
+                                                            </TouchableOpacity>
+                                                            <TouchableOpacity
+                                                                style={[qStyles.saveQBtn, quizSaving === level.name && { opacity: 0.6 }]}
+                                                                onPress={() => saveQuizForLevel(level.name)}
+                                                                disabled={quizSaving === level.name}
+                                                            >
+                                                                {quizSaving === level.name ? (
+                                                                    <ActivityIndicator size="small" color="#FFF" />
+                                                                ) : (
+                                                                    <>
+                                                                        <Feather name="save" size={14} color="#FFF" />
+                                                                        <Text style={qStyles.saveQBtnText}>Save Quiz</Text>
+                                                                    </>
+                                                                )}
+                                                            </TouchableOpacity>
+                                                        </View>
+                                                    </View>
+
+                                                    {/* Quiz Questions List */}
+                                                    {levelQuizzes[level.name]?.loading ? (
+                                                        <View style={{ padding: 20, alignItems: 'center' }}>
+                                                            <ActivityIndicator size="small" color="#F59E0B" />
+                                                            <Text style={{ marginTop: 6, fontSize: 12, color: '#6B7280' }}>Loading questions...</Text>
+                                                        </View>
+                                                    ) : (levelQuizzes[level.name]?.questions || []).length === 0 ? (
+                                                        <View style={{ padding: 20, alignItems: 'center' }}>
+                                                            <MaterialCommunityIcons name="help-circle-outline" size={32} color="#D1D5DB" />
+                                                            <Text style={{ marginTop: 6, fontSize: 12, color: '#9CA3AF' }}>No quiz questions yet</Text>
+                                                            <Text style={{ fontSize: 11, color: '#9CA3AF', textAlign: 'center', marginTop: 2 }}>
+                                                                Click "AI Generate" to auto-create from course content, or "Add" to create manually
+                                                            </Text>
+                                                        </View>
+                                                    ) : (
+                                                        <ScrollView style={{ maxHeight: 400 }} nestedScrollEnabled={true}>
+                                                            {(levelQuizzes[level.name]?.questions || []).map((q, qIdx) => {
+                                                                const isEditing = editingQuestionKey === `${level.name}:${qIdx}`;
+                                                                return (
+                                                                    <View key={qIdx} style={qStyles.questionCard}>
+                                                                        {isEditing ? (
+                                                                            /* EDIT MODE */
+                                                                            <View>
+                                                                                <Text style={qStyles.editLabel}>Editing Question {qIdx + 1}</Text>
+                                                                                <TextInput
+                                                                                    style={qStyles.qInput}
+                                                                                    value={editForm.question}
+                                                                                    onChangeText={(t) => setEditForm({ ...editForm, question: t })}
+                                                                                    placeholder="Enter question text"
+                                                                                    multiline
+                                                                                />
+                                                                                {editForm.options.map((opt, oIdx) => (
+                                                                                    <View key={oIdx} style={qStyles.optionEditRow}>
+                                                                                        <TouchableOpacity
+                                                                                            style={[qStyles.correctToggle, editForm.correctIndex === oIdx && qStyles.correctToggleActive]}
+                                                                                            onPress={() => setEditForm({ ...editForm, correctIndex: oIdx })}
+                                                                                        >
+                                                                                            <Feather
+                                                                                                name={editForm.correctIndex === oIdx ? "check-circle" : "circle"}
+                                                                                                size={16}
+                                                                                                color={editForm.correctIndex === oIdx ? "#10B981" : "#9CA3AF"}
+                                                                                            />
+                                                                                        </TouchableOpacity>
+                                                                                        <TextInput
+                                                                                            style={[qStyles.qInput, { flex: 1, marginBottom: 0 }]}
+                                                                                            value={opt}
+                                                                                            onChangeText={(t) => {
+                                                                                                const newOpts = [...editForm.options];
+                                                                                                newOpts[oIdx] = t;
+                                                                                                setEditForm({ ...editForm, options: newOpts });
+                                                                                            }}
+                                                                                            placeholder={`Option ${oIdx + 1}`}
+                                                                                        />
+                                                                                    </View>
+                                                                                ))}
+                                                                                <View style={qStyles.editBtnRow}>
+                                                                                    <TouchableOpacity style={qStyles.cancelBtn} onPress={() => setEditingQuestionKey(null)}>
+                                                                                        <Text style={{ color: '#6B7280', fontSize: 13, fontFamily: 'Poppins_500Medium' }}>Cancel</Text>
+                                                                                    </TouchableOpacity>
+                                                                                    <TouchableOpacity style={qStyles.confirmBtn} onPress={() => saveEditQuestion(level.name, qIdx)}>
+                                                                                        <Feather name="check" size={14} color="#FFF" />
+                                                                                        <Text style={{ color: '#FFF', fontSize: 13, fontFamily: 'Poppins_600SemiBold', marginLeft: 4 }}>Done</Text>
+                                                                                    </TouchableOpacity>
+                                                                                </View>
+                                                                            </View>
+                                                                        ) : (
+                                                                            /* VIEW MODE */
+                                                                            <View>
+                                                                                <View style={qStyles.qHeader}>
+                                                                                    <Text style={qStyles.qNumber}>Q{qIdx + 1}</Text>
+                                                                                    <View style={{ flexDirection: 'row', gap: 6 }}>
+                                                                                        <TouchableOpacity onPress={() => startEditQuestion(level.name, qIdx)} style={{ padding: 4 }}>
+                                                                                            <Feather name="edit-2" size={14} color="#F59E0B" />
+                                                                                        </TouchableOpacity>
+                                                                                        <TouchableOpacity onPress={() => deleteQuizQuestion(level.name, qIdx)} style={{ padding: 4 }}>
+                                                                                            <Feather name="trash-2" size={14} color="#EF4444" />
+                                                                                        </TouchableOpacity>
+                                                                                    </View>
+                                                                                </View>
+                                                                                <Text style={qStyles.qText}>{q.question}</Text>
+                                                                                {(q.options || []).map((opt, oIdx) => (
+                                                                                    <View key={oIdx} style={[qStyles.optionRow, oIdx === q.correctIndex && qStyles.correctOptionRow]}>
+                                                                                        <Text style={[qStyles.optionText, oIdx === q.correctIndex && { color: '#059669', fontFamily: 'Poppins_600SemiBold' }]}>
+                                                                                            {String.fromCharCode(65 + oIdx)}. {opt}
+                                                                                        </Text>
+                                                                                        {oIdx === q.correctIndex && (
+                                                                                            <Feather name="check-circle" size={12} color="#10B981" />
+                                                                                        )}
+                                                                                    </View>
+                                                                                ))}
+                                                                            </View>
+                                                                        )}
+                                                                    </View>
+                                                                );
+                                                            })}
+                                                        </ScrollView>
+                                                    )}
+                                                </View>
+
                                                 {/* Save Button */}
                                                 <TouchableOpacity
                                                     style={styles.saveBtn}
@@ -618,6 +1444,91 @@ export default function AccessControlModal({ visible, onClose }) {
                         />
                     )}
                 </View>
+
+                {/* Bulk Upload Modal */}
+                {bulkUploadLevelName && (
+                    <Modal visible={true} transparent animationType="fade">
+                        <View style={qStyles.bulkOverlay}>
+                            <View style={qStyles.bulkModal}>
+                                <View style={qStyles.bulkHeader}>
+                                    <Text style={qStyles.bulkTitle}>Bulk Upload Quiz: {bulkUploadLevelName}</Text>
+                                    <TouchableOpacity onPress={() => setBulkUploadLevelName(null)}>
+                                        <Feather name="x" size={20} color="#6B7280" />
+                                    </TouchableOpacity>
+                                </View>
+                                <Text style={qStyles.bulkHelp}>
+                                    Upload CSV/Excel or paste JSON. Supported columns: question, option_a, option_b, option_c, option_d, correct_index
+                                </Text>
+
+                                <View style={qStyles.bulkTopActions}>
+                                    <TouchableOpacity style={qStyles.bulkActionBtn} onPress={pickAndImportQuizFile}>
+                                        <MaterialCommunityIcons name="file-upload-outline" size={16} color="#111827" />
+                                        <Text style={qStyles.bulkActionBtnText}>Upload CSV/Excel</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity style={qStyles.bulkActionBtn} onPress={() => exportQuizAsCsv('template')}>
+                                        <MaterialCommunityIcons name="file-download-outline" size={16} color="#111827" />
+                                        <Text style={qStyles.bulkActionBtnText}>CSV Template</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity style={qStyles.bulkActionBtn} onPress={() => exportQuizAsExcel('template')}>
+                                        <MaterialCommunityIcons name="file-download-outline" size={16} color="#111827" />
+                                        <Text style={qStyles.bulkActionBtnText}>Excel Template</Text>
+                                    </TouchableOpacity>
+                                </View>
+
+                                <View style={qStyles.bulkTopActions}>
+                                    <TouchableOpacity style={qStyles.bulkActionBtn} onPress={() => exportQuizAsCsv('current')}>
+                                        <MaterialCommunityIcons name="download" size={16} color="#111827" />
+                                        <Text style={qStyles.bulkActionBtnText}>Export CSV</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity style={qStyles.bulkActionBtn} onPress={() => exportQuizAsExcel('current')}>
+                                        <MaterialCommunityIcons name="download" size={16} color="#111827" />
+                                        <Text style={qStyles.bulkActionBtnText}>Export Excel</Text>
+                                    </TouchableOpacity>
+                                </View>
+
+                                <TextInput
+                                    style={qStyles.bulkInput}
+                                    value={bulkUploadText}
+                                    onChangeText={setBulkUploadText}
+                                    placeholder="Paste JSON here (optional)"
+                                    multiline
+                                />
+                                <View style={qStyles.bulkBtnRow}>
+                                    <TouchableOpacity style={qStyles.cancelBtn} onPress={() => setBulkUploadLevelName(null)}>
+                                        <Text style={{ color: '#6B7280', fontSize: 13, fontFamily: 'Poppins_500Medium' }}>Cancel</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={qStyles.confirmBtn}
+                                        onPress={() => {
+                                            try {
+                                                applyBulkUpload();
+                                            } catch (e) {
+                                                Alert.alert('Invalid Questions', e?.message || 'Invalid bulk upload payload');
+                                            }
+                                        }}
+                                    >
+                                        <Feather name="check" size={14} color="#FFF" />
+                                        <Text style={{ color: '#FFF', fontSize: 13, fontFamily: 'Poppins_600SemiBold', marginLeft: 4 }}>Import</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        </View>
+                    </Modal>
+                )}
+                {/* Toast Notification */}
+                {toast.visible && (
+                    <View style={[
+                        styles.toastContainer,
+                        toast.type === 'success' ? styles.toastSuccess : styles.toastError
+                    ]}>
+                        <MaterialCommunityIcons
+                            name={toast.type === 'success' ? 'check-circle' : 'alert-circle'}
+                            size={20}
+                            color="#FFF"
+                        />
+                        <Text style={styles.toastText}>{toast.message}</Text>
+                    </View>
+                )}
             </GestureHandlerRootView>
         </Modal>
     );
@@ -914,15 +1825,348 @@ const styles = StyleSheet.create({
         paddingVertical: 14,
         borderRadius: 12,
         alignItems: 'center',
+        flexDirection: 'row',
+        justifyContent: 'center',
         shadowColor: '#10B981',
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.3,
         shadowRadius: 8,
         elevation: 5,
     },
+    saveBtnDisabled: {
+        backgroundColor: '#9CA3AF',
+        opacity: 0.7,
+        shadowOpacity: 0,
+        elevation: 0,
+    },
     saveBtnText: {
         color: '#FFF',
         fontSize: 14,
         fontFamily: 'Poppins_700Bold',
+    },
+
+    // Toast Notification
+    toastContainer: {
+        position: 'absolute',
+        top: 50, // Increased to avoid status bar/headers
+        left: 20,
+        right: 20,
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+        borderRadius: 12,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 100, // Very high elevation
+        zIndex: 99999, // Very high z-index
+        gap: 12,
+        backgroundColor: '#333', // Fallback background
+    },
+    toastSuccess: {
+        backgroundColor: '#10B981',
+    },
+    toastError: {
+        backgroundColor: '#EF4444',
+    },
+    toastText: {
+        flex: 1,
+        color: '#FFF',
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        lineHeight: 20,
+    },
+});
+
+// =========================================================================
+// QUIZ MANAGEMENT STYLES
+// =========================================================================
+const qStyles = StyleSheet.create({
+    quizHeader: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        marginBottom: 10,
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    quizActions: {
+        flexDirection: 'row',
+        gap: 6,
+        flexWrap: 'wrap',
+    },
+    addQBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#10B981',
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 6,
+        gap: 3,
+    },
+    addQBtnText: {
+        color: '#FFF',
+        fontSize: 11,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    regenBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#EEF2FF',
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 6,
+        borderWidth: 1,
+        borderColor: '#C7D2FE',
+        gap: 3,
+    },
+    regenBtnText: {
+        color: '#6366F1',
+        fontSize: 11,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    bulkBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#E0F2FE',
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 6,
+        borderWidth: 1,
+        borderColor: '#BAE6FD',
+        gap: 3,
+    },
+    bulkBtnText: {
+        color: '#0284C7',
+        fontSize: 11,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    aiConfigWrap: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    aiNumInput: {
+        width: 44,
+        height: 30,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        borderRadius: 8,
+        paddingHorizontal: 8,
+        backgroundColor: '#FFF',
+        fontSize: 12,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#111827',
+        textAlign: 'center',
+        paddingVertical: 0,
+    },
+    aiDiffBtn: {
+        height: 30,
+        paddingHorizontal: 10,
+        borderRadius: 8,
+        backgroundColor: '#F3F4F6',
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    aiDiffBtnText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_700Bold',
+        color: '#374151',
+    },
+    saveQBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#F59E0B',
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 6,
+        gap: 3,
+    },
+    saveQBtnText: {
+        color: '#FFF',
+        fontSize: 11,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    questionCard: {
+        backgroundColor: '#FAFAFA',
+        borderRadius: 10,
+        padding: 12,
+        marginBottom: 8,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    qHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 6,
+    },
+    qNumber: {
+        fontSize: 11,
+        fontFamily: 'Poppins_700Bold',
+        color: '#F59E0B',
+        backgroundColor: '#FEF3C7',
+        paddingHorizontal: 6,
+        paddingVertical: 1,
+        borderRadius: 4,
+        overflow: 'hidden',
+    },
+    qText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_500Medium',
+        color: '#111827',
+        marginBottom: 8,
+        lineHeight: 18,
+    },
+    optionRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 4,
+        paddingHorizontal: 8,
+        borderRadius: 6,
+        marginBottom: 3,
+        backgroundColor: '#FFF',
+    },
+    correctOptionRow: {
+        backgroundColor: '#ECFDF5',
+        borderWidth: 1,
+        borderColor: '#A7F3D0',
+    },
+    optionText: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#374151',
+        flex: 1,
+    },
+    editLabel: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#F59E0B',
+        marginBottom: 6,
+    },
+    qInput: {
+        backgroundColor: '#FFF',
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        borderRadius: 8,
+        padding: 10,
+        fontSize: 13,
+        fontFamily: 'Poppins_400Regular',
+        marginBottom: 8,
+    },
+    optionEditRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginBottom: 6,
+    },
+    correctToggle: {
+        width: 28,
+        height: 28,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    correctToggleActive: {
+        backgroundColor: '#ECFDF5',
+        borderRadius: 14,
+    },
+    editBtnRow: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        gap: 8,
+        marginTop: 8,
+    },
+    cancelBtn: {
+        paddingHorizontal: 14,
+        paddingVertical: 6,
+        borderRadius: 6,
+        backgroundColor: '#F3F4F6',
+    },
+    confirmBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 14,
+        paddingVertical: 6,
+        borderRadius: 6,
+        backgroundColor: '#10B981',
+    },
+
+    bulkOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.35)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 16,
+    },
+    bulkModal: {
+        width: '100%',
+        maxWidth: 720,
+        backgroundColor: '#FFF',
+        borderRadius: 12,
+        padding: 14,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    bulkHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 8,
+    },
+    bulkTitle: {
+        fontSize: 14,
+        fontFamily: 'Poppins_700Bold',
+        color: '#111827',
+        flex: 1,
+        paddingRight: 10,
+    },
+    bulkHelp: {
+        fontSize: 11,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        marginBottom: 8,
+    },
+    bulkTopActions: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+        marginBottom: 10,
+    },
+    bulkActionBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        borderRadius: 10,
+        backgroundColor: '#F9FAFB',
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    bulkActionBtnText: {
+        fontSize: 12,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#111827',
+    },
+    bulkInput: {
+        minHeight: 180,
+        backgroundColor: '#F9FAFB',
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        borderRadius: 10,
+        padding: 10,
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        textAlignVertical: 'top',
+    },
+    bulkBtnRow: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        gap: 8,
+        marginTop: 10,
     },
 });

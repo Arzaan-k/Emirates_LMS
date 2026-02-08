@@ -6,6 +6,7 @@ import {
     TouchableOpacity,
     Modal,
     FlatList,
+    ScrollView,
     Dimensions,
     ActivityIndicator,
     Alert
@@ -17,7 +18,7 @@ import API_URL from '../config';
 
 const { width, height } = Dimensions.get('window');
 
-export default function ScheduledExamsListModal({ visible, onClose, userProfile, onSelectExam, onCreateNew }) {
+export default function ScheduledExamsListModal({ visible, onClose, userProfile, onSelectExam, onCreateNew, onEditExam }) {
     const [exams, setExams] = useState([]);
     const [loading, setLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
@@ -115,8 +116,16 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
     };
 
     const openEditModal = (exam) => {
-        setEditingExam(exam);
-        setShowEditModal(true);
+        console.log('[Edit Modal] Opening for exam:', exam);
+
+        // If there's an onEditExam callback (opens full ScheduleExamModal in edit mode)
+        if (onEditExam) {
+            onEditExam(exam);
+        } else {
+            // Fallback: show quick PIN management modal
+            setEditingExam(exam);
+            setShowEditModal(true);
+        }
     };
 
     const closeEditModal = () => {
@@ -260,7 +269,7 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
 
                         {/* Content */}
                         {editingExam && (
-                            <View style={styles.editModalContent}>
+                            <ScrollView style={styles.editModalContent} showsVerticalScrollIndicator={false}>
                                 {/* Exam Info */}
                                 <View style={styles.examInfoSection}>
                                     <Text style={styles.examInfoTitle}>{editingExam.title}</Text>
@@ -270,10 +279,29 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
                                     <Text style={styles.examInfoLocation}>
                                         📍 {editingExam.location}
                                     </Text>
+
+                                    <View style={{ marginTop: 12, flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                                        <View style={styles.examStatChip}>
+                                            <Feather name="users" size={14} color="#6366F1" />
+                                            <Text style={styles.examStatText}>{editingExam.assigned_users?.length || 0} students</Text>
+                                        </View>
+                                        <View style={styles.examStatChip}>
+                                            <Feather name="clock" size={14} color="#6366F1" />
+                                            <Text style={styles.examStatText}>{editingExam.time_limit_minutes} mins</Text>
+                                        </View>
+                                        <View style={styles.examStatChip}>
+                                            <Feather name="award" size={14} color="#6366F1" />
+                                            <Text style={styles.examStatText}>Pass: {editingExam.passing_score}%</Text>
+                                        </View>
+                                    </View>
+
+                                    <Text style={{ marginTop: 12, fontSize: 12, color: '#9CA3AF', fontFamily: 'Poppins_400Regular' }}>
+                                        Supervisor: {editingExam.supervisor_name}
+                                    </Text>
                                 </View>
 
                                 {/* PIN Management Section */}
-                                {(editingExam.pin_enabled || editingExam.pinEnabled) && (
+                                {(editingExam.pin_enabled || editingExam.pinEnabled) ? (
                                     <View style={styles.pinSection}>
                                         <View style={styles.pinSectionHeader}>
                                             <Feather name="key" size={20} color="#8B5CF6" />
@@ -334,6 +362,17 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
                                             </View>
                                         )}
                                     </View>
+                                ) : (
+                                    <View style={styles.pinSection}>
+                                        <View style={styles.pinSectionHeader}>
+                                            <Feather name="alert-circle" size={20} color="#6B7280" />
+                                            <Text style={styles.pinSectionTitle}>PIN Check-in Not Enabled</Text>
+                                        </View>
+                                        <Text style={styles.noPinText}>
+                                            PIN check-in was not enabled when this exam was scheduled.
+                                            Students will need to be marked present by the supervisor manually.
+                                        </Text>
+                                    </View>
                                 )}
 
                                 {/* Geofencing Info (Read-only) */}
@@ -358,7 +397,7 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
                                         </Text>
                                     </View>
                                 )}
-                            </View>
+                            </ScrollView>
                         )}
                     </View>
                 </View>
@@ -468,6 +507,20 @@ const styles = StyleSheet.create({
         fontSize: 13,
         fontFamily: 'Poppins_400Regular',
         color: '#9CA3AF'
+    },
+    examStatChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: '#EEF2FF',
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 8
+    },
+    examStatText: {
+        fontSize: 12,
+        fontFamily: 'Poppins_500Medium',
+        color: '#6366F1'
     },
 
     // PIN Section

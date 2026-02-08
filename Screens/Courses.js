@@ -19,8 +19,21 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { Video, ResizeMode } from 'expo-av';
 import { Modal } from 'react-native';
+import * as ScreenOrientation from 'expo-screen-orientation';
 
 const { width, height } = Dimensions.get("window");
+
+// --- FULLSCREEN HANDLER FOR VIDEO COMPONENTS ---
+const handleVideoFullscreenUpdate = async ({ fullscreenUpdate }) => {
+    switch (fullscreenUpdate) {
+        case 1: // FULLSCREEN_UPDATE_PLAYER_WILL_PRESENT
+            await ScreenOrientation.unlockAsync();
+            break;
+        case 3: // FULLSCREEN_UPDATE_PLAYER_WILL_DISMISS
+            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+            break;
+    }
+};
 
 // --- VIDEO PLAYER MODAL ---
 // --- VIDEO PLAYER MODAL WITH TRANSCRIPT & AI TRANSLATION ---
@@ -100,6 +113,7 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
                         resizeMode={ResizeMode.CONTAIN}
                         shouldPlay
                         onError={(e) => console.log("Video Error:", e)}
+                        onFullscreenUpdate={handleVideoFullscreenUpdate}
                     />
                 </View>
 
