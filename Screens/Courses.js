@@ -22,6 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Video, ResizeMode } from 'expo-av';
 import { Modal } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
+import { WebView } from 'react-native-webview';
 
 const { width, height } = Dimensions.get("window");
 
@@ -97,64 +98,98 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
     if (!visible || !videoData) return null;
 
     const filteredLanguages = LANGUAGES.filter(l => l.toLowerCase().includes(searchLang.toLowerCase()));
+    const isVideo = videoData.resource_type === 'Video' || (videoData.videoUrl && videoData.videoUrl.match(/\.(mp4|mov|avi|wmv|flv|mkv)$/i));
 
     return (
         <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
             <View style={{ flex: 1, backgroundColor: '#000' }}>
                 {/* CLOSE BUTTON */}
-                <TouchableOpacity style={styles.closeVideoBtn} onPress={onClose}>
+                <TouchableOpacity 
+                    style={[styles.closeVideoBtn, { position: 'absolute', top: 40, right: 20, zIndex: 10, backgroundColor: 'rgba(0,0,0,0.5)' }]} 
+                    onPress={onClose}
+                >
                     <Feather name="x" size={24} color="#FFF" />
                 </TouchableOpacity>
 
-                {/* VIDEO PLAYER */}
-                <View style={{ width: '100%', height: 300, backgroundColor: '#000', justifyContent: 'center' }}>
-                    <Video
-                        source={{ uri: videoData.videoUrl }}
-                        style={{ width: '100%', height: '100%' }}
-                        useNativeControls
-                        resizeMode={ResizeMode.CONTAIN}
-                        shouldPlay
-                        onError={(e) => console.log("Video Error:", e)}
-                        onFullscreenUpdate={handleVideoFullscreenUpdate}
-                    />
+                {/* CONTENT PLAYER */}
+                <View style={{ width: '100%', aspectRatio: isVideo ? 16/9 : undefined, height: isVideo ? undefined : '100%', backgroundColor: '#000', justifyContent: 'center' }}>
+                    
+                    {isVideo ? (
+                        <Video
+                            source={{ uri: videoData.videoUrl || videoData.video_url }}
+                            style={{ width: '100%', height: '100%' }}
+                            useNativeControls
+                            resizeMode={ResizeMode.CONTAIN}
+                            shouldPlay
+                            onError={(e) => console.log("Video Error:", e)}
+                            onFullscreenUpdate={handleVideoFullscreenUpdate}
+                        />
+                    ) : (
+                        Platform.OS === 'web' ? (
+                            <iframe 
+                                src={`https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(videoData.file_url || videoData.videoUrl)}`}
+                                style={{ width: '100%', height: '100%', border: 'none' }}
+                            />
+                        ) : (
+                            <WebView
+                                source={{ uri: `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(videoData.file_url || videoData.videoUrl)}` }}
+                                style={{ flex: 1, backgroundColor: '#FFF' }}
+                                startInLoadingState={true}
+                                renderLoading={() => <ActivityIndicator size="large" color="#4F46E5" style={{ position: 'absolute', top: '50%', left: '50%' }} />}
+                            />
+                        )
+                    )}
                 </View>
 
                 {/* CONTENT CONTAINER */}
-                <View style={{ flex: 1, backgroundColor: '#111827', borderTopLeftRadius: 24, borderTopRightRadius: 24, marginTop: -20, overflow: 'hidden' }}>
-                    <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 50 }}>
-                        {/* HEADER INFO */}
-                        <Text style={{ color: '#FFF', fontSize: 20, fontFamily: 'Poppins_600SemiBold', marginBottom: 4 }}>{videoData.title}</Text>
-                        <Text style={{ color: '#9CA3AF', fontSize: 14, fontFamily: 'Poppins_400Regular', marginBottom: 24 }}>{videoData.category} • {videoData.duration}</Text>
+                <View style={{ flex: 1, backgroundColor: '#111827', borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden' }}>
+                    {/* Show Details only for Video (Documents assume WebView takes full screen or logic differs) */}
+                    {isVideo && (
+                        <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 50 }}>
+                            {/* HEADER INFO */}
+                            <Text style={{ color: '#FFF', fontSize: 20, fontFamily: 'Poppins_600SemiBold', marginBottom: 4 }}>{videoData.title}</Text>
+                            <Text style={{ color: '#9CA3AF', fontSize: 14, fontFamily: 'Poppins_400Regular', marginBottom: 24 }}>{videoData.category} • {videoData.duration}</Text>
 
-                        {/* TRANSCRIPT HEADER & LANG SELECTOR */}
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                            <Text style={{ color: '#E5E7EB', fontSize: 16, fontFamily: 'Poppins_600SemiBold' }}>Transcript</Text>
+                            {/* TRANSCRIPT HEADER & LANG SELECTOR */}
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                                <Text style={{ color: '#E5E7EB', fontSize: 16, fontFamily: 'Poppins_600SemiBold' }}>Transcript</Text>
 
-                            <TouchableOpacity
-                                style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#374151', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 }}
-                                onPress={() => { setSearchLang(''); setShowLangPicker(true); }}
-                            >
-                                <MaterialCommunityIcons name="translate" size={16} color="#A5B4FC" style={{ marginRight: 6 }} />
-                                <Text style={{ color: '#E5E7EB', fontSize: 13, fontFamily: 'Poppins_500Medium' }}>{language}</Text>
-                                <Feather name="chevron-down" size={14} color="#9CA3AF" style={{ marginLeft: 4 }} />
-                            </TouchableOpacity>
-                        </View>
-
-                        {/* TRANSCRIPT TEXT */}
-                        {isTranslating ? (
-                            <View style={{ padding: 40, alignItems: 'center' }}>
-                                <ActivityIndicator size="small" color="#A5B4FC" />
-                                <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 10, fontFamily: 'Poppins_400Regular' }}>Translating with AI...</Text>
+                                <TouchableOpacity
+                                    style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#374151', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 }}
+                                    onPress={() => { setSearchLang(''); setShowLangPicker(true); }}
+                                >
+                                    <MaterialCommunityIcons name="translate" size={16} color="#A5B4FC" style={{ marginRight: 6 }} />
+                                    <Text style={{ color: '#E5E7EB', fontSize: 13, fontFamily: 'Poppins_500Medium' }}>{language}</Text>
+                                    <Feather name="chevron-down" size={14} color="#9CA3AF" style={{ marginLeft: 4 }} />
+                                </TouchableOpacity>
                             </View>
-                        ) : (
-                            <View style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 16, padding: 16 }}>
-                                <Text style={{ color: '#D1D5DB', fontSize: 14, fontFamily: 'Poppins_400Regular', lineHeight: 24 }}>
-                                    {transcript}
-                                </Text>
-                            </View>
-                        )}
-                    </ScrollView>
+
+                            {/* TRANSCRIPT TEXT */}
+                            {isTranslating ? (
+                                <View style={{ padding: 40, alignItems: 'center' }}>
+                                    <ActivityIndicator size="small" color="#A5B4FC" />
+                                    <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 10, fontFamily: 'Poppins_400Regular' }}>Translating with AI...</Text>
+                                </View>
+                            ) : (
+                                <View style={{ backgroundColor: 'rgba(31, 41, 55, 0.5)', borderRadius: 16, padding: 16, border: '1px solid #374151' }}>
+                                    {transcript ? (
+                                        <Text style={{ color: '#D1D5DB', fontSize: 14, fontFamily: 'Poppins_400Regular', lineHeight: 24 }}>
+                                            {transcript}
+                                        </Text>
+                                    ) : (
+                                        <View style={{ alignItems: 'center', paddingVertical: 20 }}>
+                                            <MaterialCommunityIcons name="text-box-remove-outline" size={40} color="#4B5563" />
+                                            <Text style={{ color: '#6B7280', fontSize: 14, marginTop: 8, fontFamily: 'Poppins_400Regular' }}>
+                                                No transcript available for this video.
+                                            </Text>
+                                        </View>
+                                    )}
+                                </View>
+                            )}
+                        </ScrollView>
+                    )}
                 </View>
+
 
                 {/* LANGUAGE PICKER MODAL */}
                 <Modal visible={showLangPicker} transparent animationType="fade">
@@ -601,6 +636,11 @@ export default function Courses({ userEmail = "user" }) {
     });
     const [loadingStatus, setLoadingStatus] = useState(true);
 
+    // [NEW] State for video playback and chat (lifted for SelfLearningView)
+    const [modalVisible, setModalVisible] = useState(false);
+    const [currentVideo, setCurrentVideo] = useState(null);
+    const [chatVisible, setChatVisible] = useState(false);
+
     // Fetch self-learning status on mount
     React.useEffect(() => {
         fetchSelfLearningStatus();
@@ -745,6 +785,19 @@ export default function Courses({ userEmail = "user" }) {
                 {activeTab === 'quizzes' && <QuizSection />}
                 {activeTab === 'courses' && <AllCourses />}
             </View>
+
+            {/* VIDEO PLAYER MODAL & AI CHAT FOR SELF LEARNING */}
+            <VideoPlayerModal
+                visible={modalVisible}
+                videoData={currentVideo}
+                onClose={() => setModalVisible(false)}
+            />
+
+            <AskAIChatModal
+                visible={chatVisible}
+                courseData={currentVideo}
+                onClose={() => setChatVisible(false)}
+            />
 
         </View>
     );
