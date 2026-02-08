@@ -10,8 +10,9 @@ import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Form, File, UploadFile, HTTPException, Header, BackgroundTasks
+from fastapi import APIRouter, Depends, Form, File, UploadFile, HTTPException, Header, BackgroundTasks, Body
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
 from app.config.database import get_db, get_db_context
 from app.config.settings import settings
@@ -20,6 +21,7 @@ from app.core.auth import verify_token
 from app.services.content_service import ContentService
 from app.services.cdn_service import CDNService
 from app.services.ai_service import AIService
+from app.services.document_service import DocumentService
 from app.core.websocket import manager
 
 logger = logging.getLogger(__name__)
@@ -27,10 +29,18 @@ router = APIRouter(prefix="/content", tags=["Content"])
 
 
 # ==========================================
+# REQUEST MODELS
+# ==========================================
+
+class BulkDeleteRequest(BaseModel):
+    item_ids: List[str]
+
+
+# ==========================================
 # CONTENT CRUD ENDPOINTS
 # ==========================================
 
-@router.get("")
+@router.get("/")
 async def get_content(
     db: Session = Depends(get_db),
     authorization: Optional[str] = Header(None)
@@ -249,9 +259,15 @@ async def upload_content(
             message=f"New {resource_type.lower()} uploaded: {title}"
         )
 
-        # Trigger background transcription for Audio/Video
-        if resource_type in ["Video", "Audio"]:
-            background_tasks.add_task(generate_transcript_task, content_id, local_path)
+        # Trigger background processing for Audio/Video/Documents
+        if resource_type in ["Video", "Audio", "Document", "Presentation", "PDF"]:
+            background_tasks.add_task(
+                generate_transcript_task,
+                content_id,
+                local_path,
+                resource_type,
+                ext
+            )
 
         return response
         
@@ -261,6 +277,237 @@ async def upload_content(
         if os.path.exists(local_path):
             os.remove(local_path)
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
+@router.post("/bulk-folder-upload")
+async def bulk_folder_upload(
+    background_tasks: BackgroundTasks,
+    learning_path_type: str = Form("career_progression"),
+    root_bucket_name: str = Form(...),
+    files: List[UploadFile] = File(default=[]),
+    file_paths: str = Form(...),  # JSON string of relative paths
+    db: Session = Depends(get_db)
+):
+    """
+    Bulk upload files with folder hierarchy.
+    Creates nested buckets matching folder structure.
+    Processes all file types including documents (PDF, Word, PPT).
+
+    Args:
+        learning_path_type: 'self_learning' or 'career_progression'
+        root_bucket_name: Name of the root folder being uploaded
+        files: List of files to upload
+        file_paths: JSON array of relative file paths (e.g., ['file1.pdf', 'subfolder/file2.docx'])
+
+    Returns:
+        Upload status with progress information
+    """
+    service = ContentService(db)
+    cdn_service = CDNService()
+
+    try:
+        if not files:
+            logger.error(f"Bulk upload failed: No files received. Content-Type: {type(files)}")
+            raise HTTPException(status_code=400, detail="No files provided in request")
+
+        # Parse file paths
+        paths_list = json.loads(file_paths)
+
+        if len(files) != len(paths_list):
+            raise HTTPException(
+                status_code=400,
+                detail=f"File count mismatch: {len(files)} files but {len(paths_list)} paths"
+            )
+
+        logger.info(f"Starting bulk folder upload: {root_bucket_name} with {len(files)} files")
+
+        # Dictionary to cache created buckets
+        bucket_cache = {}
+
+        # Results tracking
+        results = {
+            "total": len(files),
+            "successful": 0,
+            "failed": 0,
+            "buckets_created": 0,
+            "items": []
+        }
+
+        # Create or get root bucket
+        root_bucket = None
+        try:
+            root_bucket = service.get_bucket_by_name(root_bucket_name)
+            logger.info(f"Root bucket already exists: {root_bucket_name}")
+        except:
+            # Create root bucket
+            root_bucket_id = f"bucket_{uuid.uuid4().hex[:8]}"
+            root_bucket_data = {
+                "id": root_bucket_id,
+                "name": root_bucket_name,
+                "description": f"Auto-created from folder upload",
+                "parent_bucket_id": None,
+                "folder_path": root_bucket_name,
+                "color": "#3B82F6",
+                "icon": "folder-outline",
+                "keywords": [],
+                "is_active": True
+            }
+            root_bucket = service.create_bucket(root_bucket_data)
+            results["buckets_created"] += 1
+            logger.info(f"Created root bucket: {root_bucket_name}")
+
+        bucket_cache[root_bucket_name] = root_bucket
+
+        # Process each file
+        for idx, (file, relative_path) in enumerate(zip(files, paths_list)):
+            try:
+                # Parse path to get folder hierarchy
+                path_parts = relative_path.split('/')
+                filename = path_parts[-1]
+                folder_parts = path_parts[:-1] if len(path_parts) > 1 else []
+
+                # Build nested bucket structure
+                current_parent = root_bucket
+                current_path = root_bucket_name
+
+                for folder_name in folder_parts:
+                    current_path = f"{current_path}/{folder_name}"
+
+                    # Check if bucket already exists in cache
+                    if current_path not in bucket_cache:
+                        # Try to find existing bucket or create new
+                        try:
+                            existing_bucket = service.get_bucket_by_path(current_path)
+                            bucket_cache[current_path] = existing_bucket
+                        except:
+                            # Create new nested bucket
+                            nested_bucket_id = f"bucket_{uuid.uuid4().hex[:8]}"
+                            nested_bucket_data = {
+                                "id": nested_bucket_id,
+                                "name": folder_name,
+                                "description": f"Auto-created subfolder",
+                                "parent_bucket_id": current_parent.id,
+                                "folder_path": current_path,
+                                "color": "#3B82F6",
+                                "icon": "folder-outline",
+                                "keywords": [],
+                                "is_active": True
+                            }
+                            new_bucket = service.create_bucket(nested_bucket_data)
+                            bucket_cache[current_path] = new_bucket
+                            results["buckets_created"] += 1
+                            logger.info(f"Created nested bucket: {current_path}")
+
+                    current_parent = bucket_cache[current_path]
+
+                # Now upload the file to the deepest bucket
+                target_bucket = current_parent
+
+                # Generate unique content ID
+                content_id = f"content_{uuid.uuid4().hex[:8]}"
+
+                # Determine resource type
+                ext = os.path.splitext(filename)[1].lower()
+                resource_types = {
+                    '.mp4': 'Video', '.webm': 'Video', '.mov': 'Video', '.avi': 'Video',
+                    '.mp3': 'Audio', '.wav': 'Audio',
+                    '.pdf': 'PDF', '.doc': 'Document', '.docx': 'Document',
+                    '.ppt': 'Presentation', '.pptx': 'Presentation',
+                    '.jpg': 'Image', '.jpeg': 'Image', '.png': 'Image', '.gif': 'Image',
+                    '.xls': 'Spreadsheet', '.xlsx': 'Spreadsheet',
+                }
+                resource_type = resource_types.get(ext, 'Other')
+
+                # Save file locally
+                os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+                local_path = os.path.join(settings.UPLOAD_DIR, f"{content_id}{ext}")
+
+                content_bytes = await file.read()
+                with open(local_path, "wb") as f:
+                    f.write(content_bytes)
+
+                # Upload to CDN
+                video_url = None
+                if cdn_service.enabled:
+                    cdn_key = f"content/{content_id}{ext}"
+                    cdn_result = cdn_service.upload_file(content_bytes, cdn_key, file.content_type)
+                    if cdn_result:
+                        if isinstance(cdn_result, dict):
+                            video_url = cdn_result.get("url")
+                        else:
+                            video_url = str(cdn_result)
+
+                if not video_url:
+                    video_url = f"{settings.BASE_URL}/uploads/{content_id}{ext}"
+
+                # Create content record
+                title = os.path.splitext(filename)[0]
+                content_data = {
+                    "id": content_id,
+                    "title": title,
+                    "description": f"Uploaded from folder: {root_bucket_name}",
+                    "bucket": target_bucket.name,
+                    "bucket_id": target_bucket.id,
+                    "resource_type": resource_type,
+                    "video_url": video_url,
+                    "file_url": video_url,
+                    "is_path_node": True,
+                    "learning_path_type": learning_path_type,
+                    "order_index": idx,
+                    "timestamp": datetime.utcnow(),
+                }
+
+                content = service.create_content(content_data)
+                logger.info(f"Content created: {content_id} in bucket {target_bucket.name}")
+
+                # Trigger background processing for supported types
+                if resource_type in ["Video", "Audio", "Document", "Presentation", "PDF"]:
+                    background_tasks.add_task(
+                        generate_transcript_task,
+                        content_id,
+                        local_path,
+                        resource_type,
+                        ext
+                    )
+
+                results["successful"] += 1
+                results["items"].append({
+                    "id": content_id,
+                    "filename": filename,
+                    "path": relative_path,
+                    "bucket": target_bucket.name,
+                    "status": "success"
+                })
+
+            except Exception as file_error:
+                logger.error(f"Failed to upload {relative_path}: {file_error}")
+                results["failed"] += 1
+                results["items"].append({
+                    "filename": filename if 'filename' in locals() else relative_path,
+                    "path": relative_path,
+                    "status": "failed",
+                    "error": str(file_error)
+                })
+
+        # Broadcast notification
+        await manager.broadcast_notification(
+            notification_type="BULK_UPLOAD_COMPLETE",
+            data=results,
+            title="Bulk Folder Upload Complete",
+            message=f"Uploaded {results['successful']} files from {root_bucket_name}"
+        )
+
+        return {
+            "status": "completed",
+            "results": results
+        }
+
+    except json.JSONDecodeError as je:
+        logger.error(f"Invalid file_paths JSON: {je}")
+        raise HTTPException(status_code=400, detail="Invalid file paths format")
+    except Exception as e:
+        logger.error(f"Bulk folder upload failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Bulk upload failed: {str(e)}")
 
 
 @router.get("/{item_id}")
@@ -416,29 +663,6 @@ async def delete_content(
         
         # Delete from database
         service.delete_content(item_id)
-        
-        # CLEANUP: Remove from any Access Rules to prevent 'ghost courses'
-        try:
-            from app.repositories.content_repository import AccessRuleRepository
-            access_repo = AccessRuleRepository(db)
-            all_rules = access_repo.get_all_rules()
-            
-            cleaned_count = 0
-            for rule in all_rules:
-                if rule.accessible_courses and item_id in rule.accessible_courses:
-                    # Create new list without the deleted item
-                    new_courses = [c for c in rule.accessible_courses if c != item_id]
-                    rule.accessible_courses = new_courses
-                    cleaned_count += 1
-            
-            if cleaned_count > 0:
-                db.commit()
-                logger.info(f"Removed deleted content {item_id} from {cleaned_count} access rules")
-                
-        except Exception as cleanup_error:
-            logger.error(f"Failed to cleanup access rules for {item_id}: {cleanup_error}")
-            # Don't fail the main request, just log error
-            
         logger.info(f"Content deleted: {item_id}")
         
         return {"status": "success", "message": f"Content {item_id} deleted successfully"}
@@ -446,6 +670,82 @@ async def delete_content(
     except Exception as e:
         logger.error(f"Content deletion failed: {e}")
         raise
+
+
+@router.post("/bulk-delete")
+async def bulk_delete_content(
+    request: BulkDeleteRequest,
+    background_tasks: BackgroundTasks = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Bulk delete multiple content items at once.
+    - Deletes from PostgreSQL (Content and Resource tables)
+    - Deletes from Cloudflare R2 CDN
+    - Deletes from local uploads folder
+
+    Request Body (JSON):
+    {
+        "item_ids": ["id1", "id2", "id3", ...]
+    }
+
+    Returns:
+    - Summary of successful and failed deletions
+    """
+    service = ContentService(db)
+    cdn_service = CDNService()
+
+    item_ids = request.item_ids
+
+    results = {
+        "total": len(item_ids),
+        "success": [],
+        "failed": []
+    }
+
+    for item_id in item_ids:
+        try:
+            # Get content to find file URLs
+            content = service.get_content_by_id(item_id)
+
+            if content:
+                # Delete from CDN in background
+                if cdn_service.enabled and content.video_url:
+                    if background_tasks:
+                        background_tasks.add_task(cdn_service.delete_file, content.video_url)
+
+                # Delete local file
+                local_patterns = [
+                    os.path.join(settings.UPLOAD_DIR, f"{item_id}*"),
+                ]
+                for pattern in local_patterns:
+                    import glob
+                    for filepath in glob.glob(pattern):
+                        try:
+                            os.remove(filepath)
+                        except Exception as e:
+                            logger.warning(f"Failed to delete local file {filepath}: {e}")
+
+            # Delete from database
+            service.delete_content(item_id)
+            logger.info(f"Content deleted in bulk operation: {item_id}")
+            results["success"].append({
+                "id": item_id,
+                "title": content.title if content else item_id
+            })
+
+        except Exception as e:
+            logger.error(f"Failed to delete content {item_id}: {e}")
+            results["failed"].append({
+                "id": item_id,
+                "error": str(e)
+            })
+
+    return {
+        "status": "completed",
+        "message": f"Deleted {len(results['success'])} of {results['total']} items",
+        "results": results
+    }
 
 
 # ==========================================
@@ -768,45 +1068,140 @@ async def update_content_progress(
 @router.get("/library/all")
 async def get_content_library(db: Session = Depends(get_db)):
     """
-    Get content grouped by bucket/category for ContentLibraryModal.
+    Get content grouped by bucket/category with hierarchical folder structure.
+    Returns nested tree matching the folder upload hierarchy.
     """
+    from app.models.content import CourseBucket
+
     service = ContentService(db)
-    
+
     # Get all content
     content_list = service.get_all_content()
-    
-    # Group by bucket
-    grouped = {}
-    for content in content_list:
-        bucket = content.bucket or "Uncategorized"
-        if bucket not in grouped:
-            grouped[bucket] = {
-                "id": content.bucket_id or bucket,
-                "name": bucket,
-                "items": []
-            }
-        
-        grouped[bucket]["items"].append(
+
+    # Get all buckets (folders)
+    all_buckets = db.query(CourseBucket).filter(CourseBucket.is_active == True).all()
+
+    # Build bucket lookup map
+    bucket_map = {bucket.id: bucket for bucket in all_buckets}
+
+    # Helper function to build hierarchical tree
+    def build_bucket_tree(bucket_id):
+        """Recursively build tree structure for a bucket and its children"""
+        bucket = bucket_map.get(bucket_id)
+        if not bucket:
+            return None
+
+        # Get direct content items in this bucket
+        bucket_items = [
             content.to_dict() if hasattr(content, 'to_dict') else dict(content)
-        )
-    
-    return list(grouped.values())
+            for content in content_list
+            if content.bucket_id == bucket_id
+        ]
+
+        # Find child buckets
+        child_buckets = [
+            b for b in all_buckets
+            if b.parent_bucket_id == bucket_id
+        ]
+
+        # Recursively build children
+        children = []
+        for child in child_buckets:
+            child_tree = build_bucket_tree(child.id)
+            if child_tree:
+                children.append(child_tree)
+
+        # Sort children by name
+        children.sort(key=lambda x: x.get('name', '').lower())
+
+        return {
+            "id": bucket.id,
+            "name": bucket.name,
+            "description": bucket.description,
+            "parent_bucket_id": bucket.parent_bucket_id,
+            "folder_path": bucket.folder_path,
+            "color": bucket.color,
+            "icon": bucket.icon,
+            "order_index": bucket.order_index,
+            "items": bucket_items,
+            "children": children,  # Nested child folders
+            "has_children": len(children) > 0,
+            "item_count": len(bucket_items),
+            "total_count": len(bucket_items) + sum(child.get('total_count', 0) for child in children)
+        }
+
+    # Find root buckets (no parent)
+    root_buckets = [b for b in all_buckets if not b.parent_bucket_id]
+
+    # Build tree for each root bucket
+    result = []
+    for root in root_buckets:
+        tree = build_bucket_tree(root.id)
+        if tree:
+            result.append(tree)
+
+    # Sort root buckets by order_index then name
+    result.sort(key=lambda x: (x.get('order_index', 0), x.get('name', '').lower()))
+
+    # Add uncategorized items (content without bucket)
+    uncategorized_items = [
+        content.to_dict() if hasattr(content, 'to_dict') else dict(content)
+        for content in content_list
+        if not content.bucket_id or content.bucket_id not in bucket_map
+    ]
+
+    if uncategorized_items:
+        result.append({
+            "id": "uncategorized",
+            "name": "Uncategorized",
+            "description": "Content without a folder",
+            "parent_bucket_id": None,
+            "folder_path": "Uncategorized",
+            "color": "#9CA3AF",
+            "icon": "folder-outline",
+            "order_index": 9999,
+            "items": uncategorized_items,
+            "children": [],
+            "has_children": False,
+            "item_count": len(uncategorized_items),
+            "total_count": len(uncategorized_items)
+        })
+
+    logger.info(f"Returning {len(result)} root buckets with hierarchical structure")
+    return result
 # ==========================================
 # BACKGROUND TASKS
 # ==========================================
 
-def generate_transcript_task(content_id: str, local_path: str):
+def generate_transcript_task(content_id: str, local_path: str, resource_type: str = "Video", file_ext: str = ".mp4"):
     """
     Background task to generate transcript, quiz, and embeddings.
+    Supports Video, Audio, and Document types (PDF, Word, PowerPoint).
     Run as sync function to be executed in threadpool.
     """
     ai_service = AIService()
-    
+    doc_service = DocumentService()
+
     try:
-        logger.info(f"Starting background processing for {content_id}...")
-        
-        # 1. Transcribe
-        transcript = ai_service.transcribe_audio(local_path)
+        logger.info(f"Starting background processing for {content_id} ({resource_type})...")
+
+        transcript = None
+
+        # 1. Extract text based on resource type
+        if resource_type in ["Video", "Audio"]:
+            # Transcribe audio/video
+            transcript = ai_service.transcribe_audio(local_path)
+        elif resource_type in ["Document", "Presentation", "PDF"]:
+            # Extract text from documents
+            transcript = doc_service.extract_text_from_file(local_path, file_ext)
+
+            if transcript:
+                logger.info(f"Document text extracted for {content_id}: {len(transcript)} characters")
+            else:
+                logger.warning(f"No text extracted from document {content_id}")
+        else:
+            logger.warning(f"Unsupported resource type for processing: {resource_type}")
+            return
         
         if transcript:
             with get_db_context() as db:
@@ -815,15 +1210,66 @@ def generate_transcript_task(content_id: str, local_path: str):
                 if content:
                     content.transcript = transcript
                     
-                    # 2. Generate Quiz
+                    # 2. Generate End Quiz
                     try:
                         quiz_questions = ai_service.generate_quiz_from_transcript(
                             transcript, num_questions=5, difficulty="medium"
                         )
                         content.quiz = quiz_questions
-                        logger.info(f"Quiz generated for {content_id}")
+                        logger.info(f"End quiz generated for {content_id}")
                     except Exception as qe:
-                        logger.error(f"Quiz generation failed for {content_id}: {qe}")
+                        logger.error(f"End quiz generation failed for {content_id}: {qe}")
+
+                    # 2b. Generate Mid-Video Quizzes (for videos only)
+                    if resource_type in ["Video", "Audio"] and content.duration_seconds and content.duration_seconds > 60:
+                        try:
+                            from app.models.video_progress import MidVideoQuiz
+
+                            # Calculate trigger times at 33% and 66%
+                            duration = content.duration_seconds
+                            trigger_times = [duration * 0.33, duration * 0.66]
+
+                            # Split transcript into segments
+                            transcript_length = len(transcript)
+                            segment_1 = transcript[:int(transcript_length * 0.4)]  # First 40% for 33% quiz
+                            segment_2 = transcript[int(transcript_length * 0.4):int(transcript_length * 0.7)]  # Middle 30% for 66% quiz
+
+                            segments = [segment_1, segment_2]
+
+                            for idx, (trigger_time, segment) in enumerate(zip(trigger_times, segments)):
+                                if len(segment) > 100:  # Only if segment has enough content
+                                    try:
+                                        mid_quiz_questions = ai_service.generate_quiz_from_transcript(
+                                            segment, num_questions=3, difficulty="easy"
+                                        )
+
+                                        # Store in database
+                                        mid_quiz_id = f"mvq_{content_id}_{int(trigger_time)}"
+                                        mid_quiz = MidVideoQuiz(
+                                            id=mid_quiz_id,
+                                            node_id=content_id,
+                                            trigger_time_seconds=trigger_time,
+                                            questions=mid_quiz_questions,
+                                            generated_from_transcript=segment[:500],  # Store preview
+                                            created_at=datetime.utcnow()
+                                        )
+
+                                        # Check if exists, if so update
+                                        existing = db.query(MidVideoQuiz).filter_by(id=mid_quiz_id).first()
+                                        if existing:
+                                            existing.questions = mid_quiz_questions
+                                            existing.generated_from_transcript = segment[:500]
+                                        else:
+                                            db.add(mid_quiz)
+
+                                        logger.info(f"Mid-video quiz {idx+1} generated for {content_id} at {trigger_time}s")
+                                    except Exception as mqe:
+                                        logger.error(f"Mid-quiz {idx+1} generation failed for {content_id}: {mqe}")
+
+                            db.commit()
+                            logger.info(f"All mid-video quizzes generated for {content_id}")
+                        except Exception as mve:
+                            logger.error(f"Mid-video quiz processing failed for {content_id}: {mve}")
 
                     # 3. Generate Embedding
                     try:

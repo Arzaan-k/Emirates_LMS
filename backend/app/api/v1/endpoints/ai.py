@@ -442,3 +442,588 @@ async def ask_ai_get(
     except Exception as e:
         logger.error(f"AI Chat failed: {e}")
         return {"answer": "I'm having trouble connecting to my brain right now. Please try again later."}
+
+
+# ===========================================
+# ADMIN COPILOT - PRIVILEGE-AWARE AI ASSISTANT
+# ===========================================
+
+# Privilege to data access mapping
+PRIVILEGE_DATA_ACCESS = {
+    "team_list": ["users", "employees", "team_members"],
+    "reports": ["analytics", "performance_reports", "completion_stats"],
+    "assign_quiz": ["quizzes", "quiz_assignments"],
+    "audits": ["audit_logs", "system_activity"],
+    "upload_training": ["content", "training_materials", "courses"],
+    "bulk_upload": ["bulk_operations", "import_history"],
+    "post_news": ["news", "announcements"],
+    "post_quiz": ["quizzes", "quiz_creation"],
+    "create_user": ["users", "user_management"],
+    "live_tracking": ["location", "live_tracking", "employee_locations"],
+    "proctored_assessment": ["assessments", "proctored_exams"],
+    "proctored_create_manage": ["assessments", "exam_management"],
+    "proctored_view_results": ["assessment_results", "exam_scores"],
+    "view_analytics": ["analytics", "dashboards", "metrics", "performance"],
+    "send_notification": ["notifications", "announcements"],
+    "access_control": ["privileges", "access_rules", "permissions"],
+    "manage_buckets": ["buckets", "course_categories", "content_organization"],
+    "schedule_meeting": ["meetings", "scheduled_meetings"],
+    "crm_tickets": ["crm", "tickets", "leads", "customer_data"],
+    "manage_simulations": ["simulations", "interactive_training"],
+    "manage_learning_path": ["learning_paths", "career_progression"],
+    "scheduled_exams": ["scheduled_exams", "exam_calendar"],
+    "exam_reports": ["exam_reports", "assessment_analytics"],
+    "support_library": ["support_tickets", "help_requests"],
+    "view_audit_logs": ["audit_logs", "system_logs"],
+}
+
+
+def _fetch_privilege_based_data(db: Session, privileges: List[str], is_superadmin: bool) -> Dict[str, Any]:
+    """
+    Fetch data from database based on admin's privileges.
+    Returns a dictionary with accessible data summaries.
+    """
+    from app.services.user_service import UserService
+    from app.services.quiz_service import QuizService
+    from app.repositories.analytics_repository import AnalyticsRepository
+    from app.repositories.crm_repository import CRMRepository
+    from app.models.content import Content
+    from app.models.notification import Notification
+    from app.models.simulation import Simulation
+    from app.models.assessment import ScheduledExam
+    
+    data_context = {}
+    
+    try:
+        # If superadmin, grant access to everything
+        if is_superadmin:
+            privileges = list(PRIVILEGE_DATA_ACCESS.keys())
+        
+        # TEAM LIST / USERS - fetch user summary with training stats
+        if "team_list" in privileges or "create_user" in privileges or is_superadmin:
+            try:
+                from app.models.tracking import CourseCompletion
+                from app.models.video_progress import VideoProgress
+                
+                user_service = UserService(db)
+                users = user_service.get_all_users(limit=200)
+                user_summary = []
+                role_counts = {}
+                store_counts = {}
+                category_counts = {}
+                
+                for user in users:
+                    role = getattr(user, 'role', 'Unknown')
+                    store = getattr(user, 'store', 'Unknown')
+                    category = getattr(user, 'category', 'Employee')
+                    role_counts[role] = role_counts.get(role, 0) + 1
+                    store_counts[store] = store_counts.get(store, 0) + 1
+                    category_counts[category] = category_counts.get(category, 0) + 1
+                    user_summary.append({
+                        "name": getattr(user, 'name', 'Unknown'),
+                        "email": getattr(user, 'email', ''),
+                        "role": role,
+                        "store": store,
+                        "category": category,
+                    })
+                
+                # Get training completion stats
+                total_course_completions = db.query(CourseCompletion).count()
+                total_video_completions = db.query(VideoProgress).filter(VideoProgress.completed == True).count()
+                active_learners = db.query(VideoProgress.user_email).distinct().count()
+                
+                data_context["users"] = {
+                    "total_count": len(users),
+                    "by_role": role_counts,
+                    "by_store": store_counts,
+                    "by_category": category_counts,
+                    "training_stats": {
+                        "total_course_completions": total_course_completions,
+                        "total_video_completions": total_video_completions,
+                        "active_learners": active_learners,
+                    },
+                    "sample_users": user_summary[:15],
+                }
+            except Exception as e:
+                logger.warning(f"Could not fetch users: {e}")
+        
+        # QUIZZES - fetch quiz data with submission stats
+        if "post_quiz" in privileges or "assign_quiz" in privileges or is_superadmin:
+            try:
+                from app.models.quiz import Quiz, QuizSubmission
+                
+                quiz_service = QuizService(db)
+                quizzes = quiz_service.get_all_quizzes()
+                quiz_summary = []
+                for quiz in quizzes[:15]:
+                    quiz_summary.append({
+                        "id": getattr(quiz, 'id', ''),
+                        "title": getattr(quiz, 'title', 'Untitled'),
+                        "difficulty": getattr(quiz, 'difficulty', 'Medium'),
+                        "created_by": getattr(quiz, 'created_by', 'Admin'),
+                        "questions_count": len(getattr(quiz, 'questions', []) or []),
+                        "passing_score": getattr(quiz, 'passing_score', 70),
+                    })
+                
+                # Get submission statistics
+                total_submissions = db.query(QuizSubmission).count()
+                unique_users_attempted = db.query(QuizSubmission.user_email).distinct().count()
+                
+                # Calculate average score
+                all_scores = db.query(QuizSubmission.score).all()
+                avg_score = 0.0
+                if all_scores:
+                    scores_list = [s[0] for s in all_scores if s[0] is not None]
+                    avg_score = round(sum(scores_list) / len(scores_list), 1) if scores_list else 0.0
+                
+                # Count passed (score >= 70)
+                passed_count = db.query(QuizSubmission).filter(QuizSubmission.score >= 70).count()
+                pass_rate = f"{round((passed_count / total_submissions * 100), 1)}%" if total_submissions > 0 else "0%"
+                
+                data_context["quizzes"] = {
+                    "total_quizzes": len(quizzes),
+                    "quiz_list": quiz_summary,
+                    "submission_stats": {
+                        "total_submissions": total_submissions,
+                        "unique_users_attempted": unique_users_attempted,
+                        "average_score": avg_score,
+                        "passed_count": passed_count,
+                        "pass_rate": pass_rate,
+                    }
+                }
+            except Exception as e:
+                logger.warning(f"Could not fetch quizzes: {e}")
+        
+        # ANALYTICS / REPORTS - with real metrics
+        if "reports" in privileges or "view_analytics" in privileges or is_superadmin:
+            try:
+                from app.models.tracking import CourseCompletion
+                from app.models.video_progress import VideoProgress
+                from app.models.quiz import QuizSubmission
+                from app.models.simulation import SimulationProgress
+                from app.models.assessment import AssessmentSubmission
+                
+                analytics_repo = AnalyticsRepository(db)
+                
+                # Aggregate real metrics
+                metrics = {
+                    "course_completions": db.query(CourseCompletion).count(),
+                    "video_completions": db.query(VideoProgress).filter(VideoProgress.completed == True).count(),
+                    "quiz_submissions": db.query(QuizSubmission).count(),
+                    "simulation_completions": db.query(SimulationProgress).filter(SimulationProgress.completed == True).count(),
+                    "assessment_submissions": db.query(AssessmentSubmission).count(),
+                    "active_learners": db.query(VideoProgress.user_email).distinct().count(),
+                }
+                
+                # Calculate overall engagement rate
+                from app.models.user import User
+                total_users = db.query(User).filter(User.has_admin_access == False).count()
+                engagement_rate = f"{round((metrics['active_learners'] / total_users * 100), 1)}%" if total_users > 0 else "0%"
+                metrics["engagement_rate"] = engagement_rate
+                
+                data_context["analytics"] = {
+                    "metrics": metrics,
+                    "available_reports": ["Employee Performance", "Course Completion Rates", "Quiz Scores", "Training Progress", "Simulation Analytics"],
+                }
+            except Exception as e:
+                logger.warning(f"Could not fetch analytics: {e}")
+        
+        # CONTENT / TRAINING - with video progress stats
+        if "upload_training" in privileges or "manage_learning_path" in privileges or is_superadmin:
+            try:
+                from app.models.video_progress import VideoProgress
+                from app.models.content import CourseBucket
+                
+                content_list = db.query(Content).all()
+                content_summary = []
+                bucket_counts = {}
+                path_type_counts = {"self_learning": 0, "career_progression": 0, "other": 0}
+                
+                for content in content_list:
+                    bucket = getattr(content, 'bucket', 'Uncategorized') or 'Uncategorized'
+                    bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
+                    path_type = getattr(content, 'learning_path_type', 'other') or 'other'
+                    if path_type in path_type_counts:
+                        path_type_counts[path_type] += 1
+                    content_summary.append({
+                        "id": getattr(content, 'id', ''),
+                        "title": getattr(content, 'title', 'Untitled'),
+                        "bucket": bucket,
+                        "is_path_node": getattr(content, 'is_path_node', False),
+                        "learning_path_type": path_type,
+                    })
+                
+                # Video progress stats
+                total_video_starts = db.query(VideoProgress).count()
+                total_video_completions = db.query(VideoProgress).filter(VideoProgress.completed == True).count()
+                completion_rate = f"{round((total_video_completions / total_video_starts * 100), 1)}%" if total_video_starts > 0 else "0%"
+                
+                # Average watch percentage
+                watch_percents = db.query(VideoProgress.video_watched_percent).all()
+                avg_watch = 0.0
+                if watch_percents:
+                    valid_percents = [w[0] for w in watch_percents if w[0] is not None]
+                    avg_watch = round(sum(valid_percents) / len(valid_percents), 1) if valid_percents else 0.0
+                
+                # Get buckets
+                buckets = db.query(CourseBucket).all()
+                bucket_list = [b.name for b in buckets]
+                
+                data_context["content"] = {
+                    "total_courses": len(content_list),
+                    "by_bucket": bucket_counts,
+                    "by_learning_path_type": path_type_counts,
+                    "buckets_available": bucket_list,
+                    "video_stats": {
+                        "total_video_starts": total_video_starts,
+                        "total_video_completions": total_video_completions,
+                        "completion_rate": completion_rate,
+                        "average_watch_percentage": avg_watch,
+                    },
+                    "content_list": content_summary[:15],
+                }
+            except Exception as e:
+                logger.warning(f"Could not fetch content: {e}")
+        
+        # NOTIFICATIONS / NEWS
+        if "post_news" in privileges or "send_notification" in privileges or is_superadmin:
+            try:
+                notifications = db.query(Notification).order_by(Notification.created_at.desc()).limit(20).all()
+                notif_summary = []
+                for notif in notifications:
+                    notif_summary.append({
+                        "title": getattr(notif, 'title', 'Notification'),
+                        "type": getattr(notif, 'type', 'general'),
+                        "created_at": str(getattr(notif, 'created_at', '')),
+                    })
+                data_context["notifications"] = {
+                    "recent_count": len(notifications),
+                    "recent_notifications": notif_summary,
+                }
+            except Exception as e:
+                logger.warning(f"Could not fetch notifications: {e}")
+        
+        # CRM / TICKETS
+        if "crm_tickets" in privileges or is_superadmin:
+            try:
+                crm_repo = CRMRepository(db)
+                tickets = crm_repo.get_all_tickets()
+                ticket_summary = {
+                    "total": len(tickets),
+                    "by_status": {},
+                    "by_priority": {},
+                }
+                for ticket in tickets:
+                    status = getattr(ticket, 'status', 'open')
+                    priority = getattr(ticket, 'priority', 'medium')
+                    ticket_summary["by_status"][status] = ticket_summary["by_status"].get(status, 0) + 1
+                    ticket_summary["by_priority"][priority] = ticket_summary["by_priority"].get(priority, 0) + 1
+                data_context["crm_tickets"] = ticket_summary
+            except Exception as e:
+                logger.warning(f"Could not fetch CRM tickets: {e}")
+        
+        # SIMULATIONS
+        if "manage_simulations" in privileges or is_superadmin:
+            try:
+                from app.models.simulation import Simulation, SimulationProgress
+                
+                # Fetch simulations
+                simulations = db.query(Simulation).all()
+                sim_summary = []
+                for sim in simulations[:10]:
+                    sim_summary.append({
+                        "id": sim.id,  # Include ID to map with progress
+                        "title": getattr(sim, 'title', 'Simulation'),
+                        "category": getattr(sim, 'category', 'Training'),
+                    })
+                
+                # Fetch simulation progress stats
+                progress_stats = {
+                    "total_attempts": db.query(SimulationProgress).count(),
+                    "total_completions": db.query(SimulationProgress).filter(SimulationProgress.completed == True).count(),
+                    "passed_count": db.query(SimulationProgress).filter(SimulationProgress.passed == True).count(),
+                    "avg_score": 0.0
+                }
+                
+                # Calculate avg score if there are attempts
+                if progress_stats["total_attempts"] > 0:
+                    scores = db.query(SimulationProgress.score).all()
+                    total_score = sum([s[0] for s in scores if s[0] is not None])
+                    progress_stats["avg_score"] = round(total_score / progress_stats["total_attempts"], 2)
+                
+                progress_stats["completion_rate"] = (
+                    f"{round((progress_stats['total_completions'] / progress_stats['total_attempts'] * 100), 1)}%" 
+                    if progress_stats["total_attempts"] > 0 else "0%"
+                )
+
+                data_context["simulations"] = {
+                    "total_count": len(simulations),
+                    "simulation_list": sim_summary,
+                    "stats": progress_stats
+                }
+            except Exception as e:
+                logger.warning(f"Could not fetch simulations: {e}")
+        
+        # SCHEDULED EXAMS with attendance stats
+        if "scheduled_exams" in privileges or "proctored_assessment" in privileges or is_superadmin:
+            try:
+                from app.models.assessment import ScheduledExam, ExamAttendance, ProcturedAssessment, AssessmentSubmission
+                
+                # Scheduled exams
+                exams = db.query(ScheduledExam).all()
+                exam_summary = []
+                status_counts = {"scheduled": 0, "in_progress": 0, "completed": 0, "cancelled": 0}
+                
+                for exam in exams[:10]:
+                    status = getattr(exam, 'status', 'scheduled')
+                    if status in status_counts:
+                        status_counts[status] += 1
+                    exam_summary.append({
+                        "id": getattr(exam, 'id', ''),
+                        "title": getattr(exam, 'title', 'Exam'),
+                        "exam_date": getattr(exam, 'exam_date', ''),
+                        "status": status,
+                        "assigned_count": len(getattr(exam, 'assigned_users', []) or []),
+                    })
+                
+                # Exam attendance stats
+                total_attendance_marked = db.query(ExamAttendance).filter(ExamAttendance.marked_present == True).count()
+                total_exams_completed = db.query(ExamAttendance).filter(ExamAttendance.completed == True).count()
+                total_exams_passed = db.query(ExamAttendance).filter(ExamAttendance.passed == True).count()
+                
+                # Proctored assessments
+                proctored_assessments = db.query(ProcturedAssessment).all()
+                assessment_summary = []
+                for pa in proctored_assessments[:10]:
+                    assessment_summary.append({
+                        "id": getattr(pa, 'id', ''),
+                        "title": getattr(pa, 'title', 'Assessment'),
+                        "passing_score": getattr(pa, 'passing_score', 70),
+                        "time_limit_minutes": getattr(pa, 'time_limit_minutes', 30),
+                    })
+                
+                # Assessment submission stats
+                total_submissions = db.query(AssessmentSubmission).count()
+                passed_submissions = db.query(AssessmentSubmission).filter(AssessmentSubmission.passed == True).count()
+                
+                # Calculate average score
+                scores = db.query(AssessmentSubmission.score_percent).all()
+                avg_assessment_score = 0.0
+                if scores:
+                    valid_scores = [s[0] for s in scores if s[0] is not None]
+                    avg_assessment_score = round(sum(valid_scores) / len(valid_scores), 1) if valid_scores else 0.0
+                
+                assessment_pass_rate = f"{round((passed_submissions / total_submissions * 100), 1)}%" if total_submissions > 0 else "0%"
+                
+                # Integrity stats
+                flagged_submissions = db.query(AssessmentSubmission).filter(AssessmentSubmission.integrity_status == 'flagged').count()
+                
+                data_context["scheduled_exams"] = {
+                    "total_scheduled_exams": len(exams),
+                    "by_status": status_counts,
+                    "exam_list": exam_summary,
+                    "attendance_stats": {
+                        "total_attendance_marked": total_attendance_marked,
+                        "total_exams_completed": total_exams_completed,
+                        "total_exams_passed": total_exams_passed,
+                    }
+                }
+                
+                data_context["proctored_assessments"] = {
+                    "total_assessments": len(proctored_assessments),
+                    "assessment_list": assessment_summary,
+                    "submission_stats": {
+                        "total_submissions": total_submissions,
+                        "passed_submissions": passed_submissions,
+                        "pass_rate": assessment_pass_rate,
+                        "average_score": avg_assessment_score,
+                        "flagged_for_integrity": flagged_submissions,
+                    }
+                }
+            except Exception as e:
+                logger.warning(f"Could not fetch scheduled exams: {e}")
+        
+        # AUDIT LOGS
+        if "view_audit_logs" in privileges or "audits" in privileges or is_superadmin:
+            try:
+                analytics_repo = AnalyticsRepository(db)
+                logs = analytics_repo.get_audit_logs(limit=20)
+                log_summary = []
+                for log in logs[:10]:
+                    log_dict = log.to_dict() if hasattr(log, 'to_dict') else {}
+                    log_summary.append({
+                        "action": log_dict.get('action', 'Unknown'),
+                        "user": log_dict.get('user_email', 'System'),
+                        "timestamp": str(log_dict.get('timestamp', '')),
+                    })
+                data_context["audit_logs"] = {
+                    "recent_count": len(logs),
+                    "recent_logs": log_summary,
+                }
+            except Exception as e:
+                logger.warning(f"Could not fetch audit logs: {e}")
+        
+        # LIVE TRACKING with attendance stats
+        if "live_tracking" in privileges or is_superadmin:
+            try:
+                from app.models.tracking import LocationTracking, AttendanceRecord
+                from datetime import datetime, timedelta
+                
+                # Recent locations
+                locations = db.query(LocationTracking).order_by(LocationTracking.timestamp.desc()).limit(100).all()
+                unique_users = set()
+                store_breakdown = {}
+                
+                for loc in locations:
+                    email = getattr(loc, 'user_email', '')
+                    store = getattr(loc, 'store', 'Unknown') or 'Unknown'
+                    unique_users.add(email)
+                    store_breakdown[store] = store_breakdown.get(store, 0) + 1
+                
+                # Today's attendance
+                today = datetime.utcnow().date()
+                today_start = datetime.combine(today, datetime.min.time())
+                
+                today_punch_ins = db.query(AttendanceRecord).filter(
+                    AttendanceRecord.punch_in >= today_start
+                ).count()
+                
+                active_attendance = db.query(AttendanceRecord).filter(
+                    AttendanceRecord.punch_in >= today_start,
+                    AttendanceRecord.punch_out == None
+                ).count()
+                
+                data_context["live_tracking"] = {
+                    "active_users_tracked": len(unique_users),
+                    "total_location_records": len(locations),
+                    "by_store": store_breakdown,
+                    "attendance": {
+                        "today_punch_ins": today_punch_ins,
+                        "currently_active": active_attendance,
+                    }
+                }
+            except Exception as e:
+                logger.warning(f"Could not fetch tracking data: {e}")
+        
+    except Exception as e:
+        logger.error(f"Error fetching privilege-based data: {e}")
+    
+    return data_context
+
+
+@router.post("/admin-copilot")
+async def admin_copilot(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Admin Copilot - Privilege-aware AI assistant for admins.
+    Answers questions based only on data the admin has access to.
+    """
+    try:
+        # Parse request body
+        content_type = request.headers.get("content-type", "")
+        if "application/json" in content_type:
+            data = await request.json()
+        else:
+            form = await request.form()
+            data = dict(form)
+        
+        question = data.get("question", "")
+        privileges = data.get("privileges", [])
+        is_superadmin = data.get("is_superadmin", False)
+        admin_name = data.get("admin_name", "Admin")
+        admin_role = data.get("admin_role", "Manager")
+        
+        if not question:
+            return {"answer": "Please ask me a question!", "status": "error"}
+        
+        # Parse privileges if it's a string
+        if isinstance(privileges, str):
+            try:
+                privileges = json.loads(privileges)
+            except:
+                privileges = []
+        
+        # Fetch data based on privileges
+        accessible_data = _fetch_privilege_based_data(db, privileges, is_superadmin)
+        
+        # Build context based on accessible data
+        context_parts = []
+        
+        if not accessible_data and not is_superadmin:
+            context_parts.append("Note: This admin has limited access. They can only view general information.")
+        
+        for data_type, data_value in accessible_data.items():
+            if isinstance(data_value, dict):
+                context_parts.append(f"\n{data_type.upper().replace('_', ' ')} DATA:")
+                for key, value in data_value.items():
+                    if isinstance(value, (list, dict)):
+                        context_parts.append(f"  - {key}: {json.dumps(value, default=str)[:500]}")
+                    else:
+                        context_parts.append(f"  - {key}: {value}")
+        
+        context_text = "\n".join(context_parts)
+        
+        # Build privilege description for system prompt
+        privilege_descriptions = []
+        for priv in privileges:
+            priv_name = priv.replace("_", " ").title()
+            privilege_descriptions.append(priv_name)
+        
+        if is_superadmin:
+            access_level = "SUPERADMIN (Full access to all data)"
+        elif privilege_descriptions:
+            access_level = f"Admin with access to: {', '.join(privilege_descriptions)}"
+        else:
+            access_level = "Limited access admin"
+        
+        # Build system prompt
+        system_prompt = f"""You are the Admin Copilot AI for Belgian Waffle Co.'s Learning Management System (BW LMS).
+You are assisting {admin_name} ({admin_role}).
+
+ACCESS LEVEL: {access_level}
+
+IMPORTANT RULES:
+1. ONLY answer questions based on the data provided below
+2. If the admin asks about data they don't have access to, politely inform them they need additional privileges
+3. Be helpful, professional, and concise
+4. Use numbers and statistics when available
+5. Format your response with bullet points and clear sections where appropriate
+6. Use relevant emojis sparingly (📊, 👥, 📚, ✅, 🎯)
+
+ACCESSIBLE DATA:
+{context_text if context_text else "Limited data available based on current privileges."}
+
+PRIVILEGES THIS ADMIN HAS ACCESS TO:
+{', '.join(privilege_descriptions) if privilege_descriptions else 'Basic access only'}
+"""
+
+        # Call Groq API
+        client = Groq(api_key=settings.GROQ_API_KEY)
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": question}
+            ],
+            temperature=0.7,
+            max_tokens=1000
+        )
+        
+        answer = response.choices[0].message.content.strip()
+        
+        return {
+            "answer": answer,
+            "status": "success",
+            "privileges_used": privileges,
+            "data_sources": list(accessible_data.keys()),
+        }
+        
+    except Exception as e:
+        logger.error(f"Admin Copilot Error: {e}")
+        return {
+            "answer": "I'm having trouble processing your request right now. Please try again. 🔄",
+            "status": "error",
+            "error": str(e)
+        }

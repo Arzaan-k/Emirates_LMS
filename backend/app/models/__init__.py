@@ -72,6 +72,11 @@ from app.models.analytics import (
     AuditLog,
 )
 
+# Report domain
+from app.models.report import (
+    ReportSubscription,
+)
+
 __all__ = [
     # Base
     "Base",
@@ -113,4 +118,6 @@ __all__ = [
     "SimulationProgress",
     # Analytics
     "AuditLog",
+    # Report
+    "ReportSubscription",
 ]

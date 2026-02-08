@@ -25,13 +25,20 @@ class User(Base):
     name = Column(String(255), nullable=False)
     password = Column(String(255), nullable=False)  # Bcrypt hashed
     role = Column(String(100), default="Waffler")
-    category = Column(String(100), default="Employee")
-    privileges = Column(JSON, default=[])
-    is_superadmin = Column(Boolean, default=False)
-    has_admin_access = Column(Boolean, default=False)
-    store = Column(String(255), default="Unassigned")
-    self_learning_completed = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # These columns might be missing in production DB - using Column but will handle None gracefully
+    category = Column(String(100), default="Employee", nullable=True)
+    privileges = Column(JSON, default=[], nullable=True)
+    is_superadmin = Column(Boolean, default=False, nullable=True)
+    has_admin_access = Column(Boolean, default=False, nullable=True)
+    store = Column(String(255), default="Unassigned", nullable=True)
+    self_learning_completed = Column(Boolean, default=False, nullable=True)
+    profile_data = Column(JSON, default={}, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=True)
+    last_active = Column(DateTime, nullable=True)
+    xp_points = Column(Integer, default=0, nullable=True)
+    reset_token = Column(String(100), nullable=True)
+    reset_token_expires = Column(DateTime, nullable=True)
 
     # Relationships
     completions = relationship(
@@ -96,6 +103,7 @@ class User(Base):
             "has_admin_access": self.has_admin_access or False,
             "store": self.store,
             "self_learning_completed": self.self_learning_completed or False,
+            "profile_data": self.profile_data or {},
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

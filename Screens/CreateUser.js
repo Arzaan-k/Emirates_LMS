@@ -17,6 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import API_URL from '../config';
 
 // BWC THEME
@@ -37,7 +38,8 @@ const CreateUser = ({
     userProfile = {},
     isEditing = false,
     initialData = null,
-    onUpdate = () => { }
+    onUpdate = () => { },
+    onBulkUploadStart = null // New prop for background upload
 }) => {
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
@@ -62,6 +64,20 @@ const CreateUser = ({
     const [showNewRole, setShowNewRole] = useState(false);
     const [newRoleName, setNewRoleName] = useState('');
     const [creatingRole, setCreatingRole] = useState(false);
+    const [showAllColumns, setShowAllColumns] = useState(false);
+
+    // Comprehensive list of supported columns from EXPORT_USERS format
+    const allColumns = [
+        "Employee Code", "Full Name", "Temporary Employee Code", "User Name", "Date of Birth",
+        "Gender", "Email", "Contact Number", "Address", "Proof Type", "Proof ID",
+        "Qualification", "Specialization", "Qualification Status", "Previous Experience Designation",
+        "Previous Experience", "Marital Status", "Shirt Size", "Denim Size", "Blood Group",
+        "Account Verified", "Account Approved", "Approved By", "Joining Date", "Date of Resign",
+        "Date of Leaving", "Reason for Leaving", "Franchise", "Store Name", "Store Code",
+        "Region", "City", "State", "Designation", "User Status", "Grade", "Concept",
+        "Department", "Sub Department", "Function", "Sub Function", "Job Role",
+        "Career Job Roles", "User Created On"
+    ];
 
     const isSuperAdmin = userProfile?.is_superadmin || userProfile?.role === 'Super Admin';
 
@@ -316,21 +332,45 @@ const CreateUser = ({
             setBulkResult(null);
 
             const formData = new FormData();
-            formData.append('file', {
-                uri: file.uri,
-                name: file.name,
-                type: file.mimeType || 'application/octet-stream'
-            });
+            if (Platform.OS === 'web') {
+                const response = await fetch(file.uri);
+                const blob = await response.blob();
+                const webFile = new File([blob], file.name, { type: file.mimeType || 'application/vnd.ms-excel' });
+                formData.append('file', webFile);
+            } else {
+                formData.append('file', {
+                    uri: file.uri,
+                    name: file.name,
+                    type: file.mimeType || 'application/octet-stream'
+                });
+            }
+
+            // Get auth token
+            const token = await AsyncStorage.getItem('userToken');
+            const headers = {};
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
 
             const response = await fetch(`${API_URL}/api/v1/users/bulk-upload`, {
                 method: 'POST',
                 body: formData,
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                },
+                headers,
             });
-
             const data = await response.json();
+
+            // Handle Background Task Response
+            if (data.status === 'processing' && data.task_id) {
+                if (onBulkUploadStart) {
+                    onBulkUploadStart(data.task_id);
+                } else {
+                    // Fallback if no parent handler (though dashboard should have it)
+                    Alert.alert('Upload Started', 'Upload is processing in background.');
+                    onClose();
+                }
+                return;
+            }
+
             setBulkResult(data);
 
             if (data.status === 'success') {
@@ -352,7 +392,28 @@ const CreateUser = ({
 
     const downloadTemplate = async () => {
         try {
-            const csvContent = "Name,Email,Password,Role,Category,Store\nJohn Doe,john.doe@company.com,Welcome@123,Waffler,Employee,Mumbai Central\nJane Smith,jane.smith@company.com,Welcome@123,Silver Waffler,Employee,Delhi CP\nMike Wilson,mike.wilson@company.com,Welcome@123,Store Manager,Manager,Bangalore Indiranagar";
+            // New Template based on EXPORT_USERS format
+            const header = allColumns.join(',');
+            // Sample row with matching 44 columns
+            const sampleRow1 = "BWCO-001,John Doe,johndoe,john.doe@company.com,Male,9876543210,123 Main St,Aadhar,123456789012,Graduate,Management,Completed,Manager,5 Years,Single,M,32,O+,Yes,Yes,Admin,01-01-2023,,,,,Mumbai Central,MUM-01,West,Mumbai,Maharashtra,Store Manager,Active,A,Retail,Store Operations,Operations,Store Mgmt,Operations,Store Manager,Store Manager,2023-01-01";
+            // Note: Adjust the sample row to match the exact order of allColumns if needed. 
+            // For safety, let's explicitely map them similar to the backend template example to ensure alignment.
+
+            // Re-constructing sample row to be perfectly aligned with allColumns:
+            const sampleData = [
+                "BWCO-001", "John Doe", "TEMP-001", "johndoe", "1990-01-01",
+                "Male", "john.doe@company.com", "9876543210", "123 Main St", "Aadhar", "123456789012",
+                "Graduate", "Management", "Completed", "Store Manager",
+                "5 Years", "Single", "M", "32", "O+",
+                "Yes", "Yes", "Admin", "01-01-2023", "",
+                "", "", "BWC Franchise", "Mumbai Central", "MUM-001",
+                "West", "Mumbai", "Maharashtra", "Store Manager", "Active", "A", "Concept A",
+                "Store Operations", "Operations", "Store Management", "Operations", "Store Manager",
+                "Store Manager", "01-01-2023"
+            ];
+            const sampleRow = sampleData.map(val => val.includes(',') ? `"${val}"` : val).join(',');
+
+            const csvContent = `${header}\n${sampleRow}`;
 
             if (Platform.OS === 'web') {
                 const blob = new Blob([csvContent], { type: 'text/csv' });
@@ -380,10 +441,9 @@ const CreateUser = ({
             }
         } catch (error) {
             console.error('Download template error:', error);
-            // Fallback: show the content in an alert so user can copy it
             Alert.alert(
                 'Template Content',
-                'Copy this format:\n\nName,Email,Password,Role,Category,Store\nJohn Doe,john@email.com,Pass123,Waffler,Employee,Mumbai Central',
+                'Header: Employee Code, Full Name, Email, Designation, Department, Store Name...',
                 [{ text: 'OK' }]
             );
         }
@@ -450,7 +510,7 @@ const CreateUser = ({
                                     <MaterialCommunityIcons name="file-upload-outline" size={48} color={THEME.primary} />
                                     <Text style={styles.bulkTitle}>Bulk Upload</Text>
                                     <Text style={styles.bulkDesc}>
-                                        Upload an Excel or CSV file to create multiple employees at once
+                                        Upload the standard employee export csv file
                                     </Text>
                                 </View>
 
@@ -496,16 +556,48 @@ const CreateUser = ({
 
                                 {/* Format Info */}
                                 <View style={styles.formatInfo}>
-                                    <Text style={styles.formatTitle}>Required Columns:</Text>
-                                    <View style={styles.formatRow}>
-                                        <View style={styles.formatItem}><Text style={styles.formatLabel}>Name</Text></View>
-                                        <View style={styles.formatItem}><Text style={styles.formatLabel}>Email</Text></View>
-                                        <View style={styles.formatItem}><Text style={styles.formatLabel}>Password</Text></View>
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                                        <Text style={styles.formatTitle}>Supported Columns ({allColumns.length})</Text>
+                                        <TouchableOpacity onPress={() => setShowAllColumns(!showAllColumns)}>
+                                            <Text style={{ color: THEME.primaryDark, fontWeight: '600' }}>
+                                                {showAllColumns ? 'Show Less' : 'Show All'}
+                                            </Text>
+                                        </TouchableOpacity>
                                     </View>
-                                    <View style={styles.formatRow}>
-                                        <View style={styles.formatItem}><Text style={styles.formatLabel}>Role</Text></View>
-                                        <View style={styles.formatItem}><Text style={styles.formatLabel}>Category</Text></View>
-                                        <View style={styles.formatItem}><Text style={styles.formatLabel}>Store</Text></View>
+
+                                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                                        {(showAllColumns ? allColumns : allColumns.slice(0, 9)).map((col, index) => (
+                                            <View key={index} style={{
+                                                backgroundColor: '#FEF3C7',
+                                                paddingHorizontal: 12,
+                                                paddingVertical: 6,
+                                                borderRadius: 20,
+                                                borderWidth: 1,
+                                                borderColor: '#FDE68A',
+                                                marginBottom: 4
+                                            }}>
+                                                <Text style={{
+                                                    fontSize: 12,
+                                                    color: '#92400E',
+                                                    fontWeight: '500'
+                                                }}>{col}</Text>
+                                            </View>
+                                        ))}
+                                        {!showAllColumns && (
+                                            <TouchableOpacity
+                                                onPress={() => setShowAllColumns(true)}
+                                                style={{
+                                                    backgroundColor: '#FFFBEB',
+                                                    paddingHorizontal: 12,
+                                                    paddingVertical: 6,
+                                                    borderRadius: 20,
+                                                    borderWidth: 1,
+                                                    borderColor: THEME.primary,
+                                                    borderStyle: 'dashed'
+                                                }}>
+                                                <Text style={{ fontSize: 12, color: THEME.primaryDark }}>+ {allColumns.length - 9} more...</Text>
+                                            </TouchableOpacity>
+                                        )}
                                     </View>
                                 </View>
                             </View>

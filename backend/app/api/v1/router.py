@@ -21,6 +21,7 @@ from app.api.v1.endpoints import (
     ai,
     tracking,
     roleplay,
+    reports,
 )
 
 # Create the main API router
@@ -41,6 +42,7 @@ api_router.include_router(simulations.router)
 api_router.include_router(ai.router)
 api_router.include_router(tracking.router)
 api_router.include_router(roleplay.router)
+api_router.include_router(reports.router)
 
 
 # Health check endpoint at root level

@@ -9,9 +9,11 @@ import {
     Alert,
     KeyboardAvoidingView,
     Platform,
+    Modal,
+    ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Feather } from '@expo/vector-icons';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import Animated, {
     useSharedValue,
     useAnimatedStyle,
@@ -21,7 +23,10 @@ import Animated, {
     Easing,
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import API_URL from '../config';
+
+import CustomAlert from '../Components/CustomAlert';
 
 const { width, height } = Dimensions.get('window');
 
@@ -130,10 +135,34 @@ export default function Login({ navigation }) {
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [showRoleModal, setShowRoleModal] = useState(false);
+    const [pendingUserData, setPendingUserData] = useState(null);
+
+    // Forgot Password State
+    const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
+    const [resetStage, setResetStage] = useState('email'); // 'email', 'reset'
+    const [resetEmail, setResetEmail] = useState('');
+    const [resetToken, setResetToken] = useState('');
+    const [newPassword, setNewPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [resetLoading, setResetLoading] = useState(false);
+
+    // Custom Alert State
+    const [alertVisible, setAlertVisible] = useState(false);
+    const [alertConfig, setAlertConfig] = useState({
+        title: '',
+        message: '',
+        type: 'error'
+    });
+
+    const showAlert = (title, message, type = 'error') => {
+        setAlertConfig({ title, message, type });
+        setAlertVisible(true);
+    };
 
     const handleLogin = async () => {
         if (!username || !password) {
-            Alert.alert('Missing Fields', 'Please enter both username and password.');
+            showAlert('Missing Fields', 'Please enter both username and password.', 'error');
             return;
         }
 
@@ -150,8 +179,7 @@ export default function Login({ navigation }) {
             if (data.status === 'success') {
                 const user = data.user;
 
-                // [NEW] Save user profile to AsyncStorage for other components
-                const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+                // Save user profile to AsyncStorage
                 await AsyncStorage.setItem('userProfile', JSON.stringify(user));
                 await AsyncStorage.setItem('userEmail', user.email);
                 if (data.access_token) {
@@ -159,29 +187,177 @@ export default function Login({ navigation }) {
                 }
                 console.log('[Login] Saved user profile and token to AsyncStorage:', user.email);
 
-                // Determine destination based on role/access
-                if (user.has_admin_access || user.is_superadmin || user.role === 'Store Manager') {
-                    navigation.replace('ManagerDashboard', { userProfile: user });
+                // Check if user has admin privileges
+                const hasAdminPrivileges = user.has_admin_access || user.is_superadmin || (user.privileges && user.privileges.length > 0);
+
+                if (hasAdminPrivileges) {
+                    // Show role selection modal for privileged users
+                    setPendingUserData(user);
+                    setShowRoleModal(true);
+                    setLoading(false);
                 } else {
+                    // Regular users - go directly to employee view
+                    await AsyncStorage.setItem('userMode', 'user');
                     navigation.replace('Home', { userProfile: user });
                 }
             } else {
-                Alert.alert('Login Failed', data.message || 'Invalid credentials');
+                // Use specific error message from backend if available
+                const errorMsg = data.detail || data.message || 'Invalid credentials';
+                showAlert('Login Failed', errorMsg, 'error');
             }
         } catch (error) {
             console.error('Login error:', error);
-            Alert.alert('Error', 'Unable to connect to server. Please try again.');
+            showAlert('Connection Error', 'Unable to connect to server. Please try again.', 'error');
         } finally {
-            setLoading(false);
+            if (!showRoleModal) {
+                setLoading(false);
+            }
+        }
+    };
+
+    const handleRoleSelection = async (mode) => {
+        if (!pendingUserData) return;
+
+        try {
+            // Save selected mode
+            await AsyncStorage.setItem('userMode', mode);
+            console.log(`[Login] User selected mode: ${mode}`);
+
+            // Navigate based on selected mode
+            if (mode === 'admin') {
+                navigation.replace('ManagerDashboard', { userProfile: pendingUserData });
+            } else {
+                navigation.replace('Home', { userProfile: pendingUserData });
+            }
+
+            // Reset state
+            setShowRoleModal(false);
+            setPendingUserData(null);
+        } catch (error) {
+            console.error('Error saving mode:', error);
+            Alert.alert('Error', 'Failed to save login mode');
+        }
+    };
+
+    const requestResetCode = async () => {
+        if (!resetEmail) {
+            showAlert('Missing Email', 'Please enter your email address', 'error');
+            return;
+        }
+
+        setResetLoading(true);
+        try {
+            const response = await fetch(`${API_URL}/api/v1/auth/forgot-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: resetEmail })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                // Email sent successfully
+                setResetStage('reset');
+                showAlert('Check Your Email', `A reset code has been sent to ${resetEmail}`, 'success');
+            } else {
+                showAlert('Request Failed', data.detail || 'Failed to send reset code', 'error');
+            }
+        } catch (error) {
+            console.error('Forgot password error:', error);
+            showAlert('Connection Error', 'Network error. Please try again.', 'error');
+        } finally {
+            setResetLoading(false);
+        }
+    };
+
+    const submitPasswordReset = async () => {
+        if (!resetToken || !newPassword || !confirmPassword) {
+            showAlert('Missing Fields', 'Please fill in all fields', 'error');
+            return;
+        }
+
+        if (newPassword !== confirmPassword) {
+            showAlert('Password Mismatch', 'Passwords do not match', 'error');
+            return;
+        }
+
+        // Strong password validation (Matching Backend Logic)
+        if (newPassword.length < 8) {
+            showAlert('Weak Password', 'Password must be at least 8 characters long.', 'error');
+            return;
+        }
+        if (!/[A-Z]/.test(newPassword)) {
+            showAlert('Weak Password', 'Password must contain at least one uppercase letter.', 'error');
+            return;
+        }
+        if (!/[a-z]/.test(newPassword)) {
+            showAlert('Weak Password', 'Password must contain at least one lowercase letter.', 'error');
+            return;
+        }
+        if (!/\d/.test(newPassword)) {
+            showAlert('Weak Password', 'Password must contain at least one number.', 'error');
+            return;
+        }
+        // Check for special characters (permissive list matching backend)
+        if (!/[!@#$%^&*(),.?":{}|<>]/.test(newPassword)) {
+            showAlert('Weak Password', 'Password must contain at least one special character (e.g. ! @ # $ %).', 'error');
+            return;
+        }
+
+        setResetLoading(true);
+        try {
+            const response = await fetch(`${API_URL}/api/v1/auth/reset-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: resetEmail,
+                    token: resetToken,
+                    new_password: newPassword
+                })
+            });
+
+            let data;
+            try {
+                data = await response.json();
+            } catch (e) {
+                // Fallback if response is not JSON
+                const text = await response.text();
+                // If text is empty or html, just say server error
+                data = { detail: text || 'Server returned an error' };
+            }
+
+            if (response.ok) {
+                showAlert('Success!', 'Password reset successfully. You can now login.', 'success');
+                setShowForgotPasswordModal(false);
+            } else {
+                // Try to extract the cleanest message
+                let message = data.detail || data.message || 'Failed to reset password';
+
+                // If detail is an array (FastAPI validation error), grab the first msg
+                if (Array.isArray(message)) {
+                    message = message[0]?.msg || JSON.stringify(message);
+                }
+
+                // If it looks like "Validation failed for field 'token': Invalid reset code"
+                // we keep it as is, or clean it up if needed.
+                console.log('[Login] Reset Failed Message:', message);
+                showAlert('Reset Failed', message, 'error');
+            }
+        } catch (error) {
+            console.error('Reset password error:', error);
+            showAlert('Connection Error', 'Network error. Please try again.', 'error');
+        } finally {
+            setResetLoading(false);
         }
     };
 
     const handleForgotPassword = () => {
-        Alert.alert(
-            'Reset Password',
-            'Please contact your Super Admin to reset your password.\n\nEmail: admin@belgianwaffle.com',
-            [{ text: 'OK', style: 'default' }]
-        );
+        setResetStage('email');
+        setResetEmail('');
+        setResetToken('');
+        setNewPassword('');
+        setConfirmPassword('');
+        setShowForgotPasswordModal(true);
     };
 
     return (
@@ -281,6 +457,219 @@ export default function Login({ navigation }) {
                     */}
                 </BlurView>
             </KeyboardAvoidingView>
+
+            {/* ROLE SELECTION MODAL */}
+            <Modal visible={showRoleModal} transparent animationType="fade">
+                <View style={styles.modalOverlay}>
+                    <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
+                    <View style={styles.roleModalCard}>
+                        {/* Header */}
+                        <View style={styles.roleModalHeader}>
+                            <MaterialCommunityIcons name="shield-account" size={48} color="#F59E0B" />
+                            <Text style={styles.roleModalTitle}>Choose Login Mode</Text>
+                            <Text style={styles.roleModalSubtitle}>
+                                You have admin privileges. How would you like to login?
+                            </Text>
+                        </View>
+
+                        {/* Admin Mode Button */}
+                        <TouchableOpacity
+                            style={styles.roleModeButton}
+                            onPress={() => handleRoleSelection('admin')}
+                            activeOpacity={0.8}
+                        >
+                            <LinearGradient
+                                colors={['#EF4444', '#DC2626']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={styles.roleModeGradient}
+                            >
+                                <View style={styles.roleModeIconBox}>
+                                    <MaterialCommunityIcons name="shield-crown" size={32} color="#FFF" />
+                                </View>
+                                <View style={styles.roleModeContent}>
+                                    <Text style={styles.roleModeTitle}>Admin Mode</Text>
+                                    <Text style={styles.roleModeDescription}>
+                                        Access admin dashboard, manage users, content, and settings
+                                    </Text>
+                                </View>
+                                <Feather name="chevron-right" size={24} color="#FFF" />
+                            </LinearGradient>
+                        </TouchableOpacity>
+
+                        {/* User Mode Button */}
+                        <TouchableOpacity
+                            style={styles.roleModeButton}
+                            onPress={() => handleRoleSelection('user')}
+                            activeOpacity={0.8}
+                        >
+                            <LinearGradient
+                                colors={['#3B82F6', '#2563EB']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={styles.roleModeGradient}
+                            >
+                                <View style={styles.roleModeIconBox}>
+                                    <MaterialCommunityIcons name="account-circle" size={32} color="#FFF" />
+                                </View>
+                                <View style={styles.roleModeContent}>
+                                    <Text style={styles.roleModeTitle}>Employee Mode</Text>
+                                    <Text style={styles.roleModeDescription}>
+                                        Access learning content, quizzes, analytics, and profile
+                                    </Text>
+                                </View>
+                                <Feather name="chevron-right" size={24} color="#FFF" />
+                            </LinearGradient>
+                        </TouchableOpacity>
+
+                        {/* Info Footer */}
+                        <View style={styles.roleModalFooter}>
+                            <Feather name="info" size={14} color="#6B7280" />
+                            <Text style={styles.roleModalFooterText}>
+                                You can switch modes anytime from your profile/dashboard
+                            </Text>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* FORGOT PASSWORD MODAL */}
+            <Modal visible={showForgotPasswordModal} transparent animationType="fade">
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    style={{ flex: 1 }}
+                >
+                    <View style={styles.modalOverlay}>
+                        <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
+                        <Animated.ScrollView
+                            contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}
+                            showsVerticalScrollIndicator={false}
+                            keyboardShouldPersistTaps="handled"
+                        >
+                            <View style={styles.roleModalCard}>
+                                {/* Header */}
+                                <View style={styles.roleModalHeader}>
+                                    <MaterialCommunityIcons name="lock-reset" size={48} color="#F59E0B" />
+                                    <Text style={styles.roleModalTitle}>
+                                        {resetStage === 'email' ? 'Forgot Password?' : 'Reset Password'}
+                                    </Text>
+                                    <Text style={styles.roleModalSubtitle}>
+                                        {resetStage === 'email'
+                                            ? 'Enter your email to receive a reset code'
+                                            : `Enter the code sent to ${resetEmail}`}
+                                    </Text>
+                                </View>
+
+                                {resetStage === 'email' ? (
+                                    <View>
+                                        <View style={[styles.inputContainer, { backgroundColor: '#F3F4F6' }]}>
+                                            <Feather name="mail" size={20} color="#F59E0B" />
+                                            <TextInput
+                                                style={styles.input}
+                                                placeholder="Enter your email"
+                                                placeholderTextColor="#9CA3AF"
+                                                value={resetEmail}
+                                                onChangeText={setResetEmail}
+                                                autoCapitalize="none"
+                                                keyboardType="email-address"
+                                            />
+                                        </View>
+
+                                        <TouchableOpacity
+                                            style={styles.loginBtn}
+                                            onPress={requestResetCode}
+                                            disabled={resetLoading}
+                                        >
+                                            <LinearGradient
+                                                colors={['#F59E0B', '#D97706']}
+                                                start={{ x: 0, y: 0 }}
+                                                end={{ x: 1, y: 0 }}
+                                                style={styles.loginGradient}
+                                            >
+                                                <Text style={styles.loginText}>
+                                                    {resetLoading ? "Sending..." : "Send Reset Code"}
+                                                </Text>
+                                            </LinearGradient>
+                                        </TouchableOpacity>
+                                    </View>
+                                ) : (
+                                    <View>
+                                        <View style={[styles.inputContainer, { backgroundColor: '#F3F4F6' }]}>
+                                            <MaterialCommunityIcons name="numeric" size={20} color="#F59E0B" />
+                                            <TextInput
+                                                style={styles.input}
+                                                placeholder="6-digit Code"
+                                                placeholderTextColor="#9CA3AF"
+                                                value={resetToken}
+                                                onChangeText={setResetToken}
+                                                keyboardType="numeric"
+                                                maxLength={6}
+                                            />
+                                        </View>
+
+                                        <View style={[styles.inputContainer, { backgroundColor: '#F3F4F6' }]}>
+                                            <Feather name="lock" size={20} color="#F59E0B" />
+                                            <TextInput
+                                                style={styles.input}
+                                                placeholder="New Password"
+                                                placeholderTextColor="#9CA3AF"
+                                                value={newPassword}
+                                                onChangeText={setNewPassword}
+                                                secureTextEntry
+                                            />
+                                        </View>
+
+                                        <View style={[styles.inputContainer, { backgroundColor: '#F3F4F6' }]}>
+                                            <Feather name="lock" size={20} color="#F59E0B" />
+                                            <TextInput
+                                                style={styles.input}
+                                                placeholder="Confirm Password"
+                                                placeholderTextColor="#9CA3AF"
+                                                value={confirmPassword}
+                                                onChangeText={setConfirmPassword}
+                                                secureTextEntry
+                                            />
+                                        </View>
+
+                                        <TouchableOpacity
+                                            style={styles.loginBtn}
+                                            onPress={submitPasswordReset}
+                                            disabled={resetLoading}
+                                        >
+                                            <LinearGradient
+                                                colors={['#F59E0B', '#D97706']}
+                                                start={{ x: 0, y: 0 }}
+                                                end={{ x: 1, y: 0 }}
+                                                style={styles.loginGradient}
+                                            >
+                                                <Text style={styles.loginText}>
+                                                    {resetLoading ? "Resetting..." : "Reset Password"}
+                                                </Text>
+                                            </LinearGradient>
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
+
+                                <TouchableOpacity
+                                    onPress={() => setShowForgotPasswordModal(false)}
+                                    style={{ alignSelf: 'center', marginTop: 10, padding: 10 }}
+                                >
+                                    <Text style={{ color: '#6B7280', fontSize: 14, fontFamily: 'Poppins_500Medium' }}>Cancel</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </Animated.ScrollView>
+                    </View>
+                </KeyboardAvoidingView>
+            </Modal>
+
+            {/* CUSTOM ALERT COMPONENT */}
+            <CustomAlert
+                visible={alertVisible}
+                title={alertConfig.title}
+                message={alertConfig.message}
+                type={alertConfig.type}
+                onClose={() => setAlertVisible(false)}
+            />
         </View>
     );
 }
@@ -402,5 +791,97 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_400Regular',
         color: '#6B7280',
         flex: 1,
+    },
+    // Role Selection Modal
+    modalOverlay: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20,
+    },
+    roleModalCard: {
+        width: '100%',
+        maxWidth: 450,
+        backgroundColor: '#FFFFFF',
+        borderRadius: 24,
+        padding: 24,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 20 },
+        shadowOpacity: 0.3,
+        shadowRadius: 30,
+        elevation: 20,
+    },
+    roleModalHeader: {
+        alignItems: 'center',
+        marginBottom: 24,
+    },
+    roleModalTitle: {
+        fontSize: 24,
+        fontFamily: 'Poppins_700Bold',
+        color: '#111827',
+        marginTop: 12,
+        marginBottom: 8,
+    },
+    roleModalSubtitle: {
+        fontSize: 14,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        textAlign: 'center',
+        lineHeight: 20,
+    },
+    roleModeButton: {
+        borderRadius: 16,
+        overflow: 'hidden',
+        marginBottom: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.2,
+        shadowRadius: 12,
+        elevation: 8,
+    },
+    roleModeGradient: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+        gap: 12,
+    },
+    roleModeIconBox: {
+        width: 56,
+        height: 56,
+        borderRadius: 16,
+        backgroundColor: 'rgba(255, 255, 255, 0.2)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    roleModeContent: {
+        flex: 1,
+    },
+    roleModeTitle: {
+        fontSize: 18,
+        fontFamily: 'Poppins_700Bold',
+        color: '#FFF',
+        marginBottom: 4,
+    },
+    roleModeDescription: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: 'rgba(255, 255, 255, 0.9)',
+        lineHeight: 18,
+    },
+    roleModalFooter: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#F3F4F6',
+        padding: 12,
+        borderRadius: 12,
+        gap: 8,
+        marginTop: 8,
+    },
+    roleModalFooterText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        flex: 1,
+        lineHeight: 16,
     },
 });

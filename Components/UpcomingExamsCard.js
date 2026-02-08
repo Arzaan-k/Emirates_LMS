@@ -167,6 +167,84 @@ export default function UpcomingExamsCard({ userEmail, onStartExam, refreshKey }
         );
     }
 
+
+    const getExamTargetTime = (exam) => {
+        try {
+            if (!exam.exam_date) return null;
+            // Create a date object from the date string
+            // Assuming exam_date is YYYY-MM-DD or similar standard format
+            const dateStr = exam.exam_date.split('T')[0];
+
+            let timeStr = exam.exam_time || "00:00";
+            // Normalize time string (handle AM/PM basic case)
+            if (timeStr.match(/pm/i) || timeStr.match(/am/i)) {
+                // If standard Date parse handles it with date, good.
+                // "2023-10-10 10:30 PM"
+                return new Date(`${dateStr} ${timeStr}`);
+            }
+            // If 24h "14:30" or "14:30:00"
+            if (timeStr.split(':').length === 2) timeStr += ":00";
+
+            return new Date(`${dateStr}T${timeStr}`);
+        } catch (e) {
+            console.error("Date parse error", e);
+            return null;
+        }
+    };
+
+    const CountdownTimer = ({ targetDate }) => {
+        const [timeLeft, setTimeLeft] = useState(null);
+
+        useEffect(() => {
+            const calculate = () => {
+                const now = new Date();
+                const diff = targetDate - now;
+                if (diff <= 0) return null;
+
+                const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+                const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+                const minutes = Math.floor((diff / 1000 / 60) % 60);
+                const seconds = Math.floor((diff / 1000) % 60);
+                return { days, hours, minutes, seconds };
+            };
+
+            setTimeLeft(calculate());
+            const timer = setInterval(() => {
+                const tl = calculate();
+                if (!tl) clearInterval(timer);
+                setTimeLeft(tl);
+            }, 1000);
+
+            return () => clearInterval(timer);
+        }, [targetDate]);
+
+        if (!timeLeft) return null;
+
+        return (
+            <View style={styles.timerContainer}>
+                <View style={styles.timerBlock}>
+                    <Text style={styles.timerValue}>{timeLeft.days}</Text>
+                    <Text style={styles.timerLabel}>Days</Text>
+                </View>
+                <Text style={styles.timerSep}>:</Text>
+                <View style={styles.timerBlock}>
+                    <Text style={styles.timerValue}>{String(timeLeft.hours).padStart(2, '0')}</Text>
+                    <Text style={styles.timerLabel}>Hrs</Text>
+                </View>
+                <Text style={styles.timerSep}>:</Text>
+                <View style={styles.timerBlock}>
+                    <Text style={styles.timerValue}>{String(timeLeft.minutes).padStart(2, '0')}</Text>
+                    <Text style={styles.timerLabel}>Mins</Text>
+                </View>
+                <Text style={styles.timerSep}>:</Text>
+                <View style={styles.timerBlock}>
+                    <Text style={styles.timerValue}>{String(timeLeft.seconds).padStart(2, '0')}</Text>
+                    <Text style={styles.timerLabel}>Secs</Text>
+                </View>
+            </View>
+        );
+    };
+
     return (
         <View style={styles.container}>
             <View style={styles.header}>
@@ -215,6 +293,11 @@ export default function UpcomingExamsCard({ userEmail, onStartExam, refreshKey }
 
                         {/* Exam Info - Hero Style */}
                         <Text style={styles.examTitle}>{exam.title}</Text>
+
+                        {/* LIVE COUNTDOWN TIMER */}
+                        {!exam.can_start && (
+                            <CountdownTimer targetDate={getExamTargetTime(exam)} />
+                        )}
 
                         <View style={styles.infoGrid}>
                             <View style={styles.infoRow}>
@@ -491,5 +574,42 @@ const styles = StyleSheet.create({
         fontSize: 11,
         fontFamily: 'Poppins_600SemiBold',
         color: '#059669',
+    },
+    timerContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0,0,0,0.3)',
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderRadius: 16,
+        marginBottom: 24,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.1)',
+    },
+    timerBlock: {
+        alignItems: 'center',
+        minWidth: 45,
+    },
+    timerValue: {
+        fontSize: 22,
+        fontFamily: 'Poppins_700Bold',
+        color: '#FFF',
+        marginBottom: 2,
+        fontVariant: ['tabular-nums'], // Fixed width numbers to avoid jitter
+    },
+    timerLabel: {
+        fontSize: 10,
+        fontFamily: 'Poppins_500Medium',
+        color: 'rgba(255,255,255,0.6)',
+        textTransform: 'uppercase',
+        letterSpacing: 1,
+    },
+    timerSep: {
+        fontSize: 22,
+        fontFamily: 'Poppins_300Light',
+        color: 'rgba(255,255,255,0.3)',
+        marginHorizontal: 4,
+        marginTop: -16, // Align correctly with numbers
     },
 });

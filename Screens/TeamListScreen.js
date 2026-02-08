@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
     View,
     Text,
@@ -10,6 +10,7 @@ import {
     RefreshControl,
     FlatList,
     Platform,
+    Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -17,6 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import CreateUser from './CreateUser';
 import API_URL from '../config';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width } = Dimensions.get('window');
 const ITEMS_PER_PAGE = 30;
@@ -40,7 +42,8 @@ const TeamListScreen = ({ navigation, route }) => {
     const isSuperAdmin = userProfile?.is_superadmin || userProfile?.role === 'Super Admin';
 
     const [users, setUsers] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [initialLoading, setInitialLoading] = useState(true);
+    const [listLoading, setListLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [loadingMore, setLoadingMore] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
@@ -48,6 +51,8 @@ const TeamListScreen = ({ navigation, route }) => {
     const [selectedStore, setSelectedStore] = useState('All');
     const [stores, setStores] = useState([]);
     const [showFilters, setShowFilters] = useState(false);
+    const [roleFilters, setRoleFilters] = useState(['All']);
+    const [levelColorMap, setLevelColorMap] = useState({});
 
     // Pagination
     const [page, setPage] = useState(1);
@@ -59,23 +64,31 @@ const TeamListScreen = ({ navigation, route }) => {
     const [editModalVisible, setEditModalVisible] = useState(false);
     const [editingUser, setEditingUser] = useState(null);
 
-    // Dynamic role filters (fetched from backend)
-    const [roleFilters, setRoleFilters] = useState(['All', 'Waffler', 'Silver Waffler', 'Gold Waffler', 'Shift Manager', 'Store Manager', 'Super Admin']);
-    const [levelColorMap, setLevelColorMap] = useState({});  // Maps level name to color
+    // Bulk Selection State
+    const [selectionMode, setSelectionMode] = useState(false);
+    const [selectedUsers, setSelectedUsers] = useState([]);
 
     useEffect(() => {
         fetchStores();
         fetchLevels(); // Fetch dynamic levels for role filters
-        fetchUsers(1, true);
+        fetchUsers(1, true, true);
     }, []);
 
     useEffect(() => {
         const timer = setTimeout(() => {
-            fetchUsers(1, true);
-        }, 300);
+            fetchUsers(1, true, false);
+        }, 800); // 800ms debounce for smoother typing
         return () => clearTimeout(timer);
     }, [searchQuery, selectedFilter, selectedStore]);
 
+    // Exit selection mode if user navigates away or list changes significantly
+    useEffect(() => {
+        if (!selectionMode) {
+            setSelectedUsers([]);
+        }
+    }, [selectionMode]);
+
+    // ... (fetch logic same as before) ...
     // Fetch dynamic levels from backend
     const fetchLevels = async () => {
         try {
@@ -113,10 +126,11 @@ const TeamListScreen = ({ navigation, route }) => {
         }
     };
 
-    const fetchUsers = async (pageNum = 1, reset = false) => {
+    const fetchUsers = async (pageNum = 1, reset = false, isInitial = false) => {
         try {
             if (reset) {
-                setLoading(true);
+                if (isInitial) setInitialLoading(true);
+                else setListLoading(true);
                 setPage(1);
             } else {
                 setLoadingMore(true);
@@ -147,7 +161,8 @@ const TeamListScreen = ({ navigation, route }) => {
         } catch (error) {
             console.error('Failed to fetch users:', error);
         } finally {
-            setLoading(false);
+            setInitialLoading(false);
+            setListLoading(false);
             setRefreshing(false);
             setLoadingMore(false);
         }
@@ -155,7 +170,7 @@ const TeamListScreen = ({ navigation, route }) => {
 
     const onRefresh = () => {
         setRefreshing(true);
-        fetchUsers(1, true);
+        fetchUsers(1, true, false);
     };
 
     const loadMore = () => {
@@ -167,6 +182,82 @@ const TeamListScreen = ({ navigation, route }) => {
     const handleEditUser = (user) => {
         setEditingUser(user);
         setEditModalVisible(true);
+    };
+
+    // Bulk Delete Functions
+    const toggleSelection = (email) => {
+        if (selectedUsers.includes(email)) {
+            const newSelection = selectedUsers.filter(id => id !== email);
+            setSelectedUsers(newSelection);
+            if (newSelection.length === 0) setSelectionMode(false);
+        } else {
+            setSelectedUsers([...selectedUsers, email]);
+        }
+    };
+
+    const handleLongPress = (email) => {
+        if (!isSuperAdmin) return;
+        setSelectionMode(true);
+        toggleSelection(email);
+    };
+
+    const handleSelectAll = () => {
+        if (selectedUsers.length === users.length) {
+            setSelectedUsers([]);
+            setSelectionMode(false);
+        } else {
+            // Select all loaded users
+            const allEmails = users.map(u => u.email);
+            // Filter out superadmins if needed, but backend handles it
+            setSelectedUsers(allEmails);
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedUsers.length === 0) return;
+
+        // Confirm
+        const confirmMsg = `Are you sure you want to delete ${selectedUsers.length} users?`;
+        if (Platform.OS === 'web' && window.confirm && !window.confirm(confirmMsg)) return;
+
+        // --- OPTIMISTIC UPDATE START ---
+        // 1. Snapshot current state for rollback
+        const previousUsers = [...users];
+        const previousTotal = totalUsers;
+
+        // 2. Immediately update UI
+        const usersToDelete = [...selectedUsers];
+        setUsers(prevUsers => prevUsers.filter(u => !usersToDelete.includes(u.email)));
+        setTotalUsers(prevTotal => Math.max(0, prevTotal - usersToDelete.length));
+        setSelectionMode(false);
+        setSelectedUsers([]);
+
+        // 3. Background API Call
+        try {
+            const token = await AsyncStorage.getItem('userToken');
+            const response = await fetch(`${API_URL}/api/v1/users/bulk-delete`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ emails: usersToDelete })
+            });
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                throw new Error(result.detail || 'Failed to delete users');
+            }
+            console.log(`Successfully deleted ${result.deleted} users in background.`);
+
+        } catch (error) {
+            console.error('Bulk delete error:', error);
+            // 4. Rollback on Error
+            Alert.alert("Deletion Failed", "Could not delete users. Restoring list.");
+            setUsers(previousUsers);
+            setTotalUsers(previousTotal);
+        }
     };
 
     const handleUpdateUser = async (updatedData) => {
@@ -214,135 +305,199 @@ const TeamListScreen = ({ navigation, route }) => {
         return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
     };
 
-    const renderUserCard = useCallback(({ item: user, index }) => (
-        <Animated.View
-            entering={FadeInDown.delay(Math.min(index * 30, 300))}
-            style={styles.userCard}
-        >
-            <View style={[styles.userAvatar, { backgroundColor: getRoleColor(user.role) }]}>
-                <Text style={styles.userAvatarText}>
-                    {getInitials(user.name)}
-                </Text>
-            </View>
+    const renderUserCard = useCallback(({ item: user, index }) => {
+        const isSelected = selectedUsers.includes(user.email);
 
-            <View style={styles.userInfo}>
-                <Text style={styles.userName} numberOfLines={1}>{user.name}</Text>
-                <Text style={styles.userEmail} numberOfLines={1}>{user.email}</Text>
-                <View style={styles.tagsRow}>
-                    <View style={[styles.roleBadge, { backgroundColor: '#FFFBEB', borderColor: getRoleColor(user.role), borderWidth: 1 }]}>
-                        <Text style={[styles.roleText, { color: getRoleColor(user.role) }]}>
-                            {user.role}
-                        </Text>
-                    </View>
-                    {user.store && user.store !== 'Unassigned' && (
-                        <View style={styles.storeBadge}>
-                            <MaterialCommunityIcons name="store" size={12} color="#78350F" />
-                            <Text style={styles.storeText}>{user.store}</Text>
+        return (
+            <TouchableOpacity
+                activeOpacity={0.9}
+                onLongPress={() => handleLongPress(user.email)}
+                onPress={() => {
+                    if (selectionMode) {
+                        toggleSelection(user.email);
+                    }
+                }}
+                disabled={!isSuperAdmin && !selectionMode} // Only allow interaction if superadmin or in selection mode
+            >
+                <Animated.View
+                    entering={FadeInDown.delay(Math.min(index * 30, 300))}
+                    style={[
+                        styles.userCard,
+                        isSelected && styles.userCardSelected,
+                        selectionMode && { transform: [{ scale: 0.98 }] } // Subtle shrink in selection mode
+                    ]}
+                >
+                    {/* Selection Indicator */}
+                    {selectionMode && (
+                        <View style={[styles.selectionCheckbox, isSelected && styles.selectionCheckboxActive]}>
+                            {isSelected && <Feather name="check" size={14} color="#FFF" />}
                         </View>
                     )}
-                </View>
-            </View>
 
-            <View style={styles.actionsColumn}>
-                <View style={[styles.statusDot, { backgroundColor: user.has_admin_access ? '#10B981' : '#D1D5DB' }]} />
-                {isSuperAdmin && (
-                    <TouchableOpacity
-                        style={styles.editBtn}
-                        onPress={() => handleEditUser(user)}
-                    >
-                        <Feather name="edit-2" size={16} color="#78350F" />
-                    </TouchableOpacity>
-                )}
-            </View>
-        </Animated.View>
-    ), [isSuperAdmin]);
+                    <View style={[styles.userAvatar, { backgroundColor: getRoleColor(user.role) }]}>
+                        <Text style={styles.userAvatarText}>
+                            {getInitials(user.name)}
+                        </Text>
+                    </View>
 
-    const renderHeader = () => (
+                    <View style={styles.userInfo}>
+                        <Text style={styles.userName} numberOfLines={1}>{user.name}</Text>
+                        <Text style={styles.userEmail} numberOfLines={1}>{user.email}</Text>
+                        <View style={styles.tagsRow}>
+                            <View style={[styles.roleBadge, { backgroundColor: '#FFFBEB', borderColor: getRoleColor(user.role), borderWidth: 1 }]}>
+                                <Text style={[styles.roleText, { color: getRoleColor(user.role) }]}>
+                                    {user.role}
+                                </Text>
+                            </View>
+                            {user.store && user.store !== 'Unassigned' && (
+                                <View style={styles.storeBadge}>
+                                    <MaterialCommunityIcons name="store" size={12} color="#78350F" />
+                                    <Text style={styles.storeText}>{user.store}</Text>
+                                </View>
+                            )}
+                        </View>
+                    </View>
+
+                    <View style={styles.actionsColumn}>
+                        <View style={[styles.statusDot, { backgroundColor: user.has_admin_access ? '#10B981' : '#D1D5DB' }]} />
+                        {isSuperAdmin && !selectionMode && (
+                            <TouchableOpacity
+                                style={styles.editBtn}
+                                onPress={() => handleEditUser(user)}
+                            >
+                                <Feather name="edit-2" size={16} color="#78350F" />
+                            </TouchableOpacity>
+                        )}
+                    </View>
+                </Animated.View>
+            </TouchableOpacity>
+        );
+    }, [isSuperAdmin, selectionMode, selectedUsers]);
+    const headerContent = useMemo(() => (
         <>
-            {/* SEARCH BAR */}
-            <View style={styles.searchContainer}>
-                <Feather name="search" size={20} color="#B45309" />
-                <TextInput
-                    style={styles.searchInput}
-                    placeholder="Search team members..."
-                    placeholderTextColor="#92400E"
-                    value={searchQuery}
-                    onChangeText={setSearchQuery}
-                />
-                {searchQuery.length > 0 && (
-                    <TouchableOpacity onPress={() => setSearchQuery('')}>
-                        <Feather name="x" size={20} color="#92400E" />
+            {/* SELECTION BAR OVERLAY / HEADER */}
+            {selectionMode ? (
+                <View style={styles.selectionBar}>
+                    <TouchableOpacity onPress={() => { setSelectedUsers([]); setSelectionMode(false); }}>
+                        <Feather name="x" size={24} color="#78350F" />
                     </TouchableOpacity>
-                )}
-                <TouchableOpacity
-                    style={[styles.filterToggle, showFilters && styles.filterToggleActive]}
-                    onPress={() => setShowFilters(!showFilters)}
-                >
-                    <Feather name="filter" size={18} color={showFilters ? '#FFF' : '#B45309'} />
-                </TouchableOpacity>
-            </View>
+                    <Text style={styles.selectionTitle}>{selectedUsers.length} Selected</Text>
 
-            {/* ADVANCED FILTERS */}
-            {showFilters && (
-                <View style={styles.advancedFilters}>
-                    {/* Store Filter */}
-                    <Text style={styles.filterLabel}>Store Location</Text>
-                    <View style={styles.filterChipContainer}>
-                        {stores.slice(0, 6).map((store) => (
-                            <TouchableOpacity
-                                key={store.id}
-                                style={[
-                                    styles.filterChip,
-                                    selectedStore === store.name && styles.filterChipActive
-                                ]}
-                                onPress={() => setSelectedStore(store.name)}
-                            >
-                                <Text style={[
-                                    styles.filterChipText,
-                                    selectedStore === store.name && styles.filterChipTextActive
-                                ]}>
-                                    {store.name}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
-                    </View>
-
-                    {/* Role Filter */}
-                    <Text style={styles.filterLabel}>Role</Text>
-                    <View style={styles.filterChipContainer}>
-                        {roleFilters.map((role) => (
-                            <TouchableOpacity
-                                key={role}
-                                style={[
-                                    styles.filterChip,
-                                    selectedFilter === role && styles.filterChipActive
-                                ]}
-                                onPress={() => setSelectedFilter(role)}
-                            >
-                                <Text style={[
-                                    styles.filterChipText,
-                                    selectedFilter === role && styles.filterChipTextActive
-                                ]}>
-                                    {role}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
-                    </View>
-
-                    {/* Clear Filters */}
-                    {(selectedStore !== 'All' || selectedFilter !== 'All') && (
-                        <TouchableOpacity
-                            style={styles.clearFiltersBtn}
-                            onPress={() => {
-                                setSelectedStore('All');
-                                setSelectedFilter('All');
-                            }}
-                        >
-                            <Feather name="x-circle" size={14} color="#EF4444" />
-                            <Text style={styles.clearFiltersText}>Reset Filters</Text>
+                    <View style={styles.selectionActions}>
+                        <TouchableOpacity onPress={handleSelectAll} style={styles.selectAllBtn}>
+                            <Text style={styles.selectAllText}>
+                                {selectedUsers.length === users.length ? 'Deselect All' : 'Select All'}
+                            </Text>
                         </TouchableOpacity>
-                    )}
+                        <TouchableOpacity
+                            onPress={handleBulkDelete}
+                            style={[styles.deleteBtn, selectedUsers.length === 0 && { opacity: 0.5 }]}
+                            disabled={selectedUsers.length === 0}
+                        >
+                            <Feather name="trash-2" size={20} color="#FFF" />
+                        </TouchableOpacity>
+                    </View>
                 </View>
+            ) : (
+                /* NORMAL HEADER CONTENT */
+                <>
+                    {/* SEARCH BAR */}
+                    <View style={styles.searchContainer}>
+                        <Feather name="search" size={20} color="#B45309" />
+                        <TextInput
+                            style={styles.searchInput}
+                            placeholder="Search team members..."
+                            placeholderTextColor="#92400E"
+                            value={searchQuery}
+                            onChangeText={setSearchQuery}
+                        />
+                        {searchQuery.length > 0 && (
+                            <TouchableOpacity onPress={() => setSearchQuery('')}>
+                                <Feather name="x" size={20} color="#92400E" />
+                            </TouchableOpacity>
+                        )}
+
+                        {/* Manual Selection Toggle (Web primarily) */}
+                        {isSuperAdmin && (
+                            <TouchableOpacity
+                                onPress={() => setSelectionMode(true)}
+                                style={{ padding: 4 }}
+                            >
+                                <Feather name="check-square" size={20} color="#B45309" />
+                            </TouchableOpacity>
+                        )}
+
+                        <TouchableOpacity
+                            style={[styles.filterToggle, showFilters && styles.filterToggleActive]}
+                            onPress={() => setShowFilters(!showFilters)}
+                        >
+                            <Feather name="filter" size={18} color={showFilters ? '#FFF' : '#B45309'} />
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* ADVANCED FILTERS */}
+                    {showFilters && (
+                        <View style={styles.advancedFilters}>
+                            {/* Store Filter */}
+                            <Text style={styles.filterLabel}>Store Location</Text>
+                            <View style={styles.filterChipContainer}>
+                                {stores.slice(0, 6).map((store) => (
+                                    <TouchableOpacity
+                                        key={store.id}
+                                        style={[
+                                            styles.filterChip,
+                                            selectedStore === store.name && styles.filterChipActive
+                                        ]}
+                                        onPress={() => setSelectedStore(store.name)}
+                                    >
+                                        <Text style={[
+                                            styles.filterChipText,
+                                            selectedStore === store.name && styles.filterChipTextActive
+                                        ]}>
+                                            {store.name}
+                                        </Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+
+                            {/* Role Filter */}
+                            <Text style={styles.filterLabel}>Role</Text>
+                            <View style={styles.filterChipContainer}>
+                                {roleFilters.map((role) => (
+                                    <TouchableOpacity
+                                        key={role}
+                                        style={[
+                                            styles.filterChip,
+                                            selectedFilter === role && styles.filterChipActive
+                                        ]}
+                                        onPress={() => setSelectedFilter(role)}
+                                    >
+                                        <Text style={[
+                                            styles.filterChipText,
+                                            selectedFilter === role && styles.filterChipTextActive
+                                        ]}>
+                                            {role}
+                                        </Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+
+                            {/* Clear Filters */}
+                            {(selectedStore !== 'All' || selectedFilter !== 'All') && (
+                                <TouchableOpacity
+                                    style={styles.clearFiltersBtn}
+                                    onPress={() => {
+                                        setSelectedStore('All');
+                                        setSelectedFilter('All');
+                                    }}
+                                >
+                                    <Feather name="x-circle" size={14} color="#EF4444" />
+                                    <Text style={styles.clearFiltersText}>Reset Filters</Text>
+                                </TouchableOpacity>
+                            )}
+                        </View>
+                    )}
+                </>
             )}
 
             {/* STATS BAR */}
@@ -358,7 +513,7 @@ const TeamListScreen = ({ navigation, route }) => {
                 </View>
             </View>
         </>
-    );
+    ), [selectionMode, selectedUsers, users.length, totalUsers, searchQuery, showFilters, selectedStore, selectedFilter, isSuperAdmin, stores, roleFilters]);
 
     const renderFooter = () => {
         if (!loadingMore) return null;
@@ -382,7 +537,7 @@ const TeamListScreen = ({ navigation, route }) => {
         </View>
     );
 
-    if (loading && users.length === 0) {
+    if (initialLoading && users.length === 0) {
         return (
             <SafeAreaView style={styles.container} edges={['top']}>
                 <View style={styles.loadingContainer}>
@@ -411,6 +566,11 @@ const TeamListScreen = ({ navigation, route }) => {
                     <Text style={styles.headerSubtitle}>Manage your waffle family</Text>
                 </View>
 
+                {/* Show spinner in header if refreshing lists in background */}
+                {listLoading && !refreshing && (
+                    <ActivityIndicator size="small" color="#FFF" style={{ marginRight: 10 }} />
+                )}
+
                 <TouchableOpacity onPress={onRefresh} style={styles.refreshBtn}>
                     <Feather name="refresh-cw" size={20} color="#FFF" />
                 </TouchableOpacity>
@@ -421,9 +581,9 @@ const TeamListScreen = ({ navigation, route }) => {
                     data={users}
                     renderItem={renderUserCard}
                     keyExtractor={(item) => item.email}
-                    ListHeaderComponent={renderHeader}
+                    ListHeaderComponent={headerContent}
                     ListFooterComponent={renderFooter}
-                    ListEmptyComponent={renderEmpty}
+                    ListEmptyComponent={initialLoading || listLoading ? null : renderEmpty}
                     onEndReached={loadMore}
                     onEndReachedThreshold={0.3}
                     refreshControl={
@@ -453,7 +613,7 @@ const TeamListScreen = ({ navigation, route }) => {
                 initialData={editingUser}
                 onUpdate={handleUpdateUser}
             />
-        </SafeAreaView>
+        </SafeAreaView >
     );
 };
 
@@ -809,6 +969,82 @@ const styles = StyleSheet.create({
         color: '#92400E',
         textAlign: 'center',
         lineHeight: 20,
+    },
+
+    // SELECTION MODE STYLES
+    selectionBar: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FEF3C7', // Highlight color
+        marginHorizontal: 16,
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: '#F59E0B',
+        shadowColor: '#D97706',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 4,
+        marginBottom: 8,
+    },
+    selectionTitle: {
+        flex: 1,
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#78350F',
+        marginLeft: 12,
+    },
+    selectionActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+    },
+    selectAllBtn: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        backgroundColor: '#FDE68A',
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#F59E0B',
+    },
+    selectAllText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#92400E',
+    },
+    deleteBtn: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: '#EF4444',
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#B91C1C',
+    },
+
+    // User Card Selection Overrides
+    userCardSelected: {
+        borderColor: '#F59E0B',
+        backgroundColor: '#FEF3C7',
+        borderWidth: 2,
+    },
+    selectionCheckbox: {
+        width: 20,
+        height: 20,
+        borderRadius: 6,
+        borderWidth: 2,
+        borderColor: '#D97706',
+        marginRight: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#FFF',
+    },
+    selectionCheckboxActive: {
+        backgroundColor: '#F59E0B',
+        borderColor: '#F59E0B',
     },
 });
 

@@ -512,6 +512,20 @@ class ContentService:
         """Get all buckets."""
         return self.bucket_repo.get_all_ordered()
 
+    def get_bucket_by_name(self, bucket_name: str) -> CourseBucket:
+        """Get bucket by name."""
+        bucket = self.bucket_repo.get_first_by_filter({"name": bucket_name})
+        if not bucket:
+            raise NotFoundError(resource="CourseBucket", resource_id=bucket_name)
+        return bucket
+
+    def get_bucket_by_path(self, folder_path: str) -> CourseBucket:
+        """Get bucket by folder path."""
+        bucket = self.bucket_repo.get_first_by_filter({"folder_path": folder_path})
+        if not bucket:
+            raise NotFoundError(resource="CourseBucket", resource_id=folder_path)
+        return bucket
+
     # ===========================================
     # RESOURCES
     # ===========================================

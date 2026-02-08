@@ -88,9 +88,6 @@ export default function AIScanner({ onClose }) {
 
             const response = await fetch(`${API_URL}/hygiene/analyze`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                },
                 body: formData,
                 signal: controller.signal
             });

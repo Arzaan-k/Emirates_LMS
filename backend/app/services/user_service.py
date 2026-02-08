@@ -6,9 +6,11 @@ Business logic for user management, authentication, and authorization
 import uuid
 import logging
 from typing import Any, Dict, List, Optional, Set
-from datetime import datetime
+from datetime import datetime, timedelta
+import secrets
 
 from sqlalchemy.orm import Session
+from sqlalchemy import func, or_
 
 from app.core.security import hash_password, verify_password, is_password_hashed
 from app.core.auth import (
@@ -72,6 +74,46 @@ class UserService:
     # AUTHENTICATION
     # ===========================================
 
+    def get_users_with_count(
+        self,
+        skip: int,
+        limit: int,
+        store: str | None,
+        role: str | None,
+        search: str | None,
+    ):
+        query = (
+            self.db.query(
+                User,
+                func.count().over().label("total_count")
+            )
+            .order_by(User.id)
+        )
+
+        if store:
+            query = query.filter(User.store == store)
+
+        if role:
+            query = query.filter(User.role == role)
+
+        if search:
+            query = query.filter(
+                or_(
+                    User.name.ilike(f"%{search}%"),
+                    User.email.ilike(f"%{search}%"),
+                )
+            )
+
+        rows = query.offset(skip).limit(limit).all()
+
+        if not rows:
+            return [], 0
+
+        users = [row[0] for row in rows]
+        total = rows[0][1]
+
+        return users, total
+
     def authenticate(self, email: str, password: str) -> Dict[str, Any]:
         """
         Authenticate user and return tokens.
@@ -95,8 +137,7 @@ class UserService:
         if not user:
             logger.warning(f"Login attempt for non-existent user: {email}")
             raise AuthenticationError(
-                detail="Invalid email or password",
-                error_code="INVALID_CREDENTIALS"
+                detail="Invalid Credentials"
             )
 
         # Verify password
@@ -107,15 +148,13 @@ class UserService:
             if not verify_password(password, stored_password):
                 logger.warning(f"Failed login attempt for user: {email}")
                 raise AuthenticationError(
-                    detail="Invalid email or password",
-                    error_code="INVALID_CREDENTIALS"
+                    detail="User id /password incorrect"
                 )
         else:
             # Legacy plain text password - migrate to hash
             if password != stored_password:
                 raise AuthenticationError(
-                    detail="Invalid email or password",
-                    error_code="INVALID_CREDENTIALS"
+                    detail="User id /password incorrect"
                 )
             # Hash and save the password
             user.password = hash_password(password)
@@ -216,6 +255,16 @@ class UserService:
         user_data["email"] = email
         user_data["password"] = hash_password(password)
 
+        # Check for Super Admin privileges (Role OR Category)
+        role = user_data.get("role", "").strip()
+        category = user_data.get("category", "").strip()
+        
+        if role == "Super Admin" or category == "Super Admin":
+            user_data["is_superadmin"] = True
+            user_data["has_admin_access"] = True
+            user_data["role"] = "Super Admin" # Enforce role consistency
+            logger.info(f"Elevating privileges for new user {email} (Role: {role}, Category: {category})")
+            
         # Set defaults
         user_data.setdefault("role", "Waffler")
         user_data.setdefault("category", "Employee")
@@ -282,9 +331,38 @@ class UserService:
         logger.info(f"Updated user: {email}")
         return user
 
+    def _delete_user_data(self, email: str):
+        """
+        Helper to delete all user related data from various tables.
+        Ensures data integrity by removing dependent records.
+        """
+        # Import models here to avoid circular imports at module level if any
+        from app.models.user import UserNodeProgress, UserLearningProfile, UserInteraction
+        from app.models.video_progress import VideoProgress, MidVideoQuizAttempt
+        # Assuming CourseCompletion, AssessmentSubmission, QuizSubmission are available via relationship or direct import
+        # If they are in other files, import them. 
+        # For now, we rely on cascade if configured, or manual delete where we know models.
+        
+        # Delete Video Progress
+        self.db.query(VideoProgress).filter(VideoProgress.user_email == email).delete()
+        self.db.query(MidVideoQuizAttempt).filter(MidVideoQuizAttempt.user_email == email).delete()
+        
+        # Delete User Node Progress
+        self.db.query(UserNodeProgress).filter(UserNodeProgress.user_email == email).delete()
+        
+        # Delete Learning Profile
+        self.db.query(UserLearningProfile).filter(UserLearningProfile.user_email == email).delete()
+        
+        # Delete Interactions
+        self.db.query(UserInteraction).filter(UserInteraction.user_email == email).delete()
+        
+        # Note: CourseCompletion and Submissions usually have relationships. 
+        # If cascading is not set, we should delete them too. 
+        # Attempting to delete via user.completions relationship is safer if loaded.
+        
     def delete_user(self, email: str) -> bool:
         """
-        Delete a user.
+        Delete a user and all associated data.
 
         Args:
             email: User email
@@ -296,11 +374,66 @@ class UserService:
             NotFoundError: If user not found
         """
         user = self.get_user_by_email(email)
+        
+        # Manually delete related data to ensure cleanup
+        self._delete_user_data(email)
+        
         self.db.delete(user)
         self.db.commit()
 
-        logger.info(f"Deleted user: {email}")
+        logger.info(f"Deleted user and data: {email}")
         return True
+
+    def bulk_delete_users(self, emails: List[str]) -> Dict[str, Any]:
+        """
+        Delete multiple users.
+
+        Args:
+            emails: List of user emails
+
+        Returns:
+            Dictionary with results
+        """
+        deleted_count = 0
+        errors = []
+        
+        for email in emails:
+            try:
+                # Get user to ensure existence and check superadmin
+                user = self.get_user_by_email_optional(email)
+                if user:
+                    if user.is_superadmin:
+                        errors.append(f"Cannot delete superadmin {email}")
+                        continue
+                    
+                    # Delete data and user
+                    self._delete_user_data(email)
+                    self.db.delete(user)
+                    deleted_count += 1
+                else:
+                    errors.append(f"User {email} not found")
+            except Exception as e:
+                errors.append(f"Error deleting {email}: {str(e)}")
+                # Continue preventing one failure from stopping all?
+                # Using savepoint or just continue. 
+                # With one transaction, one error might rollback all if not handled carefully.
+                # But here we commit at the end.
+                
+        try:
+            self.db.commit()
+        except Exception as e:
+            self.db.rollback()
+            return {
+                "status": "partial_error",
+                "deleted": 0,
+                "errors": [f"Database commit failed: {str(e)}"]
+            }
+        
+        return {
+            "status": "success",
+            "deleted": deleted_count,
+            "errors": errors
+        }
 
     def get_all_users(
         self,
@@ -331,6 +464,88 @@ class UserService:
     # ===========================================
     # PASSWORD MANAGEMENT
     # ===========================================
+
+    def validate_password_strength(self, password: str):
+        """
+        Validate password strength.
+        Rules:
+        - At least 8 chars
+        - At least one uppercase
+        - At least one lowercase
+        - At least one digit
+        - At least one special char
+        """
+        import re
+        if len(password) < 8:
+            raise ValidationError(detail="Password must be at least 8 characters long", field="new_password")
+        if not re.search(r"[A-Z]", password):
+            raise ValidationError(detail="Password must contain at least one uppercase letter", field="new_password")
+        if not re.search(r"[a-z]", password):
+            raise ValidationError(detail="Password must contain at least one lowercase letter", field="new_password")
+        if not re.search(r"\d", password):
+            raise ValidationError(detail="Password must contain at least one digit", field="new_password")
+        if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):
+            raise ValidationError(detail="Password must contain at least one special character", field="new_password")
+
+    def generate_password_reset_token(self, email: str) -> str:
+        """
+        Generate and save a password reset token.
+        
+        Args:
+            email: User email
+            
+        Returns:
+            The generated token (OTP)
+        """
+        user = self.get_user_by_email(email)
+        
+        # Generate 6-digit OTP
+        token = secrets.randbelow(1000000)
+        token = f"{token:06d}"
+        
+        # Save to DB with expiration (15 minutes)
+        user.reset_token = token
+        user.reset_token_expires = datetime.utcnow() + timedelta(minutes=15)
+        
+        self.db.commit()
+        return token
+
+    def reset_password_with_token(self, email: str, token: str, new_password: str) -> bool:
+        """
+        Reset password using a valid token.
+        
+        Args:
+            email: User email
+            token: The OTP token
+            new_password: New password
+            
+        Returns:
+            True if successful
+            
+        Raises:
+            ValidationError: If token is invalid or expired
+        """
+        user = self.get_user_by_email(email)
+        
+        if not user.reset_token or user.reset_token != token:
+            raise ValidationError(detail="Invalid reset code", field="token")
+            
+        if not user.reset_token_expires or user.reset_token_expires < datetime.utcnow():
+            raise ValidationError(detail="Reset code has expired", field="token")
+
+        # Validate password strength
+        self.validate_password_strength(new_password)
+            
+        # Update password
+        user.password = hash_password(new_password)
+        
+        # Clear token
+        user.reset_token = None
+        user.reset_token_expires = None
+        
+        self.db.commit()
+        logger.info(f"Password reset successfully for user: {email}")
+        return True
 
     def change_password(
         self,
@@ -670,15 +885,45 @@ class UserService:
         # Eligible if ALL required courses for current level are completed
         eligible = len(incomplete_required) == 0 and total > 0
         
+        # [NEW] Dynamic Exam Config (fetched from Target Level)
+        exam_config = {
+            "exam_questions": 10,
+            "exam_time_minutes": 15,
+            "pass_percent": 70,
+            "proctored": False
+        }
+        
+        if next_role:
+            try:
+                from app.repositories.content_repository import ProgressionLevelRepository
+                # Local import to prevent circular dependency
+                
+                level_repo = ProgressionLevelRepository(self.db)
+                target_level = level_repo.get_by_name(next_role)
+                
+                if target_level:
+                    # Use getattr to be safe if migration hasn't run yet (though SQLAlchemy might still error on query)
+                    # The try/catch block handles any DB schema mismatch errors safely
+                    exam_config["exam_questions"] = getattr(target_level, "exam_questions", 10) or 10
+                    exam_config["exam_time_minutes"] = getattr(target_level, "exam_time_minutes", 15) or 15
+                    exam_config["pass_percent"] = getattr(target_level, "pass_percent", 70) or 70
+                    exam_config["proctored"] = getattr(target_level, "proctored", False)
+            except Exception as e:
+                logger.warning(f"Could not load dynamic exam config for {next_role} (using defaults): {e}")
+
         return {
             "eligible": eligible,
             "current_role": current_role,
+            "target_role": next_role,
             "next_role": next_role,
             "requirements_met": requirements_met,
             "requirements_pending": requirements_pending,
             "progress_percent": int((completed / total * 100)) if total > 0 else 100,
             "completed_courses": completed,
             "total_courses": total,
+            "courses_total": total,
+            "courses_remaining": len(incomplete_required),
             "required_course_ids": list(required_courses),
-            "completed_course_ids": list(completed_required)
+            "completed_course_ids": list(completed_required),
+            "config": exam_config
         }

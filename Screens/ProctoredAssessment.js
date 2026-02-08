@@ -427,15 +427,22 @@ export default function ProctoredAssessment({ route, navigation }) {
             formData.append('time_limit_minutes', (parseInt(timeLimit) || 30).toString());
             formData.append('passing_score', (parseInt(passingScore) || 70).toString());
             formData.append('created_by', userProfile?.name || 'Admin');
-            formData.append('file', {
-                uri: bulkFile.uri,
-                name: bulkFile.name,
-                type: bulkFile.mimeType || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            });
+
+            if (Platform.OS === 'web') {
+                const response = await fetch(bulkFile.uri);
+                const blob = await response.blob();
+                const file = new File([blob], bulkFile.name, { type: bulkFile.mimeType || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+                formData.append('file', file);
+            } else {
+                formData.append('file', {
+                    uri: bulkFile.uri,
+                    name: bulkFile.name,
+                    type: bulkFile.mimeType || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                });
+            }
 
             const response = await fetch(`${API_URL}/api/v1/assessments/proctored/bulk-upload`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'multipart/form-data' },
                 body: formData
             });
 
@@ -502,11 +509,18 @@ export default function ProctoredAssessment({ route, navigation }) {
             // If a document file is selected, use the generate-quiz-from-content endpoint
             if (aiDocumentFile) {
                 const formData = new FormData();
-                formData.append('file', {
-                    uri: aiDocumentFile.uri,
-                    name: aiDocumentFile.name,
-                    type: aiDocumentFile.mimeType || 'application/octet-stream'
-                });
+                if (Platform.OS === 'web') {
+                    const response = await fetch(aiDocumentFile.uri);
+                    const blob = await response.blob();
+                    const file = new File([blob], aiDocumentFile.name, { type: aiDocumentFile.mimeType || 'application/octet-stream' });
+                    formData.append('file', file);
+                } else {
+                    formData.append('file', {
+                        uri: aiDocumentFile.uri,
+                        name: aiDocumentFile.name,
+                        type: aiDocumentFile.mimeType || 'application/octet-stream'
+                    });
+                }
                 formData.append('title', title || 'AI Generated Assessment');
                 formData.append('num_questions', (parseInt(aiNumQuestions) || 10).toString());
                 formData.append('difficulty', aiDifficulty);
@@ -626,8 +640,9 @@ export default function ProctoredAssessment({ route, navigation }) {
         lastBreachTimeRef.current = {};
 
         // Start Recording
+        // Start Recording (Mobile Only)
         setTimeout(async () => {
-            if (cameraRef.current) {
+            if (cameraRef.current && Platform.OS !== 'web') {
                 try {
                     const video = await cameraRef.current.recordAsync({
                         maxDuration: 3600,

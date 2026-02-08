@@ -38,10 +38,18 @@ boto3==1.35.0
 # PDF Processing
 PyMuPDF==1.24.10
 pdfplumber==0.11.4
+PyPDF2==3.0.1
+
+# Document Processing (Word, PPT)
+python-docx==1.1.2
+python-pptx==1.0.2
 
 # Excel/Spreadsheet support
 openpyxl==3.1.5
 pandas==2.2.3
+
+# PDF Report Generation
+reportlab==4.2.5
 
 # File type validation
 python-magic-bin==0.4.14;sys_platform=='win32'
@@ -58,4 +66,3 @@ python-magic==0.4.27;sys_platform!='win32'
 # openai-whisper==20231117      # Replaced by Groq Whisper API
 # torch                         # No longer needed
 # ==========================================
-PyPDF2

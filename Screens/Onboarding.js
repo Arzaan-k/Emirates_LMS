@@ -1,6 +1,6 @@
 // SplashScreen.js
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, Animated, Image } from 'react-native';
+import { View, Text, StyleSheet, Animated, Image, Platform } from 'react-native';
 
 export default function Onboarding({ navigation }) {
   const loadingWidth = React.useRef(new Animated.Value(0)).current;
@@ -9,12 +9,16 @@ export default function Onboarding({ navigation }) {
     Animated.timing(loadingWidth, {
       toValue: 1,
       duration: 2000,
-      useNativeDriver: false,
+      useNativeDriver: false, // native driver false for width
     }).start();
 
     // navigate to Login after 2 seconds
     const timeout = setTimeout(() => {
-      navigation.replace('Intro');
+      if (Platform.OS === 'web') {
+        navigation.replace('Login');
+      } else {
+        navigation.replace('Intro');
+      }
     }, 2000);
 
     return () => clearTimeout(timeout);

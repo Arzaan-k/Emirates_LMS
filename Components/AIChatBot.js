@@ -237,7 +237,6 @@ export default function AIChatBot() {
 
             const res = await fetch(`${API_URL}/ai/voice_query`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'multipart/form-data' },
                 body: formData
             });
 

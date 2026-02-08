@@ -115,16 +115,7 @@ app = FastAPI(
 # MIDDLEWARE
 # ==========================================
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Configure properly for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Security middleware (rate limiting, headers, logging)
+# Security middleware (rate limiting, headers, logging, CORS)
 setup_middleware(app)
 
 
@@ -407,6 +398,19 @@ async def general_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error"}
+    )
+
+
+from fastapi.exceptions import RequestValidationError
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle validation errors with detailed logging."""
+    error_details = exc.errors()
+    logger.error(f"Validation error for {request.url}: {error_details}")
+    return JSONResponse(
+        status_code=422,
+        content={"detail": error_details}
     )
 
 

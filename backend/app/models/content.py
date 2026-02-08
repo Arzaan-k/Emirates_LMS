@@ -94,12 +94,15 @@ class CourseBucket(Base):
     """
     Course categories/buckets for organizing content.
     Also serves as skill categories for AI recommendations.
+    Supports hierarchical nesting via parent_bucket_id.
     """
     __tablename__ = "course_buckets"
 
     id = Column(String(100), primary_key=True)
     name = Column(String(255), nullable=False)
     description = Column(Text)
+    parent_bucket_id = Column(String(100))  # ID of parent bucket for nested structure
+    folder_path = Column(String(1000))  # Full path from root (e.g., 'BWC/Career/Module1')
     color = Column(String(50))
     icon = Column(String(100))
     keywords = Column(JSON, default=list)  # Keywords for matching courses to this category
@@ -111,6 +114,7 @@ class CourseBucket(Base):
     __table_args__ = (
         Index('idx_bucket_active', 'is_active'),
         Index('idx_bucket_order', 'order_index'),
+        Index('idx_bucket_parent', 'parent_bucket_id'),
     )
 
     def __repr__(self):
@@ -122,6 +126,8 @@ class CourseBucket(Base):
             "id": self.id,
             "name": self.name,
             "description": self.description,
+            "parent_bucket_id": self.parent_bucket_id,
+            "folder_path": self.folder_path,
             "color": self.color,
             "icon": self.icon,
             "keywords": self.keywords or [],
@@ -190,6 +196,13 @@ class ProgressionLevel(Base):
     description = Column(Text)
     min_nodes = Column(Integer, default=0)  # Minimum nodes to reach this level
     min_score = Column(Float, default=0.0)  # Minimum average score required
+    
+    # Exam Configuration
+    exam_questions = Column(Integer, default=10)
+    exam_time_minutes = Column(Integer, default=15)
+    pass_percent = Column(Integer, default=70) # Required percentage to pass
+    proctored = Column(Boolean, default=False) # Is camera required?
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -212,6 +225,10 @@ class ProgressionLevel(Base):
             "description": self.description,
             "min_nodes": self.min_nodes,
             "min_score": self.min_score,
+            "exam_questions": self.exam_questions,
+            "exam_time_minutes": self.exam_time_minutes,
+            "pass_percent": self.pass_percent,
+            "proctored": self.proctored,
         }
 
 

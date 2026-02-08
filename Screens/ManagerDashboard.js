@@ -26,6 +26,7 @@ import Svg, { Circle, G, Text as SvgText } from 'react-native-svg';
 import { QuizCreationModal, QuizResultsModal } from '../Components/QuizModals';
 import EditNodeModal from '../Components/EditNodeModal';
 import BulkUploadModal from '../Components/BulkUploadModal'; // [NEW]
+import FolderUploadModal from '../Components/FolderUploadModal'; // [NEW] Folder hierarchy upload
 import BucketManagementModal from '../Components/BucketManagementModal'; // [NEW] Bucket management
 import AccessControlModal from '../Components/AccessControlModal'; // [NEW] Hierarchy & Access Control
 import CreateUser from '../Screens/CreateUser';
@@ -45,6 +46,8 @@ import ExamAttendanceModal from '../Components/ExamAttendanceModal'; // [NEW] Ex
 import ScheduledExamsListModal from '../Components/ScheduledExamsListModal'; // [NEW] Scheduled Exams List
 import ExamHistoryModal from '../Components/ExamHistoryModal'; // [NEW] Exam History
 import RoleplayHistoryModal from '../Components/RoleplayHistoryModal'; // [NEW] Roleplay History
+import ModeSwitcher from '../Components/ModeSwitcher'; // [NEW] Mode Switcher
+import ModeIndicator from '../Components/ModeIndicator'; // [NEW] Mode Indicator
 
 
 
@@ -173,6 +176,8 @@ export default function ManagerDashboard({ route, navigation }) {
     const [auditLogsVisible, setAuditLogsVisible] = useState(false);
     const [contentLibraryVisible, setContentLibraryVisible] = useState(false);
 
+    // User Mode State
+    const [userMode, setUserMode] = useState('admin');
 
     const { userProfile } = route.params || {};
     const role = userProfile?.role || "Manager";
@@ -201,7 +206,41 @@ export default function ManagerDashboard({ route, navigation }) {
     const [isPathNode, setIsPathNode] = useState(false); // RESTORED
     const [isSelfLearning, setIsSelfLearning] = useState(false); // NEW: Self Learning toggle
     const [createUserVisible, setCreateUserVisible] = useState(false); // NEW
-    const [bulkModalVisible, setBulkModalVisible] = useState(false); // [NEW]
+    const [bulkModalVisible, setBulkModalVisible] = useState(false); // [NEW] - This is for video/content bulk upload
+    const [folderUploadVisible, setFolderUploadVisible] = useState(false); // [NEW] - Folder hierarchy upload
+    const [bulkUploadTask, setBulkUploadTask] = useState(null); // { id, progress, status, total, current, error }
+
+    // Poll for bulk upload progress
+    useEffect(() => {
+        let interval;
+        if (bulkUploadTask && bulkUploadTask.status === 'processing') {
+            interval = setInterval(async () => {
+                try {
+                    const response = await fetch(`${API_URL}/api/v1/users/bulk-upload/status/${bulkUploadTask.id}`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        setBulkUploadTask(prev => ({ ...prev, ...data }));
+
+                        if (data.status === 'completed') {
+                            Alert.alert(
+                                "Bulk Upload Complete",
+                                `Successfully created ${data.results.created} users.\nSkipped: ${data.results.skipped}\nErrors: ${data.results.errors.length}`
+                            );
+                            // Clear task after a delay so user sees 100%
+                            setTimeout(() => setBulkUploadTask(null), 5000);
+                        } else if (data.status === 'failed') {
+                            Alert.alert("Bulk Upload Failed", data.error || "Unknown error");
+                            // Clear task after delay
+                            setTimeout(() => setBulkUploadTask(null), 5000);
+                        }
+                    }
+                } catch (error) {
+                    console.error("Error polling bulk upload status:", error);
+                }
+            }, 2000); // Poll every 2 seconds
+        }
+        return () => clearInterval(interval);
+    }, [bulkUploadTask]);
 
     // NEWS & QUIZ CREATION STATE
     const [newsModalVisible, setNewsModalVisible] = useState(false);
@@ -272,18 +311,29 @@ export default function ManagerDashboard({ route, navigation }) {
         setIsChatLoading(true);
 
         try {
-            const res = await fetch(`${API_URL}/api/v1/ai/ask`, {
+            // Send request to privilege-aware admin copilot endpoint
+            const res = await fetch(`${API_URL}/api/v1/ai/admin-copilot`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question: query })
+                body: JSON.stringify({
+                    question: query,
+                    privileges: userPrivileges,
+                    is_superadmin: isSuperAdmin,
+                    admin_name: name,
+                    admin_role: role
+                })
             });
             const data = await res.json();
 
-            // Add AI response
-            setChatMessages(prev => [...prev, { role: 'ai', content: data.answer }]);
+            // Add AI response with data sources info
+            let responseContent = data.answer;
+            if (data.data_sources && data.data_sources.length > 0) {
+                responseContent += `\n\n📊 *Data sources: ${data.data_sources.join(', ')}*`;
+            }
+            setChatMessages(prev => [...prev, { role: 'ai', content: responseContent }]);
         } catch (error) {
             console.error(error);
-            setChatMessages(prev => [...prev, { role: 'ai', content: "Error connecting to AI Analyst." }]);
+            setChatMessages(prev => [...prev, { role: 'ai', content: "Error connecting to Admin Copilot. Please try again." }]);
         } finally {
             setIsChatLoading(false);
         }
@@ -385,11 +435,22 @@ export default function ManagerDashboard({ route, navigation }) {
             if (selectedBucket) {
                 formData.append('bucket', selectedBucket); // Add bucket if selected
             }
-            formData.append('file', {
-                uri: resFile.uri,
-                name: resFile.name,
-                type: resFile.mimeType || 'application/octet-stream'
-            });
+
+            // Handle file differently for web vs mobile
+            if (Platform.OS === 'web') {
+                // On web, fetch the blob from the uri and create a proper File object
+                const fileResponse = await fetch(resFile.uri);
+                const blob = await fileResponse.blob();
+                const webFile = new File([blob], resFile.name, { type: resFile.mimeType || 'application/octet-stream' });
+                formData.append('file', webFile);
+            } else {
+                // On mobile, use the React Native format
+                formData.append('file', {
+                    uri: resFile.uri,
+                    name: resFile.name,
+                    type: resFile.mimeType || 'application/octet-stream'
+                });
+            }
 
             // Use the universal resource upload endpoint
             // It will handle adding to Knowledge Base AND optionally to Learning Path
@@ -438,11 +499,20 @@ export default function ManagerDashboard({ route, navigation }) {
             formData.append('author', newsAuthor);
 
             if (newsImage) {
-                formData.append('image', {
-                    uri: newsImage.uri,
-                    name: 'news_image.jpg',
-                    type: 'image/jpeg'
-                });
+                if (Platform.OS === 'web') {
+                    // WEB: Convert URI to Blob -> File
+                    const response = await fetch(newsImage.uri);
+                    const blob = await response.blob();
+                    const file = new File([blob], "news_image.jpg", { type: "image/jpeg" });
+                    formData.append('image', file);
+                } else {
+                    // NATIVE: Use internal object format
+                    formData.append('image', {
+                        uri: newsImage.uri,
+                        name: 'news_image.jpg',
+                        type: 'image/jpeg'
+                    });
+                }
             }
 
             const response = await fetch(`${API_URL}/api/v1/notifications/news`, {
@@ -451,7 +521,7 @@ export default function ManagerDashboard({ route, navigation }) {
             });
 
             const result = await response.json();
-            if (result.status === 'success') {
+            if (response.ok) {
                 Alert.alert("Success", "News posted to all users!");
                 setNewsModalVisible(false);
                 setNewsTitle('');
@@ -459,7 +529,7 @@ export default function ManagerDashboard({ route, navigation }) {
                 setNewsAuthor('');
                 setNewsImage(null);
             } else {
-                Alert.alert("Error", "Failed to post news.");
+                Alert.alert("Error", result.detail || "Failed to post news.");
             }
         } catch (error) {
             console.error("Post news error:", error);
@@ -560,11 +630,21 @@ export default function ManagerDashboard({ route, navigation }) {
             formData.append('difficulty', topicQuizDifficulty);
             formData.append('num_questions', String(aiQuizNumQuestions));
             formData.append('preview_only', 'true'); // Don't post, just generate
-            formData.append('file', {
-                uri: aiQuizFile.uri,
-                name: aiQuizFile.name,
-                type: aiQuizFile.mimeType || 'application/octet-stream'
-            });
+
+            if (Platform.OS === 'web') {
+                // WEB: Convert URI to Blob/File
+                const response = await fetch(aiQuizFile.uri);
+                const blob = await response.blob();
+                const file = new File([blob], aiQuizFile.name, { type: aiQuizFile.mimeType || 'application/octet-stream' });
+                formData.append('file', file);
+            } else {
+                // NATIVE: Use internal object format
+                formData.append('file', {
+                    uri: aiQuizFile.uri,
+                    name: aiQuizFile.name,
+                    type: aiQuizFile.mimeType || 'application/octet-stream'
+                });
+            }
 
             const response = await fetch(`${API_URL}/api/v1/quizzes/generate/from-content`, {
                 method: 'POST',
@@ -572,9 +652,9 @@ export default function ManagerDashboard({ route, navigation }) {
             });
 
             const result = await response.json();
-            if (result.status === 'success' && result.questions) {
+            if (response.ok && (result.status === 'success' || result.questions)) {
                 // Fill the form with generated questions for manual editing
-                const generatedQuestions = result.questions.map(q => ({
+                const generatedQuestions = (result.questions || []).map(q => ({
                     question: q.question || '',
                     options: q.options?.map(o => typeof o === 'string' ? o : o.text) || ['', '', '', ''],
                     correct: q.correctIndex || q.correct || 0
@@ -843,25 +923,35 @@ export default function ManagerDashboard({ route, navigation }) {
             formData.append('type', isCrucial ? 'crucial' : 'ordinary');
 
             if (notifFile) {
-                // Infer type from extension if needed, but 'video/mp4' or 'image/jpeg' usually
+                // Infer type from extension if needed
                 const fileType = notifFile.type === 'video' ? 'video/mp4' : 'image/jpeg';
-                formData.append('file', {
-                    uri: notifFile.uri,
-                    name: `upload.${notifFile.type === 'video' ? 'mp4' : 'jpg'}`,
-                    type: fileType
-                });
+                const fileName = `upload.${notifFile.type === 'video' ? 'mp4' : 'jpg'}`;
+
+                if (Platform.OS === 'web') {
+                    // WEB: Convert URI to Blob/File
+                    const response = await fetch(notifFile.uri);
+                    const blob = await response.blob();
+                    const file = new File([blob], fileName, { type: fileType });
+                    formData.append('file', file);
+                } else {
+                    // NATIVE: Use internal object format
+                    formData.append('file', {
+                        uri: notifFile.uri,
+                        name: fileName,
+                        type: fileType
+                    });
+                }
             }
 
-            // Corrected Endpoint
+            // NOTE: Do NOT set Content-Type header manually - FormData sets it automatically with boundary
             const response = await fetch(`${API_URL}/api/v1/notifications/send`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'multipart/form-data' },
                 body: formData
             });
 
             const data = await response.json();
 
-            if (data.status === 'success') {
+            if (response.ok && (data.status === 'success' || data.id)) {
                 Alert.alert("Sent", "Notification broadcasted successfully!");
                 setNotifModalVisible(false);
                 setNotifTitle('');
@@ -869,7 +959,7 @@ export default function ManagerDashboard({ route, navigation }) {
                 setIsCrucial(false);
                 setNotifFile(null);
             } else {
-                Alert.alert("Error", "Failed to send notification");
+                Alert.alert("Error", data.detail || "Failed to send notification");
             }
         } catch (error) {
             console.error(error);
@@ -881,6 +971,26 @@ export default function ManagerDashboard({ route, navigation }) {
 
     // --- LOGOUT HANDLER ---
     const handleLogout = async () => {
+        if (Platform.OS === 'web') {
+            const confirm = window.confirm("Are you sure you want to logout?");
+            if (confirm) {
+                try {
+                    await AsyncStorage.removeItem('accessToken');
+                    await AsyncStorage.removeItem('userRole');
+                    navigation.dispatch(
+                        CommonActions.reset({
+                            index: 0,
+                            routes: [{ name: 'Login' }],
+                        })
+                    );
+                } catch (e) {
+                    console.error('Logout error:', e);
+                    alert('Failed to logout. Please try again.');
+                }
+            }
+            return;
+        }
+
         Alert.alert(
             "Logout",
             "Are you sure you want to logout?",
@@ -891,13 +1001,9 @@ export default function ManagerDashboard({ route, navigation }) {
                     style: "destructive",
                     onPress: async () => {
                         try {
-                            if (Platform.OS === 'web') {
-                                await AsyncStorage.removeItem('accessToken');
-                                await AsyncStorage.removeItem('userRole');
-                            } else {
-                                await SecureStore.deleteItemAsync('accessToken');
-                                await SecureStore.deleteItemAsync('userRole');
-                            }
+                            await SecureStore.deleteItemAsync('accessToken');
+                            await SecureStore.deleteItemAsync('userRole');
+
                             navigation.dispatch(
                                 CommonActions.reset({
                                     index: 0,
@@ -914,7 +1020,20 @@ export default function ManagerDashboard({ route, navigation }) {
         );
     };
 
-
+    // Load user mode on mount
+    useEffect(() => {
+        const loadUserMode = async () => {
+            try {
+                const mode = await AsyncStorage.getItem('userMode');
+                if (mode) {
+                    setUserMode(mode);
+                }
+            } catch (error) {
+                console.error('Error loading user mode:', error);
+            }
+        };
+        loadUserMode();
+    }, []);
 
     return (
         <View style={styles.container}>
@@ -961,6 +1080,16 @@ export default function ManagerDashboard({ route, navigation }) {
                         </LinearGradient>
                     </Animated.View>
 
+                    {/* MODE INDICATOR & SWITCHER */}
+                    <Animated.View entering={FadeInDown.delay(400)} style={styles.modeSection}>
+                        <ModeIndicator mode={userMode} style={{ marginBottom: 12 }} />
+                        <ModeSwitcher
+                            navigation={navigation}
+                            currentMode={userMode}
+                            userProfile={userProfile}
+                        />
+                    </Animated.View>
+
                     {/* STATS GRID */}
                     <Text style={styles.sectionTitle}>Key Performance Indicators</Text>
                     <View style={styles.statsGrid}>
@@ -997,7 +1126,7 @@ export default function ManagerDashboard({ route, navigation }) {
                         {hasPrivilege('reports') && (
                             <TouchableOpacity
                                 style={styles.actionBtn}
-                                onPress={() => navigation.navigate('Analytics', { userProfile })}
+                                onPress={() => navigation.navigate('AdminReports', { userProfile })}
                             >
                                 <View style={[styles.actionIcon, { backgroundColor: '#FCE7F3' }]}>
                                     <Feather name="bar-chart-2" size={24} color="#DB2777" />
@@ -1046,6 +1175,16 @@ export default function ManagerDashboard({ route, navigation }) {
                                     <MaterialCommunityIcons name="layers-plus" size={24} color="#D97706" />
                                 </View>
                                 <Text style={styles.actionText}>Bulk Upload</Text>
+                            </TouchableOpacity>
+                        )}
+
+                        {/* FOLDER UPLOAD - requires bulk_upload privilege, web only */}
+                        {hasPrivilege('bulk_upload') && Platform.OS === 'web' && (
+                            <TouchableOpacity style={styles.actionBtn} onPress={() => setFolderUploadVisible(true)}>
+                                <View style={[styles.actionIcon, { backgroundColor: '#DBEAFE' }]}>
+                                    <MaterialCommunityIcons name="folder-upload" size={24} color="#2563EB" />
+                                </View>
+                                <Text style={styles.actionText}>Upload Folder</Text>
                             </TouchableOpacity>
                         )}
 
@@ -1315,6 +1454,13 @@ export default function ManagerDashboard({ route, navigation }) {
                 onUploadComplete={() => setRefreshPath(prev => prev + 1)}
             />
 
+            {/* [NEW] FOLDER UPLOAD MODAL - Hierarchical folder structure upload */}
+            <FolderUploadModal
+                visible={folderUploadVisible}
+                onClose={() => setFolderUploadVisible(false)}
+                onUploadComplete={() => setRefreshPath(prev => prev + 1)}
+            />
+
             {/* [NEW] BUCKET MANAGEMENT MODAL */}
             <BucketManagementModal
                 visible={bucketModalVisible}
@@ -1341,12 +1487,45 @@ export default function ManagerDashboard({ route, navigation }) {
                 </Modal>
             )}
 
+
+            {/* PROGRESS BAR FOR BULK UPLOAD */}
+            {bulkUploadTask && (
+                <View style={{
+                    position: 'absolute', bottom: Platform.OS === 'web' ? 20 : 100, alignSelf: 'center',
+                    width: width * 0.9, maxWidth: 400,
+                    backgroundColor: '#FFF', borderRadius: 12, padding: 12,
+                    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 10,
+                    borderWidth: 1, borderColor: '#E5E7EB',
+                    zIndex: 9999
+                }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                        <Text style={{ fontSize: 13, fontFamily: 'Poppins_600SemiBold', color: '#374151' }}>
+                            Bulk Uploading Users: {bulkUploadTask.progress}%
+                        </Text>
+                        <Text style={{ fontSize: 12, fontFamily: 'Poppins_500Medium', color: '#6B7280' }}>
+                            {bulkUploadTask.status === 'processing' ? `${bulkUploadTask.current}/${bulkUploadTask.total}` : bulkUploadTask.status}
+                        </Text>
+                    </View>
+                    <View style={{ height: 6, backgroundColor: '#F3F4F6', borderRadius: 3, overflow: 'hidden' }}>
+                        <View style={{ height: '100%', backgroundColor: '#F59E0B', width: `${bulkUploadTask.progress}%` }} />
+                    </View>
+                    {bulkUploadTask.status === 'failed' && (
+                        <Text style={{ fontSize: 11, color: '#EF4444', marginTop: 4 }}>Error: {bulkUploadTask.error}</Text>
+                    )}
+                </View>
+            )}
+
             {/* CREATE USER MODAL */}
             <CreateUser
                 visible={createUserVisible}
                 onClose={() => setCreateUserVisible(false)}
                 onCreate={handleCreateUser}
                 userProfile={userProfile}
+                onBulkUploadStart={(taskId) => {
+                    setBulkUploadTask({ id: taskId, progress: 0, status: 'processing', total: 0, current: 0 });
+                    setCreateUserVisible(false); // Close modal so user can do other things
+                    Alert.alert("Background Upload Started", "The upload will continue in the background. You can track progress on the dashboard.");
+                }}
             />
 
             {/* NOTIFICATION MODAL */}
@@ -2128,161 +2307,220 @@ export default function ManagerDashboard({ route, navigation }) {
 }
 
 const styles = StyleSheet.create({
-
     container: {
         flex: 1,
-        backgroundColor: '#F9FAFB',
+        backgroundColor: Platform.OS === 'web' ? '#F3F4F6' : '#F9FAFB',
     },
+    // HEADER
     headerBg: {
-        height: 280,
-        paddingHorizontal: 20,
-        paddingTop: 20,
-        borderBottomLeftRadius: 30,
-        borderBottomRightRadius: 30,
+        height: Platform.OS === 'web' ? 320 : 280,
+        paddingHorizontal: Platform.OS === 'web' ? 24 : 20,
+        paddingTop: Platform.OS === 'web' ? 30 : 20,
+        borderBottomLeftRadius: Platform.OS === 'web' ? 40 : 30,
+        borderBottomRightRadius: Platform.OS === 'web' ? 40 : 30,
+        ...(Platform.OS === 'web' ? {
+            shadowColor: '#4F46E5',
+            shadowOffset: { width: 0, height: 10 },
+            shadowOpacity: 0.2,
+            shadowRadius: 20,
+        } : {})
     },
     headerContent: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
         marginTop: 20,
+        ...(Platform.OS === 'web' ? {
+            maxWidth: 1200,
+            alignSelf: 'center',
+            width: '100%',
+        } : {})
     },
     backBtn: {
-        padding: 10,
-        backgroundColor: 'rgba(255,255,255,0.2)',
-        borderRadius: 12,
-        marginRight: 10,
+        padding: Platform.OS === 'web' ? 12 : 10,
+        backgroundColor: Platform.OS === 'web' ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.2)',
+        borderRadius: Platform.OS === 'web' ? 14 : 12,
+        marginRight: Platform.OS === 'web' ? 16 : 10,
+        ...(Platform.OS === 'web' ? { borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' } : {})
     },
     welcomeText: {
-        color: 'rgba(255,255,255,0.8)',
-        fontSize: 14,
+        color: Platform.OS === 'web' ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.8)',
+        fontSize: Platform.OS === 'web' ? 16 : 14,
         fontFamily: 'Poppins_400Regular',
+        ...(Platform.OS === 'web' ? { letterSpacing: 0.5 } : {})
     },
     nameText: {
         color: '#FFF',
-        fontSize: 22,
+        fontSize: Platform.OS === 'web' ? 28 : 22,
         fontFamily: 'Poppins_700Bold',
         marginBottom: 8,
+        ...(Platform.OS === 'web' ? {
+            textShadowColor: 'rgba(0,0,0,0.1)',
+            textShadowOffset: { width: 0, height: 2 },
+            textShadowRadius: 4,
+        } : {})
     },
     roleBadge: {
         backgroundColor: 'rgba(255,255,255,0.2)',
-        paddingHorizontal: 12,
-        paddingVertical: 4,
-        borderRadius: 20,
+        paddingHorizontal: Platform.OS === 'web' ? 14 : 12,
+        paddingVertical: Platform.OS === 'web' ? 6 : 4,
+        borderRadius: Platform.OS === 'web' ? 30 : 20,
         alignSelf: 'flex-start',
+        ...(Platform.OS === 'web' ? { borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' } : {})
     },
     roleText: {
         color: '#FFF',
-        fontSize: 12,
+        fontSize: Platform.OS === 'web' ? 13 : 12,
         fontFamily: 'Poppins_600SemiBold',
     },
     logo: {
-        width: 60,
-        height: 60,
+        width: Platform.OS === 'web' ? 64 : 60,
+        height: Platform.OS === 'web' ? 64 : 60,
         tintColor: '#FFF',
-        opacity: 0.5,
+        opacity: Platform.OS === 'web' ? 0.8 : 0.5,
     },
+
+    // BODY & LAYOUT
     bodyContainer: {
         flex: 1,
-        marginTop: -80,
-        paddingHorizontal: 20,
+        marginTop: Platform.OS === 'web' ? -90 : -80,
+        paddingHorizontal: Platform.OS === 'web' ? 40 : 20,
+        ...(Platform.OS === 'web' ? {
+            alignSelf: 'center',
+            width: '100%',
+            maxWidth: 1200,
+        } : {})
     },
     sectionTitle: {
-        fontSize: 18,
-        fontFamily: 'Poppins_600SemiBold',
-        color: '#111827',
-        marginBottom: 15,
-        marginTop: 25,
+        fontSize: Platform.OS === 'web' ? 20 : 18,
+        fontFamily: 'Poppins_700Bold', // changed from 600SemiBold for web, kept generic override but maybe should revert for mobile? -> Wait, original was 600SemiBold.
+        // Let's use 600SemiBold for mobile if original was that.
+        // Re-checking original: fontFamily: 'Poppins_600SemiBold'
+        // So for mobile: Poppins_600SemiBold. For Web: Poppins_700Bold.
+        // Actually, let's keep it safe.
+        fontFamily: Platform.OS === 'web' ? 'Poppins_700Bold' : 'Poppins_600SemiBold',
+        color: Platform.OS === 'web' ? '#1F2937' : '#111827',
+        marginBottom: Platform.OS === 'web' ? 20 : 15,
+        marginTop: Platform.OS === 'web' ? 32 : 25,
+        ...(Platform.OS === 'web' ? { letterSpacing: -0.5 } : {})
     },
+
+    // STATS CARDS
     statsGrid: {
-        gap: 15,
+        flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+        gap: Platform.OS === 'web' ? 20 : 15,
+        flexWrap: 'wrap',
     },
     statCard: {
         backgroundColor: '#FFF',
-        borderRadius: 16,
-        padding: 16,
+        borderRadius: Platform.OS === 'web' ? 24 : 16,
+        padding: Platform.OS === 'web' ? 20 : 16,
         flexDirection: 'row',
         alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.05,
-        shadowRadius: 10,
-        elevation: 3,
-        marginBottom: 10,
+        shadowColor: Platform.OS === 'web' ? '#64748B' : '#000',
+        shadowOffset: Platform.OS === 'web' ? { width: 0, height: 8 } : { width: 0, height: 4 },
+        shadowOpacity: Platform.OS === 'web' ? 0.08 : 0.05,
+        shadowRadius: Platform.OS === 'web' ? 24 : 10,
+        elevation: Platform.OS === 'web' ? 4 : 3,
+        marginBottom: Platform.OS === 'web' ? 0 : 10,
+        ...(Platform.OS === 'web' ? {
+            flex: 1,
+            minWidth: 260,
+            borderWidth: 1,
+            borderColor: '#F1F5F9',
+        } : {})
     },
     statCardAlert: {
-        borderLeftWidth: 4,
+        borderLeftWidth: Platform.OS === 'web' ? 6 : 4,
         borderLeftColor: '#EF4444',
     },
     statIconBg: {
-        width: 48,
-        height: 48,
-        borderRadius: 12,
-        backgroundColor: '#1F2937',
+        width: Platform.OS === 'web' ? 56 : 48,
+        height: Platform.OS === 'web' ? 56 : 48,
+        borderRadius: Platform.OS === 'web' ? 18 : 12,
+        backgroundColor: Platform.OS === 'web' ? '#F8FAFC' : '#1F2937',
         justifyContent: 'center',
         alignItems: 'center',
-        marginRight: 15,
+        marginRight: Platform.OS === 'web' ? 16 : 15,
     },
     statLabel: {
-        fontSize: 12,
-        color: '#6B7280',
+        fontSize: Platform.OS === 'web' ? 13 : 12,
+        color: Platform.OS === 'web' ? '#64748B' : '#6B7280',
         fontFamily: 'Poppins_500Medium',
+        ...(Platform.OS === 'web' ? { marginBottom: 2 } : {})
     },
     statValue: {
-        fontSize: 20,
-        color: '#111827',
+        fontSize: Platform.OS === 'web' ? 22 : 20,
+        color: Platform.OS === 'web' ? '#0F172A' : '#111827',
         fontFamily: 'Poppins_700Bold',
+        ...(Platform.OS === 'web' ? { letterSpacing: -0.5 } : {})
     },
+
+    // TREND BADGE
     trendBadge: {
         marginLeft: 'auto',
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 8,
+        paddingHorizontal: Platform.OS === 'web' ? 10 : 8,
+        paddingVertical: Platform.OS === 'web' ? 6 : 4,
+        borderRadius: Platform.OS === 'web' ? 12 : 8,
     },
     trendText: {
         fontSize: 12,
         fontFamily: 'Poppins_700Bold',
     },
+
+    // AI CARD
     aiCard: {
-        marginTop: 25,
-        borderRadius: 20,
+        marginTop: Platform.OS === 'web' ? 0 : 25, // Web handles this via margin on section title maybe? No, let's keep consistent top spacing logic or revert. Original had marginTop 25.
+        // My previous edit for web removed marginTop? No, looking at diff, I didn't see marginTop.
+        // If I keep 25 for mobile, I should check what web needs. Let's stick closer to original logic but adjusted sizing.
+        // Actually, let's keep marginTop 25 for mobile.
+        marginTop: Platform.OS === 'web' ? 0 : 25,
+        borderRadius: Platform.OS === 'web' ? 28 : 20,
         overflow: 'hidden',
-        shadowColor: '#4C1D95',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.3,
-        shadowRadius: 15,
-        elevation: 8,
+        shadowColor: '#7C3AED',
+        shadowOffset: Platform.OS === 'web' ? { width: 0, height: 12 } : { width: 0, height: 8 },
+        shadowOpacity: Platform.OS === 'web' ? 0.25 : 0.3,
+        shadowRadius: Platform.OS === 'web' ? 30 : 15,
+        elevation: Platform.OS === 'web' ? 12 : 8,
+        marginBottom: 10,
     },
     aiGradient: {
-        padding: 20,
+        padding: Platform.OS === 'web' ? 28 : 20,
     },
     aiHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 10,
+        marginBottom: Platform.OS === 'web' ? 12 : 10,
     },
     aiTitle: {
-        color: '#FBBF24',
+        color: Platform.OS === 'web' ? '#FDE68A' : '#FBBF24',
         fontFamily: 'Poppins_700Bold',
-        fontSize: 16,
-        marginLeft: 8,
+        fontSize: Platform.OS === 'web' ? 18 : 16,
+        marginLeft: Platform.OS === 'web' ? 10 : 8,
     },
     aiText: {
-        color: '#FFF',
+        color: Platform.OS === 'web' ? '#F9FAFB' : '#FFF',
         fontFamily: 'Poppins_400Regular',
-        fontSize: 14,
-        lineHeight: 22,
-        marginBottom: 15,
+        fontSize: Platform.OS === 'web' ? 15 : 14,
+        lineHeight: Platform.OS === 'web' ? 24 : 22,
+        marginBottom: Platform.OS === 'web' ? 24 : 15,
+        ...(Platform.OS === 'web' ? { opacity: 0.95 } : {})
     },
     aiBtn: {
-        backgroundColor: 'rgba(255,255,255,0.2)',
-        paddingVertical: 10,
+        backgroundColor: Platform.OS === 'web' ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.2)',
+        paddingVertical: Platform.OS === 'web' ? 12 : 10,
+        ...(Platform.OS === 'web' ? { paddingHorizontal: 24 } : {}),
         alignItems: 'center',
-        borderRadius: 12,
+        borderRadius: Platform.OS === 'web' ? 16 : 12,
+        ...(Platform.OS === 'web' ? { alignSelf: 'flex-start', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' } : {})
     },
     aiBtnText: {
         color: '#FFF',
         fontFamily: 'Poppins_600SemiBold',
+        ...(Platform.OS === 'web' ? { fontSize: 14 } : {})
     },
+
+    // ACTIVITY FEED
     feedSection: {
         marginBottom: 10,
     },
@@ -2290,152 +2528,187 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: '#FFF',
-        padding: 15,
-        borderRadius: 12,
-        marginBottom: 10,
+        padding: Platform.OS === 'web' ? 16 : 15,
+        borderRadius: Platform.OS === 'web' ? 20 : 12,
+        marginBottom: Platform.OS === 'web' ? 12 : 10,
         borderWidth: 1,
-        borderColor: '#E5E7EB',
+        borderColor: Platform.OS === 'web' ? '#F3F4F6' : '#E5E7EB',
+        ...(Platform.OS === 'web' ? {
+            shadowColor: '#64748B',
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.03,
+            shadowRadius: 10,
+        } : {})
     },
     feedIcon: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: Platform.OS === 'web' ? 44 : 40,
+        height: Platform.OS === 'web' ? 44 : 40,
+        borderRadius: Platform.OS === 'web' ? 14 : 20,
         justifyContent: 'center',
         alignItems: 'center',
-        marginRight: 15,
+        marginRight: Platform.OS === 'web' ? 16 : 15,
     },
     feedTitle: {
-        color: '#374151',
+        color: Platform.OS === 'web' ? '#1F2937' : '#374151',
         fontSize: 14,
         fontFamily: 'Poppins_600SemiBold',
+        ...(Platform.OS === 'web' ? { marginBottom: 2 } : {})
     },
     feedTime: {
         color: '#9CA3AF',
         fontSize: 12,
         fontFamily: 'Poppins_400Regular',
     },
+
+    // ACTION GRID
     actionGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        justifyContent: 'space-between',
-        gap: 15,
+        ...(Platform.OS === 'web' ? { gap: 16, marginTop: 10 } : { justifyContent: 'space-between', rowGap: 20 }),
     },
     actionBtn: {
-        width: (width - 55) / 2, // 2 cols
-        backgroundColor: '#FFF',
-        padding: 20,
-        borderRadius: 16,
+        width: Platform.OS === 'web' ? '18%' : '30%',
+        ...(Platform.OS === 'web' ? { minWidth: 140, aspectRatio: 1 } : {}),
         alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 5,
-        elevation: 2,
+        justifyContent: Platform.OS === 'web' ? 'center' : 'flex-start',
+        // marginBottom removed here as rowGap is used in container for mobile
+        ...(Platform.OS === 'web' ? {
+            marginBottom: 20,
+            backgroundColor: '#FFF',
+            borderRadius: 24,
+            padding: 16,
+            shadowColor: '#64748B',
+            shadowOffset: { width: 0, height: 6 },
+            shadowOpacity: 0.05,
+            shadowRadius: 16,
+            elevation: 2,
+            borderWidth: 1,
+            borderColor: '#F8FAFC',
+            cursor: 'pointer',
+        } : {})
     },
     actionIcon: {
-        width: 50,
-        height: 50,
-        borderRadius: 25,
+        width: Platform.OS === 'web' ? 56 : 48,
+        height: Platform.OS === 'web' ? 56 : 48,
+        borderRadius: Platform.OS === 'web' ? 20 : 16,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 12,
+        marginBottom: Platform.OS === 'web' ? 12 : 8,
     },
     actionText: {
-        color: '#374151',
+        color: '#4B5563',
         fontFamily: 'Poppins_600SemiBold',
-        fontSize: 14,
+        fontSize: Platform.OS === 'web' ? 12 : 11,
+        textAlign: 'center',
+        ...(Platform.OS === 'web' ? { lineHeight: 16 } : {})
     },
 
     // MODAL STYLES
     modalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.5)',
+        backgroundColor: Platform.OS === 'web' ? 'rgba(15, 23, 42, 0.65)' : 'rgba(0,0,0,0.5)',
         justifyContent: 'center',
-        padding: 20
+        padding: Platform.OS === 'web' ? 40 : 20,
+        ...(Platform.OS === 'web' ? { alignItems: 'center' } : {})
     },
     modalContent: {
         backgroundColor: '#FFF',
-        borderRadius: 20,
-        padding: 24,
+        borderRadius: Platform.OS === 'web' ? 32 : 20,
+        padding: Platform.OS === 'web' ? 32 : 24,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 10 },
+        shadowOffset: Platform.OS === 'web' ? { width: 0, height: 20 } : { width: 0, height: 10 },
         shadowOpacity: 0.25,
-        shadowRadius: 20,
-        elevation: 10,
+        shadowRadius: Platform.OS === 'web' ? 40 : 20,
+        elevation: Platform.OS === 'web' ? 20 : 10,
+        ...(Platform.OS === 'web' ? { width: '100%', maxWidth: 600 } : {})
     },
     modalHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: 20
+        marginBottom: Platform.OS === 'web' ? 28 : 20
     },
     modalTitle: {
-        fontSize: 20,
+        fontSize: Platform.OS === 'web' ? 24 : 20,
         fontFamily: 'Poppins_700Bold',
-        color: '#111827'
+        color: Platform.OS === 'web' ? '#0F172A' : '#111827',
+        ...(Platform.OS === 'web' ? { letterSpacing: -0.5 } : {})
     },
     inputLabel: {
         fontSize: 14,
         fontFamily: 'Poppins_600SemiBold',
         color: '#374151',
-        marginBottom: 6,
-        marginTop: 10
+        marginBottom: Platform.OS === 'web' ? 8 : 6,
+        marginTop: Platform.OS === 'web' ? 16 : 10,
+        ...(Platform.OS === 'web' ? { marginLeft: 4 } : {})
     },
     input: {
         borderWidth: 1,
-        borderColor: '#E5E7EB',
-        borderRadius: 12,
-        padding: 12,
-        fontSize: 16,
+        borderColor: Platform.OS === 'web' ? '#E2E8F0' : '#E5E7EB',
+        borderRadius: Platform.OS === 'web' ? 16 : 12,
+        padding: Platform.OS === 'web' ? 16 : 12,
+        fontSize: Platform.OS === 'web' ? 15 : 16,
         fontFamily: 'Poppins_400Regular',
+        ...(Platform.OS === 'web' ? { backgroundColor: '#F8FAFC', color: '#1E293B' } : {})
     },
     uploadBtn: {
-        backgroundColor: '#F59E0B',
-        paddingVertical: 16,
-        borderRadius: 14,
+        backgroundColor: Platform.OS === 'web' ? '#4F46E5' : '#F59E0B',
+        paddingVertical: Platform.OS === 'web' ? 18 : 16,
+        borderRadius: Platform.OS === 'web' ? 20 : 14,
         alignItems: 'center',
-        marginTop: 30
+        marginTop: Platform.OS === 'web' ? 32 : 30,
+        ...(Platform.OS === 'web' ? {
+            shadowColor: '#4F46E5',
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: 0.3,
+            shadowRadius: 20,
+            elevation: 6,
+        } : {})
     },
     disabledBtn: {
-        opacity: 0.7,
-        backgroundColor: '#D1D5DB'
+        opacity: Platform.OS === 'web' ? 0.6 : 0.7,
+        backgroundColor: Platform.OS === 'web' ? '#94A3B8' : '#D1D5DB',
+        ...(Platform.OS === 'web' ? { shadowOpacity: 0 } : {})
     },
     uploadBtnText: {
         color: '#FFF',
         fontSize: 16,
-        fontFamily: 'Poppins_700Bold'
+        fontFamily: 'Poppins_700Bold',
+        ...(Platform.OS === 'web' ? { letterSpacing: 0.5 } : {})
     },
 
     // FILE PICKER
     fileBtn: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 12,
-        backgroundColor: '#F3F4F6',
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: '#E5E7EB',
-        borderStyle: 'dashed'
+        padding: Platform.OS === 'web' ? 16 : 12,
+        backgroundColor: Platform.OS === 'web' ? '#F8FAFC' : '#F3F4F6',
+        borderRadius: Platform.OS === 'web' ? 16 : 12,
+        borderWidth: Platform.OS === 'web' ? 2 : 1,
+        borderColor: Platform.OS === 'web' ? '#E2E8F0' : '#E5E7EB',
+        borderStyle: 'dashed',
+        ...(Platform.OS === 'web' ? { justifyContent: 'center' } : {})
     },
     fileBtnText: {
         fontSize: 14,
         fontFamily: 'Poppins_500Medium',
-        color: '#6B7280',
-        marginLeft: 10
+        color: Platform.OS === 'web' ? '#64748B' : '#6B7280',
+        marginLeft: Platform.OS === 'web' ? 12 : 10
     },
     toggleRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginTop: 15,
-        marginBottom: 5,
+        marginTop: Platform.OS === 'web' ? 20 : 15,
+        marginBottom: Platform.OS === 'web' ? 8 : 5,
+        ...(Platform.OS === 'web' ? { padding: 4 } : {})
     },
     checkbox: {
-        width: 20,
-        height: 20,
-        borderRadius: 4,
+        width: Platform.OS === 'web' ? 24 : 20,
+        height: Platform.OS === 'web' ? 24 : 20,
+        borderRadius: Platform.OS === 'web' ? 8 : 4,
         borderWidth: 2,
-        borderColor: '#9CA3AF',
-        marginRight: 10,
+        borderColor: Platform.OS === 'web' ? '#94A3B8' : '#9CA3AF',
+        marginRight: Platform.OS === 'web' ? 12 : 10,
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -2443,23 +2716,102 @@ const styles = StyleSheet.create({
         backgroundColor: '#F59E0B',
         borderColor: '#F59E0B',
     },
-    toggleLabel: { fontSize: 14, fontFamily: 'Poppins_500Medium', color: '#374151' },
+    toggleLabel: { fontSize: Platform.OS === 'web' ? 15 : 14, fontFamily: 'Poppins_500Medium', color: '#374151' },
 
-    // PATH MANAGE STYLES [NEW]
-    sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginTop: 20, marginBottom: 10 },
-    pathListScroll: { paddingLeft: 20, marginBottom: 30 },
-    pathNodeCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 12, borderRadius: 12, marginRight: 12, width: 220, borderWidth: 1, borderColor: '#E5E7EB', shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05 },
-    pathNodeIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F59E0B', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+    // PATH MANAGE STYLES
+    sectionHeaderRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginTop: Platform.OS === 'web' ? 30 : 20,
+        marginBottom: Platform.OS === 'web' ? 16 : 10,
+        ...(Platform.OS === 'web' ? {} : { marginHorizontal: 20 })
+    },
+    pathListScroll: {
+        marginBottom: Platform.OS === 'web' ? 40 : 30,
+        overflow: 'visible',
+        ...(Platform.OS === 'web' ? {} : { paddingLeft: 20 })
+    },
+    pathNodeCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFF',
+        padding: 16,
+        borderRadius: Platform.OS === 'web' ? 20 : 12,
+        marginRight: Platform.OS === 'web' ? 16 : 12,
+        width: Platform.OS === 'web' ? 260 : 220,
+        borderWidth: 1,
+        borderColor: Platform.OS === 'web' ? '#F1F5F9' : '#E5E7EB',
+        shadowColor: Platform.OS === 'web' ? '#64748B' : '#000',
+        shadowOffset: Platform.OS === 'web' ? { width: 0, height: 8 } : { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 16,
+    },
+    pathNodeIcon: {
+        width: Platform.OS === 'web' ? 48 : 40,
+        height: Platform.OS === 'web' ? 48 : 40,
+        borderRadius: Platform.OS === 'web' ? 16 : 20,
+        backgroundColor: Platform.OS === 'web' ? '#FFF7ED' : '#F59E0B',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: Platform.OS === 'web' ? 16 : 10
+    },
     pathNodeInfo: { flex: 1 },
-    pathNodeTitle: { fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: '#111827' },
-    pathNodeSub: { fontSize: 11, fontFamily: 'Poppins_400Regular', color: '#6B7280' },
-    emptyPathText: { marginLeft: 20, color: '#9CA3AF', fontStyle: 'italic' },
+    pathNodeTitle: {
+        fontSize: Platform.OS === 'web' ? 15 : 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: Platform.OS === 'web' ? '#1E293B' : '#111827',
+        marginBottom: Platform.OS === 'web' ? 2 : 0
+    },
+    pathNodeSub: {
+        fontSize: Platform.OS === 'web' ? 12 : 11,
+        fontFamily: Platform.OS === 'web' ? 'Poppins_500Medium' : 'Poppins_400Regular',
+        color: Platform.OS === 'web' ? '#94A3B8' : '#6B7280'
+    },
+    emptyPathText: {
+        marginLeft: 20, // Keep this?
+        color: '#9CA3AF',
+        fontStyle: 'italic',
+        fontSize: 14
+    },
 
-    // QUICK ACTION STYLES
-    sectionContainer: { marginTop: 24, paddingHorizontal: 20 },
-    sectionTitle: { fontSize: 18, fontFamily: 'Poppins_700Bold', color: '#111827', marginBottom: 16 },
-    actionGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-    actionBtn: { width: (width - 60) / 4, alignItems: 'center', marginBottom: 20 },
-    actionIcon: { width: 50, height: 50, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-    actionText: { fontSize: 11, fontFamily: 'Poppins_500Medium', color: '#4B5563', textAlign: 'center' }
+    // FILE PICKER UPDATE
+    filePickBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 16,
+        marginBottom: 20,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: '#D1D5DB',
+        borderStyle: 'dashed',
+        backgroundColor: '#F9FAFB',
+    },
+    filePickBtnActive: {
+        backgroundColor: '#10B981',
+        borderColor: '#10B981',
+        borderStyle: 'solid',
+    },
+    filePickText: {
+        marginLeft: 10,
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#6B7280',
+    },
+
+    // MODE SECTION STYLES
+    modeSection: {
+        backgroundColor: '#FFF',
+        borderRadius: 20,
+        padding: 20,
+        marginHorizontal: 20,
+        marginTop: -10,
+        marginBottom: 20,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 12,
+        elevation: 4,
+    },
 });

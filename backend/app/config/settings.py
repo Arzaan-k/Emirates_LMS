@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # ===========================================
     HOST: str = Field(default="0.0.0.0", env="HOST")
     PORT: int = Field(default=8000, env="PORT")
-    BASE_URL: str = Field(default="http://localhost:8000", env="RENDER_EXTERNAL_URL")
+    BASE_URL: str = Field(default="http://10.47.14.1:8000", env="RENDER_EXTERNAL_URL")
 
     # ===========================================
     # DATABASE
@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     # ===========================================
     # SECURITY
     # ===========================================
-    ALLOWED_ORIGINS: str = Field(default="*", env="ALLOWED_ORIGINS")
+    ALLOWED_ORIGINS: str = Field(default="http://localhost:8081,http://localhost:8000,http://192.168.29.119:8000,http://192.168.29.119:8081,*", env="ALLOWED_ORIGINS")
     RATE_LIMIT_DEFAULT: str = Field(default="100/minute", env="RATE_LIMIT_DEFAULT")
     RATE_LIMIT_LOGIN: str = Field(default="5/minute", env="RATE_LIMIT_LOGIN")
     RATE_LIMIT_REGISTER: str = Field(default="10/hour", env="RATE_LIMIT_REGISTER")
@@ -113,6 +113,17 @@ class Settings(BaseSettings):
         default="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         env="LOG_FORMAT"
     )
+
+    # ===========================================
+    # EMAIL (SMTP)
+    # ===========================================
+    SMTP_SERVER: Optional[str] = Field(default="smtp.gmail.com", env="SMTP_SERVER")
+    SMTP_PORT: int = Field(default=587, env="SMTP_PORT")
+    SMTP_USERNAME: Optional[str] = Field(default=None, env="SMTP_USERNAME")
+    SMTP_PASSWORD: Optional[str] = Field(default=None, env="SMTP_PASSWORD")
+    EMAIL_FROM: str = Field(default="noreply@belgianwaffle.com", env="EMAIL_FROM")
+    EMAIL_FROM_NAME: str = Field(default="BWC LMS Support", env="EMAIL_FROM_NAME")
+    USE_TLS: bool = Field(default=True, env="USE_TLS")
 
     # ===========================================
     # REDIS (Optional - for caching/token blacklist)

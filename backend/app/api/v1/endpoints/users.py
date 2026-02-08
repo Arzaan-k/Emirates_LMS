@@ -7,9 +7,11 @@ import json
 import logging
 from typing import Dict, Any, Optional, List
 
-from fastapi import APIRouter, Depends, Form, File, UploadFile, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, BackgroundTasks, Request, Form
 from sqlalchemy.orm import Session
-
+from typing import List, Dict, Any, Optional
+import io
+import csv
 from app.config.database import get_db
 from app.core.dependencies import get_current_user, require_admin, require_privilege
 from app.core.middleware import limiter
@@ -25,47 +27,56 @@ router = APIRouter(prefix="/users", tags=["Users"])
 # ==========================================
 
 @router.get("/", response_model=Dict[str, Any])
-async def list_users(
+def list_users(
     page: int = 1,
     limit: int = 50,
     search: str = "",
     store: str = "",
     role: str = "",
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
-    Returns all users (without passwords) with pagination and filtering.
+    Optimized users list with pagination and filtering.
+    Uses single DB round-trip via UserService.
     """
-    service = UserService(db)
+
     skip = (page - 1) * limit
-    
-    users = service.get_all_users(
+    service = UserService(db)
+
+    users, total = service.get_users_with_count(
         skip=skip,
         limit=limit,
-        store=store if store else None,
-        role=role if role else None,
-        search=search if search else None
+        store=store or None,
+        role=role or None,
+        search=search or None,
     )
-    
-    # Remove passwords from response
-    user_list = []
-    for user in users:
-        user_dict = user.to_dict() if hasattr(user, 'to_dict') else dict(user)
-        user_dict.pop('password', None)
-        user_list.append(user_dict)
-        
-    # Get total count for pagination
-    total = service.get_user_count(
-        store=store if store else None,
-        role=role if role else None,
-        search=search if search else None
-    )
-    
+
+    # Fast serialization (no password ever fetched)
+    user_list = [
+        {
+            **(
+                user.to_dict()
+                if hasattr(user, "to_dict")
+                else {
+                    k: v
+                    for k, v in user.__dict__.items()
+                    if not k.startswith("_")
+                }
+            ),
+            **{}
+        }
+        for user in users
+    ]
+
+    for u in user_list:
+        u.pop("password", None)
+
+
     return {
         "users": user_list,
         "total": total,
         "page": page,
-        "total_pages": (total + limit - 1) // limit if limit > 0 else 1
+        "total_pages": (total + limit - 1) // limit if limit > 0 else 1,
     }
 
 
@@ -74,18 +85,18 @@ async def list_users(
 # ==========================================
 
 @router.get("/list")
-async def list_users_alias(
+def list_users_alias(
     page: int = 1,
     limit: int = 50,
     search: str = "",
     store: str = "",
     role: str = "",
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Alias for /users/ - backward compatibility with frontend.
     """
-    return await list_users(page, limit, search, store, role, db)
+    return list_users(page, limit, search, store, role, db)
 
 
 @router.post("/create")
@@ -111,9 +122,9 @@ async def update_user_alias(
     email = data.get("email")
     if not email:
         raise HTTPException(status_code=400, detail="Email is required")
-    
+
     service = UserService(db)
-    
+
     updates = {}
     if "name" in data:
         updates["name"] = data["name"]
@@ -127,7 +138,9 @@ async def update_user_alias(
         updates["privileges"] = data["privileges"]
     if "has_admin_access" in data:
         updates["has_admin_access"] = data["has_admin_access"]
-    
+    if "password" in data and data["password"]:
+        updates["password"] = data["password"]
+
     try:
         user = service.update_user(email, updates)
         logger.info(f"User updated via alias: {email}")
@@ -466,90 +479,516 @@ async def get_stores_summary(db: Session = Depends(get_db)):
 # BULK UPLOAD ENDPOINTS
 # ==========================================
 
-@router.post("/bulk-upload")
-async def bulk_upload_users(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user: Dict[str, Any] = Depends(require_admin)
-):
+
+# In-memory store for upload progress (In a real app, use Redis/DB)
+upload_tasks = {}
+
+@router.get("/bulk-upload/status/{task_id}")
+async def get_bulk_upload_status(task_id: str):
     """
-    Bulk upload users from Excel/CSV file.
-    Expected columns: Name, Email, Password, Role, Category, Store
+    Get the status of a bulk upload background task.
+    """
+    task = upload_tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
+
+def process_bulk_upload_task(task_id: str, contents: bytes):
+    """
+    Background task to process bulk upload.
+    Creates its own database session since the request session becomes invalid 
+    after the request completes.
     """
     import pandas as pd
     import io
+    from app.config.database import SessionLocal
     
-    service = UserService(db)
+    # Create a fresh database session for the background task
+    db = SessionLocal()
     
     try:
-        contents = await file.read()
+        service = UserService(db)
         
-        # Determine file type
-        if file.filename.endswith('.csv'):
-            df = pd.read_csv(io.BytesIO(contents))
-        else:
-            df = pd.read_excel(io.BytesIO(contents))
+        # Determine file type & Load DF
+        try:
+            # We can't easy guess extension from bytes, assume Excel then CSV or try-catch
+            # Since we lost filename, let's try Excel first (most common) then CSV
+            try:
+                df = pd.read_excel(io.BytesIO(contents))
+            except:
+                try:
+                    df = pd.read_csv(io.BytesIO(contents))
+                except:
+                    df = pd.read_csv(io.BytesIO(contents), encoding='ISO-8859-1')
+        except Exception as e:
+            upload_tasks[task_id]["status"] = "failed"
+            upload_tasks[task_id]["error"] = f"Invalid file format: {str(e)}"
+            return
+
+        # Sanitize
+        df.columns = [c.strip() for c in df.columns]
+        total_rows = len(df)
+        upload_tasks[task_id]["total"] = total_rows
         
         created = 0
+        skipped = 0
         errors = []
         
-        for _, row in df.iterrows():
+        for index, row in df.iterrows():
+            # Update progress every 5 rows or so to avoid lock contention if tracking was heavy
+            upload_tasks[task_id]["current"] = index + 1
+            upload_tasks[task_id]["progress"] = int(((index + 1) / total_rows) * 100) if total_rows > 0 else 100
+            
             try:
+                row_dict = {k: (v if pd.notna(v) else None) for k, v in row.items()}
+                
+                # Extract core fields
+                email = str(row_dict.get('Email', row_dict.get('email', ''))).strip()
+                if not email or email.lower() == 'nan' or email.lower() == 'none' or '@' not in email:
+                    skipped += 1
+                    continue
+                    
+                name = str(row_dict.get('Full Name', row_dict.get('Name', row_dict.get('name', '')))).strip()
+                if not name: name = email.split('@')[0]
+                
+                raw_role = str(row_dict.get('Designation', row_dict.get('Role', 'Waffler'))).strip()
+                role = raw_role if raw_role and raw_role.lower() != 'nan' else "Waffler"
+                
+                raw_cat = str(row_dict.get('Category', row_dict.get('Department', 'Employee'))).strip()
+                category = "Employee"
+                if raw_cat and raw_cat.lower() != 'nan':
+                    if "manager" in raw_cat.lower(): category = "Manager"
+                    elif "super" in raw_cat.lower(): category = "Supervisor"
+                    elif "admin" in raw_cat.lower(): category = "Super Admin"
+                
+                store = str(row_dict.get('Store Name', row_dict.get('Store', 'Unassigned'))).strip()
+                if not store or store.lower() == 'nan': store = "Unassigned"
+                
+                password = str(row_dict.get('Password', 'Welcome@123')).strip()
+                profile_data = row_dict
+                
                 user_data = {
-                    "name": str(row.get('Name', row.get('name', ''))),
-                    "email": str(row.get('Email', row.get('email', ''))),
-                    "password": str(row.get('Password', row.get('password', 'changeme123'))),
-                    "role": str(row.get('Role', row.get('role', 'Waffler'))),
-                    "category": str(row.get('Category', row.get('category', 'Employee'))),
-                    "store": str(row.get('Store', row.get('store', 'Unassigned'))),
-                    "privileges": [],
-                    "is_superadmin": False,
-                    "has_admin_access": False,
+                    "name": name, "email": email, "password": password,
+                    "role": role, "category": category, "store": store,
+                    "privileges": [], "is_superadmin": False, "has_admin_access": False,
+                    "profile_data": profile_data
                 }
+                
+                # Check exist - use optional to not raise exception
+                existing_user = service.get_user_by_email_optional(email)
+                if existing_user:
+                    skipped += 1
+                    continue
                 
                 service.create_user(user_data)
                 created += 1
                 
             except Exception as e:
-                errors.append({
-                    "email": user_data.get("email", "unknown"),
-                    "error": str(e)
-                })
-        
-        return {
-            "message": f"Bulk upload complete. Created: {created}, Errors: {len(errors)}",
+                errors.append({"email": row_dict.get("Email", "unknown"), "error": str(e)})
+                logger.error(f"Bulk upload row error: {e}")
+
+        # Complete
+        upload_tasks[task_id]["status"] = "completed"
+        upload_tasks[task_id]["results"] = {
             "created": created,
+            "skipped": skipped,
             "errors": errors
         }
+        logger.info(f"Bulk upload completed: {created} created, {skipped} skipped, {len(errors)} errors")
         
     except Exception as e:
-        logger.error(f"Bulk upload failed: {e}")
-        raise HTTPException(status_code=400, detail=f"Failed to process file: {str(e)}")
+        upload_tasks[task_id]["status"] = "failed"
+        upload_tasks[task_id]["error"] = str(e)
+        logger.error(f"Bulk upload task failed: {e}")
+    finally:
+        # Always close the session
+        db.close()
+
+
+@router.post("/bulk-upload")
+async def bulk_upload_users(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """
+    Start background bulk upload task.
+    """
+    import uuid
+    
+    # Read content here (async) before passing to background task
+    try:
+        contents = await file.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to read file: {e}")
+
+    task_id = str(uuid.uuid4())
+    upload_tasks[task_id] = {
+        "status": "processing",
+        "progress": 0,
+        "total": 0,
+        "current": 0,
+        "filename": file.filename
+    }
+    
+    background_tasks.add_task(process_bulk_upload_task, task_id, contents)
+    
+    return {
+        "status": "processing",
+        "task_id": task_id,
+        "message": "Upload started in background"
+    }
 
 
 @router.get("/bulk-upload/template")
 async def get_bulk_upload_template():
     """
-    Returns the expected format for bulk user upload.
+    Returns the expected format for bulk user upload based on the standard employee export.
     """
     return {
-        "columns": ["Name", "Email", "Password", "Role", "Category", "Store"],
+        "columns": [
+            "Employee Code", "Full Name", "Temporary Employee Code", "User Name", "Date of Birth", 
+            "Gender", "Email", "Contact Number", "Address", "Proof Type", "Proof ID", 
+            "Qualification", "Specialization", "Qualification Status", "Previous Experience Designation", 
+            "Previous Experience", "Marital Status", "Shirt Size", "Denim Size", "Blood Group", 
+            "Account Verified", "Account Approved", "Approved By", "Joining Date", "Date of Resign", 
+            "Date of Leaving", "Reason for Leaving", "Franchise", "Store Name", "Store Code", 
+            "Region", "City", "State", "Designation", "User Status", "Grade", "Concept", 
+            "Department", "Sub Department", "Function", "Sub Function", "Job Role", 
+            "Career Job Roles", "User Created On"
+        ],
         "example": [
             {
-                "Name": "John Doe",
-                "Email": "john@company.com",
-                "Password": "SecurePass123",
-                "Role": "Waffler",
-                "Category": "Employee",
-                "Store": "Mumbai Central"
+                "Employee Code": "BWCO-0028",
+                "Full Name": "Roshan Malekar",
+                "Email": "malekarroshan2@gmail.com",
+                "Designation": "Assistant Store Manager - Store Operations",
+                "Store Name": "C/005-MH-MMR-Ghatkopar",
+                "Department": "Store Operations",
+                "Contact Number": "9177382834",
+                "Gender": "male",
+                "Join Date": "23-09-2017"
             }
         ],
         "notes": [
-            "Role options: Waffler, Silver Waffler, Gold Waffler, Shift Manager, Assistant Store Manager, Store Manager",
-            "Category options: Employee, Supervisor, Manager, Super Admin",
-            "Password will be hashed automatically"
+            "Email is mandatory.",
+            "Default password will be 'Welcome@123' if not specified.",
+            "Designation will be mapped to User Role.",
+            "Store Name will be used for store assignment."
         ]
     }
+
+# ==========================================
+# SMART USER CATEGORIZATION FOR SCHEDULE EXAMS
+# (Must come BEFORE /{email} catch-all route)
+# ==========================================
+
+@router.get("/smart-categories")
+async def get_smart_user_categories(db: Session = Depends(get_db)):
+    """
+    Get smart user categories based on learning progress, roles, and stores.
+    Used for intelligent user selection in Schedule Exams feature.
+
+    Returns categories like:
+    - Completed All Waffler Courses
+    - Completed All Silver Waffler Courses
+    - Ready for Promotion (eligible for next level)
+    - All Current Wafflers (by role)
+    - Mumbai Central Store (by location)
+    """
+    from app.models.user import User, UserNodeProgress
+    from app.models.content import Content
+    from app.repositories.content_repository import AccessRuleRepository
+
+    service = UserService(db)
+    categories = []
+
+    try:
+        # Get all users
+        all_users = db.query(User).all()
+
+        # Category 1: By Current Role
+        role_counts = {}
+        for user in all_users:
+            role = user.role or "Waffler"
+            if role not in role_counts:
+                role_counts[role] = []
+            role_counts[role].append(user.email)
+
+        for role, emails in role_counts.items():
+            categories.append({
+                "id": f"role_{role.lower().replace(' ', '_')}",
+                "name": f"All Current {role}s",
+                "description": f"All users with {role} designation",
+                "type": "role",
+                "user_emails": emails,
+                "count": len(emails),
+                "icon": "users",
+                "color": "#3B82F6"
+            })
+
+        # Category 2: By Store Location
+        store_counts = {}
+        for user in all_users:
+            store = user.store or "Unassigned"
+            if store != "Unassigned" and store.strip():
+                if store not in store_counts:
+                    store_counts[store] = []
+                store_counts[store].append(user.email)
+
+        for store, emails in store_counts.items():
+            categories.append({
+                "id": f"store_{store.lower().replace(' ', '_').replace('/', '_')}",
+                "name": f"{store}",
+                "description": f"All users from {store}",
+                "type": "store",
+                "user_emails": emails,
+                "count": len(emails),
+                "icon": "map-pin",
+                "color": "#10B981"
+            })
+
+        # Category 3: By Course Completion (Career Progression)
+        # Get all career progression courses grouped by role
+        career_courses = db.query(Content).filter(
+            Content.is_path_node == True,
+            Content.learning_path_type == "career_progression"
+        ).all()
+
+        # Group courses by role (from access rules or course metadata)
+        access_repo = AccessRuleRepository(db)
+        access_rules = access_repo.get_all_rules_dict()
+
+        # Define role levels for career progression
+        role_levels = [
+            "Waffler", "Silver Waffler", "Gold Waffler",
+            "Shift Manager", "Assistant Store Manager", "Store Manager"
+        ]
+
+        for role_level in role_levels:
+            # Get courses accessible to this role
+            if role_level in access_rules:
+                accessible_course_ids = access_rules[role_level].get("accessible_courses", [])
+            else:
+                # Fallback: all courses
+                accessible_course_ids = [c.id for c in career_courses]
+
+            if not accessible_course_ids:
+                continue
+
+            # Find users who completed ALL courses for this role
+            completed_users = []
+            for user in all_users:
+                # Get user's completed courses
+                completed_nodes = db.query(UserNodeProgress).filter(
+                    UserNodeProgress.user_email == user.email,
+                    UserNodeProgress.completed == True,
+                    UserNodeProgress.node_id.in_(accessible_course_ids)
+                ).all()
+
+                completed_node_ids = {node.node_id for node in completed_nodes}
+
+                # Check if user completed ALL courses for this role
+                if set(accessible_course_ids).issubset(completed_node_ids):
+                    completed_users.append(user.email)
+
+            if completed_users:
+                categories.append({
+                    "id": f"completed_{role_level.lower().replace(' ', '_')}",
+                    "name": f"Completed All {role_level} Courses",
+                    "description": f"Users who completed all {role_level} career progression courses",
+                    "type": "completion",
+                    "user_emails": completed_users,
+                    "count": len(completed_users),
+                    "icon": "award",
+                    "color": "#F59E0B"
+                })
+
+        # Category 4: Ready for Promotion (completed current role + eligible for next)
+        for i, current_role in enumerate(role_levels[:-1]):  # Exclude last role (Store Manager)
+            next_role = role_levels[i + 1]
+
+            # Get courses for current role
+            if current_role in access_rules:
+                current_courses = access_rules[current_role].get("accessible_courses", [])
+            else:
+                current_courses = []
+
+            if not current_courses:
+                continue
+
+            # Find users who completed current role and are at that designation
+            eligible_users = []
+            for user in all_users:
+                if user.role == current_role:
+                    # Check if completed all current role courses
+                    completed_nodes = db.query(UserNodeProgress).filter(
+                        UserNodeProgress.user_email == user.email,
+                        UserNodeProgress.completed == True,
+                        UserNodeProgress.node_id.in_(current_courses)
+                    ).all()
+
+                    completed_node_ids = {node.node_id for node in completed_nodes}
+
+                    if set(current_courses).issubset(completed_node_ids):
+                        eligible_users.append(user.email)
+
+            if eligible_users:
+                categories.append({
+                    "id": f"promotion_ready_{next_role.lower().replace(' ', '_')}",
+                    "name": f"Ready for {next_role} Exam",
+                    "description": f"Completed {current_role} courses, eligible for {next_role} promotion",
+                    "type": "promotion",
+                    "user_emails": eligible_users,
+                    "count": len(eligible_users),
+                    "icon": "trending-up",
+                    "color": "#8B5CF6"
+                })
+
+        # Category 5: By Progress Percentage (50%, 75%, etc.)
+        progress_thresholds = [
+            {"min": 50, "max": 74, "label": "50-75% Progress"},
+            {"min": 75, "max": 99, "label": "75-99% Progress"}
+        ]
+
+        for threshold in progress_thresholds:
+            threshold_users = []
+            for user in all_users:
+                # Calculate overall progress
+                total_courses = len(career_courses)
+                if total_courses == 0:
+                    continue
+
+                completed_count = db.query(UserNodeProgress).filter(
+                    UserNodeProgress.user_email == user.email,
+                    UserNodeProgress.completed == True,
+                    UserNodeProgress.node_id.in_([c.id for c in career_courses])
+                ).count()
+
+                progress_percent = (completed_count / total_courses) * 100
+
+                if threshold["min"] <= progress_percent <= threshold["max"]:
+                    threshold_users.append(user.email)
+
+            if threshold_users:
+                categories.append({
+                    "id": f"progress_{threshold['min']}_{threshold['max']}",
+                    "name": f"{threshold['label']}",
+                    "description": f"Users with {threshold['label']} in career progression",
+                    "type": "progress",
+                    "user_emails": threshold_users,
+                    "count": len(threshold_users),
+                    "icon": "activity",
+                    "color": "#06B6D4"
+                })
+
+        # Sort categories: Role -> Store -> Completion -> Promotion -> Progress
+        type_order = {"role": 1, "store": 2, "completion": 3, "promotion": 4, "progress": 5}
+        categories.sort(key=lambda x: (type_order.get(x["type"], 99), -x["count"]))
+
+        logger.info(f"Generated {len(categories)} smart user categories")
+        return {"categories": categories, "total": len(categories)}
+
+    except Exception as e:
+        logger.error(f"Smart categories generation failed: {e}")
+        return {"categories": [], "total": 0, "error": str(e)}
+
+
+@router.post("/validate-employee-codes")
+async def validate_employee_codes(
+    data: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    Validate employee codes from bulk upload and return matching user emails.
+    Used for bulk user selection in Schedule Exams feature.
+
+    Request body:
+    {
+        "employee_codes": ["BWCO-0028", "BWCO-0029", ...]
+    }
+
+    Returns:
+    {
+        "matched": ["email1@example.com", "email2@example.com"],
+        "not_found": ["BWCO-9999"],
+        "matched_count": 2,
+        "not_found_count": 1
+    }
+    """
+    from app.models.user import User
+
+    try:
+        employee_codes = data.get("employee_codes", [])
+        if not employee_codes:
+            raise HTTPException(status_code=400, detail="No employee codes provided")
+
+        # Clean and normalize employee codes
+        employee_codes = [str(code).strip() for code in employee_codes if code]
+
+        logger.info(f"Validating {len(employee_codes)} employee codes")
+
+        # Get all users
+        all_users = db.query(User).all()
+
+        # Match employee codes with users
+        # The employee code might be stored in profile_data JSON field or email prefix
+        matched_emails = []
+        not_found_codes = []
+
+        for code in employee_codes:
+            found = False
+
+            # Try multiple matching strategies:
+            # 1. Check if code is in profile_data
+            # 2. Check if email starts with code
+            # 3. Check if name contains code
+
+            for user in all_users:
+                # Strategy 1: Check profile_data for employee_code
+                if user.profile_data and isinstance(user.profile_data, dict):
+                    profile_emp_code = user.profile_data.get("employee_code") or user.profile_data.get("Employee Code")
+                    if profile_emp_code and str(profile_emp_code).strip().upper() == code.upper():
+                        matched_emails.append(user.email)
+                        found = True
+                        break
+
+                # Strategy 2: Check if email starts with employee code (common pattern)
+                if user.email.upper().startswith(code.upper()):
+                    matched_emails.append(user.email)
+                    found = True
+                    break
+
+                # Strategy 3: Check if name contains the code
+                if user.name and code.upper() in user.name.upper():
+                    matched_emails.append(user.email)
+                    found = True
+                    break
+
+            if not found:
+                not_found_codes.append(code)
+
+        # Remove duplicates while preserving order
+        matched_emails = list(dict.fromkeys(matched_emails))
+
+        result = {
+            "matched": matched_emails,
+            "not_found": not_found_codes,
+            "matched_count": len(matched_emails),
+            "not_found_count": len(not_found_codes),
+            "total_codes": len(employee_codes)
+        }
+
+        logger.info(f"Matched {len(matched_emails)}/{len(employee_codes)} employee codes")
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Employee code validation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
+
 
 # ==========================================
 # USER CRUD BY EMAIL (MOVED TO END TO AVOID SHADOWING)
@@ -593,7 +1032,7 @@ async def update_user(
     Updates an existing user's privileges, role, and store assignment.
     """
     service = UserService(db)
-    
+
     updates = {}
     if "name" in data:
         updates["name"] = data["name"]
@@ -607,7 +1046,9 @@ async def update_user(
         updates["privileges"] = data["privileges"]
     if "has_admin_access" in data:
         updates["has_admin_access"] = data["has_admin_access"]
-    
+    if "password" in data and data["password"]:
+        updates["password"] = data["password"]
+
     try:
         user = service.update_user(email, updates)
         logger.info(f"User updated: {email}")
@@ -636,3 +1077,26 @@ async def delete_user(
     except Exception as e:
         logger.error(f"User deletion failed: {e}")
         raise
+
+
+@router.post("/bulk-delete")
+async def bulk_delete_users(
+    data: Dict[str, List[str]],
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """
+    Bulk delete users by list of emails (admin only).
+    """
+    emails = data.get("emails", [])
+    if not emails:
+        raise HTTPException(status_code=400, detail="No emails provided")
+
+    service = UserService(db)
+    try:
+        result = service.bulk_delete_users(emails)
+        logger.info(f"Bulk deleted {result['deleted']} users by {current_user.get('email')}")
+        return result
+    except Exception as e:
+        logger.error(f"Bulk deletion failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

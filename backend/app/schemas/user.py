@@ -3,7 +3,7 @@ User Schemas
 Pydantic models for user-related API operations
 """
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -17,6 +17,7 @@ class UserBase(BaseSchema):
     role: str = Field(default="Waffler", max_length=100)
     category: str = Field(default="Employee", max_length=100)
     store: str = Field(default="Unassigned", max_length=255)
+    profile_data: Optional[Dict[str, Any]] = None
 
 
 class UserCreate(UserBase):
@@ -46,6 +47,7 @@ class UserUpdate(BaseSchema):
     is_superadmin: Optional[bool] = None
     has_admin_access: Optional[bool] = None
     self_learning_completed: Optional[bool] = None
+    profile_data: Optional[Dict[str, Any]] = None
 
 
 class UserResponse(UserBase):

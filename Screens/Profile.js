@@ -18,7 +18,10 @@ import Svg, { Circle, G, Text as SvgText } from "react-native-svg";
 import { useLanguage } from "../context/language.context";
 import { Modal } from "react-native";
 import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import API_URL from '../config';
+import ModeSwitcher from '../Components/ModeSwitcher';
+import ModeIndicator from '../Components/ModeIndicator';
 
 const { width } = Dimensions.get("window");
 
@@ -541,6 +544,9 @@ export default function Profile({ navigation, route }) {
     const { t } = useLanguage();
     const userProfile = route?.params?.userProfile || { name: 'Aditya User', email: 'user' };
 
+    // User Mode State
+    const [userMode, setUserMode] = useState('user');
+
     // Location Tracking State
     const [locationEnabled, setLocationEnabled] = useState(false);
     const [locationInterval, setLocationInterval] = useState(null);
@@ -686,6 +692,21 @@ export default function Profile({ navigation, route }) {
         };
     }, [locationInterval]);
 
+    // Load user mode on mount
+    useEffect(() => {
+        const loadUserMode = async () => {
+            try {
+                const mode = await AsyncStorage.getItem('userMode');
+                if (mode) {
+                    setUserMode(mode);
+                }
+            } catch (error) {
+                console.error('Error loading user mode:', error);
+            }
+        };
+        loadUserMode();
+    }, []);
+
     return (
         <View style={[styles.container, { paddingTop: insets.top }]}>
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
@@ -734,6 +755,16 @@ export default function Profile({ navigation, route }) {
                             <Text style={styles.xpLabel}>{t('totalXP')}</Text>
                         </View>
                     </LinearGradient>
+                </View>
+
+                {/* MODE INDICATOR & SWITCHER */}
+                <View style={styles.modeSection}>
+                    <ModeIndicator mode={userMode} style={{ marginBottom: 12 }} />
+                    <ModeSwitcher
+                        navigation={navigation}
+                        currentMode={userMode}
+                        userProfile={userProfile}
+                    />
                 </View>
 
                 {/* LOCATION TRACKING CARD */}
@@ -1181,5 +1212,19 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontFamily: 'Poppins_600SemiBold',
         color: '#FFF',
+    },
+
+    // MODE SECTION STYLES
+    modeSection: {
+        backgroundColor: '#FFF',
+        borderRadius: 20,
+        padding: 20,
+        marginHorizontal: 20,
+        marginTop: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 12,
+        elevation: 4,
     },
 });

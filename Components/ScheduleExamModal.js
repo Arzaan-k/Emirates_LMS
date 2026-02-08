@@ -10,7 +10,8 @@ import {
     Dimensions,
     ActivityIndicator,
     Alert,
-    FlatList
+    FlatList,
+    Platform
 } from 'react-native';
 import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -31,8 +32,15 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showTimePicker, setShowTimePicker] = useState(false);
     const [location, setLocation] = useState('');
-    const [shift, setShift] = useState('Morning');
     const [supervisorEmail, setSupervisorEmail] = useState('');
+
+    // Batch System State
+    const [numberOfBatches, setNumberOfBatches] = useState(1);
+    const [batchAssignments, setBatchAssignments] = useState([]);
+    const [showBatchDropdown, setShowBatchDropdown] = useState(false);
+    const [usersPerBatch, setUsersPerBatch] = useState(''); // Empty = auto-calculate
+    const [editingBatchIndex, setEditingBatchIndex] = useState(null);
+    const [showBatchEditModal, setShowBatchEditModal] = useState(false);
     const [supervisorName, setSupervisorName] = useState('');
     const [timeLimit, setTimeLimit] = useState('30');
     const [passingScore, setPassingScore] = useState('70');
@@ -42,6 +50,16 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
     const [selectedUsers, setSelectedUsers] = useState([]);
     const [questions, setQuestions] = useState([]);
     const [loadingUsers, setLoadingUsers] = useState(false);
+
+    // Smart Categories
+    const [smartCategories, setSmartCategories] = useState([]);
+    const [selectedCategories, setSelectedCategories] = useState([]);
+    const [loadingCategories, setLoadingCategories] = useState(false);
+
+    // Bulk Upload
+    const [uploadedFileName, setUploadedFileName] = useState('');
+    const [uploadedUsersCount, setUploadedUsersCount] = useState(0);
+    const [processingUpload, setProcessingUpload] = useState(false);
 
     // AI Generation
     const [aiTopic, setAiTopic] = useState('');
@@ -62,6 +80,7 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
         if (visible) {
             fetchUsers();
             fetchStores();
+            fetchSmartCategories();
             // Default supervisor to self only if empty
             if (userProfile && !supervisorEmail) {
                 setSupervisorEmail(userProfile.email || '');
@@ -69,6 +88,116 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
             }
         }
     }, [visible]);
+
+    // Calculate batch timings with 30-min breaks
+    const calculateBatchTimings = (numBatches, perBatch = null) => {
+        const timeLimitMins = parseInt(timeLimit) || 30;
+        const breakMins = 30;
+        const startHour = date.getHours();
+        const startMin = date.getMinutes();
+        
+        const batches = [];
+        let currentTime = startHour * 60 + startMin; // Convert to minutes
+        
+        // Calculate users per batch
+        const totalUsers = selectedUsers.length;
+        const actualPerBatch = perBatch || (totalUsers > 0 ? Math.ceil(totalUsers / numBatches) : 0);
+        
+        for (let i = 0; i < numBatches; i++) {
+            const batchStartHour = Math.floor(currentTime / 60) % 24;
+            const batchStartMin = currentTime % 60;
+            const batchEndTime = currentTime + timeLimitMins;
+            const batchEndHour = Math.floor(batchEndTime / 60) % 24;
+            const batchEndMin = batchEndTime % 60;
+            
+            batches.push({
+                batchNumber: i + 1,
+                startTime: `${String(batchStartHour).padStart(2, '0')}:${String(batchStartMin).padStart(2, '0')}`,
+                endTime: `${String(batchEndHour).padStart(2, '0')}:${String(batchEndMin).padStart(2, '0')}`,
+                maxUsers: actualPerBatch,
+                users: []
+            });
+            
+            // Next batch starts after exam duration + 30 min break
+            currentTime = batchEndTime + breakMins;
+        }
+        
+        return batches;
+    };
+
+    // Distribute users into batches based on usersPerBatch or auto-calculate
+    const distributeBatches = (forcedPerBatch = null) => {
+        if (selectedUsers.length === 0 || numberOfBatches < 1) {
+            setBatchAssignments([]);
+            return;
+        }
+        
+        const perBatch = forcedPerBatch || (usersPerBatch ? parseInt(usersPerBatch) : Math.ceil(selectedUsers.length / numberOfBatches));
+        const batchTimings = calculateBatchTimings(numberOfBatches, perBatch);
+        
+        const newBatchAssignments = batchTimings.map((batch, idx) => {
+            const startIdx = idx * perBatch;
+            const endIdx = Math.min(startIdx + perBatch, selectedUsers.length);
+            return {
+                ...batch,
+                maxUsers: perBatch,
+                users: selectedUsers.slice(startIdx, endIdx)
+            };
+        });
+        
+        setBatchAssignments(newBatchAssignments);
+    };
+
+    // Update single batch timing
+    const updateBatchTiming = (batchIndex, field, value) => {
+        const updated = [...batchAssignments];
+        updated[batchIndex] = { ...updated[batchIndex], [field]: value };
+        
+        // If startTime changed, auto-calculate endTime based on exam duration
+        if (field === 'startTime') {
+            const [hours, mins] = value.split(':').map(Number);
+            const startMins = hours * 60 + mins;
+            const endMins = startMins + (parseInt(timeLimit) || 30);
+            const endHour = Math.floor(endMins / 60) % 24;
+            const endMin = endMins % 60;
+            updated[batchIndex].endTime = `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`;
+        }
+        
+        setBatchAssignments(updated);
+    };
+
+    // Move user between batches
+    const moveUserToBatch = (userEmail, fromBatchIdx, toBatchIdx) => {
+        const updated = [...batchAssignments];
+        const userToMove = updated[fromBatchIdx].users.find(u => u.email === userEmail);
+        
+        if (userToMove) {
+            updated[fromBatchIdx].users = updated[fromBatchIdx].users.filter(u => u.email !== userEmail);
+            updated[toBatchIdx].users = [...updated[toBatchIdx].users, userToMove];
+            setBatchAssignments(updated);
+        }
+    };
+
+    // Update max users per batch
+    const updateBatchMaxUsers = (batchIndex, newMax) => {
+        const updated = [...batchAssignments];
+        updated[batchIndex].maxUsers = parseInt(newMax) || 1;
+        setBatchAssignments(updated);
+    };
+
+    // Redistribute users equally
+    const redistributeUsersEqually = () => {
+        distributeBatches();
+    };
+
+    // Auto-distribute when batches or users change
+    useEffect(() => {
+        if (selectedUsers.length > 0 && numberOfBatches > 0) {
+            distributeBatches();
+        } else if (selectedUsers.length === 0) {
+            setBatchAssignments([]);
+        }
+    }, [selectedUsers.length, numberOfBatches, timeLimit, date]);
 
     // NEW: Filter Logic
     const getFilteredUsers = () => {
@@ -115,11 +244,166 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
         setLoadingUsers(false);
     };
 
+    const fetchSmartCategories = async () => {
+        setLoadingCategories(true);
+        try {
+            console.log("Fetching smart user categories...");
+            const res = await fetch(`${API_URL}/api/v1/users/smart-categories`);
+            const data = await res.json();
+
+            if (data && data.categories) {
+                console.log(`Fetched ${data.categories.length} smart categories`);
+                setSmartCategories(data.categories);
+            } else {
+                console.error('Invalid categories data:', data);
+            }
+        } catch (e) {
+            console.error('Error fetching smart categories:', e);
+            // Fail silently - categories are optional enhancement
+        }
+        setLoadingCategories(false);
+    };
+
     const toggleUserSelection = (email) => {
         if (selectedUsers.includes(email)) {
             setSelectedUsers(selectedUsers.filter(e => e !== email));
         } else {
             setSelectedUsers([...selectedUsers, email]);
+        }
+    };
+
+    const toggleCategorySelection = (categoryId) => {
+        const category = smartCategories.find(c => c.id === categoryId);
+        if (!category) return;
+
+        const isCategorySelected = selectedCategories.includes(categoryId);
+
+        if (isCategorySelected) {
+            // Deselect category - remove its users from selection
+            setSelectedCategories(selectedCategories.filter(id => id !== categoryId));
+            setSelectedUsers(selectedUsers.filter(email => !category.user_emails.includes(email)));
+        } else {
+            // Select category - ADD its users to selection (cumulative)
+            setSelectedCategories([...selectedCategories, categoryId]);
+            const newUsers = [...new Set([...selectedUsers, ...category.user_emails])];
+            setSelectedUsers(newUsers);
+        }
+    };
+
+    const handleBulkUpload = async () => {
+        try {
+            setProcessingUpload(true);
+
+            // Step 1: Pick document
+            const result = await DocumentPicker.getDocumentAsync({
+                type: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel', 'text/csv', 'text/comma-separated-values'],
+                copyToCacheDirectory: true
+            });
+
+            if (result.canceled || !result.assets || result.assets.length === 0) {
+                setProcessingUpload(false);
+                return;
+            }
+
+            const file = result.assets[0];
+            console.log("File picked:", file.name, file.uri);
+
+            // Step 2: Read file based on type
+            let employeeCodes = [];
+
+            if (file.name.endsWith('.csv')) {
+                // Parse CSV
+                const response = await fetch(file.uri);
+                const text = await response.text();
+                const lines = text.split('\n').filter(line => line.trim());
+
+                // Assume first column is Employee Code (skip header if present)
+                const hasHeader = lines[0].toLowerCase().includes('employee') || lines[0].toLowerCase().includes('code');
+                const dataLines = hasHeader ? lines.slice(1) : lines;
+
+                employeeCodes = dataLines.map(line => {
+                    const columns = line.split(',');
+                    return columns[0]?.trim().replace(/"/g, ''); // First column, remove quotes
+                }).filter(code => code);
+
+            } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+                // Parse Excel
+                const response = await fetch(file.uri);
+                const arrayBuffer = await response.arrayBuffer();
+                const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+
+                // Get first sheet
+                const sheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[sheetName];
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+                // Find Employee Code column (check first row for header)
+                const firstRow = jsonData[0] || [];
+                let empCodeIndex = 0;
+
+                // Try to find the column with "Employee Code" header
+                const empCodeColIndex = firstRow.findIndex(col =>
+                    String(col).toLowerCase().includes('employee') && String(col).toLowerCase().includes('code')
+                );
+
+                if (empCodeColIndex !== -1) {
+                    empCodeIndex = empCodeColIndex;
+                    jsonData.shift(); // Remove header row
+                }
+
+                // Extract employee codes from the identified column
+                employeeCodes = jsonData
+                    .map(row => row[empCodeIndex])
+                    .filter(code => code && String(code).trim())
+                    .map(code => String(code).trim());
+            }
+
+            if (employeeCodes.length === 0) {
+                Alert.alert('Error', 'No employee codes found in the file. Please ensure the first column contains employee codes.');
+                setProcessingUpload(false);
+                return;
+            }
+
+            console.log(`Extracted ${employeeCodes.length} employee codes:`, employeeCodes.slice(0, 5), '...');
+
+            // Step 3: Validate employee codes with backend
+            const response = await fetch(`${API_URL}/api/v1/users/validate-employee-codes`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ employee_codes: employeeCodes })
+            });
+
+            if (!response.ok) {
+                throw new Error(`Validation failed: ${response.status}`);
+            }
+
+            const data = await response.json();
+            console.log("Validation result:", data);
+
+            // Step 4: Add matched users to selection (cumulative)
+            if (data.matched && data.matched.length > 0) {
+                const newUsers = [...new Set([...selectedUsers, ...data.matched])];
+                setSelectedUsers(newUsers);
+                setUploadedFileName(file.name);
+                setUploadedUsersCount(data.matched_count);
+
+                // Show success message
+                let message = `✅ Successfully matched ${data.matched_count} users`;
+                if (data.not_found_count > 0) {
+                    message += `\n⚠️ ${data.not_found_count} employee codes not found`;
+                }
+
+                Alert.alert('Bulk Upload Success', message);
+            } else {
+                Alert.alert('No Matches', 'None of the employee codes matched any users in the system.');
+            }
+
+            setProcessingUpload(false);
+
+        } catch (error) {
+            console.error('Bulk upload error:', error);
+            Alert.alert('Upload Error', `Failed to process file: ${error.message}`);
+            setProcessingUpload(false);
         }
     };
 
@@ -215,7 +499,8 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
             formData.append('exam_date', getFormattedDate());
             formData.append('exam_time', getFormattedTime());
             formData.append('location', location);
-            formData.append('shift', shift);
+            formData.append('batch_assignments', JSON.stringify(batchAssignments));
+            formData.append('number_of_batches', numberOfBatches.toString());
             formData.append('supervisor_email', supervisorEmail);
             formData.append('supervisor_name', supervisorName);
             formData.append('assigned_users', JSON.stringify(selectedUsers));
@@ -250,10 +535,15 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
         setDescription('');
         setDate(new Date());
         setLocation('');
-        setShift('Morning');
+        setNumberOfBatches(1);
+        setBatchAssignments([]);
+        setUsersPerBatch('');
         setSelectedUsers([]);
+        setSelectedCategories([]);
         setQuestions([]);
         setActiveStep(1);
+        setUploadedFileName('');
+        setUploadedUsersCount(0);
     };
 
     const onDateChange = (event, selectedDate) => {
@@ -383,27 +673,77 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
             <View style={styles.row}>
                 <View style={{ flex: 1, marginRight: 10 }}>
                     <Text style={styles.inputLabel}>Date *</Text>
-                    <TouchableOpacity
-                        style={styles.pickerBtn}
-                        onPress={() => setShowDatePicker(true)}
-                    >
-                        <Feather name="calendar" size={18} color="#6366F1" />
-                        <Text style={styles.pickerBtnText}>{getFormattedDate()}</Text>
-                    </TouchableOpacity>
+                    {Platform.OS === 'web' ? (
+                        /* WEB: Native HTML date input */
+                        <input
+                            type="date"
+                            value={getFormattedDate()}
+                            min={new Date().toISOString().split('T')[0]}
+                            onChange={(e) => {
+                                const [year, month, day] = e.target.value.split('-');
+                                const newDate = new Date(date);
+                                newDate.setFullYear(parseInt(year), parseInt(month) - 1, parseInt(day));
+                                setDate(newDate);
+                            }}
+                            style={{
+                                width: '100%',
+                                padding: 14,
+                                borderRadius: 12,
+                                border: '1px solid #C7D2FE',
+                                backgroundColor: '#EEF2FF',
+                                fontSize: 15,
+                                fontFamily: 'Poppins, sans-serif',
+                                cursor: 'pointer'
+                            }}
+                        />
+                    ) : (
+                        <TouchableOpacity
+                            style={styles.pickerBtn}
+                            onPress={() => setShowDatePicker(true)}
+                        >
+                            <Feather name="calendar" size={18} color="#6366F1" />
+                            <Text style={styles.pickerBtnText}>{getFormattedDate()}</Text>
+                        </TouchableOpacity>
+                    )}
                 </View>
                 <View style={{ flex: 1 }}>
                     <Text style={styles.inputLabel}>Time *</Text>
-                    <TouchableOpacity
-                        style={styles.pickerBtn}
-                        onPress={() => setShowTimePicker(true)}
-                    >
-                        <Feather name="clock" size={18} color="#6366F1" />
-                        <Text style={styles.pickerBtnText}>{getFormattedTime()}</Text>
-                    </TouchableOpacity>
+                    {Platform.OS === 'web' ? (
+                        /* WEB: Native HTML time input */
+                        <input
+                            type="time"
+                            value={getFormattedTime()}
+                            onChange={(e) => {
+                                const [hours, minutes] = e.target.value.split(':');
+                                const newDate = new Date(date);
+                                newDate.setHours(parseInt(hours), parseInt(minutes));
+                                setDate(newDate);
+                            }}
+                            style={{
+                                width: '100%',
+                                padding: 14,
+                                borderRadius: 12,
+                                border: '1px solid #C7D2FE',
+                                backgroundColor: '#EEF2FF',
+                                fontSize: 15,
+                                fontFamily: 'Poppins, sans-serif',
+                                cursor: 'pointer'
+                            }}
+                        />
+                    ) : (
+                        <TouchableOpacity
+                            style={styles.pickerBtn}
+                            onPress={() => setShowTimePicker(true)}
+                        >
+                            <Feather name="clock" size={18} color="#6366F1" />
+                            <Text style={styles.pickerBtnText}>{getFormattedTime()}</Text>
+                        </TouchableOpacity>
+                    )}
                 </View>
             </View>
 
-            {(showDatePicker || showTimePicker) && (
+            {/* DateTimePicker - Native Only */}
+            {Platform.OS !== 'web' && (showDatePicker || showTimePicker) && (
                 <DateTimePicker
                     value={date}
                     mode={showDatePicker ? 'date' : 'time'}
@@ -448,18 +788,7 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
                 {(!supervisorEmail) && <Text style={styles.helperText}>Select a supervisor to proctor this exam.</Text>}
             </View>
 
-            <Text style={styles.inputLabel}>Shift</Text>
-            <View style={styles.shiftRow}>
-                {['Morning', 'Afternoon', 'Evening'].map(s => (
-                    <TouchableOpacity
-                        key={s}
-                        style={[styles.shiftBtn, shift === s && styles.shiftBtnActive]}
-                        onPress={() => setShift(s)}
-                    >
-                        <Text style={[styles.shiftText, shift === s && styles.shiftTextActive]}>{s}</Text>
-                    </TouchableOpacity>
-                ))}
-            </View>
+{/* Shift removed - replaced with Batch System in Step 2 */}
 
             <View style={styles.row}>
                 <View style={{ flex: 1, marginRight: 10 }}>
@@ -487,10 +816,327 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
     );
 
     const renderStep2 = () => (
-        <View style={{ flex: 1 }}>
+        <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
             <Text style={styles.stepTitle}>Select Participants</Text>
 
-            {/* [NEW] SEARCH & FILTERS */}
+            {/* BATCH CONFIGURATION SYSTEM */}
+            <View style={styles.batchSystemContainer}>
+                <View style={styles.batchHeader}>
+                    <MaterialCommunityIcons name="account-group-outline" size={20} color="#6366F1" />
+                    <Text style={styles.batchTitle}>Batch Configuration</Text>
+                </View>
+                
+                {/* Config Row 1: Number of Batches + Users Per Batch */}
+                <View style={styles.batchConfigRow}>
+                    <View style={styles.batchConfigItem}>
+                        <Text style={styles.batchConfigLabel}>Batches</Text>
+                        <TouchableOpacity 
+                            style={styles.batchDropdown}
+                            onPress={() => setShowBatchDropdown(!showBatchDropdown)}
+                        >
+                            <Text style={styles.batchDropdownText}>{numberOfBatches}</Text>
+                            <Feather name={showBatchDropdown ? "chevron-up" : "chevron-down"} size={16} color="#6366F1" />
+                        </TouchableOpacity>
+                    </View>
+                    
+                    <View style={styles.batchConfigItem}>
+                        <Text style={styles.batchConfigLabel}>Users/Batch</Text>
+                        <TextInput
+                            style={styles.batchConfigInput}
+                            placeholder="Auto"
+                            value={usersPerBatch}
+                            onChangeText={(val) => {
+                                setUsersPerBatch(val);
+                                if (val && selectedUsers.length > 0) {
+                                    distributeBatches(parseInt(val));
+                                }
+                            }}
+                            keyboardType="numeric"
+                        />
+                    </View>
+                    
+                    <TouchableOpacity 
+                        style={styles.redistributeBtn}
+                        onPress={redistributeUsersEqually}
+                    >
+                        <Feather name="refresh-cw" size={16} color="#FFF" />
+                        <Text style={styles.redistributeBtnText}>Auto</Text>
+                    </TouchableOpacity>
+                </View>
+                
+                {showBatchDropdown && (
+                    <View style={styles.dropdownList}>
+                        <ScrollView style={{ maxHeight: 200 }} nestedScrollEnabled>
+                            {[1,2,3,4,5,6,7,8,9,10].map(num => (
+                                <TouchableOpacity
+                                    key={num}
+                                    style={[styles.dropdownItem, numberOfBatches === num && styles.dropdownItemActive]}
+                                    onPress={() => {
+                                        setNumberOfBatches(num);
+                                        setShowBatchDropdown(false);
+                                    }}
+                                >
+                                    <Text style={[styles.dropdownItemText, numberOfBatches === num && styles.dropdownItemTextActive]}>
+                                        {num} {num === 1 ? 'Batch' : 'Batches'}
+                                    </Text>
+                                    {numberOfBatches === num && <Feather name="check" size={16} color="#6366F1" />}
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </View>
+                )}
+
+                {/* Summary Stats */}
+                {selectedUsers.length > 0 && (
+                    <View style={styles.batchStatsRow}>
+                        <View style={styles.batchStat}>
+                            <Text style={styles.batchStatValue}>{selectedUsers.length}</Text>
+                            <Text style={styles.batchStatLabel}>Total Users</Text>
+                        </View>
+                        <View style={styles.batchStatDivider} />
+                        <View style={styles.batchStat}>
+                            <Text style={styles.batchStatValue}>{numberOfBatches}</Text>
+                            <Text style={styles.batchStatLabel}>Batches</Text>
+                        </View>
+                        <View style={styles.batchStatDivider} />
+                        <View style={styles.batchStat}>
+                            <Text style={styles.batchStatValue}>~{Math.ceil(selectedUsers.length / numberOfBatches)}</Text>
+                            <Text style={styles.batchStatLabel}>Per Batch</Text>
+                        </View>
+                    </View>
+                )}
+
+                {/* Editable Batch Cards */}
+                {batchAssignments.length > 0 && selectedUsers.length > 0 && (
+                    <View style={styles.batchCardsContainer}>
+                        <View style={styles.batchCardsHeader}>
+                            <Text style={styles.batchCardsTitle}>📋 Batch Schedule</Text>
+                            <Text style={styles.batchCardsSubtitle}>Tap to edit timings</Text>
+                        </View>
+                        
+                        {batchAssignments.map((batch, idx) => (
+                            <View key={idx} style={styles.editableBatchCard}>
+                                <View style={styles.editableBatchHeader}>
+                                    <View style={styles.batchBadge}>
+                                        <Text style={styles.batchBadgeText}>Batch {batch.batchNumber}</Text>
+                                    </View>
+                                    <View style={styles.batchUsersBadge}>
+                                        <Feather name="users" size={12} color="#6366F1" />
+                                        <Text style={styles.batchUsersText}>{batch.users.length} users</Text>
+                                    </View>
+                                </View>
+                                
+                                {/* Editable Timing Row */}
+                                <View style={styles.batchTimingEditRow}>
+                                    <View style={styles.timeInputGroup}>
+                                        <Text style={styles.timeInputLabel}>Start</Text>
+                                        <TextInput
+                                            style={styles.timeInput}
+                                            value={batch.startTime}
+                                            onChangeText={(val) => updateBatchTiming(idx, 'startTime', val)}
+                                            placeholder="HH:MM"
+                                            maxLength={5}
+                                        />
+                                    </View>
+                                    
+                                    <Feather name="arrow-right" size={16} color="#9CA3AF" style={{ marginHorizontal: 8 }} />
+                                    
+                                    <View style={styles.timeInputGroup}>
+                                        <Text style={styles.timeInputLabel}>End</Text>
+                                        <TextInput
+                                            style={[styles.timeInput, { backgroundColor: '#F3F4F6' }]}
+                                            value={batch.endTime}
+                                            editable={false}
+                                            placeholder="HH:MM"
+                                        />
+                                    </View>
+                                    
+                                    <View style={styles.timeInputGroup}>
+                                        <Text style={styles.timeInputLabel}>Max</Text>
+                                        <TextInput
+                                            style={styles.timeInput}
+                                            value={String(batch.maxUsers || '')}
+                                            onChangeText={(val) => updateBatchMaxUsers(idx, val)}
+                                            keyboardType="numeric"
+                                            placeholder="#"
+                                        />
+                                    </View>
+                                </View>
+                                
+                                {/* User list preview */}
+                                {batch.users.length > 0 && (
+                                    <View style={styles.batchUserPreview}>
+                                        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                                            {batch.users.slice(0, 5).map((user, uIdx) => (
+                                                <View key={uIdx} style={styles.miniUserChip}>
+                                                    <Text style={styles.miniUserChipText} numberOfLines={1}>
+                                                        {user.name?.split(' ')[0] || user.email?.split('@')[0]}
+                                                    </Text>
+                                                </View>
+                                            ))}
+                                            {batch.users.length > 5 && (
+                                                <View style={styles.miniUserChipMore}>
+                                                    <Text style={styles.miniUserChipMoreText}>+{batch.users.length - 5}</Text>
+                                                </View>
+                                            )}
+                                        </ScrollView>
+                                    </View>
+                                )}
+                            </View>
+                        ))}
+                    </View>
+                )}
+                
+                {/* Empty State */}
+                {selectedUsers.length === 0 && (
+                    <View style={styles.batchEmptyState}>
+                        <Feather name="users" size={32} color="#D1D5DB" />
+                        <Text style={styles.batchEmptyText}>Select users below to configure batches</Text>
+                    </View>
+                )}
+            </View>
+
+            {/* SMART CATEGORIES - Improved Grid Layout */}
+            {smartCategories.length > 0 && (
+                <View style={styles.smartCategoriesContainer}>
+                    <View style={styles.smartCategoriesHeader}>
+                        <Text style={styles.smartCategoriesTitle}>✨ Quick Select Categories</Text>
+                        <Text style={styles.smartCategoriesSubtitle}>
+                            {selectedCategories.length > 0
+                                ? `${selectedCategories.length} ${selectedCategories.length === 1 ? 'category' : 'categories'} selected`
+                                : 'Tap to select user groups'
+                            }
+                        </Text>
+                    </View>
+
+                    {/* Grid Layout with Internal Scrolling */}
+                    <ScrollView
+                        style={styles.categoriesScrollView}
+                        showsVerticalScrollIndicator={true}
+                        nestedScrollEnabled={true}
+                    >
+                        <View style={styles.categoriesGrid}>
+                            {smartCategories.map(category => {
+                            const isSelected = selectedCategories.includes(category.id);
+                            const getCategoryColor = () => {
+                                switch (category.type) {
+                                    case 'role': return '#3B82F6';
+                                    case 'store': return '#10B981';
+                                    case 'completion': return '#F59E0B';
+                                    case 'promotion': return '#8B5CF6';
+                                    case 'progress': return '#06B6D4';
+                                    default: return '#6B7280';
+                                }
+                            };
+                            const iconMap = {
+                                'users': 'account-group',
+                                'map-pin': 'map-marker',
+                                'award': 'trophy',
+                                'trending-up': 'trending-up',
+                                'activity': 'chart-line'
+                            };
+
+                            return (
+                                <TouchableOpacity
+                                    key={category.id}
+                                    style={[
+                                        styles.smartCategoryChip,
+                                        isSelected && {
+                                            backgroundColor: getCategoryColor() + '15',
+                                            borderColor: getCategoryColor(),
+                                            borderWidth: 2
+                                        }
+                                    ]}
+                                    onPress={() => toggleCategorySelection(category.id)}
+                                >
+                                    <View style={[styles.categoryIconBadge, { backgroundColor: getCategoryColor() }]}>
+                                        <MaterialCommunityIcons
+                                            name={iconMap[category.icon] || 'account-group'}
+                                            size={16}
+                                            color="#FFF"
+                                        />
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text
+                                            style={[
+                                                styles.smartCategoryName,
+                                                isSelected && { color: getCategoryColor() }
+                                            ]}
+                                            numberOfLines={2}
+                                            ellipsizeMode="tail"
+                                        >
+                                            {category.name}
+                                        </Text>
+                                        <Text style={styles.smartCategoryCount}>
+                                            {category.count} {category.count === 1 ? 'user' : 'users'}
+                                        </Text>
+                                    </View>
+                                    {isSelected && (
+                                        <View style={[styles.categoryCheckmark, { backgroundColor: getCategoryColor() }]}>
+                                            <Feather name="check" size={12} color="#FFF" />
+                                        </View>
+                                    )}
+                                </TouchableOpacity>
+                            );
+                        })}
+                        </View>
+                    </ScrollView>
+                </View>
+            )}
+
+            {/* BULK UPLOAD SECTION */}
+            <View style={styles.bulkUploadContainer}>
+                <View style={styles.bulkUploadHeader}>
+                    <MaterialCommunityIcons name="file-upload" size={18} color="#6366F1" />
+                    <Text style={styles.bulkUploadTitle}>Bulk Upload Users</Text>
+                </View>
+                <Text style={styles.bulkUploadSubtitle}>
+                    Upload Excel or CSV file with employee codes
+                </Text>
+
+                <TouchableOpacity
+                    style={styles.bulkUploadBtn}
+                    onPress={handleBulkUpload}
+                    disabled={processingUpload}
+                >
+                    {processingUpload ? (
+                        <ActivityIndicator size="small" color="#6366F1" />
+                    ) : (
+                        <>
+                            <Feather name="upload" size={16} color="#6366F1" />
+                            <Text style={styles.bulkUploadBtnText}>
+                                {uploadedFileName ? 'Upload Another File' : 'Choose File'}
+                            </Text>
+                        </>
+                    )}
+                </TouchableOpacity>
+
+                {uploadedFileName && (
+                    <View style={styles.uploadSuccessBox}>
+                        <Feather name="check-circle" size={16} color="#10B981" />
+                        <View style={{ flex: 1, marginLeft: 8 }}>
+                            <Text style={styles.uploadSuccessTitle}>{uploadedFileName}</Text>
+                            <Text style={styles.uploadSuccessText}>
+                                {uploadedUsersCount} {uploadedUsersCount === 1 ? 'user' : 'users'} added to selection
+                            </Text>
+                        </View>
+                        <TouchableOpacity
+                            onPress={() => {
+                                setUploadedFileName('');
+                                setUploadedUsersCount(0);
+                            }}
+                        >
+                            <Feather name="x" size={18} color="#6B7280" />
+                        </TouchableOpacity>
+                    </View>
+                )}
+
+                <Text style={styles.bulkUploadHint}>
+                    💡 File should contain employee codes in the first column
+                </Text>
+            </View>
+
+            {/* SEARCH & FILTERS */}
             <View style={styles.filterContainer}>
                 <View style={styles.searchBox}>
                     <Feather name="search" size={18} color="#9CA3AF" />
@@ -530,60 +1176,65 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
                 )}
             </View>
 
-            <Text style={styles.stepSubtitle}>{selectedUsers.length} users selected</Text>
-
-            {loadingUsers ? (
-                <ActivityIndicator size="large" color="#6366F1" style={{ marginTop: 40 }} />
-            ) : (
-                <FlatList
-                    data={getFilteredUsers()}
-                    keyExtractor={item => item.email}
-                    showsVerticalScrollIndicator={false}
-                    renderItem={({ item }) => (
-                        <TouchableOpacity
-                            style={[styles.userItem, selectedUsers.includes(item.email) && styles.userItemSelected]}
-                            onPress={() => toggleUserSelection(item.email)}
-                        >
-                            <View style={styles.userAvatar}>
-                                <Text style={styles.userAvatarText}>{item.name?.charAt(0) || '?'}</Text>
-                            </View>
-                            <View style={{ flex: 1 }}>
-                                <Text style={styles.userName}>{item.name}</Text>
-                                <Text style={styles.userEmail}>{item.email}</Text>
-                            </View>
-                            <View style={[styles.checkbox, selectedUsers.includes(item.email) && styles.checkboxChecked]}>
-                                {selectedUsers.includes(item.email) && (
-                                    <Feather name="check" size={14} color="#FFF" />
-                                )}
-                            </View>
-                        </TouchableOpacity>
-                    )}
-                    ListEmptyComponent={
-                        <Text style={styles.emptyText}>No users found</Text>
-                    }
-                />
-            )}
-
-            <TouchableOpacity
-                style={styles.selectAllBtn}
-                onPress={() => {
-                    const filtered = getFilteredUsers();
-                    if (filtered.length > 0 && filtered.every(u => selectedUsers.includes(u.email))) {
-                        // Deselect all visible
-                        setSelectedUsers(selectedUsers.filter(email => !filtered.find(u => u.email === email)));
-                    } else {
-                        // Select all visible
-                        const newSelected = new Set([...selectedUsers, ...filtered.map(u => u.email)]);
-                        setSelectedUsers(Array.from(newSelected));
-                    }
-                }}
-            >
-                <Feather name="check-square" size={18} color="#6366F1" />
-                <Text style={styles.selectAllText}>
-                    Select All Visible
+            <View style={styles.userSelectionHeader}>
+                <Text style={styles.stepSubtitle}>
+                    {selectedUsers.length} {selectedUsers.length === 1 ? 'user' : 'users'} selected
                 </Text>
-            </TouchableOpacity>
-        </View>
+                <TouchableOpacity
+                    style={styles.selectAllBtnCompact}
+                    onPress={() => {
+                        const filtered = getFilteredUsers();
+                        if (filtered.length > 0 && filtered.every(u => selectedUsers.includes(u.email))) {
+                            // Deselect all visible
+                            setSelectedUsers(selectedUsers.filter(email => !filtered.find(u => u.email === email)));
+                        } else {
+                            // Select all visible
+                            const newSelected = new Set([...selectedUsers, ...filtered.map(u => u.email)]);
+                            setSelectedUsers(Array.from(newSelected));
+                        }
+                    }}
+                >
+                    <Feather name="check-square" size={16} color="#6366F1" />
+                    <Text style={styles.selectAllTextCompact}>Select All Visible</Text>
+                </TouchableOpacity>
+            </View>
+
+            {/* User List with Fixed Height for Scrolling */}
+            <View style={styles.userListContainer}>
+                {loadingUsers ? (
+                    <ActivityIndicator size="large" color="#6366F1" style={{ marginTop: 40 }} />
+                ) : (
+                    <FlatList
+                        data={getFilteredUsers()}
+                        keyExtractor={item => item.email}
+                        showsVerticalScrollIndicator={true}
+                        nestedScrollEnabled={true}
+                        renderItem={({ item }) => (
+                            <TouchableOpacity
+                                style={[styles.userItem, selectedUsers.includes(item.email) && styles.userItemSelected]}
+                                onPress={() => toggleUserSelection(item.email)}
+                            >
+                                <View style={styles.userAvatar}>
+                                    <Text style={styles.userAvatarText}>{item.name?.charAt(0) || '?'}</Text>
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.userName}>{item.name}</Text>
+                                    <Text style={styles.userEmail}>{item.email}</Text>
+                                </View>
+                                <View style={[styles.checkbox, selectedUsers.includes(item.email) && styles.checkboxChecked]}>
+                                    {selectedUsers.includes(item.email) && (
+                                        <Feather name="check" size={14} color="#FFF" />
+                                    )}
+                                </View>
+                            </TouchableOpacity>
+                        )}
+                        ListEmptyComponent={
+                            <Text style={styles.emptyText}>No users found</Text>
+                        }
+                    />
+                )}
+            </View>
+        </ScrollView>
     );
 
     const renderStep3 = () => (
@@ -740,9 +1391,9 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
                     <Text style={styles.reviewValue}>{location}</Text>
                 </View>
                 <View style={styles.reviewRow}>
-                    <Feather name="clock" size={18} color="#6B7280" />
-                    <Text style={styles.reviewLabel}>Shift:</Text>
-                    <Text style={styles.reviewValue}>{shift}</Text>
+                    <MaterialCommunityIcons name="account-group" size={18} color="#6B7280" />
+                    <Text style={styles.reviewLabel}>Batches:</Text>
+                    <Text style={styles.reviewValue}>{numberOfBatches} {numberOfBatches === 1 ? 'batch' : 'batches'}</Text>
                 </View>
                 <View style={styles.reviewRow}>
                     <Feather name="users" size={18} color="#6B7280" />
@@ -766,8 +1417,22 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
                 </View>
             </View>
 
+            {/* Batch Schedule Summary */}
+            {batchAssignments.length > 0 && (
+                <View style={styles.batchReviewContainer}>
+                    <Text style={styles.batchReviewTitle}>📋 Batch Schedule</Text>
+                    {batchAssignments.map((batch, idx) => (
+                        <View key={idx} style={styles.batchReviewRow}>
+                            <Text style={styles.batchReviewLabel}>Batch {batch.batchNumber}:</Text>
+                            <Text style={styles.batchReviewTime}>{batch.startTime} - {batch.endTime}</Text>
+                            <Text style={styles.batchReviewUsers}>({batch.users.length} users)</Text>
+                        </View>
+                    ))}
+                </View>
+            )}
+
             <Text style={styles.noteText}>
-                📢 Notifications will be sent to all selected participants with exam details.
+                📢 Notifications will be sent to all selected participants with their batch timings.
             </Text>
         </ScrollView>
     );
@@ -863,7 +1528,14 @@ export default function ScheduleExamModal({ visible, onClose, userProfile }) {
 
 const styles = StyleSheet.create({
     overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-    container: { height: height * 0.92, backgroundColor: '#F9FAFB', borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden' },
+    container: {
+        height: Platform.OS === 'web' ? '90vh' : height * 0.92,
+        maxHeight: 900,
+        backgroundColor: '#F9FAFB',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        overflow: 'hidden'
+    },
     header: { paddingTop: 20, paddingBottom: 16, paddingHorizontal: 20 },
     headerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
     closeBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
@@ -952,4 +1624,591 @@ const styles = StyleSheet.create({
     supervisorNameActive: { color: '#059669' },
     helperText: { fontSize: 12, fontFamily: 'Poppins_400Regular', color: '#9CA3AF', marginTop: 4, fontStyle: 'italic' },
     filterLabel: { fontSize: 12, fontFamily: 'Poppins_500Medium', color: '#6B7280', alignSelf: 'center', marginRight: 8 },
+
+    // Smart Categories - Compact Mobile Layout
+    smartCategoriesContainer: {
+        marginBottom: 16,
+        backgroundColor: '#FFFFFF',
+        padding: 12,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.03,
+        shadowRadius: 2,
+        elevation: 1
+    },
+    smartCategoriesHeader: {
+        marginBottom: 10,
+        paddingBottom: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F3F4F6'
+    },
+    smartCategoriesTitle: {
+        fontSize: 14,
+        fontFamily: 'Poppins_700Bold',
+        color: '#111827',
+        marginBottom: 2
+    },
+    smartCategoriesSubtitle: {
+        fontSize: 11,
+        fontFamily: 'Poppins_500Medium',
+        color: '#6B7280'
+    },
+    categoriesGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'flex-start',
+        gap: 8
+    },
+    categoriesScrollView: {
+        maxHeight: 200
+    },
+    smartCategoryChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#F9FAFB',
+        paddingVertical: 8,
+        paddingHorizontal: 10,
+        borderRadius: 10,
+        width: Platform.OS === 'web' ? '48.5%' : '100%',
+        marginBottom: 0,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 2,
+        elevation: 1
+    },
+    categoryIconBadge: {
+        width: 28,
+        height: 28,
+        borderRadius: 7,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 8
+    },
+    smartCategoryName: {
+        fontSize: 12,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#111827',
+        marginBottom: 2,
+        lineHeight: 16
+    },
+    smartCategoryCount: {
+        fontSize: 10,
+        fontFamily: 'Poppins_500Medium',
+        color: '#6B7280'
+    },
+    categoryCheckmark: {
+        width: 16,
+        height: 16,
+        borderRadius: 8,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginLeft: 4
+    },
+
+    // User Selection Header
+    userSelectionHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 12,
+        paddingHorizontal: 4
+    },
+    selectAllBtnCompact: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingVertical: 6,
+        paddingHorizontal: 12,
+        backgroundColor: '#EEF2FF',
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#C7D2FE'
+    },
+    selectAllTextCompact: {
+        fontSize: 12,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#6366F1'
+    },
+
+    // User List Container with Fixed Height
+    userListContainer: {
+        flex: 1,
+        minHeight: 300,
+        maxHeight: 400,
+        backgroundColor: '#FFF',
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        padding: 8
+    },
+
+    // Bulk Upload Styles
+    bulkUploadContainer: {
+        marginBottom: 16,
+        backgroundColor: '#F9FAFB',
+        padding: 14,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        borderStyle: 'dashed'
+    },
+    bulkUploadHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 4
+    },
+    bulkUploadTitle: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#111827',
+        marginLeft: 6
+    },
+    bulkUploadSubtitle: {
+        fontSize: 11,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        marginBottom: 10
+    },
+    bulkUploadBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        backgroundColor: '#EEF2FF',
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#C7D2FE',
+        gap: 6,
+        minHeight: 40
+    },
+    bulkUploadBtnText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#6366F1'
+    },
+    uploadSuccessBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#ECFDF5',
+        padding: 10,
+        borderRadius: 8,
+        marginTop: 10,
+        borderWidth: 1,
+        borderColor: '#A7F3D0'
+    },
+    uploadSuccessTitle: {
+        fontSize: 12,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#059669',
+        marginBottom: 2
+    },
+    uploadSuccessText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_400Regular',
+        color: '#047857'
+    },
+    bulkUploadHint: {
+        fontSize: 10,
+        fontFamily: 'Poppins_400Regular',
+        color: '#9CA3AF',
+        marginTop: 8,
+        fontStyle: 'italic',
+        textAlign: 'center'
+    },
+
+    // Batch System Styles
+    batchSystemContainer: {
+        marginBottom: 16,
+        backgroundColor: '#EEF2FF',
+        padding: 14,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#C7D2FE'
+    },
+    batchHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 12
+    },
+    batchTitle: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#4338CA',
+        marginLeft: 8
+    },
+    batchRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 8
+    },
+    batchLabel: {
+        fontSize: 13,
+        fontFamily: 'Poppins_500Medium',
+        color: '#374151'
+    },
+    batchDropdown: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFF',
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#C7D2FE',
+        minWidth: 100,
+        justifyContent: 'space-between'
+    },
+    batchDropdownText: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#6366F1',
+        marginRight: 8
+    },
+    dropdownList: {
+        backgroundColor: '#FFF',
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        marginTop: 4,
+        overflow: 'hidden',
+        elevation: 4,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4
+    },
+    dropdownItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F3F4F6'
+    },
+    dropdownItemActive: {
+        backgroundColor: '#EEF2FF'
+    },
+    dropdownItemText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_500Medium',
+        color: '#374151'
+    },
+    dropdownItemTextActive: {
+        color: '#6366F1',
+        fontFamily: 'Poppins_600SemiBold'
+    },
+    batchPreview: {
+        marginTop: 12,
+        backgroundColor: '#FFF',
+        padding: 12,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#E5E7EB'
+    },
+    batchPreviewTitle: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#111827',
+        marginBottom: 2
+    },
+    batchPreviewSubtitle: {
+        fontSize: 11,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280'
+    },
+    batchCard: {
+        backgroundColor: '#F9FAFB',
+        padding: 12,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        marginRight: 10,
+        minWidth: 110
+    },
+    batchCardHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 6
+    },
+    batchCardTitle: {
+        fontSize: 12,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#4338CA'
+    },
+    batchUserCount: {
+        backgroundColor: '#6366F1',
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        justifyContent: 'center',
+        alignItems: 'center'
+    },
+    batchUserCountText: {
+        fontSize: 10,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF'
+    },
+    batchTimeRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4
+    },
+    batchTimeText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_500Medium',
+        color: '#6366F1'
+    },
+
+    // Batch Review Styles (Step 4)
+    batchReviewContainer: {
+        backgroundColor: '#EEF2FF',
+        padding: 14,
+        borderRadius: 12,
+        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: '#C7D2FE'
+    },
+    batchReviewTitle: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#4338CA',
+        marginBottom: 10
+    },
+    batchReviewRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 6,
+        borderBottomWidth: 1,
+        borderBottomColor: '#C7D2FE'
+    },
+    batchReviewLabel: {
+        fontSize: 12,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#4338CA',
+        width: 70
+    },
+    batchReviewTime: {
+        fontSize: 12,
+        fontFamily: 'Poppins_500Medium',
+        color: '#374151',
+        flex: 1
+    },
+    batchReviewUsers: {
+        fontSize: 11,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280'
+    },
+
+    // NEW: Customizable Batch System Styles
+    batchConfigRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-end',
+        gap: 12,
+        marginTop: 12
+    },
+    batchConfigItem: {
+        flex: 1
+    },
+    batchConfigLabel: {
+        fontSize: 11,
+        fontFamily: 'Poppins_500Medium',
+        color: '#6B7280',
+        marginBottom: 4
+    },
+    batchConfigInput: {
+        backgroundColor: '#FFF',
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        borderRadius: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        fontSize: 14,
+        fontFamily: 'Poppins_500Medium',
+        color: '#111827',
+        textAlign: 'center'
+    },
+    redistributeBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#6366F1',
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        borderRadius: 8,
+        gap: 6
+    },
+    redistributeBtnText: {
+        fontSize: 12,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF'
+    },
+    batchStatsRow: {
+        flexDirection: 'row',
+        backgroundColor: '#FFF',
+        borderRadius: 10,
+        padding: 12,
+        marginTop: 12,
+        borderWidth: 1,
+        borderColor: '#E5E7EB'
+    },
+    batchStat: {
+        flex: 1,
+        alignItems: 'center'
+    },
+    batchStatValue: {
+        fontSize: 18,
+        fontFamily: 'Poppins_700Bold',
+        color: '#6366F1'
+    },
+    batchStatLabel: {
+        fontSize: 10,
+        fontFamily: 'Poppins_400Regular',
+        color: '#9CA3AF',
+        marginTop: 2
+    },
+    batchStatDivider: {
+        width: 1,
+        backgroundColor: '#E5E7EB',
+        marginHorizontal: 8
+    },
+    batchCardsContainer: {
+        marginTop: 14
+    },
+    batchCardsHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 10
+    },
+    batchCardsTitle: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#111827'
+    },
+    batchCardsSubtitle: {
+        fontSize: 11,
+        fontFamily: 'Poppins_400Regular',
+        color: '#9CA3AF'
+    },
+    editableBatchCard: {
+        backgroundColor: '#FFF',
+        borderRadius: 12,
+        padding: 14,
+        marginBottom: 10,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        shadowColor: '#6366F1',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 4,
+        elevation: 2
+    },
+    editableBatchHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 12
+    },
+    batchBadge: {
+        backgroundColor: '#6366F1',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 6
+    },
+    batchBadgeText: {
+        fontSize: 12,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF'
+    },
+    batchUsersBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#EEF2FF',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 6,
+        gap: 4
+    },
+    batchUsersText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_500Medium',
+        color: '#6366F1'
+    },
+    batchTimingEditRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 10
+    },
+    timeInputGroup: {
+        flex: 1
+    },
+    timeInputLabel: {
+        fontSize: 10,
+        fontFamily: 'Poppins_500Medium',
+        color: '#9CA3AF',
+        marginBottom: 4,
+        textAlign: 'center'
+    },
+    timeInput: {
+        backgroundColor: '#F9FAFB',
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        borderRadius: 8,
+        paddingHorizontal: 8,
+        paddingVertical: 8,
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#111827',
+        textAlign: 'center'
+    },
+    batchUserPreview: {
+        marginTop: 8,
+        paddingTop: 10,
+        borderTopWidth: 1,
+        borderTopColor: '#F3F4F6'
+    },
+    miniUserChip: {
+        backgroundColor: '#F3F4F6',
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 16,
+        marginRight: 6
+    },
+    miniUserChipText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_500Medium',
+        color: '#4B5563',
+        maxWidth: 60
+    },
+    miniUserChipMore: {
+        backgroundColor: '#6366F1',
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 16
+    },
+    miniUserChipMoreText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF'
+    },
+    batchEmptyState: {
+        alignItems: 'center',
+        paddingVertical: 24,
+        gap: 8
+    },
+    batchEmptyText: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#9CA3AF',
+        textAlign: 'center'
+    }
 });

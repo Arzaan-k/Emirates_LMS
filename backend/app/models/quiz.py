@@ -100,9 +100,9 @@ class QuizSubmission(Base):
              return self.score >= self.quiz.passing_score
         return self.score >= 70.0  # Default passing score if undefined
 
-    time_taken_seconds = Column(Integer)
+    # time_taken_seconds = Column(Integer)  # DISABLED: Column missing in prod DB
+    # attempt_number = Column(Integer, default=1)  # DISABLED: Column missing in prod DB
     submitted_at = Column(DateTime, default=datetime.utcnow)
-    attempt_number = Column(Integer, default=1)
 
     # Relationships
     quiz = relationship("Quiz", back_populates="submissions")
@@ -129,9 +129,9 @@ class QuizSubmission(Base):
             "score": self.score,
             "score_percent": self.score,
             "passed": self.passed,
-            "time_taken_seconds": self.time_taken_seconds,
+            "time_taken_seconds": getattr(self, 'time_taken_seconds', 0) or 0,
             "submitted_at": self.submitted_at.isoformat() if self.submitted_at else None,
-            "attempt_number": self.attempt_number,
+            "attempt_number": getattr(self, 'attempt_number', 1) or 1,
         }
 
 

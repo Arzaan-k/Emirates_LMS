@@ -95,7 +95,7 @@ class AssessmentSubmission(Base):
     total_questions = Column(Integer)
     score_percent = Column(Float)
     passed = Column(Boolean, default=False)
-    time_taken_seconds = Column(Integer)
+    # time_taken_seconds = Column(Integer)  # REMOVED: May be missing in prod DB
     time_limit_seconds = Column(Integer)
     violations = Column(Integer, default=0)
     breach_log = Column(JSON, default=[])
@@ -105,7 +105,7 @@ class AssessmentSubmission(Base):
     integrity_score = Column(Float, default=100.0)
     submitted_at = Column(DateTime, default=datetime.utcnow)
     started_at = Column(DateTime)
-    attempt_number = Column(Integer, default=1)
+    # attempt_number = Column(Integer, default=1)  # DISABLED: May be missing in prod DB
 
     # Relationships
     assessment = relationship("ProcturedAssessment", back_populates="submissions")
@@ -141,13 +141,13 @@ class AssessmentSubmission(Base):
             "total_questions": self.total_questions,
             "score_percent": self.score_percent,
             "passed": self.passed,
-            "time_taken_seconds": self.time_taken_seconds,
+            "time_taken_seconds": getattr(self, 'time_taken_seconds', 0) or 0,
             "violations": self.violations,
             "integrity_status": self.integrity_status,
             "integrity_score": self.integrity_score,
             "submitted_at": safe_iso(self.submitted_at),
             "started_at": safe_iso(self.started_at),
-            "attempt_number": self.attempt_number,
+            "attempt_number": getattr(self, 'attempt_number', 1) or 1,
         }
 
 
@@ -165,7 +165,10 @@ class ScheduledExam(Base):
     exam_time = Column(String(100))
     exam_datetime = Column(DateTime)  # Combined date and time
     location = Column(String(255))
-    shift = Column(String(100))
+    shift = Column(String(100))  # Legacy - kept for backward compatibility
+    # Batch System Fields
+    number_of_batches = Column(Integer, default=1)
+    batch_assignments = Column(JSON, default=[])  # [{batchNumber, startTime, endTime, maxUsers, users: [...]}]
     supervisor_email = Column(String(255))
     supervisor_name = Column(String(255))
     assigned_users = Column(JSON, default=[])
@@ -212,7 +215,12 @@ class ScheduledExam(Base):
             "exam_time": self.exam_time,
             "exam_datetime": safe_iso(self.exam_datetime),
             "location": self.location,
-            "shift": self.shift,
+            "shift": self.shift,  # Legacy - kept for backward compatibility
+            "number_of_batches": self.number_of_batches or 1,
+            "batch_assignments": self.batch_assignments or [],
+            # CamelCase aliases for frontend
+            "numberOfBatches": self.number_of_batches or 1,
+            "batchAssignments": self.batch_assignments or [],
             "supervisor_email": self.supervisor_email,
             "supervisor_name": self.supervisor_name,
             "assigned_users": self.assigned_users or [],
