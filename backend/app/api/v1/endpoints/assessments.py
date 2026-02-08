@@ -538,6 +538,18 @@ async def get_user_scheduled_exams(
     service = AssessmentService(db)
     exams = service.get_scheduled_exams_for_user(user_email)
 
+    # Pre-fetch attendance for this user to avoid N+1 queries
+    from app.models.assessment import ExamAttendance
+    exam_ids = [e.id for e in exams]
+    attendances = []
+    if exam_ids:
+        attendances = db.query(ExamAttendance).filter(
+            ExamAttendance.user_email == user_email,
+            ExamAttendance.exam_id.in_(exam_ids)
+        ).all()
+    
+    attendance_map = {a.exam_id: a for a in attendances}
+
     result = []
     current_datetime = datetime.utcnow()
 
@@ -598,6 +610,20 @@ async def get_user_scheduled_exams(
         else:
             # No batch assignments - use default exam timing
             exam_dict['is_batch_exam'] = False
+
+        # Inject Attendance Status
+        attendance = attendance_map.get(exam.id)
+        marked_present = attendance.marked_present if attendance else False
+        has_completed = attendance.completed if attendance else False
+        
+        exam_dict['marked_present'] = marked_present
+        exam_dict['has_completed'] = has_completed
+        
+        # 'can_start' logic: 
+        # 1. Must be marked present
+        # 2. Must not be completed
+        # 3. Can add time check if needed, but 'marked_present' usually implies time is valid or supervisor allowed it
+        exam_dict['can_start'] = marked_present and not has_completed
 
         result.append(exam_dict)
 
@@ -945,7 +971,13 @@ async def submit_scheduled_exam(
     }
     
     try:
-        result = service.submit_scheduled_exam(exam_id, submission_data)
+        result = service.submit_scheduled_exam(
+            exam_id=exam_id,
+            user_email=submission_data["user_email"],
+            user_name=submission_data["user_name"],
+            answers=submission_data["answers"],
+            time_taken_seconds=submission_data["time_taken_seconds"]
+        )
         logger.info(f"Scheduled exam submitted: {user_email} - {exam_id}")
         return result
     except Exception as e:
@@ -1032,7 +1064,7 @@ async def validate_user_location(
     """
     try:
         service = AssessmentService(db)
-        exam = service.get_scheduled_exam(exam_id)
+        exam = service.get_scheduled_exam_by_id(exam_id)
 
         if not exam:
             raise HTTPException(status_code=404, detail="Exam not found")
@@ -1092,20 +1124,20 @@ async def validate_user_location(
 async def generate_exam_pin(
     exam_id: str,
     batch_number: Optional[int] = Form(None),
+    keep_old_pin: bool = Form(False),
+    validity_minutes: Optional[int] = Form(None),
     db: Session = Depends(get_db)
 ):
     """
     Generate a 4-digit PIN for exam check-in.
-    This would typically be called by a scheduler X minutes before exam start.
-
-    Returns:
-        - pin: str - 4-digit PIN
-        - valid_until: datetime - When PIN expires
-        - batch_number: int - Batch number (if applicable)
+    
+    Args:
+        keep_old_pin: If True, moves current PIN to active_pins list instead of overwriting.
+        validity_minutes: Override default validity duration (e.g. 5 mins for regen).
     """
     try:
         service = AssessmentService(db)
-        exam = service.get_scheduled_exam(exam_id)
+        exam = service.get_scheduled_exam_by_id(exam_id)
 
         if not exam:
             raise HTTPException(status_code=404, detail="Exam not found")
@@ -1114,16 +1146,46 @@ async def generate_exam_pin(
         if not exam.pin_enabled:
             raise HTTPException(status_code=400, detail="PIN feature not enabled for this exam")
 
+        # Handle keeping old PIN
+        active_pins = list(exam.active_pins) if exam.active_pins else []
+        
+        # Clean up expired pins from active_pins first
+        now = datetime.utcnow()
+        active_pins = [
+            p for p in active_pins 
+            if datetime.fromisoformat(p['valid_until']) > now
+        ]
+
+        if keep_old_pin and exam.generated_pin and exam.pin_generated_at:
+            current_validity = exam.pin_validity_minutes or 30
+            old_valid_until = exam.pin_generated_at + timedelta(minutes=current_validity)
+            
+            if old_valid_until > now:
+                # Add current pin to active_pins
+                active_pins.append({
+                    "pin": exam.generated_pin,
+                    "generated_at": exam.pin_generated_at.isoformat(),
+                    "valid_until": old_valid_until.isoformat()
+                })
+
         # Generate random 4-digit PIN
         pin = str(random.randint(1000, 9999))
+        while pin == exam.generated_pin or any(p['pin'] == pin for p in active_pins):
+             pin = str(random.randint(1000, 9999))
+
+        # Update validity if provided
+        if validity_minutes:
+            exam.pin_validity_minutes = validity_minutes
 
         # Calculate expiry time
-        validity_minutes = exam.pin_validity_minutes or 30
-        valid_until = datetime.utcnow() + timedelta(minutes=validity_minutes)
+        final_validity = exam.pin_validity_minutes or 30
+        valid_until = now + timedelta(minutes=final_validity)
 
-        # Update exam with generated PIN
+        # Update exam with generated PIN and active_pins list
         exam.generated_pin = pin
-        exam.pin_generated_at = datetime.utcnow()
+        exam.pin_generated_at = now
+        exam.active_pins = active_pins
+        
         db.commit()
 
         logger.info(f"Generated PIN {pin} for exam {exam_id}, valid until {valid_until}")
@@ -1133,7 +1195,8 @@ async def generate_exam_pin(
             "generated_at": exam.pin_generated_at.isoformat(),
             "valid_until": valid_until.isoformat(),
             "validity_minutes": validity_minutes,
-            "batch_number": batch_number
+            "batch_number": batch_number,
+            "active_pins_count": len(active_pins)
         }
 
     except HTTPException:
@@ -1142,6 +1205,32 @@ async def generate_exam_pin(
         logger.error(f"PIN generation error: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=f"PIN generation failed: {str(e)}")
+
+
+@router.put("/scheduled/{exam_id}/toggle-pin")
+async def toggle_exam_pin(
+    exam_id: str,
+    enabled: bool = Form(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Toggle PIN feature for a scheduled exam.
+    """
+    try:
+        service = AssessmentService(db)
+        exam = service.get_scheduled_exam_by_id(exam_id)
+        
+        # Update pin_enabled status
+        service.update_scheduled_exam(exam_id, {"pin_enabled": enabled})
+        
+        return {
+            "status": "success", 
+            "message": f"PIN feature {'enabled' if enabled else 'disabled'}",
+            "pin_enabled": enabled
+        }
+    except Exception as e:
+        logger.error(f"Toggle PIN failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/scheduled/{exam_id}/pin-status")
@@ -1162,7 +1251,7 @@ async def get_exam_pin_status(
     """
     try:
         service = AssessmentService(db)
-        exam = service.get_scheduled_exam(exam_id)
+        exam = service.get_scheduled_exam_by_id(exam_id)
 
         if not exam:
             raise HTTPException(status_code=404, detail="Exam not found")
@@ -1198,6 +1287,7 @@ async def get_exam_pin_status(
         return {
             "pin_enabled": True,
             "pin": exam.generated_pin,
+            "active_pins": exam.active_pins or [],
             "is_active": is_active,
             "generated_at": exam.pin_generated_at.isoformat() if exam.pin_generated_at else None,
             "valid_until": valid_until.isoformat() if valid_until else None,
@@ -1236,7 +1326,7 @@ async def validate_exam_pin(
     """
     try:
         service = AssessmentService(db)
-        exam = service.get_scheduled_exam(exam_id)
+        exam = service.get_scheduled_exam_by_id(exam_id)
 
         if not exam:
             raise HTTPException(status_code=404, detail="Exam not found")
@@ -1257,25 +1347,36 @@ async def validate_exam_pin(
                 "message": "PIN not generated yet. Please ask your supervisor."
             }
 
-        # Validate PIN
-        if exam.generated_pin != pin:
-            logger.warning(f"Invalid PIN attempt by {user_email} for exam {exam_id}")
+        # 1. Validate against latest PIN
+        is_latest_valid = False
+        if exam.generated_pin and exam.generated_pin == pin:
+            validity_minutes = exam.pin_validity_minutes or 30
+            if exam.pin_generated_at:
+                expiry_time = exam.pin_generated_at + timedelta(minutes=validity_minutes)
+                if datetime.utcnow() <= expiry_time:
+                    is_latest_valid = True
+
+        # 2. Validate against active_pins list
+        is_alt_valid = False
+        if not is_latest_valid and exam.active_pins:
+            now = datetime.utcnow()
+            for p in exam.active_pins:
+                if p.get('pin') == pin:
+                    # Check expiry
+                    try:
+                        valid_until = datetime.fromisoformat(p.get('valid_until'))
+                        if now <= valid_until:
+                            is_alt_valid = True
+                            break
+                    except:
+                        pass
+
+        if not (is_latest_valid or is_alt_valid):
+            logger.warning(f"Invalid or expired PIN attempt by {user_email} for exam {exam_id}")
             return {
                 "valid": False,
                 "marked_present": False,
-                "message": "Incorrect PIN"
-            }
-
-        # Check if PIN is expired
-        validity_minutes = exam.pin_validity_minutes or 30
-        expiry_time = exam.pin_generated_at + timedelta(minutes=validity_minutes)
-
-        if datetime.utcnow() > expiry_time:
-            logger.warning(f"Expired PIN attempt by {user_email} for exam {exam_id}")
-            return {
-                "valid": False,
-                "marked_present": False,
-                "message": "PIN has expired. Please ask supervisor for a new PIN."
+                "message": "Invalid or expired PIN"
             }
 
         # Check geofencing if enabled
@@ -1386,7 +1487,7 @@ async def supervisor_override_location(
     """
     try:
         service = AssessmentService(db)
-        exam = service.get_scheduled_exam(exam_id)
+        exam = service.get_scheduled_exam_by_id(exam_id)
 
         if not exam:
             raise HTTPException(status_code=404, detail="Exam not found")

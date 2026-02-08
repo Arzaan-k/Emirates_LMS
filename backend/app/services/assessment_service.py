@@ -324,6 +324,14 @@ class AssessmentService:
         exam_data.setdefault("time_limit_minutes", 30)
         exam_data.setdefault("passing_score", 70)
 
+        # Auto-generate PIN if enabled on creation
+        if exam_data.get("pin_enabled") and not exam_data.get("generated_pin"):
+             import random
+             pin = str(random.randint(1000, 9999))
+             exam_data["generated_pin"] = pin
+             exam_data["pin_generated_at"] = datetime.utcnow()
+             exam_data["active_pins"] = []
+
         exam = self.exam_repo.create(exam_data)
         logger.info(f"Created scheduled exam: {exam.id}")
 
@@ -447,7 +455,7 @@ class AssessmentService:
         exam_id: str,
         user_email: str,
         user_name: str,
-        answers: List[int],
+        answers: List[Any],
         time_taken_seconds: int
     ) -> Dict[str, Any]:
         """Submit a scheduled exam."""

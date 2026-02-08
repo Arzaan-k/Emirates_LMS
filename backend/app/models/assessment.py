@@ -199,6 +199,7 @@ class ScheduledExam(Base):
     pin_validity_minutes = Column(Integer, default=30)  # PIN valid for X minutes
     generated_pin = Column(String(4), nullable=True)  # Auto-generated 4-digit PIN
     pin_generated_at = Column(DateTime, nullable=True)  # When PIN was generated
+    active_pins = Column(JSON, default=[])  # List of previously generated PINs that are still valid
 
     # Relationships
     attendance_records = relationship(
