@@ -300,6 +300,9 @@ class ExamAttendance(Base):
     marked_present = Column(Boolean, default=False)
     marked_by = Column(String(255))
     marked_at = Column(DateTime)
+    check_in_time = Column(DateTime)  # When user checked in (via PIN or supervisor)
+    check_in_method = Column(String(50))  # PIN, SUPERVISOR, SUPERVISOR_OVERRIDE
+    override_reason = Column(Text)  # Reason for supervisor override
     started_exam = Column(Boolean, default=False)
     start_time = Column(DateTime)
     completed = Column(Boolean, default=False)

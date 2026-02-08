@@ -21,6 +21,9 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
     const [exams, setExams] = useState([]);
     const [loading, setLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
+    const [editingExam, setEditingExam] = useState(null);
+    const [showEditModal, setShowEditModal] = useState(false);
+    const [generatingPin, setGeneratingPin] = useState(false);
 
     useEffect(() => {
         if (visible) {
@@ -63,6 +66,62 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
             case 'ongoing': return '#F59E0B';
             default: return '#6366F1';
         }
+    };
+
+    const handleGeneratePin = async (examId) => {
+        setGeneratingPin(true);
+        try {
+            const formData = new FormData();
+            formData.append('admin_email', userProfile.email);
+
+            const res = await fetch(`${API_URL}/api/v1/assessments/scheduled/${examId}/generate-pin`, {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await res.json();
+
+            if (data.pin) {
+                Alert.alert(
+                    '✅ PIN Generated',
+                    `PIN: ${data.pin}\n\nValid until: ${new Date(data.valid_until).toLocaleTimeString()}\n\nAnnounce this PIN to students present in the exam hall.`,
+                    [{ text: 'OK', onPress: () => fetchExams() }]
+                );
+            } else {
+                Alert.alert('Error', data.message || 'Failed to generate PIN');
+            }
+        } catch (e) {
+            console.error('PIN generation error:', e);
+            Alert.alert('Error', 'Failed to generate PIN');
+        }
+        setGeneratingPin(false);
+    };
+
+    const handleRegeneratePin = async (examId) => {
+        Alert.alert(
+            'Regenerate PIN?',
+            'This will invalidate the previous PIN and create a new one.',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Regenerate',
+                    style: 'destructive',
+                    onPress: async () => {
+                        await handleGeneratePin(examId);
+                    }
+                }
+            ]
+        );
+    };
+
+    const openEditModal = (exam) => {
+        setEditingExam(exam);
+        setShowEditModal(true);
+    };
+
+    const closeEditModal = () => {
+        setShowEditModal(false);
+        setEditingExam(null);
     };
 
     if (!visible) return null;
@@ -113,23 +172,24 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
                                 contentContainerStyle={{ padding: 20 }}
                                 showsVerticalScrollIndicator={false}
                                 renderItem={({ item }) => (
-                                    <TouchableOpacity
-                                        style={styles.examCard}
-                                        onPress={() => onSelectExam(item)}
-                                    >
-                                        <View style={styles.cardHeader}>
-                                            <View style={{ flex: 1 }}>
-                                                <Text style={styles.examTitle}>{item.title}</Text>
-                                                <Text style={styles.examDate}>
-                                                    {item.exam_date} at {item.exam_time} • {item.location}
-                                                </Text>
+                                    <View style={styles.examCard}>
+                                        <TouchableOpacity
+                                            style={{ flex: 1 }}
+                                            onPress={() => onSelectExam(item)}
+                                        >
+                                            <View style={styles.cardHeader}>
+                                                <View style={{ flex: 1 }}>
+                                                    <Text style={styles.examTitle}>{item.title}</Text>
+                                                    <Text style={styles.examDate}>
+                                                        {item.exam_date} at {item.exam_time} • {item.location}
+                                                    </Text>
+                                                </View>
+                                                <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + '20' }]}>
+                                                    <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
+                                                        {item.status?.toUpperCase() || 'SCHEDULED'}
+                                                    </Text>
+                                                </View>
                                             </View>
-                                            <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + '20' }]}>
-                                                <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
-                                                    {item.status?.toUpperCase() || 'SCHEDULED'}
-                                                </Text>
-                                            </View>
-                                        </View>
 
                                         <View style={styles.cardFooter}>
                                             <View style={styles.stat}>
@@ -146,10 +206,22 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
                                             </View>
                                         </View>
 
-                                        <Text style={[styles.supervisorText, item.supervisor_email === userProfile?.email && { color: '#10B981', fontWeight: 'bold' }]}>
-                                            Supervisor: {item.supervisor_name} {item.supervisor_email === userProfile?.email ? '(You)' : ''}
-                                        </Text>
-                                    </TouchableOpacity>
+                                            <Text style={[styles.supervisorText, item.supervisor_email === userProfile?.email && { color: '#10B981', fontWeight: 'bold' }]}>
+                                                Supervisor: {item.supervisor_name} {item.supervisor_email === userProfile?.email ? '(You)' : ''}
+                                            </Text>
+                                        </TouchableOpacity>
+
+                                        {/* Edit Button - Only for admin/supervisor */}
+                                        {(userProfile?.is_superadmin || item.supervisor_email === userProfile?.email) && (
+                                            <TouchableOpacity
+                                                style={styles.editButton}
+                                                onPress={() => openEditModal(item)}
+                                            >
+                                                <Feather name="edit-2" size={16} color="#6366F1" />
+                                                <Text style={styles.editButtonText}>Edit</Text>
+                                            </TouchableOpacity>
+                                        )}
+                                    </View>
                                 )}
                                 ListEmptyComponent={
                                     <View style={styles.emptyContainer}>
@@ -165,6 +237,132 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
                     </View>
                 </View>
             </View>
+
+            {/* Edit Exam Modal */}
+            <Modal visible={showEditModal} animationType="slide" transparent>
+                <View style={styles.editModalOverlay}>
+                    <BlurView intensity={30} style={StyleSheet.absoluteFill} />
+                    <View style={styles.editModalContainer}>
+                        {/* Header */}
+                        <LinearGradient
+                            colors={['#6366F1', '#4F46E5']}
+                            style={styles.editModalHeader}
+                            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                        >
+                            <View style={styles.editModalHeaderRow}>
+                                <Feather name="settings" size={22} color="#FFF" />
+                                <Text style={styles.editModalTitle}>Manage Exam</Text>
+                            </View>
+                            <TouchableOpacity onPress={closeEditModal} style={styles.closeBtn}>
+                                <Feather name="x" size={22} color="#FFF" />
+                            </TouchableOpacity>
+                        </LinearGradient>
+
+                        {/* Content */}
+                        {editingExam && (
+                            <View style={styles.editModalContent}>
+                                {/* Exam Info */}
+                                <View style={styles.examInfoSection}>
+                                    <Text style={styles.examInfoTitle}>{editingExam.title}</Text>
+                                    <Text style={styles.examInfoSubtitle}>
+                                        {editingExam.exam_date} at {editingExam.exam_time}
+                                    </Text>
+                                    <Text style={styles.examInfoLocation}>
+                                        📍 {editingExam.location}
+                                    </Text>
+                                </View>
+
+                                {/* PIN Management Section */}
+                                {(editingExam.pin_enabled || editingExam.pinEnabled) && (
+                                    <View style={styles.pinSection}>
+                                        <View style={styles.pinSectionHeader}>
+                                            <Feather name="key" size={20} color="#8B5CF6" />
+                                            <Text style={styles.pinSectionTitle}>PIN Check-in</Text>
+                                        </View>
+
+                                        {editingExam.generated_pin || editingExam.generatedPin ? (
+                                            <View style={styles.pinDisplay}>
+                                                <View style={styles.pinCodeContainer}>
+                                                    <Text style={styles.pinLabel}>Current PIN</Text>
+                                                    <Text style={styles.pinCode}>{editingExam.generated_pin || editingExam.generatedPin}</Text>
+                                                </View>
+
+                                                {editingExam.pin_generated_at && (
+                                                    <Text style={styles.pinTimestamp}>
+                                                        Generated: {new Date(editingExam.pin_generated_at).toLocaleString()}
+                                                    </Text>
+                                                )}
+
+                                                <Text style={styles.pinInstructions}>
+                                                    💡 Announce this PIN to students in the exam hall. They can enter it to mark themselves present.
+                                                </Text>
+
+                                                <TouchableOpacity
+                                                    style={styles.regeneratePinBtn}
+                                                    onPress={() => handleRegeneratePin(editingExam.id)}
+                                                    disabled={generatingPin}
+                                                >
+                                                    {generatingPin ? (
+                                                        <ActivityIndicator color="#8B5CF6" size="small" />
+                                                    ) : (
+                                                        <>
+                                                            <Feather name="refresh-cw" size={18} color="#8B5CF6" />
+                                                            <Text style={styles.regeneratePinText}>Regenerate PIN</Text>
+                                                        </>
+                                                    )}
+                                                </TouchableOpacity>
+                                            </View>
+                                        ) : (
+                                            <View style={styles.noPinContainer}>
+                                                <Text style={styles.noPinText}>
+                                                    No PIN generated yet. Generate a PIN for students to check-in.
+                                                </Text>
+                                                <TouchableOpacity
+                                                    style={styles.generatePinBtn}
+                                                    onPress={() => handleGeneratePin(editingExam.id)}
+                                                    disabled={generatingPin}
+                                                >
+                                                    {generatingPin ? (
+                                                        <ActivityIndicator color="#FFF" size="small" />
+                                                    ) : (
+                                                        <>
+                                                            <Feather name="key" size={18} color="#FFF" />
+                                                            <Text style={styles.generatePinText}>Generate PIN Now</Text>
+                                                        </>
+                                                    )}
+                                                </TouchableOpacity>
+                                            </View>
+                                        )}
+                                    </View>
+                                )}
+
+                                {/* Geofencing Info (Read-only) */}
+                                {(editingExam.geofencing_enabled || editingExam.geofencingEnabled) && (
+                                    <View style={styles.geofencingSection}>
+                                        <View style={styles.geofencingSectionHeader}>
+                                            <Feather name="map-pin" size={20} color="#10B981" />
+                                            <Text style={styles.geofencingSectionTitle}>Geofencing Active</Text>
+                                        </View>
+                                        <Text style={styles.geofencingInfo}>
+                                            📍 Students must be within {editingExam.geofencing_radius || editingExam.geofencingRadius || 100}m radius to check-in
+                                        </Text>
+                                    </View>
+                                )}
+
+                                {/* Auto-generation Info */}
+                                {(editingExam.pin_enabled || editingExam.pinEnabled) && (
+                                    <View style={styles.autoGenInfo}>
+                                        <Feather name="info" size={16} color="#6B7280" />
+                                        <Text style={styles.autoGenText}>
+                                            Auto-generation: {editingExam.pin_generation_minutes || editingExam.pinGenerationMinutes || 5} min before exam
+                                        </Text>
+                                    </View>
+                                )}
+                            </View>
+                        )}
+                    </View>
+                </View>
+            </Modal>
         </Modal>
     );
 }
@@ -192,4 +390,234 @@ const styles = StyleSheet.create({
     emptyContainer: { alignItems: 'center', justifyContent: 'center', marginTop: 80 },
     emptyText: { fontSize: 16, fontFamily: 'Poppins_600SemiBold', color: '#374151', marginTop: 16 },
     emptySubText: { fontSize: 14, fontFamily: 'Poppins_400Regular', color: '#9CA3AF', marginTop: 8 },
+
+    // Edit Button
+    editButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        backgroundColor: '#EEF2FF',
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        borderRadius: 10,
+        marginTop: 12,
+        alignSelf: 'flex-start'
+    },
+    editButtonText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#6366F1'
+    },
+
+    // Edit Modal
+    editModalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20
+    },
+    editModalContainer: {
+        width: '100%',
+        maxWidth: 500,
+        backgroundColor: '#FFF',
+        borderRadius: 24,
+        overflow: 'hidden',
+        maxHeight: height * 0.8
+    },
+    editModalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: 20
+    },
+    editModalHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12
+    },
+    editModalTitle: {
+        fontSize: 20,
+        fontFamily: 'Poppins_700Bold',
+        color: '#FFF'
+    },
+    editModalContent: {
+        padding: 20
+    },
+
+    // Exam Info
+    examInfoSection: {
+        backgroundColor: '#F9FAFB',
+        padding: 16,
+        borderRadius: 16,
+        marginBottom: 20
+    },
+    examInfoTitle: {
+        fontSize: 18,
+        fontFamily: 'Poppins_700Bold',
+        color: '#111827',
+        marginBottom: 6
+    },
+    examInfoSubtitle: {
+        fontSize: 14,
+        fontFamily: 'Poppins_500Medium',
+        color: '#6B7280',
+        marginBottom: 4
+    },
+    examInfoLocation: {
+        fontSize: 13,
+        fontFamily: 'Poppins_400Regular',
+        color: '#9CA3AF'
+    },
+
+    // PIN Section
+    pinSection: {
+        backgroundColor: '#FAF5FF',
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 16
+    },
+    pinSectionHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        marginBottom: 16
+    },
+    pinSectionTitle: {
+        fontSize: 16,
+        fontFamily: 'Poppins_700Bold',
+        color: '#7C3AED'
+    },
+    pinDisplay: {
+        alignItems: 'center'
+    },
+    pinCodeContainer: {
+        backgroundColor: '#FFF',
+        borderRadius: 16,
+        padding: 20,
+        alignItems: 'center',
+        marginBottom: 12,
+        borderWidth: 2,
+        borderColor: '#8B5CF6',
+        shadowColor: '#8B5CF6',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+        elevation: 4
+    },
+    pinLabel: {
+        fontSize: 12,
+        fontFamily: 'Poppins_500Medium',
+        color: '#9CA3AF',
+        marginBottom: 8,
+        textTransform: 'uppercase',
+        letterSpacing: 1
+    },
+    pinCode: {
+        fontSize: 48,
+        fontFamily: 'Poppins_900Black',
+        color: '#7C3AED',
+        letterSpacing: 8
+    },
+    pinTimestamp: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        marginBottom: 12
+    },
+    pinInstructions: {
+        fontSize: 13,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        textAlign: 'center',
+        marginBottom: 16,
+        lineHeight: 20
+    },
+    regeneratePinBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        backgroundColor: '#FFF',
+        paddingVertical: 12,
+        paddingHorizontal: 20,
+        borderRadius: 12,
+        borderWidth: 2,
+        borderColor: '#8B5CF6'
+    },
+    regeneratePinText: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#8B5CF6'
+    },
+    noPinContainer: {
+        alignItems: 'center'
+    },
+    noPinText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        textAlign: 'center',
+        marginBottom: 16,
+        lineHeight: 20
+    },
+    generatePinBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        backgroundColor: '#8B5CF6',
+        paddingVertical: 14,
+        paddingHorizontal: 24,
+        borderRadius: 12,
+        shadowColor: '#8B5CF6',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 4
+    },
+    generatePinText: {
+        fontSize: 15,
+        fontFamily: 'Poppins_700Bold',
+        color: '#FFF'
+    },
+
+    // Geofencing Section
+    geofencingSection: {
+        backgroundColor: '#ECFDF5',
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 16
+    },
+    geofencingSectionHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        marginBottom: 10
+    },
+    geofencingSectionTitle: {
+        fontSize: 16,
+        fontFamily: 'Poppins_700Bold',
+        color: '#059669'
+    },
+    geofencingInfo: {
+        fontSize: 13,
+        fontFamily: 'Poppins_400Regular',
+        color: '#047857',
+        lineHeight: 20
+    },
+
+    // Auto-gen Info
+    autoGenInfo: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        backgroundColor: '#F3F4F6',
+        padding: 12,
+        borderRadius: 10
+    },
+    autoGenText: {
+        fontSize: 12,
+        fontFamily: 'Poppins_500Medium',
+        color: '#6B7280',
+        flex: 1
+    }
 });

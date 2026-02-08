@@ -209,19 +209,7 @@ export default function UpcomingExamsCard({ userEmail, onStartExam, refreshKey }
         try {
             setStarting(exam.id);
 
-            // Step 1: Check geofencing FIRST if enabled
-            if (exam.geofencing_enabled || exam.geofencingEnabled) {
-                console.log('[PIN+Geo] Checking location before PIN validation...');
-                const locationValid = await checkGeofencing(exam);
-
-                if (!locationValid) {
-                    setStarting(null);
-                    return; // Error shown in checkGeofencing
-                }
-                console.log('[PIN+Geo] Location valid, proceeding with PIN validation...');
-            }
-
-            // Step 2: Validate PIN
+            // Prepare form data
             const formData = new FormData();
             formData.append('user_email', userEmail);
             formData.append('pin', pin);
@@ -229,6 +217,30 @@ export default function UpcomingExamsCard({ userEmail, onStartExam, refreshKey }
                 formData.append('batch_number', exam.batch_number);
             }
 
+            // Step 1: Get location if geofencing is enabled
+            if (exam.geofencing_enabled || exam.geofencingEnabled) {
+                console.log('[PIN+Geo] Getting user location for combined validation...');
+
+                const { status } = await Location.requestForegroundPermissionsAsync();
+                if (status !== 'granted') {
+                    setStarting(null);
+                    Alert.alert(
+                        'Location Permission Required',
+                        'Location access is required to check-in for this exam. Please enable location permissions.'
+                    );
+                    return;
+                }
+
+                const { coords } = await Location.getCurrentPositionAsync({
+                    accuracy: Location.Accuracy.High
+                });
+
+                formData.append('latitude', coords.latitude.toString());
+                formData.append('longitude', coords.longitude.toString());
+                console.log('[PIN+Geo] Location obtained, validating...');
+            }
+
+            // Step 2: Validate PIN (with location if enabled)
             const res = await fetch(
                 `${API_URL}/api/v1/assessments/scheduled/${exam.id}/validate-pin`,
                 {
@@ -243,6 +255,7 @@ export default function UpcomingExamsCard({ userEmail, onStartExam, refreshKey }
             console.log('[PIN] Validation result:', data);
 
             if (data.valid && data.marked_present) {
+                // Success - PIN valid and location check passed (if enabled)
                 Alert.alert(
                     '✅ Check-in Successful!',
                     'You have been marked present. You can now start the exam.',
@@ -256,7 +269,24 @@ export default function UpcomingExamsCard({ userEmail, onStartExam, refreshKey }
                         }
                     ]
                 );
+            } else if (data.valid && !data.marked_present && data.requires_override) {
+                // PIN valid but location check failed - show detailed error
+                Alert.alert(
+                    '📍 Location Check Failed',
+                    data.message,
+                    [
+                        {
+                            text: 'Contact Supervisor',
+                            style: 'default'
+                        },
+                        {
+                            text: 'Try Again',
+                            onPress: () => showPINDialog(exam)
+                        }
+                    ]
+                );
             } else {
+                // PIN invalid or expired
                 Alert.alert(
                     'Invalid PIN',
                     data.message || 'The PIN you entered is incorrect or has expired.'

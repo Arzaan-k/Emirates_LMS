@@ -1116,16 +1116,20 @@ async def validate_exam_pin(
     exam_id: str,
     user_email: str = Form(...),
     pin: str = Form(...),
+    latitude: Optional[float] = Form(None),
+    longitude: Optional[float] = Form(None),
     batch_number: Optional[int] = Form(None),
     db: Session = Depends(get_db)
 ):
     """
-    Validate PIN and mark user as present.
+    Validate PIN and mark user as present. If geofencing is enabled, also validates location.
 
     Returns:
         - valid: bool - Whether PIN is correct and not expired
         - marked_present: bool - Whether user was successfully marked present
+        - location_valid: bool - Whether location check passed (if enabled)
         - message: str - Success/error message
+        - requires_override: bool - Whether supervisor override is needed
     """
     try:
         service = AssessmentService(db)
@@ -1171,7 +1175,50 @@ async def validate_exam_pin(
                 "message": "PIN has expired. Please ask supervisor for a new PIN."
             }
 
-        # PIN is valid - mark user as present
+        # Check geofencing if enabled
+        location_valid = True
+        location_message = None
+        requires_override = False
+
+        if exam.geofencing_enabled and latitude is not None and longitude is not None:
+            if exam.geofencing_latitude is None or exam.geofencing_longitude is None:
+                logger.warning(f"Geofencing enabled but coordinates not set for exam {exam_id}")
+                location_valid = True  # Allow if coordinates not configured
+            else:
+                # Calculate distance
+                distance = haversine_distance(
+                    float(exam.geofencing_latitude),
+                    float(exam.geofencing_longitude),
+                    latitude,
+                    longitude
+                )
+
+                allowed_radius = exam.geofencing_radius or 100
+                location_valid = distance <= allowed_radius
+
+                if not location_valid:
+                    logger.warning(
+                        f"Location check failed for {user_email} on exam {exam_id}: "
+                        f"distance={distance:.2f}m, allowed={allowed_radius}m"
+                    )
+                    location_message = (
+                        f"You are {round(distance)}m away from the exam location. "
+                        f"You must be within {allowed_radius}m to check-in. "
+                        f"Contact your supervisor if you believe this is an error."
+                    )
+                    requires_override = True
+
+                    return {
+                        "valid": True,  # PIN is valid
+                        "marked_present": False,  # But not marked due to location
+                        "location_valid": False,
+                        "distance_meters": round(distance, 2),
+                        "allowed_radius": allowed_radius,
+                        "message": location_message,
+                        "requires_override": True
+                    }
+
+        # PIN is valid and location check passed (if enabled) - mark user as present
         from app.models.assessment import ExamAttendance
 
         # Check if attendance record exists
@@ -1199,11 +1246,13 @@ async def validate_exam_pin(
 
         db.commit()
 
-        logger.info(f"User {user_email} marked present for exam {exam_id} via PIN")
+        logger.info(f"User {user_email} marked present for exam {exam_id} via PIN{' with location check' if exam.geofencing_enabled else ''}")
 
         return {
             "valid": True,
             "marked_present": True,
+            "location_valid": location_valid,
+            "requires_override": False,
             "message": "You have been marked present! You can now start the exam.",
             "check_in_time": attendance.check_in_time.isoformat()
         }
@@ -1214,3 +1263,78 @@ async def validate_exam_pin(
         logger.error(f"PIN validation error: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=f"PIN validation failed: {str(e)}")
+
+
+@router.post("/scheduled/{exam_id}/supervisor-override")
+async def supervisor_override_location(
+    exam_id: str,
+    user_email: str = Form(...),
+    supervisor_email: str = Form(...),
+    override_reason: Optional[str] = Form("Supervisor manual override"),
+    db: Session = Depends(get_db)
+):
+    """
+    Allow supervisor to manually mark user as present, overriding location check failure.
+
+    Returns:
+        - success: bool
+        - marked_present: bool
+        - message: str
+    """
+    try:
+        service = AssessmentService(db)
+        exam = service.get_scheduled_exam(exam_id)
+
+        if not exam:
+            raise HTTPException(status_code=404, detail="Exam not found")
+
+        # Verify supervisor authorization
+        if exam.supervisor_email != supervisor_email:
+            return {
+                "success": False,
+                "marked_present": False,
+                "message": "Only the assigned supervisor can override attendance"
+            }
+
+        # Mark user as present with override flag
+        from app.models.assessment import ExamAttendance
+
+        attendance = db.query(ExamAttendance).filter(
+            ExamAttendance.exam_id == exam_id,
+            ExamAttendance.user_email == user_email
+        ).first()
+
+        if attendance:
+            attendance.marked_present = True
+            attendance.check_in_time = datetime.utcnow()
+            attendance.check_in_method = "SUPERVISOR_OVERRIDE"
+            attendance.override_reason = override_reason
+        else:
+            attendance = ExamAttendance(
+                id=str(uuid.uuid4()),
+                exam_id=exam_id,
+                user_email=user_email,
+                marked_present=True,
+                check_in_time=datetime.utcnow(),
+                check_in_method="SUPERVISOR_OVERRIDE",
+                override_reason=override_reason
+            )
+            db.add(attendance)
+
+        db.commit()
+
+        logger.info(f"Supervisor {supervisor_email} manually marked {user_email} present for exam {exam_id}")
+
+        return {
+            "success": True,
+            "marked_present": True,
+            "message": f"User {user_email} has been manually marked present by supervisor",
+            "check_in_time": attendance.check_in_time.isoformat()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Supervisor override error: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Override failed: {str(e)}")
