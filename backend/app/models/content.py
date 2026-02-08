@@ -28,6 +28,7 @@ class Content(Base):
     video_url = Column(String(1000))
     audio_url = Column(String(1000))  # For audio version of content
     file_url = Column(String(1000))
+    pdf_url = Column(String(1000))  # PDF version for secure viewing (converted from PPT/DOCX)
     thumbnail = Column(String(1000))
     duration = Column(String(100))
     duration_seconds = Column(Integer)  # Duration in seconds for calculations
@@ -68,6 +69,7 @@ class Content(Base):
             "video_url": self.video_url,
             "audio_url": self.audio_url,
             "file_url": self.file_url,
+            "pdf_url": self.pdf_url,
             "thumbnail": self.thumbnail,
             "learning_path_type": self.learning_path_type,
             "is_path_node": self.is_path_node,
@@ -75,6 +77,7 @@ class Content(Base):
             "videoUrl": self.video_url,
             "audioUrl": self.audio_url,
             "fileUrl": self.file_url,
+            "pdfUrl": self.pdf_url,
             "thumbnailUrl": self.thumbnail,
             "learningPathType": self.learning_path_type,
             "isPathNode": self.is_path_node,

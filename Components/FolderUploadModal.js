@@ -260,6 +260,14 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
     setUploadProgress(0);
     setUploadStatus(`Preparing to upload ${filesToUpload.length} files...`);
 
+    // Simulate progress updates
+    const progressInterval = setInterval(() => {
+      setUploadProgress(prev => {
+        if (prev >= 90) return prev;
+        return prev + Math.random() * 10;
+      });
+    }, 500);
+
     try {
       const formData = new FormData();
 
@@ -276,18 +284,19 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
       formData.append('root_bucket_name', rootFolderName);
       formData.append('learning_path_type', learningPathType);
 
-      setUploadStatus('Uploading files to server...');
+      setUploadStatus(`Uploading ${filesToUpload.length} files to server...`);
 
       const response = await fetch(`${API_URL}/api/v1/content/bulk-folder-upload`, {
         method: 'POST',
         body: formData,
       });
 
+      clearInterval(progressInterval);
       const result = await response.json();
 
       if (response.ok) {
         setUploadProgress(100);
-        setUploadStatus(`✓ Upload complete! ${result.results.successful} files uploaded successfully.`);
+        setUploadStatus(`✅ Upload complete! ${result.results.successful} files uploaded successfully.`);
 
         setTimeout(() => {
           onUploadComplete && onUploadComplete(result);
@@ -297,9 +306,16 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
         throw new Error(result.detail || 'Upload failed');
       }
     } catch (error) {
+      clearInterval(progressInterval);
       console.error('Upload error:', error);
-      setUploadStatus(`✗ Upload failed: ${error.message}`);
-      setUploading(false);
+      setUploadProgress(0);
+      setUploadStatus(`❌ Upload failed: ${error.message}`);
+
+      // Reset uploading state after showing error for 3 seconds
+      setTimeout(() => {
+        setUploading(false);
+        setUploadStatus('');
+      }, 3000);
     }
   };
 

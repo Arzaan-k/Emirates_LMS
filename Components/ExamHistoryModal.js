@@ -8,6 +8,7 @@ import {
     StyleSheet,
     ActivityIndicator,
     Dimensions,
+    Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
@@ -24,6 +25,8 @@ export default function ExamHistoryModal({ visible, onClose }) {
     const [examReport, setExamReport] = useState(null);
     const [loadingReport, setLoadingReport] = useState(false);
     const [filter, setFilter] = useState('all'); // all, scheduled, ongoing, completed
+    const [pinStatus, setPinStatus] = useState({}); // Store PIN status by exam ID
+    const [pinLoading, setPinLoading] = useState({});
 
     useEffect(() => {
         if (visible) {
@@ -57,9 +60,68 @@ export default function ExamHistoryModal({ visible, onClose }) {
         setLoadingReport(false);
     };
 
+    // Fetch PIN status for a specific exam
+    const fetchPinStatus = async (examId) => {
+        try {
+            const res = await fetch(`${API_URL}/api/v1/assessments/scheduled/${examId}/pin-status`);
+            const data = await res.json();
+            setPinStatus(prev => ({ ...prev, [examId]: data }));
+            return data;
+        } catch (e) {
+            console.error('Error fetching PIN status:', e);
+            return null;
+        }
+    };
+
+    // Generate a new PIN for the exam
+    const handleGeneratePin = async (examId, examTitle) => {
+        Alert.alert(
+            '🔑 Generate New PIN',
+            `Generate a new 4-digit PIN for "${examTitle}"?\n\nThis will replace any existing PIN.`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Generate',
+                    onPress: async () => {
+                        setPinLoading(prev => ({ ...prev, [examId]: true }));
+                        try {
+                            const formData = new FormData();
+                            const res = await fetch(
+                                `${API_URL}/api/v1/assessments/scheduled/${examId}/generate-pin`,
+                                { method: 'POST', body: formData }
+                            );
+                            const data = await res.json();
+
+                            if (data.pin) {
+                                // Refresh PIN status and exams list
+                                await fetchPinStatus(examId);
+                                await fetchExams(); // Refresh list to show new PIN
+                                Alert.alert(
+                                    '✅ PIN Generated',
+                                    `New PIN: ${data.pin}\n\nValid for ${data.validity_minutes} minutes.\n\nAnnounce this PIN to students so they can check in.`,
+                                    [{ text: 'OK' }]
+                                );
+                            } else {
+                                Alert.alert('Error', data.detail || 'Failed to generate PIN');
+                            }
+                        } catch (e) {
+                            console.error('Error generating PIN:', e);
+                            Alert.alert('Error', 'Network error. Please try again.');
+                        }
+                        setPinLoading(prev => ({ ...prev, [examId]: false }));
+                    }
+                }
+            ]
+        );
+    };
+
     const handleExamPress = (exam) => {
         setSelectedExam(exam);
         fetchExamReport(exam.id);
+        // Also fetch PIN status if PIN is enabled
+        if (exam.pin_enabled || exam.pinEnabled) {
+            fetchPinStatus(exam.id);
+        }
     };
 
     const getStatusColor = (status) => {
@@ -86,6 +148,18 @@ export default function ExamHistoryModal({ visible, onClose }) {
         if (!dateStr) return '';
         const date = new Date(dateStr);
         return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+    };
+
+    // Helper to check if PIN is still active based on exam data
+    const isPinActive = (exam) => {
+        const pinGeneratedAt = exam.pin_generated_at || exam.pinGeneratedAt;
+        const pinValidityMinutes = exam.pin_validity_minutes || exam.pinValidityMinutes || 30;
+
+        if (!pinGeneratedAt) return false;
+
+        const generatedTime = new Date(pinGeneratedAt);
+        const expiryTime = new Date(generatedTime.getTime() + pinValidityMinutes * 60 * 1000);
+        return new Date() < expiryTime;
     };
 
     if (!visible) return null;
@@ -157,6 +231,70 @@ export default function ExamHistoryModal({ visible, onClose }) {
                                         <Text style={styles.statLabel}>Completed</Text>
                                     </View>
                                 </View>
+
+                                {/* PIN Management Section - Only show if PIN is enabled */}
+                                {(selectedExam?.pin_enabled || selectedExam?.pinEnabled) && (
+                                    <View style={styles.pinSection}>
+                                        <Text style={styles.sectionTitle}>🔑 PIN Check-in</Text>
+                                        <View style={styles.pinCard}>
+                                            {pinStatus[selectedExam.id]?.pin ? (
+                                                <>
+                                                    <View style={styles.pinDisplayContainer}>
+                                                        <Text style={styles.pinLabel}>Current PIN</Text>
+                                                        <View style={[
+                                                            styles.pinDisplay,
+                                                            !pinStatus[selectedExam.id]?.is_active && styles.pinDisplayExpired
+                                                        ]}>
+                                                            <Text style={[
+                                                                styles.pinCode,
+                                                                !pinStatus[selectedExam.id]?.is_active && styles.pinCodeExpired
+                                                            ]}>
+                                                                {pinStatus[selectedExam.id].pin}
+                                                            </Text>
+                                                        </View>
+                                                        <Text style={[
+                                                            styles.pinStatus,
+                                                            { color: pinStatus[selectedExam.id]?.is_active ? '#10B981' : '#EF4444' }
+                                                        ]}>
+                                                            {pinStatus[selectedExam.id]?.is_active
+                                                                ? `✓ Active - ${Math.floor(pinStatus[selectedExam.id].time_remaining_seconds / 60)}m ${pinStatus[selectedExam.id].time_remaining_seconds % 60}s remaining`
+                                                                : '✗ Expired'}
+                                                        </Text>
+                                                    </View>
+                                                    <Text style={styles.pinInstructions}>
+                                                        📢 Announce this PIN to students so they can check in and mark themselves present.
+                                                    </Text>
+                                                </>
+                                            ) : (
+                                                <View style={styles.noPinContainer}>
+                                                    <MaterialCommunityIcons name="key-outline" size={40} color="#64748B" />
+                                                    <Text style={styles.noPinText}>No PIN generated yet</Text>
+                                                    <Text style={styles.noPinSubtext}>Generate a PIN for students to check in</Text>
+                                                </View>
+                                            )}
+
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.generatePinBtn,
+                                                    pinLoading[selectedExam.id] && styles.generatePinBtnDisabled
+                                                ]}
+                                                onPress={() => handleGeneratePin(selectedExam.id, selectedExam.title)}
+                                                disabled={pinLoading[selectedExam.id]}
+                                            >
+                                                {pinLoading[selectedExam.id] ? (
+                                                    <ActivityIndicator color="#FFF" size="small" />
+                                                ) : (
+                                                    <>
+                                                        <Feather name="refresh-cw" size={18} color="#FFF" />
+                                                        <Text style={styles.generatePinBtnText}>
+                                                            {pinStatus[selectedExam.id]?.pin ? 'Regenerate PIN' : 'Generate PIN'}
+                                                        </Text>
+                                                    </>
+                                                )}
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+                                )}
 
                                 {/* Score Statistics */}
                                 {examReport.statistics.completed > 0 && (
@@ -347,21 +485,78 @@ export default function ExamHistoryModal({ visible, onClose }) {
                                                 📅 {formatDate(exam.exam_date)} • ⏰ {exam.exam_time} • 📍 {exam.location}
                                             </Text>
 
+                                            {/* PIN Display Section - Only for PIN-enabled exams */}
+                                            {(exam.pin_enabled || exam.pinEnabled) && (
+                                                <View style={styles.pinListSection}>
+                                                    <View style={styles.pinListHeader}>
+                                                        <Feather name="key" size={14} color="#8B5CF6" />
+                                                        <Text style={styles.pinListLabel}>Check-in PIN</Text>
+                                                    </View>
+                                                    <View style={styles.pinListContent}>
+                                                        {(exam.generated_pin || exam.generatedPin) ? (
+                                                            <>
+                                                                <View style={[
+                                                                    styles.pinListBox,
+                                                                    !(pinStatus[exam.id]?.is_active ?? isPinActive(exam)) && styles.pinListBoxExpired
+                                                                ]}>
+                                                                    <Text style={[
+                                                                        styles.pinListCode,
+                                                                        !(pinStatus[exam.id]?.is_active ?? isPinActive(exam)) && styles.pinListCodeExpired
+                                                                    ]}>
+                                                                        {exam.generated_pin || exam.generatedPin}
+                                                                    </Text>
+                                                                </View>
+                                                                <Text style={[
+                                                                    styles.pinListStatus,
+                                                                    { color: (pinStatus[exam.id]?.is_active ?? isPinActive(exam)) ? '#10B981' : '#EF4444' }
+                                                                ]}>
+                                                                    {(pinStatus[exam.id]?.is_active ?? isPinActive(exam)) ? '● Active' : '○ Expired'}
+                                                                </Text>
+                                                            </>
+                                                        ) : (
+                                                            <Text style={styles.pinListNone}>Not Generated</Text>
+                                                        )}
+                                                        <TouchableOpacity
+                                                            style={[
+                                                                styles.pinListBtn,
+                                                                pinLoading[exam.id] && styles.pinListBtnDisabled
+                                                            ]}
+                                                            onPress={(e) => {
+                                                                e.stopPropagation();
+                                                                handleGeneratePin(exam.id, exam.title);
+                                                            }}
+                                                            disabled={pinLoading[exam.id]}
+                                                        >
+                                                            {pinLoading[exam.id] ? (
+                                                                <ActivityIndicator color="#FFF" size="small" />
+                                                            ) : (
+                                                                <>
+                                                                    <Feather name="refresh-cw" size={12} color="#FFF" />
+                                                                    <Text style={styles.pinListBtnText}>
+                                                                        {(exam.generated_pin || exam.generatedPin) ? 'Renew' : 'Generate'}
+                                                                    </Text>
+                                                                </>
+                                                            )}
+                                                        </TouchableOpacity>
+                                                    </View>
+                                                </View>
+                                            )}
+
                                             <View style={styles.examCardStats}>
                                                 <View style={styles.miniStat}>
-                                                    <Text style={styles.miniStatValue}>{exam.stats.total_assigned}</Text>
+                                                    <Text style={styles.miniStatValue}>{exam.stats?.total_assigned || 0}</Text>
                                                     <Text style={styles.miniStatLabel}>Assigned</Text>
                                                 </View>
                                                 <View style={styles.miniStat}>
-                                                    <Text style={[styles.miniStatValue, { color: '#10B981' }]}>{exam.stats.marked_present}</Text>
+                                                    <Text style={[styles.miniStatValue, { color: '#10B981' }]}>{exam.stats?.marked_present || 0}</Text>
                                                     <Text style={styles.miniStatLabel}>Present</Text>
                                                 </View>
                                                 <View style={styles.miniStat}>
-                                                    <Text style={[styles.miniStatValue, { color: '#6366F1' }]}>{exam.stats.completed}</Text>
+                                                    <Text style={[styles.miniStatValue, { color: '#6366F1' }]}>{exam.stats?.completed || 0}</Text>
                                                     <Text style={styles.miniStatLabel}>Completed</Text>
                                                 </View>
                                                 <View style={styles.miniStat}>
-                                                    <Text style={styles.miniStatValue}>{exam.stats.avg_score}%</Text>
+                                                    <Text style={styles.miniStatValue}>{exam.stats?.avg_score || 0}%</Text>
                                                     <Text style={styles.miniStatLabel}>Avg Score</Text>
                                                 </View>
                                             </View>
@@ -726,5 +921,165 @@ const styles = StyleSheet.create({
         color: '#EF4444',
         fontStyle: 'italic',
         marginTop: 4,
+    },
+    // PIN Management Styles
+    pinSection: {
+        marginBottom: 24,
+    },
+    pinCard: {
+        backgroundColor: '#1E293B',
+        borderRadius: 16,
+        padding: 20,
+        borderWidth: 1,
+        borderColor: '#8B5CF6',
+    },
+    pinDisplayContainer: {
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    pinLabel: {
+        fontSize: 12,
+        fontFamily: 'Poppins_500Medium',
+        color: '#94A3B8',
+        marginBottom: 8,
+        textTransform: 'uppercase',
+        letterSpacing: 1,
+    },
+    pinDisplay: {
+        backgroundColor: '#8B5CF6',
+        paddingHorizontal: 32,
+        paddingVertical: 16,
+        borderRadius: 16,
+        marginBottom: 8,
+    },
+    pinDisplayExpired: {
+        backgroundColor: '#374151',
+    },
+    pinCode: {
+        fontSize: 48,
+        fontFamily: 'Poppins_700Bold',
+        color: '#FFF',
+        letterSpacing: 12,
+    },
+    pinCodeExpired: {
+        color: '#9CA3AF',
+        textDecorationLine: 'line-through',
+    },
+    pinStatus: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    pinInstructions: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#94A3B8',
+        textAlign: 'center',
+        marginBottom: 16,
+        lineHeight: 18,
+    },
+    noPinContainer: {
+        alignItems: 'center',
+        paddingVertical: 20,
+    },
+    noPinText: {
+        fontSize: 16,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#94A3B8',
+        marginTop: 12,
+    },
+    noPinSubtext: {
+        fontSize: 13,
+        fontFamily: 'Poppins_400Regular',
+        color: '#64748B',
+        marginTop: 4,
+    },
+    generatePinBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#8B5CF6',
+        paddingVertical: 14,
+        borderRadius: 12,
+        gap: 8,
+    },
+    generatePinBtnDisabled: {
+        backgroundColor: '#6B7280',
+    },
+    generatePinBtnText: {
+        fontSize: 15,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF',
+    },
+    // PIN List Styles (for exam cards in list view)
+    pinListSection: {
+        backgroundColor: 'rgba(139, 92, 246, 0.1)',
+        borderRadius: 12,
+        padding: 12,
+        marginBottom: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(139, 92, 246, 0.3)',
+    },
+    pinListHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginBottom: 8,
+    },
+    pinListLabel: {
+        fontSize: 12,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#8B5CF6',
+    },
+    pinListContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    pinListBox: {
+        backgroundColor: '#8B5CF6',
+        paddingHorizontal: 14,
+        paddingVertical: 6,
+        borderRadius: 8,
+    },
+    pinListBoxExpired: {
+        backgroundColor: '#4B5563',
+    },
+    pinListCode: {
+        fontSize: 20,
+        fontFamily: 'Poppins_700Bold',
+        color: '#FFF',
+        letterSpacing: 4,
+    },
+    pinListCodeExpired: {
+        textDecorationLine: 'line-through',
+        color: '#9CA3AF',
+    },
+    pinListStatus: {
+        fontSize: 11,
+        fontFamily: 'Poppins_600SemiBold',
+        flex: 1,
+    },
+    pinListNone: {
+        fontSize: 13,
+        fontFamily: 'Poppins_400Regular',
+        color: '#9CA3AF',
+        flex: 1,
+    },
+    pinListBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#8B5CF6',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 8,
+        gap: 4,
+    },
+    pinListBtnDisabled: {
+        backgroundColor: '#6B7280',
+    },
+    pinListBtnText: {
+        fontSize: 12,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF',
     },
 });

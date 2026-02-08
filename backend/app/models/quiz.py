@@ -135,6 +135,49 @@ class QuizSubmission(Base):
         }
 
 
+class LevelExamQuestion(Base):
+    """
+    Stores admin-editable level advancement exam questions.
+    These are the questions shown when a user takes the role advancement exam
+    (e.g., Waffler → Silver Waffler). Admins can edit, add, delete, or regenerate.
+    
+    Questions are stored per level_name (the level the user is advancing FROM).
+    """
+    __tablename__ = "level_exam_questions"
+
+    id = Column(String(255), primary_key=True)
+    level_name = Column(String(255), nullable=False, index=True)  # e.g., "Waffler"
+    questions = Column(JSON, nullable=False, default=[])  # Array of question objects
+    # Format: [{"question": str, "options": [str], "correctIndex": int, "explanation": str}]
+    
+    source = Column(String(100), default="ai_generated")  # ai_generated, manual, mixed
+    generated_from_content = Column(Text, nullable=True)  # Content summary used for AI generation
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = Column(String(255), nullable=True)  # Admin who last edited
+
+    __table_args__ = (
+        Index('idx_level_exam_level', 'level_name', unique=True),
+    )
+
+    def __repr__(self):
+        return f"<LevelExamQuestion {self.level_name} ({len(self.questions or [])} questions)>"
+
+    def to_dict(self):
+        """Convert to dictionary for API responses."""
+        return {
+            "id": self.id,
+            "level_name": self.level_name,
+            "questions": self.questions or [],
+            "question_count": len(self.questions or []),
+            "source": self.source,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "updated_by": self.updated_by,
+        }
+
+
 class LiveQuiz(Base):
     """
     Live/Topic quizzes for quick assessments.

@@ -180,13 +180,98 @@ class VideoProgressService:
             _progress_cache[cache_key] = progress.to_dict()
 
         if include_requirements:
+            # Check if this content has a transcript/quiz
+            has_quiz = self._content_has_quiz(node_id)
+            
             # Add completion validation
             requirements = DEFAULT_REQUIREMENTS.copy()
-            validation = self._validate_completion(progress.to_dict() if progress else empty_progress, requirements)
+            # If no quiz exists (no transcript was generated), quiz is not required
+            requirements["quiz_required"] = has_quiz
+            
+            progress_dict = progress.to_dict() if progress else empty_progress
+            validation = self._validate_completion(progress_dict, requirements)
             result.update(validation)
             result["requirements"] = requirements
+            result["has_quiz"] = has_quiz
 
         return result
+
+    def _content_has_quiz(self, node_id: str) -> bool:
+        """Check if a content node has a quiz (i.e., transcript was generated)."""
+        try:
+            from app.models.content import Content
+            content = self.db.query(Content).filter(Content.id == node_id).first()
+            if content and content.quiz:
+                if isinstance(content.quiz, list) and len(content.quiz) > 0:
+                    return True
+            return False
+        except Exception as e:
+            logger.warning(f"Error checking content quiz for {node_id}: {e}")
+            return True  # Default to requiring quiz on error (safe fallback)
+
+    def complete_node_video_only(
+        self,
+        user_email: str,
+        node_id: str
+    ) -> Dict[str, Any]:
+        """
+        Complete a node based on video progress alone (no quiz required).
+        Used when a video has no audio/transcript and thus no quiz was generated.
+        
+        Only completes if video_watched_percent >= required threshold.
+        """
+        progress = self.progress_repo.get_by_user_and_node(user_email, node_id)
+        if not progress:
+            progress = self.progress_repo.upsert_progress(user_email, node_id, {})
+        
+        current_video_percent = progress.video_watched_percent or 0
+        video_complete = current_video_percent >= DEFAULT_REQUIREMENTS["video_watch_percent"]
+        
+        if not video_complete:
+            return {
+                "status": "error",
+                "message": f"Video progress insufficient. Current: {current_video_percent:.0f}%, Required: {DEFAULT_REQUIREMENTS['video_watch_percent']}%",
+                "result": {
+                    "node_completed": False,
+                    "video_complete": video_complete,
+                    "current_video_percent": current_video_percent,
+                    "is_complete": False
+                }
+            }
+        
+        # Mark as completed
+        if not progress.completed:
+            progress.completed = True
+            progress.completed_at = datetime.utcnow()
+            # Set quiz as "passed" implicitly (no quiz needed)
+            progress.end_quiz_passed = True
+            progress.end_quiz_score = 100.0
+            progress.updated_at = datetime.utcnow()
+            self.db.commit()
+            
+            logger.info(f"Course COMPLETED (video-only, no quiz): {user_email} - {node_id}")
+            
+            # Record in course_completions table for learning path advancement
+            try:
+                self._record_course_completion(user_email, node_id, 100.0)
+            except Exception as e:
+                logger.error(f"Failed to record video-only course completion: {e}")
+        
+        # Clear cache
+        cache_key = f"{user_email}:{node_id}"
+        _progress_cache.pop(cache_key, None)
+        
+        return {
+            "status": "success",
+            "result": {
+                "node_completed": True,
+                "video_complete": True,
+                "current_video_percent": current_video_percent,
+                "quiz_passed": True,
+                "is_complete": True,
+                "message": "Course completed! (Video progress only)"
+            }
+        }
 
     # ===========================================
     # MID-VIDEO QUIZ GENERATION
@@ -546,12 +631,20 @@ class VideoProgressService:
         # Check video requirement
         video_complete = progress_dict.get("video_watched_percent", 0) >= requirements["video_watch_percent"]
 
-        # Check end quiz requirement
-        quiz_passed = progress_dict.get("end_quiz_passed", False)
+        # Check if quiz is required for this content
+        # If quiz_required is False (no transcript → no quiz generated), skip quiz check
+        quiz_required = requirements.get("quiz_required", True)
+        
+        if quiz_required:
+            # Check end quiz requirement
+            quiz_passed = progress_dict.get("end_quiz_passed", False)
+        else:
+            # No quiz exists for this content (no transcript/audio) → auto-pass
+            quiz_passed = True
 
         # Check mid-quiz requirement (optional)
         mid_quiz_ok = True
-        if requirements.get("mid_quiz_required", False):
+        if quiz_required and requirements.get("mid_quiz_required", False):
             mid_total = progress_dict.get("mid_quizzes_total", 0)
             if mid_total > 0:
                 mid_passed = progress_dict.get("mid_quizzes_passed", 0)
@@ -567,7 +660,8 @@ class VideoProgressService:
             "video_complete": video_complete,
             "quiz_passed": quiz_passed,
             "mid_quiz_ok": mid_quiz_ok,
-            "is_complete": is_complete
+            "is_complete": is_complete,
+            "quiz_required": quiz_required
         }
 
     # ===========================================

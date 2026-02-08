@@ -33,6 +33,7 @@ import Animated, {
     withDelay,
 } from 'react-native-reanimated';
 import { Feather, MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import API_URL from '../config';
 
 const { width, height } = Dimensions.get('window');
@@ -261,6 +262,17 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
             setShowControls(true);
         }
     }, [isVideoPlaying]);
+
+    // Unlock orientation for fullscreen video experience
+    useEffect(() => {
+        // Unlock orientation to allow landscape when simulation is active
+        ScreenOrientation.unlockAsync();
+
+        return () => {
+            // Lock back to portrait when component unmounts
+            ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+        };
+    }, []);
 
     // Handle tap on video to toggle controls
     const handleVideoTap = () => {
