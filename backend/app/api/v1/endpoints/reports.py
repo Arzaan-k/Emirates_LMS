@@ -381,15 +381,63 @@ async def get_reports_overview(db: Session = Depends(get_db)):
 # USER ANALYTICS
 # ==========================================
 
+@router.get("/filters")
+async def get_report_filters(db: Session = Depends(get_db)):
+    """Get unique filter options for frontend dropdowns."""
+    try:
+        users = db.query(User).filter(User.category != 'Admin').all()
+        
+        roles = set()
+        stores = set()
+        categories = set()
+        states = set()
+        regions = set()
+        cities = set()
+        countries = set()
+        
+        for user in users:
+            if user.role: roles.add(user.role)
+            if user.store: stores.add(user.store)
+            if user.category: categories.add(user.category)
+            
+            # Extract from profile_data
+            if user.profile_data:
+                if isinstance(user.profile_data, dict):
+                    if user.profile_data.get('State'): states.add(user.profile_data['State'])
+                    if user.profile_data.get('Region'): regions.add(user.profile_data['Region'])
+                    if user.profile_data.get('City'): cities.add(user.profile_data['City'])
+                    if user.profile_data.get('Country'): countries.add(user.profile_data['Country'])
+        
+        return {
+            "roles": sorted(list(roles)),
+            "stores": sorted(list(stores)),
+            "categories": sorted(list(categories)),
+            "states": sorted(list(states)),
+            "regions": sorted(list(regions)),
+            "cities": sorted(list(cities)),
+            "countries": sorted(list(countries))
+        }
+    except Exception as e:
+        logger.error(f"Error fetching filters: {e}")
+        return {}
+
+
 @router.get("/users")
 async def get_user_analytics(
     role_filter: str = Query(None),
     store_filter: str = Query(None),
     date_from: str = Query(None),
     date_to: str = Query(None),
+    search: str = Query(None),
+    min_score: float = Query(None),
+    state: str = Query(None),
+    city: str = Query(None),
+    region: str = Query(None),
+    country: str = Query(None),
+    category: str = Query(None),
     db: Session = Depends(get_db)
 ):
-    """Get comprehensive user analytics with date range filtering."""
+    """Get comprehensive user analytics with detailed filtering."""
     try:
         query = db.query(User).filter(User.category != 'Admin')
 
@@ -397,6 +445,17 @@ async def get_user_analytics(
             query = query.filter(User.role == role_filter)
         if store_filter:
             query = query.filter(User.store == store_filter)
+        if category:
+            query = query.filter(User.category == category)
+        
+        # Search filter
+        if search:
+            query = query.filter(
+                or_(
+                    User.name.ilike(f"%{search}%"),
+                    User.email.ilike(f"%{search}%")
+                )
+            )
 
         # Date range filter for user creation or last activity
         if date_from:
@@ -420,6 +479,14 @@ async def get_user_analytics(
         
         user_data = []
         for user in users:
+            # Python-side filtering for JSON fields (safe for both Postgres/SQLite)
+            p_data = user.profile_data or {}
+            
+            if state and p_data.get('State') != state: continue
+            if city and p_data.get('City') != city: continue
+            if region and p_data.get('Region') != region: continue
+            if country and p_data.get('Country') != country: continue
+
             # Get course completions with date filter
             completions_query = db.query(CourseCompletion).filter(
                 CourseCompletion.user_email == user.email
@@ -447,6 +514,10 @@ async def get_user_analytics(
             avg_score = sum(c.score or 0 for c in completions) / len(completions) if completions else 0
             avg_quiz_score = sum(q.score or 0 for q in quiz_subs) / len(quiz_subs) if quiz_subs else 0
             
+            # Min Score Filter
+            if min_score is not None and avg_score < min_score:
+                continue
+
             user_data.append({
                 "name": user.name,
                 "email": user.email,
@@ -486,10 +557,19 @@ async def download_user_analytics_csv(
     store_filter: str = Query(None),
     date_from: str = Query(None),
     date_to: str = Query(None),
+    search: str = Query(None),
+    min_score: float = Query(None),
+    state: str = Query(None),
+    city: str = Query(None),
+    region: str = Query(None),
+    category: str = Query(None),
     db: Session = Depends(get_db)
 ):
     """Download user analytics as CSV."""
-    result = await get_user_analytics(role_filter, store_filter, date_from, date_to, db)
+    result = await get_user_analytics(
+        role_filter, store_filter, date_from, date_to, 
+        search, min_score, state, city, region, category, db
+    )
     return generate_csv_response(
         result["users"],
         f"user_analytics_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -502,10 +582,19 @@ async def download_user_analytics_pdf(
     store_filter: str = Query(None),
     date_from: str = Query(None),
     date_to: str = Query(None),
+    search: str = Query(None),
+    min_score: float = Query(None),
+    state: str = Query(None),
+    city: str = Query(None),
+    region: str = Query(None),
+    category: str = Query(None),
     db: Session = Depends(get_db)
 ):
     """Download user analytics as PDF with insights."""
-    result = await get_user_analytics(role_filter, store_filter, date_from, date_to, db)
+    result = await get_user_analytics(
+        role_filter, store_filter, date_from, date_to, 
+        search, min_score, state, city, region, category, db
+    )
     
     users = result.get("users", [])
     summary = result.get("summary", {})
@@ -556,6 +645,8 @@ async def get_training_effectiveness(
     bucket_filter: str = Query(None),
     date_from: str = Query(None),
     date_to: str = Query(None),
+    search: str = Query(None),
+    min_score: float = Query(None),
     db: Session = Depends(get_db)
 ):
     """Get training effectiveness metrics with date range filtering."""
@@ -563,6 +654,9 @@ async def get_training_effectiveness(
         query = db.query(Content)
         if bucket_filter:
             query = query.filter(Content.bucket_id == bucket_filter)
+        
+        if search:
+            query = query.filter(Content.title.ilike(f"%{search}%"))
 
         content_items = query.all()
 
@@ -584,6 +678,11 @@ async def get_training_effectiveness(
             
             total_completions = len(completions)
             avg_score = sum(c.score or 0 for c in completions) / total_completions if total_completions else 0
+            
+            # Min Score Filter
+            if min_score is not None and avg_score < min_score:
+                continue
+
             pass_count = sum(1 for c in completions if (c.score or 0) >= 70)
             pass_rate = (pass_count / total_completions * 100) if total_completions else 0
             
@@ -623,10 +722,12 @@ async def download_training_csv(
     bucket_filter: str = Query(None),
     date_from: str = Query(None),
     date_to: str = Query(None),
+    search: str = Query(None),
+    min_score: float = Query(None),
     db: Session = Depends(get_db)
 ):
     """Download training effectiveness as CSV."""
-    result = await get_training_effectiveness(bucket_filter, date_from, date_to, db)
+    result = await get_training_effectiveness(bucket_filter, date_from, date_to, search, min_score, db)
     return generate_csv_response(
         result["courses"],
         f"training_effectiveness_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -638,10 +739,12 @@ async def download_training_pdf(
     bucket_filter: str = Query(None),
     date_from: str = Query(None),
     date_to: str = Query(None),
+    search: str = Query(None),
+    min_score: float = Query(None),
     db: Session = Depends(get_db)
 ):
     """Download training effectiveness as PDF with insights."""
-    result = await get_training_effectiveness(bucket_filter, date_from, date_to, db)
+    result = await get_training_effectiveness(bucket_filter, date_from, date_to, search, min_score, db)
     
     courses = result.get("courses", [])
     summary = result.get("summary", {})
@@ -693,11 +796,16 @@ async def download_training_pdf(
 async def get_quiz_performance(
     date_from: str = Query(None),
     date_to: str = Query(None),
+    search: str = Query(None),
+    min_score: float = Query(None),
     db: Session = Depends(get_db)
 ):
     """Get quiz performance metrics with date range filtering."""
     try:
-        quizzes = db.query(Quiz).all()
+        query = db.query(Quiz)
+        if search:
+            query = query.filter(Quiz.topic.ilike(f"%{search}%"))
+        quizzes = query.all()
 
         quiz_data = []
         for quiz in quizzes:
@@ -717,6 +825,10 @@ async def get_quiz_performance(
             
             total = len(submissions)
             avg_score = sum(s.score or 0 for s in submissions) / total if total else 0
+            
+            if min_score is not None and avg_score < min_score:
+                continue
+
             passed = sum(1 for s in submissions if (s.score or 0) >= 70)
             pass_rate = (passed / total * 100) if total else 0
             
@@ -778,10 +890,12 @@ async def get_quiz_performance(
 async def download_quiz_csv(
     date_from: str = Query(None),
     date_to: str = Query(None),
+    search: str = Query(None),
+    min_score: float = Query(None),
     db: Session = Depends(get_db)
 ):
     """Download quiz performance as CSV."""
-    result = await get_quiz_performance(date_from, date_to, db)
+    result = await get_quiz_performance(date_from, date_to, search, min_score, db)
     return generate_csv_response(
         result["quizzes"],
         f"quiz_performance_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -792,10 +906,12 @@ async def download_quiz_csv(
 async def download_quiz_pdf(
     date_from: str = Query(None),
     date_to: str = Query(None),
+    search: str = Query(None),
+    min_score: float = Query(None),
     db: Session = Depends(get_db)
 ):
     """Download quiz performance as PDF with insights."""
-    result = await get_quiz_performance(date_from, date_to, db)
+    result = await get_quiz_performance(date_from, date_to, search, min_score, db)
     
     quizzes = result.get("quizzes", [])
     summary = result.get("summary", {})
@@ -846,11 +962,16 @@ async def download_quiz_pdf(
 async def get_assessment_results(
     date_from: str = Query(None),
     date_to: str = Query(None),
+    search: str = Query(None),
+    min_score: float = Query(None),
     db: Session = Depends(get_db)
 ):
     """Get proctored assessment results with date range filtering."""
     try:
-        exams = db.query(ScheduledExam).all()
+        query = db.query(ScheduledExam)
+        if search:
+            query = query.filter(ScheduledExam.title.ilike(f"%{search}%"))
+        exams = query.all()
 
         assessment_data = []
         for exam in exams:
@@ -869,7 +990,12 @@ async def get_assessment_results(
             submissions = submissions_query.all()
             
             total = len(submissions)
+            total = len(submissions)
             avg_score = sum(s.score_percent or 0 for s in submissions) / total if total else 0
+            
+            if min_score is not None and avg_score < min_score:
+                continue
+
             passed = sum(1 for s in submissions if s.passed)
             pass_rate = (passed / total * 100) if total else 0
 
@@ -904,10 +1030,12 @@ async def get_assessment_results(
 async def download_assessments_csv(
     date_from: str = Query(None),
     date_to: str = Query(None),
+    search: str = Query(None),
+    min_score: float = Query(None),
     db: Session = Depends(get_db)
 ):
     """Download assessment results as CSV."""
-    result = await get_assessment_results(date_from, date_to, db)
+    result = await get_assessment_results(date_from, date_to, search, min_score, db)
     return generate_csv_response(
         result["assessments"],
         f"assessment_results_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -918,10 +1046,12 @@ async def download_assessments_csv(
 async def download_assessments_pdf(
     date_from: str = Query(None),
     date_to: str = Query(None),
+    search: str = Query(None),
+    min_score: float = Query(None),
     db: Session = Depends(get_db)
 ):
     """Download assessment results as PDF with insights."""
-    result = await get_assessment_results(date_from, date_to, db)
+    result = await get_assessment_results(date_from, date_to, search, min_score, db)
     
     assessments = result.get("assessments", [])
     summary = result.get("summary", {})
@@ -1346,14 +1476,19 @@ async def get_content_engagement(
     bucket_filter: str = Query(None),
     date_from: str = Query(None),
     date_to: str = Query(None),
+    search: str = Query(None),
     db: Session = Depends(get_db)
 ):
-    """Get content engagement metrics with filtering."""
+    """Get content engagement metrics with date range filtering."""
     try:
-        content_query = db.query(Content)
+        query = db.query(Content)
         if bucket_filter:
-            content_query = content_query.filter(Content.bucket_id == bucket_filter)
-        content_items = content_query.all()
+            query = query.filter(Content.bucket_id == bucket_filter)
+            
+        if search:
+            query = query.filter(Content.title.ilike(f"%{search}%"))
+
+        content_items = query.all()
 
         content_data = []
         for content in content_items:
@@ -1423,10 +1558,11 @@ async def download_content_csv(
     bucket_filter: str = Query(None),
     date_from: str = Query(None),
     date_to: str = Query(None),
+    search: str = Query(None),
     db: Session = Depends(get_db)
 ):
     """Download content engagement as CSV."""
-    result = await get_content_engagement(bucket_filter, date_from, date_to, db)
+    result = await get_content_engagement(bucket_filter, date_from, date_to, search, db)
     return generate_csv_response(
         result["content"],
         f"content_engagement_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -1438,10 +1574,11 @@ async def download_content_pdf(
     bucket_filter: str = Query(None),
     date_from: str = Query(None),
     date_to: str = Query(None),
+    search: str = Query(None),
     db: Session = Depends(get_db)
 ):
     """Download content engagement as PDF with insights."""
-    result = await get_content_engagement(bucket_filter, date_from, date_to, db)
+    result = await get_content_engagement(bucket_filter, date_from, date_to, search, db)
     
     content = result.get("content", [])
     summary = result.get("summary", {})

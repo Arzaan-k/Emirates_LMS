@@ -6,7 +6,11 @@ import {
     TouchableOpacity,
     ActivityIndicator,
     Alert,
-    Dimensions
+    Dimensions,
+    Modal,
+    TextInput,
+    KeyboardAvoidingView,
+    Platform
 } from 'react-native';
 import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -24,6 +28,11 @@ export default function UpcomingExamsCard({ userEmail, onStartExam, refreshKey }
     const [isRefreshing, setIsRefreshing] = useState(false); // Silent background refresh
     const [starting, setStarting] = useState(null);
     const [showHistory, setShowHistory] = useState(false);
+
+    // PIN Modal State
+    const [pinModalVisible, setPinModalVisible] = useState(false);
+    const [pin, setPin] = useState('');
+    const [selectedExam, setSelectedExam] = useState(null);
 
     useEffect(() => {
         if (userEmail) {
@@ -183,26 +192,26 @@ export default function UpcomingExamsCard({ userEmail, onStartExam, refreshKey }
     };
 
     const showPINDialog = (exam) => {
-        Alert.prompt(
-            'Enter Exam PIN',
-            'Please enter the 4-digit PIN provided by your supervisor',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Submit',
-                    onPress: async (pin) => {
-                        if (pin && pin.length === 4 && /^\d{4}$/.test(pin)) {
-                            await validatePIN(exam, pin);
-                        } else {
-                            Alert.alert('Invalid PIN', 'Please enter a valid 4-digit PIN');
-                        }
-                    }
-                }
-            ],
-            'plain-text',
-            '',
-            'number-pad'
-        );
+        setSelectedExam(exam);
+        setPin('');
+        setPinModalVisible(true);
+    };
+
+    const closePinModal = () => {
+        setPinModalVisible(false);
+        setPin('');
+        setSelectedExam(null);
+    };
+
+    const handlePinSubmit = async () => {
+        if (pin && pin.length === 4 && /^\d{4}$/.test(pin)) {
+            closePinModal();
+            if (selectedExam) {
+                await validatePIN(selectedExam, pin);
+            }
+        } else {
+            Alert.alert('Invalid PIN', 'Please enter a valid 4-digit PIN');
+        }
     };
 
     const validatePIN = async (exam, pin) => {
@@ -255,7 +264,19 @@ export default function UpcomingExamsCard({ userEmail, onStartExam, refreshKey }
             console.log('[PIN] Validation result:', data);
 
             if (data.valid && data.marked_present) {
-                // Success - PIN valid and location check passed (if enabled)
+                // Success - PIN valid and location check passed
+
+                // Optimistically update UI immediately
+                setExams(currentExams =>
+                    currentExams.map(e =>
+                        e.id === exam.id
+                            ? { ...e, can_start: true, marked_present: true }
+                            : e
+                    )
+                );
+
+                console.log('[PIN] Optimistic update applied for exam', exam.id);
+
                 Alert.alert(
                     '✅ Check-in Successful!',
                     'You have been marked present. You can now start the exam.',
@@ -263,8 +284,12 @@ export default function UpcomingExamsCard({ userEmail, onStartExam, refreshKey }
                         {
                             text: 'Start Exam',
                             onPress: async () => {
-                                await refreshExamsSilently(); // Silent refresh to update can_start
-                                // After refresh, the button state will update automatically
+                                // Force a refresh to overlap optimistic update
+                                refreshExamsSilently();
+
+                                // Optionally auto-start? 
+                                // For now, the user just wants the CARD STATE to change. 
+                                // The optimistic update above ensures the card turns Green "Ready to Start".
                             }
                         }
                     ]
@@ -496,6 +521,59 @@ export default function UpcomingExamsCard({ userEmail, onStartExam, refreshKey }
         );
     };
 
+    const renderPinModal = () => (
+        <Modal
+            animationType="fade"
+            transparent={true}
+            visible={pinModalVisible}
+            onRequestClose={closePinModal}
+        >
+            <KeyboardAvoidingView
+                behavior={Platform.OS === "ios" ? "padding" : "height"}
+                style={styles.modalOverlay}
+            >
+                <View style={styles.modalContent}>
+                    <View style={styles.modalHeader}>
+                        <View style={styles.modalIconContainer}>
+                            <Feather name="lock" size={24} color="#6366F1" />
+                        </View>
+                        <Text style={styles.modalTitle}>Enter Exam PIN</Text>
+                        <Text style={styles.modalSubtitle}>
+                            Please enter the 4-digit PIN provided by your supervisor
+                        </Text>
+                    </View>
+
+                    <TextInput
+                        style={styles.pinInput}
+                        value={pin}
+                        onChangeText={(text) => setPin(text.replace(/[^0-9]/g, '').slice(0, 4))}
+                        placeholder="0000"
+                        placeholderTextColor="#9CA3AF"
+                        keyboardType="number-pad"
+                        maxLength={4}
+                        autoFocus={true}
+                        secureTextEntry={true}
+                    />
+
+                    <View style={styles.modalActions}>
+                        <TouchableOpacity
+                            style={[styles.modalBtn, styles.modalBtnCancel]}
+                            onPress={closePinModal}
+                        >
+                            <Text style={styles.modalBtnTextCancel}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.modalBtn, styles.modalBtnSubmit]}
+                            onPress={handlePinSubmit}
+                        >
+                            <Text style={styles.modalBtnTextSubmit}>Submit</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </KeyboardAvoidingView>
+        </Modal>
+    );
+
     return (
         <View style={styles.container}>
             <View style={styles.header}>
@@ -622,6 +700,7 @@ export default function UpcomingExamsCard({ userEmail, onStartExam, refreshKey }
                     </LinearGradient>
                 </Animated.View>
             ))}
+            {renderPinModal()}
         </View>
     );
 }
@@ -898,9 +977,99 @@ const styles = StyleSheet.create({
     },
     timerSep: {
         fontSize: 22,
-        fontFamily: 'Poppins_300Light',
-        color: 'rgba(255,255,255,0.3)',
+        fontFamily: 'Poppins_700Bold',
+        color: 'rgba(255,255,255,0.4)',
         marginHorizontal: 4,
-        marginTop: -16, // Align correctly with numbers
+        marginTop: -14, // visual alignment
+    },
+    // Modal Styles
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20
+    },
+    modalContent: {
+        width: '100%',
+        maxWidth: 340,
+        backgroundColor: '#FFF',
+        borderRadius: 24,
+        padding: 24,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.25,
+        shadowRadius: 20,
+        elevation: 10,
+    },
+    modalHeader: {
+        alignItems: 'center',
+        marginBottom: 24,
+    },
+    modalIconContainer: {
+        width: 64,
+        height: 64,
+        borderRadius: 32,
+        backgroundColor: '#EEF2FF',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 16,
+    },
+    modalTitle: {
+        fontSize: 20,
+        fontFamily: 'Poppins_700Bold',
+        color: '#111827',
+        textAlign: 'center',
+        marginBottom: 8,
+    },
+    modalSubtitle: {
+        fontSize: 14,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        textAlign: 'center',
+        paddingHorizontal: 20,
+    },
+    pinInput: {
+        width: '100%',
+        height: 56,
+        backgroundColor: '#F3F4F6',
+        borderRadius: 12,
+        fontSize: 24,
+        fontFamily: 'Poppins_600SemiBold',
+        textAlign: 'center',
+        color: '#111827',
+        letterSpacing: 8,
+        marginBottom: 24,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    modalActions: {
+        flexDirection: 'row',
+        gap: 12,
+        width: '100%',
+    },
+    modalBtn: {
+        flex: 1,
+        height: 48,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    modalBtnCancel: {
+        backgroundColor: '#F3F4F6',
+    },
+    modalBtnSubmit: {
+        backgroundColor: '#6366F1',
+    },
+    modalBtnTextCancel: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#6B7280',
+    },
+    modalBtnTextSubmit: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF',
     },
 });

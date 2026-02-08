@@ -9,7 +9,9 @@ import {
     ScrollView,
     Dimensions,
     ActivityIndicator,
-    Alert
+    Alert,
+    Switch,
+    Platform
 } from 'react-native';
 import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
@@ -69,11 +71,39 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
         }
     };
 
-    const handleGeneratePin = async (examId) => {
+    const isPinActive = (exam) => {
+        if (!exam.pin_generated_at) return false;
+
+        let dateStr = exam.pin_generated_at;
+        // Ensure UTC interpretation if missing timezone info
+        if (!dateStr.endsWith('Z') && !dateStr.includes('+')) {
+            dateStr += 'Z';
+        }
+
+        const now = new Date();
+        const generatedAt = new Date(dateStr);
+
+        // Default validity is 30 mins, but check if exam has it
+        const validityMinutes = exam.pin_validity_minutes || exam.pinValidityMinutes || 30;
+        const expiresAt = new Date(generatedAt.getTime() + validityMinutes * 60000);
+
+        return now < expiresAt;
+    };
+
+    const handleGeneratePin = async (examId, keepOld = false, validityMinutes = null) => {
         setGeneratingPin(true);
+        console.log('[GenericPin] Generating for', examId, { keepOld, validityMinutes });
         try {
             const formData = new FormData();
-            formData.append('admin_email', userProfile.email);
+            formData.append('admin_email', userProfile.email || '');
+
+            // React Native FormData robustly handles strings best
+            if (keepOld) {
+                formData.append('keep_old_pin', 'true');
+            }
+            if (validityMinutes) {
+                formData.append('validity_minutes', String(validityMinutes));
+            }
 
             const res = await fetch(`${API_URL}/api/v1/assessments/scheduled/${examId}/generate-pin`, {
                 method: 'POST',
@@ -83,11 +113,14 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
             const data = await res.json();
 
             if (data.pin) {
-                Alert.alert(
-                    '✅ PIN Generated',
-                    `PIN: ${data.pin}\n\nValid until: ${new Date(data.valid_until).toLocaleTimeString()}\n\nAnnounce this PIN to students present in the exam hall.`,
-                    [{ text: 'OK', onPress: () => fetchExams() }]
-                );
+                let msg = `New PIN: ${data.pin}\n\nExpires: ${new Date(data.valid_until).toLocaleTimeString()}`;
+                if (keepOld) {
+                    msg += `\n\n(Previous PINs are still active if not expired)`;
+                }
+
+                // Refresh immediately
+                fetchExams();
+                Alert.alert('✅ PIN Generated', msg);
             } else {
                 Alert.alert('Error', data.message || 'Failed to generate PIN');
             }
@@ -99,20 +132,63 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
     };
 
     const handleRegeneratePin = async (examId) => {
+        console.log('[Regenerate] Clicked for', examId);
+
+        if (Platform.OS === 'web') {
+            if (window.confirm('Regenerate PIN? This will create a new PIN valid for 5 minutes.\n\nClick OK to invalidate the old PIN and generate a new one.')) {
+                await handleGeneratePin(examId, false, 5);
+            }
+            return;
+        }
+
         Alert.alert(
             'Regenerate PIN?',
-            'This will invalidate the previous PIN and create a new one.',
+            'Regenerated PINs will be valid for 5 minutes.\n\nDo you want to INVALIDATE the current PIN or allow both to be used?',
             [
                 { text: 'Cancel', style: 'cancel' },
                 {
-                    text: 'Regenerate',
+                    text: 'Replace (Invalidate Old)',
                     style: 'destructive',
                     onPress: async () => {
-                        await handleGeneratePin(examId);
+                        await handleGeneratePin(examId, false, 5);
+                    }
+                },
+                {
+                    text: 'Keep Old & Generate New',
+                    onPress: async () => {
+                        await handleGeneratePin(examId, true, 5);
                     }
                 }
             ]
         );
+    };
+
+    const handleTogglePin = async (examId, currentValue) => {
+        const newValue = !currentValue;
+
+        // Optimistic update (optional, but let's wait for server for safety)
+        try {
+            const formData = new FormData();
+            formData.append('enabled', newValue);
+
+            const res = await fetch(`${API_URL}/api/v1/assessments/scheduled/${examId}/toggle-pin`, {
+                method: 'PUT',
+                body: formData
+            });
+
+            const data = await res.json();
+
+            if (data.status === 'success') {
+                // Update local state to reflect change without full reload if possible, 
+                // but fetching is safer to get consistent state
+                fetchExams();
+            } else {
+                Alert.alert('Error', data.message || 'Failed to toggle PIN');
+            }
+        } catch (e) {
+            console.error('Toggle PIN error:', e);
+            Alert.alert('Error', 'Failed to toggle PIN status');
+        }
     };
 
     const openEditModal = (exam) => {
@@ -182,54 +258,118 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
                                 showsVerticalScrollIndicator={false}
                                 renderItem={({ item }) => (
                                     <View style={styles.examCard}>
-                                        <TouchableOpacity
-                                            style={{ flex: 1 }}
-                                            onPress={() => onSelectExam(item)}
-                                        >
-                                            <View style={styles.cardHeader}>
-                                                <View style={{ flex: 1 }}>
-                                                    <Text style={styles.examTitle}>{item.title}</Text>
-                                                    <Text style={styles.examDate}>
-                                                        {item.exam_date} at {item.exam_time} • {item.location}
-                                                    </Text>
-                                                </View>
-                                                <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + '20' }]}>
-                                                    <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
-                                                        {item.status?.toUpperCase() || 'SCHEDULED'}
-                                                    </Text>
-                                                </View>
-                                            </View>
-
-                                        <View style={styles.cardFooter}>
-                                            <View style={styles.stat}>
-                                                <Feather name="users" size={14} color="#6B7280" />
-                                                <Text style={styles.statText}>{item.assigned_users?.length || 0} assigned</Text>
-                                            </View>
-                                            <View style={styles.stat}>
-                                                <Feather name="clock" size={14} color="#6B7280" />
-                                                <Text style={styles.statText}>{item.time_limit_minutes} mins</Text>
-                                            </View>
-                                            <View style={styles.stat}>
-                                                <MaterialCommunityIcons name="clipboard-check-outline" size={14} color="#6B7280" />
-                                                <Text style={styles.statText}>Pass: {item.passing_score}%</Text>
-                                            </View>
-                                        </View>
-
-                                            <Text style={[styles.supervisorText, item.supervisor_email === userProfile?.email && { color: '#10B981', fontWeight: 'bold' }]}>
-                                                Supervisor: {item.supervisor_name} {item.supervisor_email === userProfile?.email ? '(You)' : ''}
-                                            </Text>
-                                        </TouchableOpacity>
-
-                                        {/* Edit Button - Only for admin/supervisor */}
-                                        {(userProfile?.is_superadmin || item.supervisor_email === userProfile?.email) && (
+                                        <View style={{ flexDirection: 'row', gap: 16 }}>
+                                            {/* Left Column: Exam Details */}
                                             <TouchableOpacity
-                                                style={styles.editButton}
-                                                onPress={() => openEditModal(item)}
+                                                style={{ flex: 1 }}
+                                                onPress={() => onSelectExam(item)}
                                             >
-                                                <Feather name="edit-2" size={16} color="#6366F1" />
-                                                <Text style={styles.editButtonText}>Edit</Text>
+                                                <View style={styles.cardHeader}>
+                                                    <View style={{ flex: 1 }}>
+                                                        <Text style={styles.examTitle}>{item.title}</Text>
+                                                        <Text style={styles.examDate}>
+                                                            {item.exam_date} at {item.exam_time} • {item.location}
+                                                        </Text>
+                                                    </View>
+                                                    <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + '20' }]}>
+                                                        <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
+                                                            {item.status?.toUpperCase() || 'SCHEDULED'}
+                                                        </Text>
+                                                    </View>
+                                                </View>
+
+                                                <View style={styles.cardFooter}>
+                                                    <View style={styles.stat}>
+                                                        <Feather name="users" size={14} color="#6B7280" />
+                                                        <Text style={styles.statText}>{item.assigned_users?.length || 0} assigned</Text>
+                                                    </View>
+                                                    <View style={styles.stat}>
+                                                        <Feather name="clock" size={14} color="#6B7280" />
+                                                        <Text style={styles.statText}>{item.time_limit_minutes} mins</Text>
+                                                    </View>
+                                                    <View style={styles.stat}>
+                                                        <MaterialCommunityIcons name="clipboard-check-outline" size={14} color="#6B7280" />
+                                                        <Text style={styles.statText}>Pass: {item.passing_score}%</Text>
+                                                    </View>
+                                                </View>
+
+                                                <Text style={[styles.supervisorText, item.supervisor_email === userProfile?.email && { color: '#10B981', fontWeight: 'bold' }]}>
+                                                    Supervisor: {item.supervisor_name} {item.supervisor_email === userProfile?.email ? '(You)' : ''}
+                                                </Text>
+
+                                                {/* Edit Button - Only for admin/supervisor */}
+                                                {(userProfile?.is_superadmin || item.supervisor_email === userProfile?.email) && (
+                                                    <TouchableOpacity
+                                                        style={styles.editButton}
+                                                        onPress={() => openEditModal(item)}
+                                                    >
+                                                        <Feather name="edit-2" size={16} color="#6366F1" />
+                                                        <Text style={styles.editButtonText}>Edit</Text>
+                                                    </TouchableOpacity>
+                                                )}
                                             </TouchableOpacity>
-                                        )}
+
+                                            {/* Right Column: PIN Management (Admin/Supervisor Only) */}
+                                            {(userProfile?.is_superadmin || item.supervisor_email === userProfile?.email) && (
+                                                <View style={styles.pinControlPanel}>
+                                                    <View style={styles.pinToggleRow}>
+                                                        <Text style={styles.pinToggleLabel}>PIN Access</Text>
+                                                        <Switch
+                                                            trackColor={{ false: "#E5E7EB", true: "#C4B5FD" }}
+                                                            thumbColor={(item.pin_enabled || item.pinEnabled) ? "#7C3AED" : "#9CA3AF"}
+                                                            onValueChange={() => handleTogglePin(item.id, (item.pin_enabled || item.pinEnabled))}
+                                                            value={!!(item.pin_enabled || item.pinEnabled)}
+                                                            style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] }}
+                                                        />
+                                                    </View>
+
+                                                    {(item.pin_enabled || item.pinEnabled) ? (
+                                                        <View style={styles.pinDisplaySmall}>
+                                                            {item.generated_pin || item.generatedPin ? (
+                                                                <View style={{ alignItems: 'center' }}>
+                                                                    {isPinActive(item) ? (
+                                                                        <View style={styles.activeBadge}>
+                                                                            <View style={styles.activeDot} />
+                                                                            <Text style={styles.activeText}>ACTIVE</Text>
+                                                                        </View>
+                                                                    ) : (
+                                                                        <View style={styles.expiredBadge}>
+                                                                            <Text style={styles.expiredText}>EXPIRED</Text>
+                                                                        </View>
+                                                                    )}
+
+                                                                    <Text style={styles.pinCodeSmall}>{item.generated_pin || item.generatedPin}</Text>
+
+                                                                    <TouchableOpacity
+                                                                        onPress={() => handleRegeneratePin(item.id)}
+                                                                        style={styles.pinRegenBtnSmall}
+                                                                        disabled={generatingPin}
+                                                                    >
+                                                                        {generatingPin ? (
+                                                                            <ActivityIndicator size="small" color="#6366F1" />
+                                                                        ) : (
+                                                                            <>
+                                                                                <Feather name="refresh-cw" size={12} color="#6366F1" />
+                                                                                <Text style={styles.pinRegenTextSmall}>Regenerate</Text>
+                                                                            </>
+                                                                        )}
+                                                                    </TouchableOpacity>
+                                                                </View>
+                                                            ) : (
+                                                                <TouchableOpacity
+                                                                    onPress={() => handleGeneratePin(item.id)}
+                                                                    style={styles.pinGenBtnSmall}
+                                                                >
+                                                                    <Text style={styles.pinGenTextSmall}>Generate PIN</Text>
+                                                                </TouchableOpacity>
+                                                            )}
+                                                        </View>
+                                                    ) : (
+                                                        <Text style={styles.pinDisabledText}>PIN Disabled</Text>
+                                                    )}
+                                                </View>
+                                            )}
+                                        </View>
                                     </View>
                                 )}
                                 ListEmptyComponent={
@@ -672,5 +812,104 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_500Medium',
         color: '#6B7280',
         flex: 1
+    },
+
+    // Right Side PIN Panel
+    pinControlPanel: {
+        width: 110,
+        backgroundColor: '#F9FAFB',
+        borderRadius: 12,
+        padding: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderLeftWidth: 1,
+        borderLeftColor: '#F3F4F6'
+    },
+    pinToggleRow: {
+        alignItems: 'center',
+        marginBottom: 8
+    },
+    pinToggleLabel: {
+        fontSize: 10,
+        fontFamily: 'Poppins_500Medium',
+        color: '#6B7280',
+        marginBottom: 2
+    },
+    pinDisplaySmall: {
+        alignItems: 'center',
+        width: '100%'
+    },
+    pinCodeSmall: {
+        fontSize: 18,
+        fontFamily: 'Poppins_700Bold',
+        color: '#7C3AED',
+        marginBottom: 4,
+        letterSpacing: 2
+    },
+    pinRegenBtnSmall: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        padding: 4,
+        backgroundColor: '#EEF2FF',
+        borderRadius: 6
+    },
+    pinRegenTextSmall: {
+        fontSize: 10,
+        fontFamily: 'Poppins_500Medium',
+        color: '#6366F1'
+    },
+    pinGenBtnSmall: {
+        backgroundColor: '#7C3AED',
+        paddingVertical: 6,
+        paddingHorizontal: 8,
+        borderRadius: 6,
+        width: '100%',
+        alignItems: 'center'
+    },
+    pinGenTextSmall: {
+        fontSize: 10,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF'
+    },
+    pinDisabledText: {
+        fontSize: 10,
+        fontFamily: 'Poppins_400Regular',
+        color: '#9CA3AF',
+        fontStyle: 'italic',
+        marginTop: 4
+    },
+    activeBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: '#D1FAE5',
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 8,
+        marginBottom: 8
+    },
+    activeDot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: '#10B981'
+    },
+    activeText: {
+        fontSize: 10,
+        fontFamily: 'Poppins_700Bold',
+        color: '#059669'
+    },
+    expiredBadge: {
+        backgroundColor: '#FEE2E2',
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 8,
+        marginBottom: 8
+    },
+    expiredText: {
+        fontSize: 10,
+        fontFamily: 'Poppins_700Bold',
+        color: '#DC2626'
     }
 });
