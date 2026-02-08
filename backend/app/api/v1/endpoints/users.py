@@ -138,6 +138,10 @@ async def update_user_alias(
         updates["privileges"] = data["privileges"]
     if "has_admin_access" in data:
         updates["has_admin_access"] = data["has_admin_access"]
+    if "is_external" in data:
+        updates["is_external"] = data["is_external"]
+    if "joined_at_level" in data:
+        updates["joined_at_level"] = data["joined_at_level"]
     if "password" in data and data["password"]:
         updates["password"] = data["password"]
 
@@ -184,6 +188,8 @@ async def create_user(
         "privileges": data.get("privileges", []),
         "is_superadmin": data.get("is_superadmin", False),
         "has_admin_access": data.get("has_admin_access", False),
+        "is_external": data.get("is_external", False),
+        "joined_at_level": data.get("joined_at_level", None),
     }
     
     try:
@@ -430,11 +436,46 @@ async def create_user_category(
     return {"status": "success", "category": new_category}
 
 
+@router.delete("/categories/{category_id}")
+async def delete_user_category(
+    category_id: str,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """
+    Deletes a user category.
+    """
+    global _user_categories_store
+    
+    # Check if category exists
+    category = next((c for c in _user_categories_store if c["id"] == str(category_id)), None)
+    if not category:
+        # If not found in memory, just return success to avoid blocking UI
+        return {"status": "success", "message": "Category removed"}
+        
+    # Prevent deleting critical default categories (Super Admin, Employee)
+    # IDs 1 (Super Admin) and 4 (Employee) are critical
+    if category["id"] in ["1", "4"]:
+        raise HTTPException(status_code=400, detail="Cannot delete critical system categories (Super Admin, Employee)")
+    
+    # Remove from store
+    # Since _user_categories_store is a list of dicts, we filter it
+    # We must access the global variable to modify it
+    for i, cat in enumerate(_user_categories_store):
+        if cat["id"] == str(category_id):
+            del _user_categories_store[i]
+            break
+            
+    return {"status": "success", "message": f"Category {category['name']} deleted"}
+
+
 # ==========================================
 # STORES ENDPOINTS
 # ==========================================
 
-STORES_LIST = [
+
+# In-memory store management (mutable)
+_stores_store = [
     {"id": "1", "name": "HQ", "city": "Mumbai", "region": "West"},
     {"id": "2", "name": "Mumbai Central", "city": "Mumbai", "region": "West"},
     {"id": "3", "name": "Mumbai Andheri", "city": "Mumbai", "region": "West"},
@@ -455,7 +496,59 @@ async def get_stores():
     """
     Returns list of all stores for employee assignment.
     """
-    return STORES_LIST
+    return _stores_store
+
+
+@router.post("/stores")
+async def create_store(
+    store: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """
+    Create a new store.
+    """
+    global _stores_store
+    
+    new_store = {
+        "id": f"store_{uuid.uuid4().hex[:8]}",
+        "name": store.get("name"),
+        "city": store.get("city", ""),
+        "region": store.get("region", "")
+    }
+    
+    _stores_store.append(new_store)
+    return {"status": "success", "store": new_store}
+
+
+@router.delete("/stores/{store_id}")
+async def delete_store(
+    store_id: str,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """
+    Delete a store.
+    """
+    global _stores_store
+    
+    # Check if store exists
+    store = next((s for s in _stores_store if s["id"] == str(store_id)), None)
+    if not store:
+        return {"status": "success", "message": "Store removed"}
+        
+    # Prevent deleting HQ (ID 1) as minimum default, but allow others
+    if store_id == "1":
+        raise HTTPException(status_code=400, detail="Cannot delete HQ store")
+        
+    # Remove from store
+    for i, s in enumerate(_stores_store):
+        if s["id"] == str(store_id):
+            del _stores_store[i]
+            break
+            
+    return {"status": "success", "message": f"Store {store['name']} deleted"}
+
 
 
 @router.get("/stores/summary")
@@ -467,7 +560,7 @@ async def get_stores_summary(db: Session = Depends(get_db)):
     store_counts = service.get_user_count_by_store()
     
     result = []
-    for store in STORES_LIST:
+    for store in _stores_store:
         store_data = store.copy()
         store_data["employee_count"] = store_counts.get(store["name"], 0)
         result.append(store_data)
@@ -564,6 +657,16 @@ def process_bulk_upload_task(task_id: str, contents: bytes):
                 store = str(row_dict.get('Store Name', row_dict.get('Store', 'Unassigned'))).strip()
                 if not store or store.lower() == 'nan': store = "Unassigned"
                 
+                # External user flag from CSV
+                raw_external = str(row_dict.get('Is External', row_dict.get('External', 'No'))).strip().lower()
+                is_external = raw_external in ('yes', 'true', '1', 'y', 'external')
+                
+                raw_joined_level = str(row_dict.get('Joined At Level', row_dict.get('joined_at_level', ''))).strip()
+                joined_at_level = raw_joined_level if raw_joined_level and raw_joined_level.lower() not in ('nan', 'none', '') else None
+                # If external but no joined_at_level specified, default to their role
+                if is_external and not joined_at_level:
+                    joined_at_level = role
+                
                 password = str(row_dict.get('Password', 'Welcome@123')).strip()
                 profile_data = row_dict
                 
@@ -571,6 +674,7 @@ def process_bulk_upload_task(task_id: str, contents: bytes):
                     "name": name, "email": email, "password": password,
                     "role": role, "category": category, "store": store,
                     "privileges": [], "is_superadmin": False, "has_admin_access": False,
+                    "is_external": is_external, "joined_at_level": joined_at_level,
                     "profile_data": profile_data
                 }
                 
@@ -656,7 +760,7 @@ async def get_bulk_upload_template():
             "Date of Leaving", "Reason for Leaving", "Franchise", "Store Name", "Store Code", 
             "Region", "City", "State", "Designation", "User Status", "Grade", "Concept", 
             "Department", "Sub Department", "Function", "Sub Function", "Job Role", 
-            "Career Job Roles", "User Created On"
+            "Career Job Roles", "User Created On", "Is External", "Joined At Level"
         ],
         "example": [
             {
@@ -668,16 +772,98 @@ async def get_bulk_upload_template():
                 "Department": "Store Operations",
                 "Contact Number": "9177382834",
                 "Gender": "male",
-                "Join Date": "23-09-2017"
+                "Join Date": "23-09-2017",
+                "Is External": "Yes",
+                "Joined At Level": "Gold Waffler"
             }
         ],
         "notes": [
             "Email is mandatory.",
             "Default password will be 'Welcome@123' if not specified.",
             "Designation will be mapped to User Role.",
-            "Store Name will be used for store assignment."
+            "Store Name will be used for store assignment.",
+            "'Is External' accepts Yes/No/True/False. External users see merged levels in their learning path.",
+            "'Joined At Level' specifies the level the external user joined at. Defaults to their Designation/Role if not set."
         ]
     }
+
+# ==========================================
+# EXTERNAL USER MANAGEMENT
+# (Must come BEFORE /{email} catch-all route)
+# ==========================================
+
+@router.post("/toggle-external")
+async def toggle_external_status(
+    data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """
+    Toggle a user's external status. Admin only.
+    Body: { email, is_external, joined_at_level? }
+    """
+    from app.models.user import User
+
+    email = data.get("email")
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required")
+
+    is_external = data.get("is_external", False)
+    joined_at_level = data.get("joined_at_level", None)
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User '{email}' not found")
+
+    user.is_external = is_external
+    if is_external:
+        # If marking as external, set joined_at_level (default to current role)
+        user.joined_at_level = joined_at_level or user.role
+    else:
+        # If marking as normal, clear joined_at_level
+        user.joined_at_level = None
+
+    db.commit()
+    db.refresh(user)
+
+    logger.info(f"External status toggled for {email}: is_external={is_external}, joined_at_level={user.joined_at_level} by {current_user.get('email')}")
+    return {"status": "success", "user": user.to_dict()}
+
+
+@router.post("/bulk-toggle-external")
+async def bulk_toggle_external(
+    data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """
+    Bulk toggle external status for multiple users. Admin only.
+    Body: { emails: [...], is_external: bool, joined_at_level?: string }
+    """
+    from app.models.user import User
+
+    emails = data.get("emails", [])
+    is_external = data.get("is_external", False)
+    joined_at_level = data.get("joined_at_level", None)
+
+    if not emails:
+        raise HTTPException(status_code=400, detail="No emails provided")
+
+    updated = 0
+    for email in emails:
+        user = db.query(User).filter(User.email == email).first()
+        if user:
+            user.is_external = is_external
+            if is_external:
+                user.joined_at_level = joined_at_level or user.role
+            else:
+                user.joined_at_level = None
+            updated += 1
+
+    db.commit()
+    logger.info(f"Bulk external toggle: {updated} users set to is_external={is_external} by {current_user.get('email')}")
+    return {"status": "success", "updated": updated}
+
 
 # ==========================================
 # SMART USER CATEGORIZATION FOR SCHEDULE EXAMS
@@ -1046,6 +1232,10 @@ async def update_user(
         updates["privileges"] = data["privileges"]
     if "has_admin_access" in data:
         updates["has_admin_access"] = data["has_admin_access"]
+    if "is_external" in data:
+        updates["is_external"] = data["is_external"]
+    if "joined_at_level" in data:
+        updates["joined_at_level"] = data["joined_at_level"]
     if "password" in data and data["password"]:
         updates["password"] = data["password"]
 

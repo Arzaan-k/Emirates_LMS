@@ -1,8 +1,10 @@
 # CloudConvert Setup - Exact PPT/DOCX to PDF Conversion
 
+**Important**: CloudConvert is ONLY used for PowerPoint (.ppt, .pptx) and Word (.doc, .docx) files that are >= 24MB. Other file types (PDF, Excel, etc.) are not converted.
+
 ## Why CloudConvert?
 
-CloudConvert provides **EXACT** document conversion:
+CloudConvert provides **EXACT** document conversion for PPT/DOC files:
 - ✅ Preserves ALL formatting, fonts, colors
 - ✅ Preserves images, charts, SmartArt
 - ✅ Preserves animations and transitions (as static)

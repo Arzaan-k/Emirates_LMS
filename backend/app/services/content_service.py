@@ -75,6 +75,15 @@ class ContentService:
             raise NotFoundError(resource="Content", resource_id=content_id)
         return content
 
+    def get_content_by_title_and_bucket(self, title: str, bucket_id: str) -> Optional[Content]:
+        """Get content by title and bucket ID for duplicate detection."""
+        from app.models import Content
+        content = self.db.query(Content).filter(
+            Content.title == title,
+            Content.bucket_id == bucket_id
+        ).first()
+        return content
+
     def update_content(self, content_id: str, updates: Dict[str, Any]) -> Content:
         """Update content."""
         content = self.get_content_by_id(content_id)
@@ -282,8 +291,8 @@ class ContentService:
         completed_count = sum(1 for n in response_nodes if n.get("status") == "completed")
         total_count = len(response_nodes)
 
-        # Determine if path is locked (career path locked until self-learning complete)
-        is_locked = path_type == "career_progression" and not self_learning_completed
+        # Both learning paths are always unlocked for all users
+        is_locked = False
 
         return {
             "path_type": path_type,
@@ -292,7 +301,7 @@ class ContentService:
             "completed_courses": completed_count,
             "progress_percent": round((completed_count / total_count * 100) if total_count > 0 else 0, 1),
             "is_locked": is_locked,
-            "lock_message": "Complete Self-Learning to unlock Career Progression" if is_locked else None,
+            "lock_message": None,
         }
 
     def filter_courses_by_level(

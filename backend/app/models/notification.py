@@ -27,6 +27,9 @@ class Notification(Base):
     target_users = Column(JSON, default=[])  # Empty = all users, else specific emails
     target_stores = Column(JSON, default=[])  # Target specific stores
     target_roles = Column(JSON, default=[])  # Target specific roles
+    target_categories = Column(JSON, default=[])  # Target specific user categories
+    source_bucket_id = Column(String(255))  # Bucket that triggered notification
+    source_course_id = Column(String(255))  # Course that triggered notification
     is_crucial = Column(Boolean, default=False)  # Important notifications
     priority = Column(String(50), default="normal")  # low, normal, high, urgent
     expires_at = Column(DateTime)  # Auto-expire notification
@@ -57,6 +60,11 @@ class Notification(Base):
             "action_url": self.action_url,
             "action_type": self.action_type,
             "target_users": self.target_users or [],
+            "target_stores": self.target_stores or [],
+            "target_roles": self.target_roles or [],
+            "target_categories": self.target_categories or [],
+            "source_bucket_id": self.source_bucket_id,
+            "source_course_id": self.source_course_id,
             "read_by": self.read_by or [],
             "created_by": self.created_by,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -128,4 +136,43 @@ class NewsFeed(Base):
             "commentsCount": len(self.comments or []),
             "viewCount": self.view_count,
             "createdAt": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class CourseFeedback(Base):
+    """
+    User feedback on courses after completion.
+    Star rating (1-5) + optional text description.
+    """
+    __tablename__ = "course_feedback"
+
+    id = Column(String(255), primary_key=True)
+    user_email = Column(String(255), nullable=False)
+    course_id = Column(String(255), nullable=False)
+    course_title = Column(String(500))
+    bucket = Column(String(255))
+    rating = Column(Integer, nullable=False)  # 1-5 stars
+    comment = Column(Text)  # Optional text feedback
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_feedback_user', 'user_email'),
+        Index('idx_feedback_course', 'course_id'),
+        Index('idx_feedback_rating', 'rating'),
+        Index('idx_feedback_created', 'created_at'),
+    )
+
+    def __repr__(self):
+        return f"<CourseFeedback {self.user_email} - {self.course_id} ({self.rating}★)>"
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_email": self.user_email,
+            "course_id": self.course_id,
+            "course_title": self.course_title,
+            "bucket": self.bucket,
+            "rating": self.rating,
+            "comment": self.comment,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }

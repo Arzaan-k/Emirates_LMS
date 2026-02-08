@@ -147,7 +147,7 @@ const MidVideoQuizModal = ({ visible, quiz, onSubmit, onClose }) => {
     );
 };
 
-// Cross-platform document viewer - uses iframe on web, WebView on native
+// Cross-platform document viewer - uses Google Docs viewer for fast PDF rendering
 const CrossPlatformDocViewer = ({ uri, loadingText = "Loading...", onLoadEnd, disableDownload = true, fileType = 'pdf' }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
@@ -162,21 +162,17 @@ const CrossPlatformDocViewer = ({ uri, loadingText = "Loading...", onLoadEnd, di
         setLoading(false);
     };
 
-    // Determine the best viewing strategy based on file type
+    // Use Google Docs viewer for ALL documents (fast, reliable, no download button)
+    // This is much faster than native iframe PDF rendering
     const getViewerUrl = () => {
-        // If it's a PDF from Cloudflare, embed directly with #toolbar=0 to hide download button
-        if (fileType === 'pdf' || uri.toLowerCase().includes('.pdf')) {
-            return `${uri}#toolbar=0&navpanes=0&scrollbar=0`;
-        }
-
-        // For PPT/DOCX, use Google Viewer (only until backend converts to PDF)
-        // Google Viewer embedded mode - prevents direct download UI
+        // Google Docs viewer works great for PDFs and is much faster than native iframe
+        // It also hides download options in embedded mode
         return `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(uri)}`;
     };
 
     const viewerUrl = getViewerUrl();
 
-    // Web platform - use iframe
+    // Web platform - use iframe with Google Docs viewer
     if (Platform.OS === 'web') {
         return (
             <View style={{ flex: 1, position: 'relative' }}>
@@ -194,7 +190,7 @@ const CrossPlatformDocViewer = ({ uri, loadingText = "Loading...", onLoadEnd, di
                     </View>
                 )}
                 <iframe
-                    src={disableDownload ? viewerUrl : uri}
+                    src={viewerUrl}
                     style={{
                         width: '100%',
                         height: '100%',
