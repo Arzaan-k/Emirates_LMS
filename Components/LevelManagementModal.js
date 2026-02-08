@@ -43,6 +43,15 @@ export default function LevelManagementModal({ visible, onClose }) {
     const [draggedIndex, setDraggedIndex] = useState(null);
     const [dragOverIndex, setDragOverIndex] = useState(null);
 
+    // Quiz management state
+    const [showQuizModal, setShowQuizModal] = useState(null); // level object when open
+    const [quizQuestions, setQuizQuestions] = useState([]);
+    const [quizLoading, setQuizLoading] = useState(false);
+    const [quizSaving, setQuizSaving] = useState(false);
+    const [quizSource, setQuizSource] = useState(null);
+    const [editingQuestion, setEditingQuestion] = useState(null); // index of question being edited
+    const [editForm, setEditForm] = useState({ question: '', options: ['', '', '', ''], correctIndex: 0 });
+
     // New level form state
     const [newLevel, setNewLevel] = useState({
         name: '',
@@ -108,6 +117,157 @@ export default function LevelManagementModal({ visible, onClose }) {
         } catch (error) {
             console.error('Failed to fetch courses:', error);
         }
+    };
+
+    // ===========================================================================
+    // QUIZ MANAGEMENT FUNCTIONS
+    // ===========================================================================
+    const fetchQuizQuestions = async (levelName) => {
+        setQuizLoading(true);
+        try {
+            const headers = await getAuthHeaders();
+            const response = await fetch(`${API_URL}/api/v1/levels/exam-questions/${encodeURIComponent(levelName)}`, { headers });
+            const data = await response.json();
+            if (data.status === 'success' && data.data) {
+                setQuizQuestions(data.data.questions || []);
+                setQuizSource(data.data.source || null);
+            } else {
+                setQuizQuestions([]);
+                setQuizSource(null);
+            }
+        } catch (error) {
+            console.error('Failed to fetch quiz questions:', error);
+            setQuizQuestions([]);
+        } finally {
+            setQuizLoading(false);
+        }
+    };
+
+    const saveQuizQuestions = async () => {
+        if (!showQuizModal) return;
+        setQuizSaving(true);
+        try {
+            const headers = await getAuthHeaders();
+            const response = await fetch(`${API_URL}/api/v1/levels/exam-questions/${encodeURIComponent(showQuizModal.name)}`, {
+                method: 'PUT',
+                headers,
+                body: JSON.stringify({ questions: quizQuestions, updated_by: 'admin' }),
+            });
+            const data = await response.json();
+            if (data.status === 'success') {
+                Alert.alert('Success', 'Quiz questions saved!');
+                setQuizSource(data.data?.source || 'manual');
+            } else {
+                Alert.alert('Error', data.message || 'Failed to save questions');
+            }
+        } catch (error) {
+            console.error('Failed to save quiz questions:', error);
+            Alert.alert('Error', 'Failed to save quiz questions');
+        } finally {
+            setQuizSaving(false);
+        }
+    };
+
+    const regenerateQuizQuestions = async () => {
+        if (!showQuizModal) return;
+        Alert.alert(
+            'Regenerate Questions',
+            'This will overwrite all existing questions with AI-generated ones. Continue?',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Regenerate', style: 'destructive', onPress: async () => {
+                        setQuizLoading(true);
+                        try {
+                            const headers = await getAuthHeaders();
+                            const response = await fetch(`${API_URL}/api/v1/levels/exam-questions/${encodeURIComponent(showQuizModal.name)}/regenerate`, {
+                                method: 'POST',
+                                headers,
+                            });
+                            const data = await response.json();
+                            if (data.status === 'success' && data.data) {
+                                setQuizQuestions(data.data.questions || []);
+                                setQuizSource('ai_generated');
+                                Alert.alert('Success', `Generated ${data.data.question_count} questions!`);
+                            } else {
+                                Alert.alert('Error', data.message || 'Failed to regenerate');
+                            }
+                        } catch (error) {
+                            console.error('Failed to regenerate quiz:', error);
+                            Alert.alert('Error', 'Failed to regenerate questions');
+                        } finally {
+                            setQuizLoading(false);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
+    const openQuizModal = (level) => {
+        setShowQuizModal(level);
+        setEditingQuestion(null);
+        fetchQuizQuestions(level.name);
+    };
+
+    const startEditQuestion = (index) => {
+        const q = quizQuestions[index];
+        setEditForm({
+            question: q.question || '',
+            options: [...(q.options || ['', '', '', ''])],
+            correctIndex: q.correctIndex || 0,
+        });
+        setEditingQuestion(index);
+    };
+
+    const saveEditQuestion = () => {
+        if (!editForm.question.trim()) {
+            Alert.alert('Error', 'Question text is required');
+            return;
+        }
+        const validOptions = editForm.options.filter(o => o.trim());
+        if (validOptions.length < 2) {
+            Alert.alert('Error', 'At least 2 options are required');
+            return;
+        }
+        const updated = [...quizQuestions];
+        updated[editingQuestion] = {
+            ...updated[editingQuestion],
+            question: editForm.question,
+            options: editForm.options,
+            correctIndex: editForm.correctIndex,
+        };
+        setQuizQuestions(updated);
+        setEditingQuestion(null);
+    };
+
+    const addNewQuestion = () => {
+        setQuizQuestions([...quizQuestions, {
+            question: 'New Question',
+            options: ['Option A', 'Option B', 'Option C', 'Option D'],
+            correctIndex: 0,
+        }]);
+        // Auto-open edit for the new question
+        const newIdx = quizQuestions.length;
+        setEditForm({
+            question: 'New Question',
+            options: ['Option A', 'Option B', 'Option C', 'Option D'],
+            correctIndex: 0,
+        });
+        setEditingQuestion(newIdx);
+    };
+
+    const deleteQuestion = (index) => {
+        Alert.alert('Delete Question', `Delete question ${index + 1}?`, [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Delete', style: 'destructive', onPress: () => {
+                    const updated = quizQuestions.filter((_, i) => i !== index);
+                    setQuizQuestions(updated);
+                    if (editingQuestion === index) setEditingQuestion(null);
+                }
+            }
+        ]);
     };
 
     // Handle drag-end for levels reordering
@@ -344,6 +504,12 @@ export default function LevelManagementModal({ visible, onClose }) {
 
                     {/* Actions */}
                     <View style={styles.levelActions}>
+                        <TouchableOpacity
+                            style={styles.actionBtn}
+                            onPress={() => openQuizModal(item)}
+                        >
+                            <MaterialCommunityIcons name="help-circle-outline" size={20} color="#6366F1" />
+                        </TouchableOpacity>
                         <TouchableOpacity
                             style={styles.actionBtn}
                             onPress={() => setShowCourseModal(item)}
@@ -744,6 +910,165 @@ export default function LevelManagementModal({ visible, onClose }) {
     };
 
     // ===========================================================================
+    // QUIZ MANAGEMENT MODAL
+    // ===========================================================================
+    const renderQuizModal = () => {
+        if (!showQuizModal) return null;
+
+        return (
+            <Modal visible={true} animationType="slide" presentationStyle="pageSheet">
+                <View style={styles.modalContainer}>
+                    {/* Header */}
+                    <View style={styles.modalHeader}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.modalTitle}>Level Exam Questions</Text>
+                            <Text style={styles.modalSubtitle}>
+                                {showQuizModal.name} • {quizQuestions.length} questions
+                                {quizSource ? ` • ${quizSource === 'ai_generated' ? 'AI Generated' : quizSource === 'manual' ? 'Manually Edited' : 'Mixed'}` : ''}
+                            </Text>
+                        </View>
+                        <TouchableOpacity onPress={() => { setShowQuizModal(null); setEditingQuestion(null); }}>
+                            <Feather name="x" size={24} color="#6B7280" />
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* Action Bar */}
+                    <View style={quizStyles.actionBar}>
+                        <TouchableOpacity style={quizStyles.addBtn} onPress={addNewQuestion}>
+                            <Feather name="plus" size={16} color="#FFF" />
+                            <Text style={quizStyles.addBtnText}>Add Question</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={quizStyles.regenerateBtn} onPress={regenerateQuizQuestions} disabled={quizLoading}>
+                            <MaterialCommunityIcons name="robot" size={16} color="#6366F1" />
+                            <Text style={quizStyles.regenerateBtnText}>AI Regenerate</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[quizStyles.saveAllBtn, quizSaving && { opacity: 0.6 }]}
+                            onPress={saveQuizQuestions}
+                            disabled={quizSaving}
+                        >
+                            {quizSaving ? (
+                                <ActivityIndicator size="small" color="#FFF" />
+                            ) : (
+                                <>
+                                    <Feather name="save" size={16} color="#FFF" />
+                                    <Text style={quizStyles.saveAllBtnText}>Save All</Text>
+                                </>
+                            )}
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* Questions List */}
+                    {quizLoading ? (
+                        <View style={styles.loadingContainer}>
+                            <ActivityIndicator size="large" color="#F59E0B" />
+                            <Text style={styles.loadingText}>Loading questions...</Text>
+                        </View>
+                    ) : (
+                        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
+                            {quizQuestions.length === 0 ? (
+                                <View style={styles.emptyState}>
+                                    <MaterialCommunityIcons name="help-circle-outline" size={48} color="#D1D5DB" />
+                                    <Text style={styles.emptyText}>No questions yet</Text>
+                                    <Text style={{ color: '#9CA3AF', fontSize: 12, marginTop: 4, textAlign: 'center' }}>
+                                        Add questions manually or use AI to generate them from course content
+                                    </Text>
+                                </View>
+                            ) : (
+                                quizQuestions.map((q, idx) => (
+                                    <View key={idx} style={quizStyles.questionCard}>
+                                        {editingQuestion === idx ? (
+                                            /* EDIT MODE */
+                                            <View>
+                                                <Text style={quizStyles.editLabel}>Question {idx + 1}</Text>
+                                                <TextInput
+                                                    style={[styles.input, { marginBottom: 10 }]}
+                                                    value={editForm.question}
+                                                    onChangeText={(t) => setEditForm({ ...editForm, question: t })}
+                                                    placeholder="Enter question text"
+                                                    multiline
+                                                />
+                                                {editForm.options.map((opt, oIdx) => (
+                                                    <View key={oIdx} style={quizStyles.optionEditRow}>
+                                                        <TouchableOpacity
+                                                            style={[
+                                                                quizStyles.correctToggle,
+                                                                editForm.correctIndex === oIdx && quizStyles.correctToggleActive
+                                                            ]}
+                                                            onPress={() => setEditForm({ ...editForm, correctIndex: oIdx })}
+                                                        >
+                                                            <Feather
+                                                                name={editForm.correctIndex === oIdx ? "check-circle" : "circle"}
+                                                                size={18}
+                                                                color={editForm.correctIndex === oIdx ? "#10B981" : "#9CA3AF"}
+                                                            />
+                                                        </TouchableOpacity>
+                                                        <TextInput
+                                                            style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                                                            value={opt}
+                                                            onChangeText={(t) => {
+                                                                const newOpts = [...editForm.options];
+                                                                newOpts[oIdx] = t;
+                                                                setEditForm({ ...editForm, options: newOpts });
+                                                            }}
+                                                            placeholder={`Option ${oIdx + 1}`}
+                                                        />
+                                                    </View>
+                                                ))}
+                                                <View style={quizStyles.editActions}>
+                                                    <TouchableOpacity style={quizStyles.cancelEditBtn} onPress={() => setEditingQuestion(null)}>
+                                                        <Text style={{ color: '#6B7280', fontFamily: 'Poppins_500Medium' }}>Cancel</Text>
+                                                    </TouchableOpacity>
+                                                    <TouchableOpacity style={quizStyles.saveEditBtn} onPress={saveEditQuestion}>
+                                                        <Feather name="check" size={16} color="#FFF" />
+                                                        <Text style={{ color: '#FFF', fontFamily: 'Poppins_600SemiBold', marginLeft: 4 }}>Save</Text>
+                                                    </TouchableOpacity>
+                                                </View>
+                                            </View>
+                                        ) : (
+                                            /* VIEW MODE */
+                                            <View>
+                                                <View style={quizStyles.questionHeader}>
+                                                    <Text style={quizStyles.questionNumber}>Q{idx + 1}</Text>
+                                                    <View style={quizStyles.questionActions}>
+                                                        <TouchableOpacity onPress={() => startEditQuestion(idx)} style={{ padding: 4 }}>
+                                                            <Feather name="edit-2" size={16} color="#F59E0B" />
+                                                        </TouchableOpacity>
+                                                        <TouchableOpacity onPress={() => deleteQuestion(idx)} style={{ padding: 4 }}>
+                                                            <Feather name="trash-2" size={16} color="#EF4444" />
+                                                        </TouchableOpacity>
+                                                    </View>
+                                                </View>
+                                                <Text style={quizStyles.questionText}>{q.question}</Text>
+                                                {(q.options || []).map((opt, oIdx) => (
+                                                    <View key={oIdx} style={[
+                                                        quizStyles.optionRow,
+                                                        oIdx === q.correctIndex && quizStyles.correctOption
+                                                    ]}>
+                                                        <Text style={[
+                                                            quizStyles.optionText,
+                                                            oIdx === q.correctIndex && { color: '#059669', fontFamily: 'Poppins_600SemiBold' }
+                                                        ]}>
+                                                            {String.fromCharCode(65 + oIdx)}. {opt}
+                                                        </Text>
+                                                        {oIdx === q.correctIndex && (
+                                                            <Feather name="check-circle" size={14} color="#10B981" />
+                                                        )}
+                                                    </View>
+                                                ))}
+                                            </View>
+                                        )}
+                                    </View>
+                                ))
+                            )}
+                        </ScrollView>
+                    )}
+                </View>
+            </Modal>
+        );
+    };
+
+    // ===========================================================================
     // MAIN RENDER
     // ===========================================================================
     return (
@@ -887,6 +1212,12 @@ export default function LevelManagementModal({ visible, onClose }) {
                                         <View style={styles.levelActions}>
                                             <TouchableOpacity
                                                 style={styles.actionBtn}
+                                                onPress={() => openQuizModal(item)}
+                                            >
+                                                <MaterialCommunityIcons name="help-circle-outline" size={20} color="#6366F1" />
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={styles.actionBtn}
                                                 onPress={() => setShowCourseModal(item)}
                                             >
                                                 <MaterialCommunityIcons name="playlist-edit" size={20} color="#3B82F6" />
@@ -931,6 +1262,7 @@ export default function LevelManagementModal({ visible, onClose }) {
                 {renderEditModal()}
                 {renderAddModal()}
                 {renderCourseModal()}
+                {renderQuizModal()}
             </GestureHandlerRootView>
         </Modal>
     );
@@ -1331,5 +1663,170 @@ const styles = StyleSheet.create({
         marginTop: 10,
         color: '#9CA3AF',
         fontFamily: 'Poppins_500Medium',
+    },
+});
+
+// ===========================================================================
+// QUIZ MANAGEMENT STYLES
+// ===========================================================================
+const quizStyles = StyleSheet.create({
+    actionBar: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 12,
+        paddingHorizontal: 16,
+        backgroundColor: '#F9FAFB',
+        borderBottomWidth: 1,
+        borderBottomColor: '#E5E7EB',
+        gap: 8,
+        flexWrap: 'wrap',
+    },
+    addBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#10B981',
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 8,
+        gap: 4,
+    },
+    addBtnText: {
+        color: '#FFF',
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    regenerateBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#EEF2FF',
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#C7D2FE',
+        gap: 4,
+    },
+    regenerateBtnText: {
+        color: '#6366F1',
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    saveAllBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#F59E0B',
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 8,
+        gap: 4,
+        marginLeft: 'auto',
+    },
+    saveAllBtnText: {
+        color: '#FFF',
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    questionCard: {
+        backgroundColor: '#FFF',
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 12,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.04,
+        shadowRadius: 4,
+        elevation: 1,
+    },
+    questionHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 8,
+    },
+    questionNumber: {
+        fontSize: 12,
+        fontFamily: 'Poppins_700Bold',
+        color: '#F59E0B',
+        backgroundColor: '#FEF3C7',
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 6,
+        overflow: 'hidden',
+    },
+    questionActions: {
+        flexDirection: 'row',
+        gap: 8,
+    },
+    questionText: {
+        fontSize: 14,
+        fontFamily: 'Poppins_500Medium',
+        color: '#111827',
+        marginBottom: 10,
+        lineHeight: 20,
+    },
+    optionRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 6,
+        paddingHorizontal: 10,
+        borderRadius: 8,
+        marginBottom: 4,
+        backgroundColor: '#F9FAFB',
+    },
+    correctOption: {
+        backgroundColor: '#ECFDF5',
+        borderWidth: 1,
+        borderColor: '#A7F3D0',
+    },
+    optionText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_400Regular',
+        color: '#374151',
+        flex: 1,
+    },
+    editLabel: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#F59E0B',
+        marginBottom: 8,
+    },
+    optionEditRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 8,
+    },
+    correctToggle: {
+        width: 32,
+        height: 32,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    correctToggleActive: {
+        backgroundColor: '#ECFDF5',
+        borderRadius: 16,
+    },
+    editActions: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        gap: 10,
+        marginTop: 12,
+    },
+    cancelEditBtn: {
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 8,
+        backgroundColor: '#F3F4F6',
+    },
+    saveEditBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 8,
+        backgroundColor: '#10B981',
     },
 });

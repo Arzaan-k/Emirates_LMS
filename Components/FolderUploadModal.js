@@ -22,6 +22,11 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
   const [uploadStatus, setUploadStatus] = useState('');
   const fileInputRef = useRef(null);
 
+  // Duplicate Modal State
+  const [duplicateModalVisible, setDuplicateModalVisible] = useState(false);
+  const [duplicateFiles, setDuplicateFiles] = useState([]);
+  const [duplicateAction, setDuplicateAction] = useState('skip'); // 'skip' or 'replace'
+
   // Build tree structure from files
   const buildFileTree = (files) => {
     const tree = {};
@@ -248,17 +253,49 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
     return selected;
   };
 
-  const handleUpload = async () => {
-    const filesToUpload = getSelectedFiles();
+  const checkForDuplicates = async (filesToUpload) => {
+    try {
+      const formData = new FormData();
 
-    if (filesToUpload.length === 0) {
-      alert('Please select at least one file to upload');
-      return;
+      filesToUpload.forEach(fileObj => {
+        formData.append('files', fileObj.file);
+      });
+
+      const filePaths = filesToUpload.map(f => f.path);
+      formData.append('file_paths', JSON.stringify(filePaths));
+      formData.append('root_bucket_name', rootFolderName);
+      formData.append('learning_path_type', learningPathType);
+
+      const response = await fetch(`${API_URL}/api/v1/content/bulk-folder-upload/check-duplicates`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        return result.duplicates || [];
+      }
+      return [];
+    } catch (error) {
+      console.error('Duplicate check error:', error);
+      return [];
     }
+  };
+
+  const performUpload = async (skipDuplicates = false, duplicateAction = 'skip') => {
+    const filesToUpload = getSelectedFiles();
 
     setUploading(true);
     setUploadProgress(0);
     setUploadStatus(`Preparing to upload ${filesToUpload.length} files...`);
+
+    // Simulate progress updates
+    const progressInterval = setInterval(() => {
+      setUploadProgress(prev => {
+        if (prev >= 90) return prev;
+        return prev + Math.random() * 10;
+      });
+    }, 500);
 
     try {
       const formData = new FormData();
@@ -275,19 +312,29 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
       // Add metadata
       formData.append('root_bucket_name', rootFolderName);
       formData.append('learning_path_type', learningPathType);
+      formData.append('skip_duplicates', skipDuplicates ? 'true' : 'false');
+      formData.append('duplicate_action', duplicateAction);
 
-      setUploadStatus('Uploading files to server...');
+      setUploadStatus(`Uploading ${filesToUpload.length} files to server...`);
 
       const response = await fetch(`${API_URL}/api/v1/content/bulk-folder-upload`, {
         method: 'POST',
         body: formData,
       });
 
+      clearInterval(progressInterval);
       const result = await response.json();
 
       if (response.ok) {
         setUploadProgress(100);
-        setUploadStatus(`✓ Upload complete! ${result.results.successful} files uploaded successfully.`);
+        const { successful, skipped, replaced, failed } = result.results;
+        const parts = [];
+        if (successful > 0) parts.push(`${successful} uploaded`);
+        if (skipped > 0) parts.push(`${skipped} skipped`);
+        if (replaced > 0) parts.push(`${replaced} replaced`);
+        if (failed > 0) parts.push(`${failed} failed`);
+
+        setUploadStatus(`✅ Upload complete! ${parts.join(', ')}`);
 
         setTimeout(() => {
           onUploadComplete && onUploadComplete(result);
@@ -297,10 +344,52 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
         throw new Error(result.detail || 'Upload failed');
       }
     } catch (error) {
+      clearInterval(progressInterval);
       console.error('Upload error:', error);
-      setUploadStatus(`✗ Upload failed: ${error.message}`);
-      setUploading(false);
+      setUploadProgress(0);
+      setUploadStatus(`❌ Upload failed: ${error.message}`);
+
+      // Reset uploading state after showing error for 3 seconds
+      setTimeout(() => {
+        setUploading(false);
+        setUploadStatus('');
+      }, 3000);
     }
+  };
+
+  const handleUpload = async () => {
+    const filesToUpload = getSelectedFiles();
+
+    if (filesToUpload.length === 0) {
+      alert('Please select at least one file to upload');
+      return;
+    }
+
+    // Check for duplicates first
+    setUploadStatus('Checking for existing files...');
+    setUploading(true);
+
+    const duplicates = await checkForDuplicates(filesToUpload);
+
+    if (duplicates.length > 0) {
+      setUploading(false);
+      setDuplicateFiles(duplicates);
+      setDuplicateAction('skip'); // Default to skip
+      setDuplicateModalVisible(true);
+    } else {
+      // No duplicates, proceed with upload
+      await performUpload(false, 'skip');
+    }
+  };
+
+  const handleDuplicateConfirm = async () => {
+    setDuplicateModalVisible(false);
+    await performUpload(true, duplicateAction);
+  };
+
+  const handleDuplicateCancel = () => {
+    setDuplicateModalVisible(false);
+    setDuplicateFiles([]);
   };
 
   const handleClose = () => {
@@ -431,6 +520,120 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
           )}
         </View>
       </View>
+
+      {/* Duplicate Files Modal */}
+      <Modal visible={duplicateModalVisible} animationType="fade" transparent={true}>
+        <View style={styles.duplicateModalOverlay}>
+          <View style={styles.duplicateModalContent}>
+            {/* Header */}
+            <View style={styles.duplicateHeader}>
+              <MaterialIcons name="warning" size={32} color="#F59E0B" />
+              <Text style={styles.duplicateTitle}>Duplicate Files Found</Text>
+            </View>
+
+            {/* Message */}
+            <Text style={styles.duplicateMessage}>
+              Found {duplicateFiles.length} file{duplicateFiles.length > 1 ? 's' : ''} that already exist in the same location:
+            </Text>
+
+            {/* Duplicate Files List */}
+            <ScrollView style={styles.duplicateList}>
+              {duplicateFiles.map((dup, index) => (
+                <View key={index} style={styles.duplicateItem}>
+                  <MaterialIcons
+                    name={getFileIcon(getFileType(dup.filename))}
+                    size={20}
+                    color="#6B7280"
+                  />
+                  <View style={styles.duplicateInfo}>
+                    <Text style={styles.duplicateFileName} numberOfLines={1}>
+                      {dup.title}
+                    </Text>
+                    <Text style={styles.duplicatePath} numberOfLines={1}>
+                      {dup.folder_path}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+
+            {/* Action Selection */}
+            <View style={styles.duplicateActions}>
+              <Text style={styles.duplicateActionLabel}>What would you like to do?</Text>
+
+              <TouchableOpacity
+                style={[
+                  styles.duplicateActionBtn,
+                  duplicateAction === 'skip' && styles.duplicateActionBtnActive
+                ]}
+                onPress={() => setDuplicateAction('skip')}
+              >
+                <View style={styles.duplicateActionContent}>
+                  <MaterialIcons
+                    name="skip-next"
+                    size={24}
+                    color={duplicateAction === 'skip' ? '#3B82F6' : '#6B7280'}
+                  />
+                  <View style={styles.duplicateActionText}>
+                    <Text style={[
+                      styles.duplicateActionTitle,
+                      duplicateAction === 'skip' && styles.duplicateActionTitleActive
+                    ]}>
+                      Skip Duplicates
+                    </Text>
+                    <Text style={styles.duplicateActionDesc}>
+                      Keep existing files, only upload new ones
+                    </Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.duplicateActionBtn,
+                  duplicateAction === 'replace' && styles.duplicateActionBtnActive
+                ]}
+                onPress={() => setDuplicateAction('replace')}
+              >
+                <View style={styles.duplicateActionContent}>
+                  <MaterialIcons
+                    name="sync"
+                    size={24}
+                    color={duplicateAction === 'replace' ? '#3B82F6' : '#6B7280'}
+                  />
+                  <View style={styles.duplicateActionText}>
+                    <Text style={[
+                      styles.duplicateActionTitle,
+                      duplicateAction === 'replace' && styles.duplicateActionTitleActive
+                    ]}>
+                      Replace Existing
+                    </Text>
+                    <Text style={styles.duplicateActionDesc}>
+                      Overwrite existing files with new versions
+                    </Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            </View>
+
+            {/* Footer Buttons */}
+            <View style={styles.duplicateFooter}>
+              <TouchableOpacity
+                style={styles.duplicateCancelBtn}
+                onPress={handleDuplicateCancel}
+              >
+                <Text style={styles.duplicateCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.duplicateConfirmBtn}
+                onPress={handleDuplicateConfirm}
+              >
+                <Text style={styles.duplicateConfirmText}>Continue</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 };
@@ -629,6 +832,160 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: '#3B82F6',
+  },
+
+  // Duplicate Modal Styles
+  duplicateModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  duplicateModalContent: {
+    width: '100%',
+    maxWidth: 600,
+    maxHeight: '80%',
+    backgroundColor: '#FFF',
+    borderRadius: 16,
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 20,
+  },
+  duplicateHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+  },
+  duplicateTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  duplicateMessage: {
+    fontSize: 15,
+    color: '#6B7280',
+    marginBottom: 16,
+    lineHeight: 22,
+  },
+  duplicateList: {
+    maxHeight: 350,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 20,
+  },
+  duplicateItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    backgroundColor: '#FFF',
+    borderRadius: 6,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  duplicateInfo: {
+    flex: 1,
+  },
+  duplicateFileName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 2,
+  },
+  duplicatePath: {
+    fontSize: 12,
+    color: '#9CA3AF',
+  },
+  duplicateMore: {
+    fontSize: 13,
+    color: '#6B7280',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    paddingVertical: 8,
+  },
+  duplicateActions: {
+    marginBottom: 20,
+  },
+  duplicateActionLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 12,
+  },
+  duplicateActionBtn: {
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    borderRadius: 10,
+    padding: 14,
+    marginBottom: 12,
+    backgroundColor: '#FFF',
+  },
+  duplicateActionBtnActive: {
+    borderColor: '#3B82F6',
+    backgroundColor: '#EFF6FF',
+  },
+  duplicateActionContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  duplicateActionText: {
+    flex: 1,
+  },
+  duplicateActionTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 2,
+  },
+  duplicateActionTitleActive: {
+    color: '#3B82F6',
+  },
+  duplicateActionDesc: {
+    fontSize: 13,
+    color: '#6B7280',
+    lineHeight: 18,
+  },
+  duplicateFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+  },
+  duplicateCancelBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+  },
+  duplicateCancelText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  duplicateConfirmBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    backgroundColor: '#3B82F6',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  duplicateConfirmText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFF',
   },
 });
 

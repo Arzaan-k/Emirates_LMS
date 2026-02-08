@@ -291,6 +291,7 @@ export default function ManagerDashboard({ route, navigation }) {
     const [scheduledExamsListVisible, setScheduledExamsListVisible] = useState(false); // [NEW] List Modal
     const [examAttendanceVisible, setExamAttendanceVisible] = useState(false);
     const [selectedExamForAttendance, setSelectedExamForAttendance] = useState(null);
+    const [editingExam, setEditingExam] = useState(null); // [NEW] Exam being edited
     const [scheduledExams, setScheduledExams] = useState([]);
     const [examHistoryVisible, setExamHistoryVisible] = useState(false); // [NEW] Exam History Modal
 
@@ -2177,8 +2178,12 @@ export default function ManagerDashboard({ route, navigation }) {
             {/* [NEW] SCHEDULE EXAM MODAL */}
             <ScheduleExamModal
                 visible={scheduleExamVisible}
-                onClose={() => setScheduleExamVisible(false)}
+                onClose={() => {
+                    setScheduleExamVisible(false);
+                    setEditingExam(null);
+                }}
                 userProfile={userProfile}
+                editingExam={editingExam}
             />
 
             {/* [NEW] EXAM ATTENDANCE MODAL */}
@@ -2201,6 +2206,13 @@ export default function ManagerDashboard({ route, navigation }) {
                 }}
                 onCreateNew={() => {
                     setScheduledExamsListVisible(false);
+                    setEditingExam(null);
+                    setTimeout(() => setScheduleExamVisible(true), 500);
+                }}
+                onEditExam={(exam) => {
+                    console.log('[ManagerDashboard] Editing exam:', exam);
+                    setScheduledExamsListVisible(false);
+                    setEditingExam(exam);
                     setTimeout(() => setScheduleExamVisible(true), 500);
                 }}
             />

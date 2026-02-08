@@ -19,7 +19,9 @@ import {
     TextInput,
     Switch,
     Modal,
+    FlatList,
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -138,6 +140,32 @@ const AdminReports = ({ navigation }) => {
     const [roleFilter, setRoleFilter] = useState('');
     const [storeFilter, setStoreFilter] = useState('');
     const [bucketFilter, setBucketFilter] = useState('');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [minScore, setMinScore] = useState('');
+
+    // Extended Filters
+    const [stateFilter, setStateFilter] = useState('');
+    const [cityFilter, setCityFilter] = useState('');
+    const [regionFilter, setRegionFilter] = useState('');
+    const [countryFilter, setCountryFilter] = useState('');
+    const [categoryFilter, setCategoryFilter] = useState('');
+
+    // Date Picker State
+    const [showDatePicker, setShowDatePicker] = useState(false);
+    const [datePickerType, setDatePickerType] = useState('from'); // 'from' | 'to'
+
+    // Picker Data
+    const [availableRoles, setAvailableRoles] = useState([]);
+    const [availableStores, setAvailableStores] = useState([]);
+    const [availableStates, setAvailableStates] = useState([]);
+    const [availableCities, setAvailableCities] = useState([]);
+    const [availableRegions, setAvailableRegions] = useState([]);
+    const [availableCountries, setAvailableCountries] = useState([]);
+    const [availableCategories, setAvailableCategories] = useState([]);
+
+    const [pickerVisible, setPickerVisible] = useState(false);
+    const [pickerType, setPickerType] = useState('role'); // role, store, state, city, region, category, country
+    const [pickerSearch, setPickerSearch] = useState('');
 
     // Subscription State
     const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
@@ -157,6 +185,34 @@ const AdminReports = ({ navigation }) => {
         };
         init();
     }, []);
+
+    useEffect(() => {
+        loadFilterOptions();
+        fetchOverviewData();
+    }, []);
+
+    const loadFilterOptions = async () => {
+        try {
+            // Fetch comprehensive filter options
+            const response = await fetch(`${API_URL}/api/v1/reports/filters`);
+            const data = await response.json();
+
+            if (data) {
+                // Formatting for picker (needs id/name)
+                const formatOptions = (list) => list.map(item => ({ id: item, name: item }));
+
+                setAvailableRoles(formatOptions(data.roles || []));
+                setAvailableStores(formatOptions(data.stores || []));
+                setAvailableCategories(formatOptions(data.categories || []));
+                setAvailableStates(formatOptions(data.states || []));
+                setAvailableRegions(formatOptions(data.regions || []));
+                setAvailableCities(formatOptions(data.cities || []));
+                setAvailableCountries(formatOptions(data.countries || []));
+            }
+        } catch (error) {
+            console.error('Error loading filter options:', error);
+        }
+    };
 
     const fetchSubscriptions = async (email) => {
         try {
@@ -244,8 +300,8 @@ const AdminReports = ({ navigation }) => {
         }
     };
 
-    // Fetch overview data on mount
     useEffect(() => {
+        loadFilterOptions();
         fetchOverviewData();
     }, []);
 
@@ -281,6 +337,15 @@ const AdminReports = ({ navigation }) => {
             if (roleFilter) params.append('role_filter', roleFilter);
             if (storeFilter) params.append('store_filter', storeFilter);
             if (bucketFilter) params.append('bucket_filter', bucketFilter);
+            if (searchQuery) params.append('search', searchQuery);
+            if (minScore) params.append('min_score', minScore);
+
+            // New filters
+            if (stateFilter) params.append('state', stateFilter);
+            if (cityFilter) params.append('city', cityFilter);
+            if (regionFilter) params.append('region', regionFilter);
+            if (countryFilter) params.append('country', countryFilter);
+            if (categoryFilter) params.append('category', categoryFilter);
 
             const url = `${API_URL}${categoryInfo.endpoint}${params.toString() ? '?' + params.toString() : ''}`;
             const response = await fetch(url);
@@ -314,6 +379,16 @@ const AdminReports = ({ navigation }) => {
             if (roleFilter) params.append('role_filter', roleFilter);
             if (storeFilter) params.append('store_filter', storeFilter);
             if (bucketFilter) params.append('bucket_filter', bucketFilter);
+
+            if (searchQuery) params.append('search', searchQuery);
+            if (minScore) params.append('min_score', minScore);
+
+            // Location & Category Filters
+            if (stateFilter) params.append('state', stateFilter);
+            if (cityFilter) params.append('city', cityFilter);
+            if (regionFilter) params.append('region', regionFilter);
+            if (countryFilter) params.append('country', countryFilter);
+            if (categoryFilter) params.append('category', categoryFilter);
 
             const downloadUrl = `${API_URL}${categoryInfo.downloadEndpoint}${params.toString() ? '?' + params.toString() : ''}`;
 
@@ -378,6 +453,16 @@ const AdminReports = ({ navigation }) => {
             if (roleFilter) params.append('role_filter', roleFilter);
             if (storeFilter) params.append('store_filter', storeFilter);
             if (bucketFilter) params.append('bucket_filter', bucketFilter);
+
+            if (searchQuery) params.append('search', searchQuery);
+            if (minScore) params.append('min_score', minScore);
+
+            // Location & Category Filters
+            if (stateFilter) params.append('state', stateFilter);
+            if (cityFilter) params.append('city', cityFilter);
+            if (regionFilter) params.append('region', regionFilter);
+            if (countryFilter) params.append('country', countryFilter);
+            if (categoryFilter) params.append('category', categoryFilter);
 
             const downloadUrl = `${API_URL}${categoryInfo.pdfEndpoint}${params.toString() ? '?' + params.toString() : ''}`;
 
@@ -460,6 +545,13 @@ const AdminReports = ({ navigation }) => {
         setRoleFilter('');
         setStoreFilter('');
         setBucketFilter('');
+        setSearchQuery('');
+        setMinScore('');
+        setStateFilter('');
+        setCityFilter('');
+        setRegionFilter('');
+        setCountryFilter('');
+        setCategoryFilter('');
     };
 
     // Apply filters
@@ -481,72 +573,159 @@ const AdminReports = ({ navigation }) => {
                     </TouchableOpacity>
                 </View>
 
-                {/* Date Range Filters */}
-                <View style={styles.filterSection}>
-                    <Text style={styles.filterSectionTitle}>Date Range</Text>
-                    <View style={styles.filterRow}>
-                        <View style={styles.filterInputWrapper}>
-                            <Text style={styles.filterLabel}>From</Text>
-                            <TextInput
-                                style={styles.filterInput}
-                                placeholder="YYYY-MM-DD"
-                                value={dateFrom}
-                                onChangeText={setDateFrom}
-                                placeholderTextColor="#9CA3AF"
-                            />
-                        </View>
-                        <View style={styles.filterInputWrapper}>
-                            <Text style={styles.filterLabel}>To</Text>
-                            <TextInput
-                                style={styles.filterInput}
-                                placeholder="YYYY-MM-DD"
-                                value={dateTo}
-                                onChangeText={setDateTo}
-                                placeholderTextColor="#9CA3AF"
-                            />
-                        </View>
+                {/* Compact Grid Layout for Filters */}
+
+                {/* Row 1: Search & Score (Full Width & Small Input) */}
+                <View style={[styles.filterRow, { marginBottom: 12 }]}>
+                    <View style={{ flex: 2 }}>
+                        <Text style={styles.filterLabel}>Search</Text>
+                        <TextInput
+                            style={styles.compactInput}
+                            placeholder="Name, Email, etc..."
+                            value={searchQuery}
+                            onChangeText={setSearchQuery}
+                            placeholderTextColor="#9CA3AF"
+                        />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.filterLabel}>Min Score %</Text>
+                        <TextInput
+                            style={styles.compactInput}
+                            placeholder="80"
+                            value={minScore}
+                            onChangeText={(text) => setMinScore(text.replace(/[^0-9]/g, ''))}
+                            keyboardType="numeric"
+                            placeholderTextColor="#9CA3AF"
+                            maxLength={3}
+                        />
                     </View>
                 </View>
 
-                {/* Role Filter */}
-                {['users', 'attendance'].includes(selectedCategory) && (
-                    <View style={styles.filterSection}>
-                        <Text style={styles.filterSectionTitle}>Role</Text>
-                        <TextInput
-                            style={styles.filterInput}
-                            placeholder="e.g., Waffler, Store Manager"
-                            value={roleFilter}
-                            onChangeText={setRoleFilter}
-                            placeholderTextColor="#9CA3AF"
-                        />
+                {/* Row 2: Dates (Half & Half) */}
+                <View style={[styles.filterRow, { marginBottom: 12 }]}>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.filterLabel}>From Date</Text>
+                        <TouchableOpacity
+                            style={styles.compactSelectBtn}
+                            onPress={() => { setDatePickerType('from'); setShowDatePicker(true); }}
+                        >
+                            <Text style={[styles.compactSelectBtnText, !dateFrom && { color: '#9CA3AF' }]}>
+                                {dateFrom || 'YYYY-MM-DD'}
+                            </Text>
+                            <Feather name="calendar" size={14} color="#6B7280" />
+                        </TouchableOpacity>
                     </View>
-                )}
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.filterLabel}>To Date</Text>
+                        <TouchableOpacity
+                            style={styles.compactSelectBtn}
+                            onPress={() => { setDatePickerType('to'); setShowDatePicker(true); }}
+                        >
+                            <Text style={[styles.compactSelectBtnText, !dateTo && { color: '#9CA3AF' }]}>
+                                {dateTo || 'YYYY-MM-DD'}
+                            </Text>
+                            <Feather name="calendar" size={14} color="#6B7280" />
+                        </TouchableOpacity>
+                    </View>
+                </View>
 
-                {/* Store Filter */}
+                {/* Row 3: Location Filters (2 Rows of 2) */}
                 {['users', 'attendance', 'stores'].includes(selectedCategory) && (
-                    <View style={styles.filterSection}>
-                        <Text style={styles.filterSectionTitle}>Store</Text>
-                        <TextInput
-                            style={styles.filterInput}
-                            placeholder="e.g., Mumbai Central, Delhi CP"
-                            value={storeFilter}
-                            onChangeText={setStoreFilter}
-                            placeholderTextColor="#9CA3AF"
-                        />
-                    </View>
+                    <>
+                        <View style={[styles.filterRow, { marginBottom: 12 }]}>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.filterLabel}>Country</Text>
+                                <TouchableOpacity
+                                    style={styles.compactSelectBtn}
+                                    onPress={() => { setPickerType('country'); setPickerSearch(''); setPickerVisible(true); }}
+                                >
+                                    <Text numberOfLines={1} style={[styles.compactSelectBtnText, !countryFilter && styles.placeholderText]}>
+                                        {countryFilter || 'All'}
+                                    </Text>
+                                    <Feather name="chevron-down" size={14} color="#6B7280" />
+                                </TouchableOpacity>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.filterLabel}>State</Text>
+                                <TouchableOpacity
+                                    style={styles.compactSelectBtn}
+                                    onPress={() => { setPickerType('state'); setPickerSearch(''); setPickerVisible(true); }}
+                                >
+                                    <Text numberOfLines={1} style={[styles.compactSelectBtnText, !stateFilter && styles.placeholderText]}>
+                                        {stateFilter || 'All'}
+                                    </Text>
+                                    <Feather name="chevron-down" size={14} color="#6B7280" />
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                        <View style={[styles.filterRow, { marginBottom: 12 }]}>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.filterLabel}>Region</Text>
+                                <TouchableOpacity
+                                    style={styles.compactSelectBtn}
+                                    onPress={() => { setPickerType('region'); setPickerSearch(''); setPickerVisible(true); }}
+                                >
+                                    <Text numberOfLines={1} style={[styles.compactSelectBtnText, !regionFilter && styles.placeholderText]}>
+                                        {regionFilter || 'All'}
+                                    </Text>
+                                    <Feather name="chevron-down" size={14} color="#6B7280" />
+                                </TouchableOpacity>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.filterLabel}>City</Text>
+                                <TouchableOpacity
+                                    style={styles.compactSelectBtn}
+                                    onPress={() => { setPickerType('city'); setPickerSearch(''); setPickerVisible(true); }}
+                                >
+                                    <Text numberOfLines={1} style={[styles.compactSelectBtnText, !cityFilter && styles.placeholderText]}>
+                                        {cityFilter || 'All'}
+                                    </Text>
+                                    <Feather name="chevron-down" size={14} color="#6B7280" />
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </>
                 )}
 
-                {/* Bucket/Category Filter */}
-                {['training', 'content'].includes(selectedCategory) && (
-                    <View style={styles.filterSection}>
-                        <Text style={styles.filterSectionTitle}>Category</Text>
-                        <TextInput
-                            style={styles.filterInput}
-                            placeholder="e.g., Product Training, Skills"
-                            value={bucketFilter}
-                            onChangeText={setBucketFilter}
-                            placeholderTextColor="#9CA3AF"
-                        />
+                {/* Row 4: Details (Role, Store, Category) */}
+                {['users', 'attendance'].includes(selectedCategory) && (
+                    <View style={[styles.filterRow, { marginBottom: 12 }]}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.filterLabel}>Role</Text>
+                            <TouchableOpacity
+                                style={styles.compactSelectBtn}
+                                onPress={() => { setPickerType('role'); setPickerSearch(''); setPickerVisible(true); }}
+                            >
+                                <Text numberOfLines={1} style={[styles.compactSelectBtnText, !roleFilter && styles.placeholderText]}>
+                                    {roleFilter || 'All'}
+                                </Text>
+                                <Feather name="chevron-down" size={14} color="#6B7280" />
+                            </TouchableOpacity>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.filterLabel}>Store</Text>
+                            <TouchableOpacity
+                                style={styles.compactSelectBtn}
+                                onPress={() => { setPickerType('store'); setPickerSearch(''); setPickerVisible(true); }}
+                            >
+                                <Text numberOfLines={1} style={[styles.compactSelectBtnText, !storeFilter && styles.placeholderText]}>
+                                    {storeFilter || 'All'}
+                                </Text>
+                                <Feather name="chevron-down" size={14} color="#6B7280" />
+                            </TouchableOpacity>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.filterLabel}>Type</Text>
+                            <TouchableOpacity
+                                style={styles.compactSelectBtn}
+                                onPress={() => { setPickerType('category'); setPickerSearch(''); setPickerVisible(true); }}
+                            >
+                                <Text numberOfLines={1} style={[styles.compactSelectBtnText, !categoryFilter && styles.placeholderText]}>
+                                    {categoryFilter || 'All'}
+                                </Text>
+                                <Feather name="chevron-down" size={14} color="#6B7280" />
+                            </TouchableOpacity>
+                        </View>
                     </View>
                 )}
 
@@ -674,6 +853,135 @@ const AdminReports = ({ navigation }) => {
             </View>
         </Modal>
     );
+
+    // Render picker modal for Role/Store selection
+    const renderPickerModal = () => {
+        let currentOptions = [];
+        let currentFilterSetter = null;
+        let placeholder = '';
+        let currentFilterValue = '';
+
+        switch (pickerType) {
+            case 'role':
+                currentOptions = availableRoles;
+                currentFilterSetter = setRoleFilter;
+                placeholder = 'Select Role';
+                currentFilterValue = roleFilter;
+                break;
+            case 'store':
+                currentOptions = availableStores;
+                currentFilterSetter = setStoreFilter;
+                placeholder = 'Select Store';
+                currentFilterValue = storeFilter;
+                break;
+            case 'state':
+                currentOptions = availableStates;
+                currentFilterSetter = setStateFilter;
+                placeholder = 'Select State';
+                currentFilterValue = stateFilter;
+                break;
+            case 'city':
+                currentOptions = availableCities;
+                currentFilterSetter = setCityFilter;
+                placeholder = 'Select City';
+                currentFilterValue = cityFilter;
+                break;
+            case 'region':
+                currentOptions = availableRegions;
+                currentFilterSetter = setRegionFilter;
+                placeholder = 'Select Region';
+                currentFilterValue = regionFilter;
+                break;
+            case 'country':
+                currentOptions = availableCountries;
+                currentFilterSetter = setCountryFilter;
+                placeholder = 'Select Country';
+                currentFilterValue = countryFilter;
+                break;
+            case 'category':
+                currentOptions = availableCategories;
+                currentFilterSetter = setCategoryFilter;
+                placeholder = 'Select Type';
+                currentFilterValue = categoryFilter;
+                break;
+            default:
+                return null;
+        }
+
+        const filteredOptions = currentOptions.filter(item =>
+            item.name.toLowerCase().includes(pickerSearch.toLowerCase())
+        );
+
+        return (
+            <Modal
+                animationType="slide"
+                transparent={true}
+                visible={pickerVisible}
+                onRequestClose={() => {
+                    setPickerVisible(!pickerVisible);
+                    setPickerSearch('');
+                }}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>{placeholder}</Text>
+                            <TouchableOpacity onPress={() => { setPickerVisible(false); setPickerSearch(''); }}>
+                                <Feather name="x" size={24} color="#6B7280" />
+                            </TouchableOpacity>
+                        </View>
+                        <View style={styles.modalBody}>
+                            <View style={styles.pickerSearchBox}>
+                                <Feather name="search" size={16} color="#9CA3AF" />
+                                <TextInput
+                                    style={styles.pickerSearchInput}
+                                    placeholder="Search..."
+                                    value={pickerSearch}
+                                    onChangeText={setPickerSearch}
+                                    autoCapitalize="none"
+                                />
+                            </View>
+                            <FlatList
+                                data={filteredOptions}
+                                keyExtractor={(item) => item.id ? item.id.toString() : item.name}
+                                renderItem={({ item }) => {
+                                    const isSelected = currentFilterValue === item.name;
+                                    return (
+                                        <TouchableOpacity
+                                            style={[styles.pickerItem, isSelected && styles.pickerItemActive]}
+                                            onPress={() => {
+                                                currentFilterSetter(item.name);
+                                                setPickerVisible(false);
+                                                setPickerSearch('');
+                                            }}
+                                        >
+                                            <View style={styles.pickerSubText}>
+                                                <Text style={[styles.pickerItemText, isSelected && styles.pickerItemTextActive]}>{item.name}</Text>
+                                                {item.city && <Text style={styles.pickerSubText}>{item.city}</Text>}
+                                            </View>
+                                            {isSelected && <Feather name="check" size={16} color="#D97706" />}
+                                        </TouchableOpacity>
+                                    );
+                                }}
+                            />
+                        </View>
+                        <View style={styles.modalFooter}>
+                            <TouchableOpacity style={styles.pickerClearBtn} onPress={() => {
+                                currentFilterSetter('');
+                                setPickerVisible(false);
+                                setPickerSearch('');
+                            }}>
+                                <Text style={styles.pickerClearText}>Clear Filter</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.btnSave} onPress={() => setPickerVisible(false)}>
+                                <Text style={styles.btnSaveText}>Done</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+        );
+    };
 
     // Render category tabs
     const renderCategoryTabs = () => (
@@ -1159,8 +1467,28 @@ const AdminReports = ({ navigation }) => {
                 {/* Subscription Modal */}
                 {renderSubscriptionModal()}
 
+                {/* Picker Modal */}
+                {renderPickerModal()}
+
                 {/* Report Content */}
                 {renderReportContent()}
+
+                {/* Date Picker Component */}
+                {showDatePicker && (
+                    <DateTimePicker
+                        value={new Date()}
+                        mode="date"
+                        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                        onChange={(event, selectedDate) => {
+                            setShowDatePicker(false);
+                            if (selectedDate && event.type !== 'dismissed') {
+                                const dateStr = selectedDate.toISOString().split('T')[0];
+                                if (datePickerType === 'from') setDateFrom(dateStr);
+                                else setDateTo(dateStr);
+                            }
+                        }}
+                    />
+                )}
 
                 <View style={{ height: 40 }} />
             </ScrollView>
@@ -1421,6 +1749,17 @@ const styles = StyleSheet.create({
         fontSize: 13,
         fontFamily: 'Poppins_400Regular',
         color: '#9CA3AF',
+    },
+    datePickerBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#D1D5DB',
+        borderRadius: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 10, // Matching TextInput height roughly
+        backgroundColor: '#F9FAFB',
+        height: 48,
     },
 
     // LOADING & EMPTY
@@ -1916,7 +2255,108 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontFamily: 'Poppins_600SemiBold',
         color: '#FFF'
-    }
+    },
+    // Select Button Styles
+    selectBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        borderWidth: 1,
+        borderColor: '#D1D5DB',
+        borderRadius: 8,
+        paddingHorizontal: 12,
+        height: 44,
+        backgroundColor: '#F9FAFB',
+    },
+    selectBtnText: {
+        color: '#1F2937',
+        fontSize: 14,
+    },
+    placeholderText: {
+        color: '#9CA3AF',
+    },
+    // Picker Modal Styles
+    pickerSearchBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#F3F4F6',
+        borderRadius: 10,
+        paddingHorizontal: 12,
+        height: 40,
+        marginBottom: 12,
+        gap: 8,
+    },
+    pickerSearchInput: {
+        flex: 1,
+        fontSize: 14,
+        color: '#1F2937',
+    },
+    pickerItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 12,
+        paddingHorizontal: 4,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F3F4F6',
+    },
+    pickerItemActive: {
+        backgroundColor: '#FFFBEB',
+    },
+    pickerItemText: {
+        fontSize: 14,
+        color: '#374151',
+    },
+    pickerItemTextActive: {
+        color: '#D97706',
+        fontWeight: '600',
+    },
+    pickerSubText: {
+        fontSize: 12,
+        color: '#9CA3AF',
+    },
+    pickerClearBtn: {
+        marginTop: 10,
+        alignItems: 'center',
+        paddingVertical: 10,
+        borderTopWidth: 1,
+        borderTopColor: '#E5E7EB',
+    },
+    pickerClearText: {
+        color: '#EF4444',
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    // Compact Filter Styles
+    compactInput: {
+        backgroundColor: '#F9FAFB',
+        borderWidth: 1,
+        borderColor: '#D1D5DB',
+        borderRadius: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        fontSize: 13,
+        fontFamily: 'Poppins_400Regular',
+        color: '#111827',
+        height: 40,
+    },
+    compactSelectBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: '#F9FAFB',
+        borderWidth: 1,
+        borderColor: '#D1D5DB',
+        borderRadius: 8,
+        paddingHorizontal: 10,
+        height: 40,
+    },
+    compactSelectBtnText: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#1F2937',
+        flex: 1,
+    },
 });
 
 export default AdminReports;

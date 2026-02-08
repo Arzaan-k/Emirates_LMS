@@ -315,6 +315,36 @@ async def submit_end_quiz(
 
 
 # ===========================================
+# VIDEO-ONLY COMPLETION (No transcript/quiz)
+# ===========================================
+
+@router.post("/complete-video-only")
+async def complete_node_video_only(
+    user_email: str = Form(...),
+    node_id: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Complete a node based on video progress alone.
+    Used when a video has no audio/transcript and thus no quiz was generated.
+    Only completes if video_watched_percent >= 90%.
+    """
+    try:
+        service = VideoProgressService(db)
+        result = service.complete_node_video_only(
+            user_email=user_email,
+            node_id=node_id
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Video-only completion failed: {e}")
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+
+# ===========================================
 # COMPLETION VALIDATION
 # ===========================================
 

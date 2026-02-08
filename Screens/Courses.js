@@ -14,13 +14,28 @@ import {
 import { MaterialCommunityIcons, Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import CoursePath from "../Components/CoursePath";
+import SelfLearningView from "../Components/SelfLearningView";
+import NotificationBell from "../Components/NotificationBell";
 import QuizSection from "../Components/QuizSection";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { Video, ResizeMode } from 'expo-av';
 import { Modal } from 'react-native';
+import * as ScreenOrientation from 'expo-screen-orientation';
 
 const { width, height } = Dimensions.get("window");
+
+// --- FULLSCREEN HANDLER FOR VIDEO COMPONENTS ---
+const handleVideoFullscreenUpdate = async ({ fullscreenUpdate }) => {
+    switch (fullscreenUpdate) {
+        case 1: // FULLSCREEN_UPDATE_PLAYER_WILL_PRESENT
+            await ScreenOrientation.unlockAsync();
+            break;
+        case 3: // FULLSCREEN_UPDATE_PLAYER_WILL_DISMISS
+            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+            break;
+    }
+};
 
 // --- VIDEO PLAYER MODAL ---
 // --- VIDEO PLAYER MODAL WITH TRANSCRIPT & AI TRANSLATION ---
@@ -100,6 +115,7 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
                         resizeMode={ResizeMode.CONTAIN}
                         shouldPlay
                         onError={(e) => console.log("Video Error:", e)}
+                        onFullscreenUpdate={handleVideoFullscreenUpdate}
                     />
                 </View>
 
@@ -604,10 +620,7 @@ export default function Courses({ userEmail = "user" }) {
     };
 
     const handlePathTabChange = (tab) => {
-        // If career progression is locked, show message
-        if (tab === 'career_progression' && !selfLearningStatus.career_path_unlocked) {
-            return; // Can't switch to locked tab
-        }
+        // Both learning paths are always accessible
         setLearningPathTab(tab);
     };
 
@@ -623,9 +636,12 @@ export default function Courses({ userEmail = "user" }) {
                             {learningPathTab === 'self_learning' ? '📚 Self Learning Journey' : '🚀 Career Progression'}
                         </Text>
                     </View>
-                    <View style={styles.xpContainer}>
-                        <MaterialCommunityIcons name="lightning-bolt" size={20} color="#F59E0B" />
-                        <Text style={styles.xpText}>1,240 XP</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        <NotificationBell userEmail={userEmail} />
+                        <View style={styles.xpContainer}>
+                            <MaterialCommunityIcons name="lightning-bolt" size={20} color="#F59E0B" />
+                            <Text style={styles.xpText}>1,240 XP</Text>
+                        </View>
                     </View>
                 </View>
 
@@ -691,63 +707,38 @@ export default function Courses({ userEmail = "user" }) {
                     <TouchableOpacity
                         style={[
                             styles.learningPathTab,
-                            learningPathTab === 'career_progression' && styles.learningPathTabActiveCareer,
-                            !selfLearningStatus.career_path_unlocked && styles.learningPathTabLocked
+                            learningPathTab === 'career_progression' && styles.learningPathTabActiveCareer
                         ]}
                         onPress={() => handlePathTabChange('career_progression')}
-                        disabled={!selfLearningStatus.career_path_unlocked}
                     >
-                        {/* Lock Icon if locked */}
-                        {!selfLearningStatus.career_path_unlocked ? (
-                            <MaterialCommunityIcons name="lock" size={18} color="#9CA3AF" />
-                        ) : (
-                            <MaterialCommunityIcons
-                                name="trending-up"
-                                size={18}
-                                color={learningPathTab === 'career_progression' ? '#FFF' : '#F59E0B'}
-                            />
-                        )}
+                        <MaterialCommunityIcons
+                            name="trending-up"
+                            size={18}
+                            color={learningPathTab === 'career_progression' ? '#FFF' : '#F59E0B'}
+                        />
                         <Text style={[
                             styles.learningPathTabText,
-                            learningPathTab === 'career_progression' && selfLearningStatus.career_path_unlocked && styles.learningPathTabTextActive,
-                            !selfLearningStatus.career_path_unlocked && styles.learningPathTabTextLocked
+                            learningPathTab === 'career_progression' && styles.learningPathTabTextActive
                         ]}>Career Progression</Text>
                     </TouchableOpacity>
                 </View>
             )}
 
-            {/* LOCKED OVERLAY MESSAGE (when trying to access locked career path) */}
-            {activeTab === 'path' && learningPathTab === 'career_progression' && !selfLearningStatus.career_path_unlocked && (
-                <View style={styles.lockedOverlay}>
-                    <View style={styles.lockedCard}>
-                        <MaterialCommunityIcons name="lock-outline" size={60} color="#9CA3AF" />
-                        <Text style={styles.lockedTitle}>Career Progression Locked</Text>
-                        <Text style={styles.lockedMessage}>
-                            Complete Self Learning to unlock Career Progression
-                        </Text>
-                        <View style={styles.progressContainer}>
-                            <View style={styles.progressBar}>
-                                <View style={[styles.progressFill, { width: `${selfLearningStatus.self_learning_progress || 0}%` }]} />
-                            </View>
-                            <Text style={styles.progressText}>{Math.round(selfLearningStatus.self_learning_progress || 0)}% Complete</Text>
-                        </View>
-                        <TouchableOpacity
-                            style={styles.goToSelfLearningBtn}
-                            onPress={() => setLearningPathTab('self_learning')}
-                        >
-                            <MaterialCommunityIcons name="school" size={18} color="#FFF" />
-                            <Text style={styles.goToSelfLearningBtnText}>Go to Self Learning</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            )}
-
             {/* MAIN CONTENT */}
             <View style={{ flex: 1 }}>
-                {activeTab === 'path' && (
+                {activeTab === 'path' && learningPathTab === 'self_learning' && (
+                    <SelfLearningView
+                        userEmail={userEmail}
+                        onOpenCourse={(course) => {
+                            setCurrentVideo(course);
+                            setModalVisible(true);
+                        }}
+                    />
+                )}
+                {activeTab === 'path' && learningPathTab === 'career_progression' && (
                     <CoursePath
                         userEmail={userEmail}
-                        learningPathType={learningPathTab}
+                        learningPathType="career_progression"
                         onComplete={fetchSelfLearningStatus}
                     />
                 )}

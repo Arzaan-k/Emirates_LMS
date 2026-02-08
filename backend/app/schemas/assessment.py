@@ -117,7 +117,10 @@ class ScheduledExamCreate(BaseSchema):
     exam_date: str  # Format: YYYY-MM-DD
     exam_time: str  # Format: HH:MM
     location: Optional[str] = None
-    shift: Optional[str] = None
+    shift: Optional[str] = None  # Legacy - kept for backward compatibility
+    # Batch System
+    number_of_batches: int = 1
+    batch_assignments: List[Dict[str, Any]] = []  # [{batchNumber, startTime, endTime, maxUsers, users: [...]}]
     supervisor_email: Optional[str] = None
     supervisor_name: Optional[str] = None
     assigned_users: List[str] = []  # List of user emails
@@ -133,7 +136,9 @@ class ScheduledExamUpdate(BaseSchema):
     exam_date: Optional[str] = None
     exam_time: Optional[str] = None
     location: Optional[str] = None
-    shift: Optional[str] = None
+    shift: Optional[str] = None  # Legacy
+    number_of_batches: Optional[int] = None
+    batch_assignments: Optional[List[Dict[str, Any]]] = None
     supervisor_email: Optional[str] = None
     supervisor_name: Optional[str] = None
     assigned_users: Optional[List[str]] = None
@@ -151,7 +156,9 @@ class ScheduledExamResponse(BaseSchema):
     exam_date: str
     exam_time: str
     location: Optional[str] = None
-    shift: Optional[str] = None
+    shift: Optional[str] = None  # Legacy
+    number_of_batches: int = 1
+    batch_assignments: List[Dict[str, Any]] = []
     supervisor_email: Optional[str] = None
     supervisor_name: Optional[str] = None
     assigned_users: List[str] = []

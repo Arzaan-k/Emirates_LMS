@@ -5,7 +5,6 @@ import {
     Modal,
     TouchableOpacity,
     StyleSheet,
-    FlatList,
     TextInput,
     Dimensions,
     Alert,
@@ -35,6 +34,7 @@ export default function BucketManagementModal({ visible, onClose, onBucketsChang
     const [buckets, setBuckets] = useState([]);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [expandedBuckets, setExpandedBuckets] = useState(new Set());
 
     // Create/Edit state
     const [editMode, setEditMode] = useState(false);
@@ -43,6 +43,12 @@ export default function BucketManagementModal({ visible, onClose, onBucketsChang
     const [bucketDesc, setBucketDesc] = useState('');
     const [bucketColor, setBucketColor] = useState('#6366F1');
     const [bucketIcon, setBucketIcon] = useState('folder');
+    const [parentBucketId, setParentBucketId] = useState(null);
+
+    // Delete confirmation modal state
+    const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+    const [bucketToDelete, setBucketToDelete] = useState(null);
+    const [deleting, setDeleting] = useState(false);
 
     useEffect(() => {
         if (visible) {
@@ -64,6 +70,40 @@ export default function BucketManagementModal({ visible, onClose, onBucketsChang
         }
     };
 
+    // Build hierarchical tree structure
+    const buildBucketTree = () => {
+        const bucketMap = {};
+        const roots = [];
+
+        // Create a map of all buckets
+        buckets.forEach(bucket => {
+            bucketMap[bucket.id] = { ...bucket, children: [] };
+        });
+
+        // Build the tree
+        buckets.forEach(bucket => {
+            if (bucket.parent_bucket_id && bucketMap[bucket.parent_bucket_id]) {
+                bucketMap[bucket.parent_bucket_id].children.push(bucketMap[bucket.id]);
+            } else {
+                roots.push(bucketMap[bucket.id]);
+            }
+        });
+
+        return roots;
+    };
+
+    const toggleExpand = (bucketId) => {
+        setExpandedBuckets(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(bucketId)) {
+                newSet.delete(bucketId);
+            } else {
+                newSet.add(bucketId);
+            }
+            return newSet;
+        });
+    };
+
     const resetForm = () => {
         setEditMode(false);
         setEditingBucket(null);
@@ -71,10 +111,12 @@ export default function BucketManagementModal({ visible, onClose, onBucketsChang
         setBucketDesc('');
         setBucketColor('#6366F1');
         setBucketIcon('folder');
+        setParentBucketId(null);
     };
 
-    const openCreateMode = () => {
+    const openCreateMode = (parentBucket = null) => {
         resetForm();
+        setParentBucketId(parentBucket?.id || null);
         setEditMode(true);
     };
 
@@ -84,6 +126,7 @@ export default function BucketManagementModal({ visible, onClose, onBucketsChang
         setBucketDesc(bucket.description || '');
         setBucketColor(bucket.color || '#6366F1');
         setBucketIcon(bucket.icon || 'folder');
+        setParentBucketId(bucket.parent_bucket_id || null);
         setEditMode(true);
     };
 
@@ -100,6 +143,9 @@ export default function BucketManagementModal({ visible, onClose, onBucketsChang
             formData.append('description', bucketDesc);
             formData.append('color', bucketColor);
             formData.append('icon', bucketIcon);
+            if (parentBucketId) {
+                formData.append('parent_bucket_id', parentBucketId);
+            }
 
             const url = editingBucket
                 ? `${API_URL}/api/v1/content/buckets/${editingBucket.id}`
@@ -129,54 +175,122 @@ export default function BucketManagementModal({ visible, onClose, onBucketsChang
         }
     };
 
-    const handleDelete = async (bucketId) => {
-        Alert.alert(
-            'Delete Bucket',
-            'Are you sure you want to delete this bucket? Courses in this bucket will become uncategorized.',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Delete',
-                    style: 'destructive',
-                    onPress: async () => {
-                        try {
-                            const res = await fetch(`${API_URL}/api/v1/content/buckets/${bucketId}`, {
-                                method: 'DELETE'
-                            });
-                            const data = await res.json();
-                            if (data.status === 'success') {
-                                Alert.alert('Deleted', 'Bucket removed');
-                                await fetchBuckets();
-                                if (onBucketsChanged) onBucketsChanged();
-                            }
-                        } catch (e) {
-                            Alert.alert('Error', 'Failed to delete');
-                        }
-                    }
-                }
-            ]
+    const handleDelete = (bucket) => {
+        setBucketToDelete(bucket);
+        setDeleteModalVisible(true);
+    };
+
+    const confirmDelete = async () => {
+        if (!bucketToDelete) return;
+
+        setDeleting(true);
+        try {
+            const res = await fetch(`${API_URL}/api/v1/content/buckets/${bucketToDelete.id}`, {
+                method: 'DELETE'
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                setDeleteModalVisible(false);
+                setBucketToDelete(null);
+                Alert.alert('Success', 'Bucket deleted successfully');
+                await fetchBuckets();
+                if (onBucketsChanged) onBucketsChanged();
+            } else {
+                Alert.alert('Error', 'Failed to delete bucket');
+            }
+        } catch (e) {
+            console.error('Delete error:', e);
+            Alert.alert('Error', 'Network error');
+        } finally {
+            setDeleting(false);
+        }
+    };
+
+    const renderBucketTree = (bucket, level = 0) => {
+        const isExpanded = expandedBuckets.has(bucket.id);
+        const hasChildren = bucket.children && bucket.children.length > 0;
+
+        return (
+            <View key={bucket.id} style={{ marginLeft: level * 20 }}>
+                <View style={styles.bucketCard}>
+                    {/* Expand/Collapse Button */}
+                    {hasChildren && (
+                        <TouchableOpacity
+                            onPress={() => toggleExpand(bucket.id)}
+                            style={styles.expandBtn}
+                        >
+                            <Feather
+                                name={isExpanded ? 'chevron-down' : 'chevron-right'}
+                                size={18}
+                                color="#6B7280"
+                            />
+                        </TouchableOpacity>
+                    )}
+
+                    {/* Bucket Icon */}
+                    <View style={[styles.bucketIcon, { backgroundColor: bucket.color + '20' }]}>
+                        <MaterialCommunityIcons
+                            name={bucket.icon || 'folder'}
+                            size={24}
+                            color={bucket.color}
+                        />
+                    </View>
+
+                    {/* Bucket Info */}
+                    <View style={styles.bucketInfo}>
+                        <Text style={styles.bucketName}>{bucket.name}</Text>
+                        <Text style={styles.bucketDesc} numberOfLines={1}>
+                            {bucket.description || 'No description'}
+                        </Text>
+                    </View>
+
+                    {/* Actions */}
+                    <View style={styles.bucketActions}>
+                        <TouchableOpacity
+                            onPress={() => openCreateMode(bucket)}
+                            style={styles.actionBtn}
+                        >
+                            <Feather name="plus" size={18} color="#10B981" />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            onPress={() => openEditMode(bucket)}
+                            style={styles.actionBtn}
+                        >
+                            <Feather name="edit-2" size={18} color="#6B7280" />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            onPress={() => handleDelete(bucket)}
+                            style={styles.actionBtn}
+                        >
+                            <Feather name="trash-2" size={18} color="#EF4444" />
+                        </TouchableOpacity>
+                    </View>
+                </View>
+
+                {/* Render Children */}
+                {hasChildren && isExpanded && (
+                    <View>
+                        {bucket.children.map(child => renderBucketTree(child, level + 1))}
+                    </View>
+                )}
+            </View>
         );
     };
 
-    const renderBucketItem = ({ item }) => (
-        <View style={styles.bucketCard}>
-            <View style={[styles.bucketIcon, { backgroundColor: item.color + '20' }]}>
-                <MaterialCommunityIcons name={item.icon || 'folder'} size={24} color={item.color} />
-            </View>
-            <View style={styles.bucketInfo}>
-                <Text style={styles.bucketName}>{item.name}</Text>
-                <Text style={styles.bucketDesc} numberOfLines={1}>{item.description || 'No description'}</Text>
-            </View>
-            <View style={styles.bucketActions}>
-                <TouchableOpacity onPress={() => openEditMode(item)} style={styles.actionBtn}>
-                    <Feather name="edit-2" size={18} color="#6B7280" />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => handleDelete(item.id)} style={styles.actionBtn}>
-                    <Feather name="trash-2" size={18} color="#EF4444" />
-                </TouchableOpacity>
-            </View>
-        </View>
-    );
+    const getFlatBucketList = () => {
+        const flatList = [];
+        const traverse = (buckets, parentName = '') => {
+            buckets.forEach(bucket => {
+                const fullPath = parentName ? `${parentName} > ${bucket.name}` : bucket.name;
+                flatList.push({ ...bucket, fullPath });
+                if (bucket.children && bucket.children.length > 0) {
+                    traverse(bucket.children, fullPath);
+                }
+            });
+        };
+        traverse(buildBucketTree());
+        return flatList;
+    };
 
     return (
         <Modal visible={visible} animationType="slide" transparent>
@@ -200,125 +314,203 @@ export default function BucketManagementModal({ visible, onClose, onBucketsChang
                         </TouchableOpacity>
                     </LinearGradient>
 
-                    {/* Content */}
-                    <View style={styles.content}>
-                        {editMode ? (
-                            /* CREATE/EDIT FORM */
-                            <ScrollView showsVerticalScrollIndicator={false}>
-                                <View style={styles.formHeader}>
-                                    <TouchableOpacity onPress={resetForm} style={styles.backBtn}>
-                                        <Feather name="arrow-left" size={20} color="#374151" />
-                                    </TouchableOpacity>
-                                    <Text style={styles.formTitle}>
-                                        {editingBucket ? 'Edit Bucket' : 'Create New Bucket'}
-                                    </Text>
+                    {!editMode ? (
+                        <>
+                            {/* Create New Button */}
+                            <TouchableOpacity
+                                style={styles.createBtn}
+                                onPress={() => openCreateMode()}
+                            >
+                                <Feather name="plus" size={20} color="#6366F1" />
+                                <Text style={styles.createBtnText}>Create New Bucket</Text>
+                            </TouchableOpacity>
+
+                            {/* Buckets List */}
+                            {loading ? (
+                                <ActivityIndicator size="large" color="#6366F1" style={{ marginTop: 40 }} />
+                            ) : (
+                                <ScrollView style={styles.bucketsContainer}>
+                                    {buildBucketTree().map(bucket => renderBucketTree(bucket))}
+                                </ScrollView>
+                            )}
+                        </>
+                    ) : (
+                        <>
+                            {/* Edit/Create Form */}
+                            <ScrollView style={styles.formContainer}>
+                                <Text style={styles.formTitle}>
+                                    {editingBucket ? 'Edit Bucket' : 'Create New Bucket'}
+                                </Text>
+
+                                {/* Parent Bucket Selection */}
+                                <Text style={styles.label}>Parent Bucket (Optional)</Text>
+                                <View style={styles.pickerContainer}>
+                                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.parentOption,
+                                                !parentBucketId && styles.parentOptionActive
+                                            ]}
+                                            onPress={() => setParentBucketId(null)}
+                                        >
+                                            <Text style={[
+                                                styles.parentOptionText,
+                                                !parentBucketId && styles.parentOptionTextActive
+                                            ]}>
+                                                None (Root Level)
+                                            </Text>
+                                        </TouchableOpacity>
+                                        {getFlatBucketList()
+                                            .filter(b => b.id !== editingBucket?.id)
+                                            .map(bucket => (
+                                                <TouchableOpacity
+                                                    key={bucket.id}
+                                                    style={[
+                                                        styles.parentOption,
+                                                        parentBucketId === bucket.id && styles.parentOptionActive
+                                                    ]}
+                                                    onPress={() => setParentBucketId(bucket.id)}
+                                                >
+                                                    <Text style={[
+                                                        styles.parentOptionText,
+                                                        parentBucketId === bucket.id && styles.parentOptionTextActive
+                                                    ]}>
+                                                        {bucket.fullPath}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            ))}
+                                    </ScrollView>
                                 </View>
 
+                                {/* Bucket Name */}
                                 <Text style={styles.label}>Bucket Name *</Text>
                                 <TextInput
                                     style={styles.input}
-                                    placeholder="e.g. Safety Training"
+                                    placeholder="Enter bucket name"
                                     value={bucketName}
                                     onChangeText={setBucketName}
                                 />
 
+                                {/* Description */}
                                 <Text style={styles.label}>Description</Text>
                                 <TextInput
-                                    style={[styles.input, { height: 80 }]}
-                                    placeholder="Brief description of this bucket..."
+                                    style={[styles.input, styles.textArea]}
+                                    placeholder="Enter description"
                                     value={bucketDesc}
                                     onChangeText={setBucketDesc}
                                     multiline
+                                    numberOfLines={3}
                                 />
 
+                                {/* Icon Selection */}
+                                <Text style={styles.label}>Icon</Text>
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.iconScroll}>
+                                    {BUCKET_ICONS.map(icon => (
+                                        <TouchableOpacity
+                                            key={icon}
+                                            style={[
+                                                styles.iconOption,
+                                                bucketIcon === icon && styles.iconOptionActive
+                                            ]}
+                                            onPress={() => setBucketIcon(icon)}
+                                        >
+                                            <MaterialCommunityIcons name={icon} size={24} color={bucketIcon === icon ? '#6366F1' : '#9CA3AF'} />
+                                        </TouchableOpacity>
+                                    ))}
+                                </ScrollView>
+
+                                {/* Color Selection */}
                                 <Text style={styles.label}>Color</Text>
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.colorPicker}>
-                                    {BUCKET_COLORS.map((color) => (
+                                <View style={styles.colorGrid}>
+                                    {BUCKET_COLORS.map(color => (
                                         <TouchableOpacity
                                             key={color}
-                                            onPress={() => setBucketColor(color)}
                                             style={[
                                                 styles.colorOption,
                                                 { backgroundColor: color },
-                                                bucketColor === color && styles.colorSelected
+                                                bucketColor === color && styles.colorOptionActive
                                             ]}
+                                            onPress={() => setBucketColor(color)}
                                         >
                                             {bucketColor === color && (
                                                 <Feather name="check" size={16} color="#FFF" />
                                             )}
                                         </TouchableOpacity>
                                     ))}
-                                </ScrollView>
-
-                                <Text style={styles.label}>Icon</Text>
-                                <View style={styles.iconGrid}>
-                                    {BUCKET_ICONS.map((icon) => (
-                                        <TouchableOpacity
-                                            key={icon}
-                                            onPress={() => setBucketIcon(icon)}
-                                            style={[
-                                                styles.iconOption,
-                                                bucketIcon === icon && { backgroundColor: bucketColor + '20', borderColor: bucketColor }
-                                            ]}
-                                        >
-                                            <MaterialCommunityIcons
-                                                name={icon}
-                                                size={22}
-                                                color={bucketIcon === icon ? bucketColor : '#6B7280'}
-                                            />
-                                        </TouchableOpacity>
-                                    ))}
                                 </View>
 
-                                <TouchableOpacity
-                                    style={[styles.saveBtn, { backgroundColor: bucketColor }]}
-                                    onPress={handleSave}
-                                    disabled={saving}
-                                >
-                                    {saving ? (
-                                        <ActivityIndicator color="#FFF" />
-                                    ) : (
-                                        <>
-                                            <Feather name="check" size={18} color="#FFF" />
-                                            <Text style={styles.saveBtnText}>
-                                                {editingBucket ? 'Update Bucket' : 'Create Bucket'}
-                                            </Text>
-                                        </>
-                                    )}
-                                </TouchableOpacity>
+                                {/* Action Buttons */}
+                                <View style={styles.formActions}>
+                                    <TouchableOpacity
+                                        style={styles.cancelBtn}
+                                        onPress={resetForm}
+                                        disabled={saving}
+                                    >
+                                        <Text style={styles.cancelBtnText}>Cancel</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
+                                        onPress={handleSave}
+                                        disabled={saving}
+                                    >
+                                        {saving ? (
+                                            <ActivityIndicator size="small" color="#FFF" />
+                                        ) : (
+                                            <>
+                                                <Feather name="save" size={18} color="#FFF" />
+                                                <Text style={styles.saveBtnText}>Save</Text>
+                                            </>
+                                        )}
+                                    </TouchableOpacity>
+                                </View>
                             </ScrollView>
-                        ) : (
-                            /* BUCKET LIST */
-                            <>
-                                <TouchableOpacity style={styles.createBtn} onPress={openCreateMode}>
-                                    <Feather name="plus" size={20} color="#6366F1" />
-                                    <Text style={styles.createBtnText}>Create New Bucket</Text>
-                                </TouchableOpacity>
-
-                                {loading ? (
-                                    <View style={styles.loader}>
-                                        <ActivityIndicator size="large" color="#6366F1" />
-                                    </View>
-                                ) : (
-                                    <FlatList
-                                        data={buckets}
-                                        keyExtractor={(item) => item.id}
-                                        renderItem={renderBucketItem}
-                                        contentContainerStyle={{ paddingBottom: 20 }}
-                                        ListEmptyComponent={
-                                            <View style={styles.empty}>
-                                                <MaterialCommunityIcons name="folder-open-outline" size={48} color="#D1D5DB" />
-                                                <Text style={styles.emptyText}>No buckets yet</Text>
-                                                <Text style={styles.emptySubtext}>Create buckets to organize your courses</Text>
-                                            </View>
-                                        }
-                                    />
-                                )}
-                            </>
-                        )}
-                    </View>
+                        </>
+                    )}
                 </View>
             </View>
+
+            {/* Delete Confirmation Modal */}
+            <Modal visible={deleteModalVisible} animationType="fade" transparent={true}>
+                <View style={styles.deleteModalOverlay}>
+                    <View style={styles.deleteModalContent}>
+                        <View style={styles.deleteIconContainer}>
+                            <Feather name="alert-circle" size={64} color="#EF4444" />
+                        </View>
+
+                        <Text style={styles.deleteTitle}>Delete Bucket?</Text>
+                        <Text style={styles.deleteMessage}>
+                            Are you sure you want to delete "{bucketToDelete?.name}"?
+                        </Text>
+                        <Text style={styles.deleteSubMessage}>
+                            Content in this bucket will become uncategorized. This action cannot be undone.
+                        </Text>
+
+                        <View style={styles.deleteFooter}>
+                            <TouchableOpacity
+                                style={styles.deleteCancelBtn}
+                                onPress={() => {
+                                    setDeleteModalVisible(false);
+                                    setBucketToDelete(null);
+                                }}
+                                disabled={deleting}
+                            >
+                                <Text style={styles.deleteCancelText}>Cancel</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.deleteConfirmBtn, deleting && styles.deleteConfirmBtnDisabled]}
+                                onPress={confirmDelete}
+                                disabled={deleting}
+                            >
+                                {deleting ? (
+                                    <ActivityIndicator size="small" color="#FFF" />
+                                ) : (
+                                    <Text style={styles.deleteConfirmText}>Delete</Text>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </Modal>
     );
 }
@@ -327,215 +519,336 @@ const styles = StyleSheet.create({
     overlay: {
         flex: 1,
         backgroundColor: 'rgba(0,0,0,0.5)',
-        justifyContent: 'flex-end'
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     container: {
-        backgroundColor: '#F9FAFB',
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-        maxHeight: height * 0.85,
-        minHeight: height * 0.6
+        width: '90%',
+        maxWidth: 700,
+        maxHeight: '90%',
+        backgroundColor: '#FFF',
+        borderRadius: 16,
+        overflow: 'hidden',
     },
     header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         padding: 20,
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24
     },
     headerContent: {
         flexDirection: 'row',
-        alignItems: 'center'
+        alignItems: 'center',
+        gap: 12,
     },
     headerIcon: {
-        width: 36,
-        height: 36,
-        borderRadius: 10,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
         backgroundColor: 'rgba(255,255,255,0.2)',
         justifyContent: 'center',
         alignItems: 'center',
-        marginRight: 10
     },
     headerTitle: {
-        fontSize: 18,
-        fontFamily: 'Poppins_700Bold',
-        color: '#FFF'
+        fontSize: 20,
+        fontWeight: '700',
+        color: '#FFF',
     },
     closeBtn: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
         backgroundColor: 'rgba(255,255,255,0.2)',
-        padding: 8,
-        borderRadius: 10
-    },
-    content: {
-        flex: 1,
-        padding: 20
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     createBtn: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#EEF2FF',
+        gap: 8,
+        margin: 20,
         padding: 16,
+        backgroundColor: '#EEF2FF',
         borderRadius: 12,
-        borderWidth: 1,
-        borderColor: '#C7D2FE',
+        borderWidth: 2,
+        borderColor: '#6366F1',
         borderStyle: 'dashed',
-        marginBottom: 20
     },
     createBtnText: {
-        marginLeft: 8,
-        fontSize: 15,
-        fontFamily: 'Poppins_600SemiBold',
-        color: '#6366F1'
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#6366F1',
+    },
+    bucketsContainer: {
+        flex: 1,
+        padding: 20,
     },
     bucketCard: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#FFF',
-        padding: 16,
+        padding: 12,
+        backgroundColor: '#F9FAFB',
         borderRadius: 12,
-        marginBottom: 10,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 4,
-        elevation: 2
-    },
-    bucketIcon: {
-        width: 44,
-        height: 44,
-        borderRadius: 12,
-        justifyContent: 'center',
-        alignItems: 'center'
-    },
-    bucketInfo: {
-        flex: 1,
-        marginLeft: 12
-    },
-    bucketName: {
-        fontSize: 15,
-        fontFamily: 'Poppins_600SemiBold',
-        color: '#1F2937'
-    },
-    bucketDesc: {
-        fontSize: 12,
-        fontFamily: 'Poppins_400Regular',
-        color: '#6B7280',
-        marginTop: 2
-    },
-    bucketActions: {
-        flexDirection: 'row'
-    },
-    actionBtn: {
-        padding: 8,
-        marginLeft: 4
-    },
-    loader: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center'
-    },
-    empty: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 40
-    },
-    emptyText: {
-        fontSize: 16,
-        fontFamily: 'Poppins_600SemiBold',
-        color: '#9CA3AF',
-        marginTop: 12
-    },
-    emptySubtext: {
-        fontSize: 13,
-        fontFamily: 'Poppins_400Regular',
-        color: '#D1D5DB',
-        marginTop: 4
-    },
-    // Form styles
-    formHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 20
-    },
-    backBtn: {
-        padding: 8,
-        marginRight: 10
-    },
-    formTitle: {
-        fontSize: 18,
-        fontFamily: 'Poppins_700Bold',
-        color: '#1F2937'
-    },
-    label: {
-        fontSize: 13,
-        fontFamily: 'Poppins_600SemiBold',
-        color: '#374151',
-        marginBottom: 8,
-        marginTop: 16
-    },
-    input: {
-        backgroundColor: '#FFF',
+        marginBottom: 12,
         borderWidth: 1,
         borderColor: '#E5E7EB',
-        borderRadius: 12,
-        padding: 14,
-        fontSize: 15,
-        fontFamily: 'Poppins_400Regular',
-        color: '#1F2937'
     },
-    colorPicker: {
-        flexDirection: 'row',
-        marginBottom: 10
-    },
-    colorOption: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        marginRight: 10,
-        justifyContent: 'center',
-        alignItems: 'center'
-    },
-    colorSelected: {
-        borderWidth: 3,
-        borderColor: '#FFF',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        elevation: 4
-    },
-    iconGrid: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        marginBottom: 20
-    },
-    iconOption: {
-        width: 44,
-        height: 44,
-        borderRadius: 10,
+    expandBtn: {
+        width: 32,
+        height: 32,
         justifyContent: 'center',
         alignItems: 'center',
         marginRight: 8,
+    },
+    bucketIcon: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+    },
+    bucketInfo: {
+        flex: 1,
+    },
+    bucketName: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#111827',
+        marginBottom: 2,
+    },
+    bucketDesc: {
+        fontSize: 13,
+        color: '#6B7280',
+    },
+    bucketActions: {
+        flexDirection: 'row',
+        gap: 8,
+    },
+    actionBtn: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: '#FFF',
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    formContainer: {
+        flex: 1,
+        padding: 20,
+    },
+    formTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#111827',
+        marginBottom: 20,
+    },
+    label: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#374151',
         marginBottom: 8,
+        marginTop: 16,
+    },
+    input: {
+        borderWidth: 1,
+        borderColor: '#D1D5DB',
+        borderRadius: 8,
+        padding: 12,
+        fontSize: 15,
+        color: '#111827',
+        backgroundColor: '#F9FAFB',
+    },
+    textArea: {
+        height: 80,
+        textAlignVertical: 'top',
+    },
+    pickerContainer: {
+        marginBottom: 8,
+    },
+    parentOption: {
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        borderRadius: 8,
         backgroundColor: '#F3F4F6',
+        marginRight: 8,
         borderWidth: 2,
-        borderColor: 'transparent'
+        borderColor: '#E5E7EB',
+    },
+    parentOptionActive: {
+        backgroundColor: '#EEF2FF',
+        borderColor: '#6366F1',
+    },
+    parentOptionText: {
+        fontSize: 14,
+        color: '#6B7280',
+        fontWeight: '500',
+    },
+    parentOptionTextActive: {
+        color: '#6366F1',
+        fontWeight: '600',
+    },
+    iconScroll: {
+        marginBottom: 8,
+    },
+    iconOption: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: '#F3F4F6',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+        borderWidth: 2,
+        borderColor: '#E5E7EB',
+    },
+    iconOptionActive: {
+        backgroundColor: '#EEF2FF',
+        borderColor: '#6366F1',
+    },
+    colorGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 12,
+        marginBottom: 8,
+    },
+    colorOption: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 3,
+        borderColor: 'transparent',
+    },
+    colorOptionActive: {
+        borderColor: '#FFF',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+        elevation: 4,
+    },
+    formActions: {
+        flexDirection: 'row',
+        gap: 12,
+        marginTop: 24,
+        marginBottom: 20,
+    },
+    cancelBtn: {
+        flex: 1,
+        padding: 14,
+        borderRadius: 10,
+        backgroundColor: '#F3F4F6',
+        alignItems: 'center',
+    },
+    cancelBtnText: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#6B7280',
     },
     saveBtn: {
+        flex: 1,
+        padding: 14,
+        borderRadius: 10,
+        backgroundColor: '#6366F1',
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 16,
-        borderRadius: 12,
-        marginTop: 10,
-        marginBottom: 30
+        gap: 8,
+    },
+    saveBtnDisabled: {
+        backgroundColor: '#9CA3AF',
     },
     saveBtnText: {
-        marginLeft: 8,
         fontSize: 16,
-        fontFamily: 'Poppins_700Bold',
-        color: '#FFF'
-    }
+        fontWeight: '600',
+        color: '#FFF',
+    },
+
+    // Delete Modal Styles
+    deleteModalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20,
+    },
+    deleteModalContent: {
+        width: '100%',
+        maxWidth: 400,
+        backgroundColor: '#FFF',
+        borderRadius: 20,
+        padding: 32,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.25,
+        shadowRadius: 20,
+        elevation: 20,
+    },
+    deleteIconContainer: {
+        marginBottom: 20,
+    },
+    deleteTitle: {
+        fontSize: 22,
+        fontWeight: '700',
+        color: '#111827',
+        marginBottom: 12,
+        textAlign: 'center',
+    },
+    deleteMessage: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#374151',
+        marginBottom: 8,
+        textAlign: 'center',
+    },
+    deleteSubMessage: {
+        fontSize: 14,
+        color: '#6B7280',
+        marginBottom: 24,
+        textAlign: 'center',
+        lineHeight: 20,
+    },
+    deleteFooter: {
+        flexDirection: 'row',
+        gap: 12,
+        width: '100%',
+    },
+    deleteCancelBtn: {
+        flex: 1,
+        paddingVertical: 14,
+        borderRadius: 12,
+        backgroundColor: '#F3F4F6',
+        alignItems: 'center',
+    },
+    deleteCancelText: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#6B7280',
+    },
+    deleteConfirmBtn: {
+        flex: 1,
+        paddingVertical: 14,
+        borderRadius: 12,
+        backgroundColor: '#EF4444',
+        alignItems: 'center',
+        shadowColor: '#EF4444',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 4,
+    },
+    deleteConfirmBtnDisabled: {
+        backgroundColor: '#9CA3AF',
+    },
+    deleteConfirmText: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#FFF',
+    },
 });

@@ -736,7 +736,7 @@ class UserService:
             "self_learning_progress": round(progress_percent, 1),
             "completed_courses": completed_self_learning,
             "total_courses": total_self_learning,
-            "career_path_unlocked": self_learning_completed or progress_percent >= 100,
+            "career_path_unlocked": True,  # Always unlocked for all users
         }
 
     def complete_self_learning(self, user_email: str) -> User:
@@ -791,6 +791,8 @@ class UserService:
             "completed_nodes": len(user_completed),
             "nodes_remaining": max(0, total_required - completed_count),
             "progress_percent": int((completed_count / total_required * 100)) if total_required > 0 else 100,
+            "is_external": getattr(user, 'is_external', False) or False,
+            "joined_at_level": getattr(user, 'joined_at_level', None),
         }
 
     def promote_user(self, email: str, new_role: str) -> User:

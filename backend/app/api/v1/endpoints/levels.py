@@ -549,6 +549,212 @@ async def check_and_apply_level_up(user_email: str, db: Session = Depends(get_db
         raise
 
 
+# ==========================================
+# LEVEL EXAM QUESTION MANAGEMENT (Admin)
+# ==========================================
+
+@router.get("/exam-questions/{level_name}")
+async def get_level_exam_questions(level_name: str, db: Session = Depends(get_db)):
+    """
+    Get stored exam questions for a specific level.
+    Returns the admin-editable question bank for level advancement exams.
+    """
+    from app.models.quiz import LevelExamQuestion
+    
+    try:
+        exam = db.query(LevelExamQuestion).filter(
+            LevelExamQuestion.level_name == level_name
+        ).first()
+        
+        if exam:
+            return {"status": "success", "data": exam.to_dict()}
+        else:
+            return {"status": "success", "data": {
+                "level_name": level_name,
+                "questions": [],
+                "question_count": 0,
+                "source": None
+            }}
+    except Exception as e:
+        logger.error(f"Failed to fetch exam questions for {level_name}: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@router.get("/exam-questions")
+async def get_all_level_exam_questions(db: Session = Depends(get_db)):
+    """
+    Get all stored exam questions for all levels.
+    """
+    from app.models.quiz import LevelExamQuestion
+    
+    try:
+        exams = db.query(LevelExamQuestion).all()
+        result = {}
+        for exam in exams:
+            result[exam.level_name] = exam.to_dict()
+        return {"status": "success", "data": result}
+    except Exception as e:
+        logger.error(f"Failed to fetch all exam questions: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@router.put("/exam-questions/{level_name}")
+async def update_level_exam_questions(
+    level_name: str,
+    data: Dict[str, Any],
+    db: Session = Depends(get_db)
+):
+    """
+    Update (replace) all exam questions for a level.
+    Admin can edit questions, options, correct answers, add/remove questions.
+    
+    Expects: {"questions": [...], "updated_by": "admin@email.com"}
+    """
+    from app.models.quiz import LevelExamQuestion
+    from sqlalchemy.orm.attributes import flag_modified
+    
+    try:
+        questions = data.get("questions", [])
+        updated_by = data.get("updated_by", "admin")
+        
+        # Validate question format
+        for i, q in enumerate(questions):
+            if not q.get("question"):
+                raise HTTPException(status_code=400, detail=f"Question {i+1} is missing question text")
+            if not q.get("options") or len(q["options"]) < 2:
+                raise HTTPException(status_code=400, detail=f"Question {i+1} needs at least 2 options")
+            if "correctIndex" not in q:
+                raise HTTPException(status_code=400, detail=f"Question {i+1} is missing correctIndex")
+        
+        exam = db.query(LevelExamQuestion).filter(
+            LevelExamQuestion.level_name == level_name
+        ).first()
+        
+        if exam:
+            exam.questions = questions
+            exam.source = "manual" if exam.source == "ai_generated" else "mixed"
+            exam.updated_at = datetime.utcnow()
+            exam.updated_by = updated_by
+            flag_modified(exam, "questions")
+        else:
+            exam = LevelExamQuestion(
+                id=f"leq_{level_name.lower().replace(' ', '_')}_{uuid.uuid4().hex[:8]}",
+                level_name=level_name,
+                questions=questions,
+                source="manual",
+                updated_by=updated_by
+            )
+            db.add(exam)
+        
+        db.commit()
+        db.refresh(exam)
+        
+        logger.info(f"Level exam questions updated for {level_name} by {updated_by} ({len(questions)} questions)")
+        return {"status": "success", "data": exam.to_dict()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update exam questions for {level_name}: {e}")
+        db.rollback()
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/exam-questions/{level_name}/regenerate")
+async def regenerate_level_exam_questions(
+    level_name: str,
+    num_questions: int = 10,
+    difficulty: str = "medium",
+    db: Session = Depends(get_db)
+):
+    """
+    Regenerate exam questions for a level using AI.
+    Uses course content assigned to the level to generate questions.
+    Overwrites existing questions.
+    """
+    from app.models.quiz import LevelExamQuestion
+    from app.repositories.content_repository import AccessRuleRepository, ContentRepository, ProgressionLevelRepository
+    from app.services.ai_service import AIService
+    from sqlalchemy.orm.attributes import flag_modified
+    
+    try:
+        # Get level config
+        level_repo = ProgressionLevelRepository(db)
+        level = level_repo.get_by_name(level_name)
+        default_num_questions = getattr(level, 'exam_questions', 10) if level else 10
+        if num_questions is None:
+            num_questions = default_num_questions
+        if not isinstance(num_questions, int):
+            raise HTTPException(status_code=400, detail="num_questions must be an integer")
+        if num_questions < 1 or num_questions > 50:
+            raise HTTPException(status_code=400, detail="num_questions must be between 1 and 50")
+
+        difficulty = (difficulty or "medium").lower().strip()
+        if difficulty not in {"easy", "medium", "hard"}:
+            raise HTTPException(status_code=400, detail="difficulty must be one of: easy, medium, hard")
+        
+        # Get courses for this level
+        access_repo = AccessRuleRepository(db)
+        content_repo = ContentRepository(db)
+        
+        access_rule = access_repo.get_by_level(level_name)
+        course_ids = access_rule.accessible_courses if access_rule else []
+        
+        content_text = ""
+        if course_ids:
+            courses = content_repo.get_content_by_ids(course_ids)
+            for course in courses:
+                content_text += f"\n\nTopic: {course.title}\n"
+                content_text += f"Description: {course.description or ''}\n"
+                if course.transcript:
+                    content_text += f"Content: {course.transcript[:2000]}\n"
+        
+        if not content_text.strip():
+            return {"status": "error", "message": f"No content found for level '{level_name}'. Assign courses first."}
+        
+        # Generate via AI
+        ai_service = AIService()
+        questions = ai_service.generate_quiz_from_transcript(
+            content_text, num_questions=num_questions, difficulty=difficulty
+        )
+        
+        # Store in DB
+        exam = db.query(LevelExamQuestion).filter(
+            LevelExamQuestion.level_name == level_name
+        ).first()
+        
+        if exam:
+            exam.questions = questions
+            exam.source = "ai_generated"
+            exam.generated_from_content = content_text[:5000]
+            exam.updated_at = datetime.utcnow()
+            exam.updated_by = "ai_regeneration"
+            flag_modified(exam, "questions")
+        else:
+            exam = LevelExamQuestion(
+                id=f"leq_{level_name.lower().replace(' ', '_')}_{uuid.uuid4().hex[:8]}",
+                level_name=level_name,
+                questions=questions,
+                source="ai_generated",
+                generated_from_content=content_text[:5000],
+                updated_by="ai_regeneration"
+            )
+            db.add(exam)
+        
+        db.commit()
+        db.refresh(exam)
+        
+        logger.info(f"Regenerated {len(questions)} exam questions for {level_name}")
+        return {"status": "success", "data": exam.to_dict()}
+    except Exception as e:
+        logger.error(f"Failed to regenerate exam questions for {level_name}: {e}")
+        db.rollback()
+        return {"status": "error", "message": str(e)}
+
+
+# ==========================================
+# ROLE ADVANCEMENT ENDPOINTS
+# ==========================================
+
 @router.get("/role-advancement/eligibility/{user_email}")
 async def check_eligibility(user_email: str, db: Session = Depends(get_db)):
     """
@@ -614,39 +820,67 @@ async def get_role_exam(user_email: str, db: Session = Depends(get_db)):
     exam_pass_percent = getattr(target_level, "pass_percent", 70) if target_level else 70
     exam_time_limit = getattr(target_level, "exam_time_minutes", 15) if target_level else 15
 
-    # Fetch content for current role's access rules
-    access_repo = AccessRuleRepository(db)
-    content_repo = ContentRepository(db)
+    # PRIORITY 1: Check for admin-stored exam questions in LevelExamQuestion table
+    from app.models.quiz import LevelExamQuestion
     
-    access_rule = access_repo.get_by_level(current_role)
-    course_ids = access_rule.accessible_courses if access_rule else []
+    stored_exam = db.query(LevelExamQuestion).filter(
+        LevelExamQuestion.level_name == current_role
+    ).first()
     
-    content_text = ""
-    if course_ids:
-        # Get content items
-        courses = content_repo.get_content_by_ids(course_ids)
-        # Aggregate text (Title + Description + Transcript if available)
-        for course in courses:
-            content_text += f"\n\nTopic: {course.title}\n"
-            content_text += f"Description: {course.description}\n"
-            if course.transcript:
-                 content_text += f"Content: {course.transcript[:2000]}...\n" # Limit transcript to 2k chars per course
-    
-    # Generate Questions via AI
-    ai_service = AIService()
     questions = []
     
-    try:
-        if content_text.strip():
-            logger.info(f"Generating exam for {user_email} based on {len(course_ids)} courses.")
-            questions = ai_service.generate_quiz_from_transcript(content_text, num_questions=exam_questions_count, difficulty="medium")
-        else:
-            logger.warning(f"No content found for {current_role}, generating generic exam.")
-            questions = ai_service.generate_quiz_from_topic(f"{current_role} Responsibilities and Skills", num_questions=exam_questions_count)
-    except Exception as e:
-        logger.error(f"Exam generation failed: {e}")
-        # Fallback to topic generation
-        questions = ai_service.generate_quiz_from_topic(current_role, num_questions=5)
+    if stored_exam and stored_exam.questions and len(stored_exam.questions) > 0:
+        # Use admin-managed questions (may be AI-generated then edited by admin)
+        questions = stored_exam.questions[:exam_questions_count]
+        logger.info(f"Using {len(questions)} stored exam questions for {current_role} (source: {stored_exam.source})")
+    else:
+        # PRIORITY 2: Fallback to AI generation if no stored questions
+        access_repo = AccessRuleRepository(db)
+        content_repo = ContentRepository(db)
+        
+        access_rule = access_repo.get_by_level(current_role)
+        course_ids = access_rule.accessible_courses if access_rule else []
+        
+        content_text = ""
+        if course_ids:
+            courses = content_repo.get_content_by_ids(course_ids)
+            for course in courses:
+                content_text += f"\n\nTopic: {course.title}\n"
+                content_text += f"Description: {course.description}\n"
+                if course.transcript:
+                     content_text += f"Content: {course.transcript[:2000]}...\n"
+        
+        ai_service = AIService()
+        
+        try:
+            if content_text.strip():
+                logger.info(f"Generating exam for {user_email} based on {len(course_ids)} courses.")
+                questions = ai_service.generate_quiz_from_transcript(content_text, num_questions=exam_questions_count, difficulty="medium")
+            else:
+                logger.warning(f"No content found for {current_role}, generating generic exam.")
+                questions = ai_service.generate_quiz_from_topic(f"{current_role} Responsibilities and Skills", num_questions=exam_questions_count)
+        except Exception as e:
+            logger.error(f"Exam generation failed: {e}")
+            questions = ai_service.generate_quiz_from_topic(current_role, num_questions=5)
+        
+        # Auto-store generated questions for future admin editing
+        if questions:
+            try:
+                from sqlalchemy.orm.attributes import flag_modified
+                new_exam = LevelExamQuestion(
+                    id=f"leq_{current_role.lower().replace(' ', '_')}_{uuid.uuid4().hex[:8]}",
+                    level_name=current_role,
+                    questions=questions,
+                    source="ai_generated",
+                    generated_from_content=content_text[:5000] if content_text else None,
+                    updated_by="auto_generation"
+                )
+                db.add(new_exam)
+                db.commit()
+                logger.info(f"Auto-stored {len(questions)} exam questions for {current_role}")
+            except Exception as store_err:
+                logger.warning(f"Failed to auto-store exam questions: {store_err}")
+                db.rollback()
 
     # Ensure we return valid metadata for the frontend
     total_questions = len(questions) or exam_questions_count

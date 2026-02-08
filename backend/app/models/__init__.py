@@ -35,6 +35,7 @@ from app.models.quiz import (
     Quiz,
     QuizSubmission,
     LiveQuiz,
+    LevelExamQuestion,
 )
 
 # CRM domain
@@ -101,6 +102,7 @@ __all__ = [
     "Quiz",
     "QuizSubmission",
     "LiveQuiz",
+    "LevelExamQuestion",
     # CRM
     "CRMTicket",
     "CRMTaskAssignment",

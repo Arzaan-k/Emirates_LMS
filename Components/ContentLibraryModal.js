@@ -15,9 +15,11 @@ import {
     KeyboardAvoidingView,
     Platform
 } from 'react-native';
+import { WebView } from 'react-native-webview';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
+import CourseSettingsModal from './CourseSettingsModal';
 import API_URL from '../config';
 
 const { width, height } = Dimensions.get('window');
@@ -48,8 +50,10 @@ const showAlert = (title, message, buttons = []) => {
 
 export default function ContentLibraryModal({ visible, onClose }) {
     const [searchQuery, setSearchQuery] = useState('');
+    const [activeLearningPath, setActiveLearningPath] = useState('career_progression'); // career_progression or self_learning
     const [activeTab, setActiveTab] = useState('All');
     const [contentCategories, setContentCategories] = useState([]);
+    const [learningPaths, setLearningPaths] = useState([]);
     const [loading, setLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
 
@@ -63,6 +67,10 @@ export default function ContentLibraryModal({ visible, onClose }) {
     const [editDescription, setEditDescription] = useState('');
     const [editBucketId, setEditBucketId] = useState(null);
 
+    // Preview Modal State
+    const [previewModalVisible, setPreviewModalVisible] = useState(false);
+    const [previewContent, setPreviewContent] = useState(null);
+
     // Category Modal State
     const [categoryModalVisible, setCategoryModalVisible] = useState(false);
     const [availableBuckets, setAvailableBuckets] = useState([]);
@@ -72,6 +80,21 @@ export default function ContentLibraryModal({ visible, onClose }) {
     const [selectedItems, setSelectedItems] = useState(new Set());
     const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
     const [deletingInBackground, setDeletingInBackground] = useState(false);
+
+    // Success Modal State
+    const [successModalVisible, setSuccessModalVisible] = useState(false);
+    const [successMessage, setSuccessMessage] = useState({ title: '', count: 0 });
+
+    // Course/Bucket Settings Modal State
+    const [settingsModalVisible, setSettingsModalVisible] = useState(false);
+    const [settingsItem, setSettingsItem] = useState(null);
+    const [settingsItemType, setSettingsItemType] = useState('course');
+
+    const openSettingsModal = (item, type = 'course') => {
+        setSettingsItem(item);
+        setSettingsItemType(type);
+        setSettingsModalVisible(true);
+    };
 
     useEffect(() => {
         if (visible) {
@@ -85,9 +108,34 @@ export default function ContentLibraryModal({ visible, onClose }) {
         try {
             const response = await fetch(`${API_URL}/api/v1/content/library/all`);
             const data = await response.json();
-            // The endpoint returns buckets with items, so map it to categories format
-            if (Array.isArray(data)) {
+
+            // Handle the new two-tier structure from backend
+            if (data.learning_paths) {
+                // New structure with learning paths
+                setLearningPaths(data.learning_paths);
+                setContentCategories(data.all_buckets || []);
+            } else if (Array.isArray(data)) {
+                // Legacy structure - flat array of buckets
                 setContentCategories(data);
+                // Create synthetic learning paths from the data
+                setLearningPaths([
+                    {
+                        id: 'career_progression',
+                        name: 'Career Progression',
+                        color: '#3B82F6',
+                        icon: 'trending-up',
+                        buckets: data.filter(b => b.learning_path_type !== 'self_learning'),
+                        total_count: data.filter(b => b.learning_path_type !== 'self_learning').reduce((sum, b) => sum + (b.total_count || 0), 0)
+                    },
+                    {
+                        id: 'self_learning',
+                        name: 'Self Learning',
+                        color: '#10B981',
+                        icon: 'book-open',
+                        buckets: data.filter(b => b.learning_path_type === 'self_learning'),
+                        total_count: data.filter(b => b.learning_path_type === 'self_learning').reduce((sum, b) => sum + (b.total_count || 0), 0)
+                    }
+                ]);
             } else if (data.categories) {
                 setContentCategories(data.categories);
             }
@@ -115,7 +163,7 @@ export default function ContentLibraryModal({ visible, onClose }) {
     };
 
     const handleDelete = (item) => {
-        Alert.alert(
+        showAlert(
             "Delete Content",
             `Are you sure you want to delete "${item.title}"?`,
             [
@@ -124,21 +172,42 @@ export default function ContentLibraryModal({ visible, onClose }) {
                     text: "Delete",
                     style: "destructive",
                     onPress: async () => {
+                        // 1. Optimistic Update: Remove item from UI immediately
+                        const removeItemFromBuckets = (buckets, itemId) => {
+                            if (!buckets) return [];
+                            return buckets.map(bucket => ({
+                                ...bucket,
+                                items: (bucket.items || []).filter(i => i.id !== itemId),
+                                children: bucket.children ? removeItemFromBuckets(bucket.children, itemId) : []
+                            }));
+                        };
+
+                        // Update both state variables to ensure UI reflects change instantly
+                        setLearningPaths(prev => prev.map(lp => ({
+                            ...lp,
+                            buckets: removeItemFromBuckets(lp.buckets || [], item.id)
+                        })));
+
+                        setContentCategories(prev => removeItemFromBuckets(prev, item.id));
+
+                        // 2. Perform Backend Deletion
                         try {
                             const response = await fetch(`${API_URL}/api/v1/content/${item.id}`, {
                                 method: 'DELETE',
                             });
                             const result = await response.json();
-                            if (result.status === 'success') {
-                                // Refresh content
-                                fetchContent();
-                                Alert.alert("Success", "Content deleted successfully");
-                            } else {
+
+                            if (result.status !== 'success') {
+                                // If failed, revert by refreshing
                                 Alert.alert("Error", "Failed to delete content");
+                                fetchContent();
                             }
+                            // On success: Do nothing (already removed)
                         } catch (error) {
                             console.error("Delete error:", error);
+                            // If error, revert by refreshing
                             Alert.alert("Error", "An error occurred while deleting");
+                            fetchContent();
                         }
                     }
                 }
@@ -187,6 +256,11 @@ export default function ContentLibraryModal({ visible, onClose }) {
         setCategoryModalVisible(true);
     };
 
+    const openPreviewModal = (item) => {
+        setPreviewContent(item);
+        setPreviewModalVisible(true);
+    };
+
     const toggleItemSelection = (itemId) => {
         console.log("📌 Toggling selection for item:", itemId);
         setSelectedItems(prev => {
@@ -205,9 +279,23 @@ export default function ContentLibraryModal({ visible, onClose }) {
 
     const selectAll = () => {
         const allItemIds = new Set();
-        displayCategories.forEach(cat => {
-            cat.items.forEach(item => allItemIds.add(item.id));
-        });
+
+        // Recurse function to gather all items from nested folders
+        const collectRecursively = (folders) => {
+            if (!folders) return;
+            folders.forEach(folder => {
+                // Add items in this folder
+                if (folder.items) {
+                    folder.items.forEach(item => allItemIds.add(item.id));
+                }
+                // Recurse into subfolders
+                if (folder.children && folder.children.length > 0) {
+                    collectRecursively(folder.children);
+                }
+            });
+        };
+
+        collectRecursively(displayCategories);
         setSelectedItems(allItemIds);
     };
 
@@ -267,17 +355,13 @@ export default function ContentLibraryModal({ visible, onClose }) {
                         setSelectionMode(false);
                         setDeletingInBackground(true);
 
-                        // Show instant feedback
+                        // Show instant feedback with modal
                         setTimeout(() => {
-                            if (Platform.OS === 'web') {
-                                alert(`✓ Items Removed\n\n${itemCount} item(s) deleted successfully.\n\nCleanup is happening in the background.`);
-                            } else {
-                                Alert.alert(
-                                    "✓ Items Removed",
-                                    `${itemCount} item(s) deleted successfully.\n\nCleanup is happening in the background.`,
-                                    [{ text: "OK" }]
-                                );
-                            }
+                            setSuccessMessage({
+                                title: 'Items Removed',
+                                count: itemCount
+                            });
+                            setSuccessModalVisible(true);
                         }, 100);
 
                         // BACKGROUND DELETION - Actual deletion happens here
@@ -409,7 +493,12 @@ export default function ContentLibraryModal({ visible, onClose }) {
         });
     };
 
-    const tabs = Array.from(new Set(['All', ...availableBuckets.map(b => b.name)]));
+    // Get buckets for the currently active learning path
+    const currentLearningPath = learningPaths.find(lp => lp.id === activeLearningPath);
+    const currentBuckets = currentLearningPath?.buckets || contentCategories;
+
+    // Generate sub-category tabs from current learning path's buckets
+    const tabs = Array.from(new Set(['All', ...currentBuckets.map(b => b.name)]));
 
     // Recursively filter folders and items based on search query
     const filterFolderTree = (folder) => {
@@ -444,10 +533,10 @@ export default function ContentLibraryModal({ visible, onClose }) {
         return null; // Exclude this folder
     };
 
-    // Filter by active tab - only filter at root level
+    // Filter by active tab (sub-category) - only filter at root level within current learning path
     const filteredCategories = activeTab === 'All'
-        ? contentCategories
-        : contentCategories.filter(cat => cat.name === activeTab);
+        ? currentBuckets
+        : currentBuckets.filter(cat => cat.name === activeTab);
 
     // Apply search filter recursively
     const displayCategories = filteredCategories
@@ -526,6 +615,15 @@ export default function ContentLibraryModal({ visible, onClose }) {
                             {folder.total_count || folder.item_count || folder.items?.length || 0}
                         </Text>
                     </View>
+
+                    {/* Settings Gear for Bucket */}
+                    <TouchableOpacity
+                        onPress={() => openSettingsModal(folder, 'bucket')}
+                        style={{ padding: 6, marginLeft: 4 }}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                        <Feather name="settings" size={16} color="#9CA3AF" />
+                    </TouchableOpacity>
                 </TouchableOpacity>
 
                 {/* Folder Contents (when expanded) */}
@@ -582,53 +680,66 @@ export default function ContentLibraryModal({ visible, onClose }) {
 
         return (
             <View style={[styles.contentItem, { marginLeft: indentWidth }, isSelected && styles.selectedItem]}>
-                {/* Selection Checkbox (shown in selection mode) */}
-                {selectionMode && (
-                    <TouchableOpacity
-                        onPress={() => toggleItemSelection(item.id)}
-                        style={styles.checkboxContainer}
-                    >
-                        <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
-                            {isSelected && <Feather name="check" size={16} color="#FFF" />}
-                        </View>
-                    </TouchableOpacity>
-                )}
+                {/* Top row: checkbox + icon + info */}
+                <View style={styles.contentItemTopRow}>
+                    {selectionMode && (
+                        <TouchableOpacity
+                            onPress={() => toggleItemSelection(item.id)}
+                            style={styles.checkboxContainer}
+                        >
+                            <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
+                                {isSelected && <Feather name="check" size={16} color="#FFF" />}
+                            </View>
+                        </TouchableOpacity>
+                    )}
 
-                <View style={[styles.iconBox, { backgroundColor: iconColor + '20' }]}>
-                    <MaterialCommunityIcons name={iconName} size={24} color={iconColor} />
-                </View>
-                <View style={styles.itemInfo}>
-                    <Text style={styles.itemTitle}>{item.title}</Text>
-                    <Text style={styles.itemDesc} numberOfLines={1}>{item.description}</Text>
-                    <View style={styles.itemMetaRow}>
-                        {resourceType && (
-                            <>
-                                <MaterialCommunityIcons name="tag" size={12} color="#9CA3AF" />
-                                <Text style={styles.itemResourceType}>{resourceType}</Text>
-                                <Text style={styles.itemDot}>•</Text>
-                            </>
-                        )}
-                        <Text style={styles.itemCategory}>{item.category || item.bucket}</Text>
-                        {item.date && (
-                            <>
-                                <Text style={styles.itemDot}>•</Text>
-                                <Text style={styles.itemDate}>{item.date}</Text>
-                            </>
-                        )}
+                    <View style={[styles.iconBox, { backgroundColor: iconColor + '20' }]}>
+                        <MaterialCommunityIcons name={iconName} size={24} color={iconColor} />
+                    </View>
+                    <View style={styles.itemInfo}>
+                        <Text style={styles.itemTitle}>{item.title}</Text>
+                        <Text style={styles.itemDesc} numberOfLines={1}>{item.description}</Text>
+                        <View style={styles.itemMetaRow}>
+                            {resourceType && (
+                                <>
+                                    <MaterialCommunityIcons name="tag" size={12} color="#9CA3AF" />
+                                    <Text style={styles.itemResourceType}>{resourceType}</Text>
+                                    <Text style={styles.itemDot}>•</Text>
+                                </>
+                            )}
+                            <Text style={styles.itemCategory}>{item.category || item.bucket}</Text>
+                            {item.date && (
+                                <>
+                                    <Text style={styles.itemDot}>•</Text>
+                                    <Text style={styles.itemDate}>{item.date}</Text>
+                                </>
+                            )}
+                        </View>
                     </View>
                 </View>
 
-                {/* Actions (hidden in selection mode) */}
+                {/* Action buttons row (hidden in selection mode) */}
                 {!selectionMode && (
                     <View style={styles.actionsContainer}>
-                        <TouchableOpacity onPress={() => openEditModal(item)} style={styles.actionBtn}>
-                            <Feather name="edit-2" size={18} color="#3B82F6" />
+                        <TouchableOpacity onPress={() => openPreviewModal(item)} style={[styles.actionBtn, { backgroundColor: '#ECFDF5' }]}>
+                            <Feather name="eye" size={16} color="#10B981" />
+                            <Text style={[styles.actionLabel, { color: '#10B981' }]}>Preview</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity onPress={() => openCategoryModal(item)} style={styles.actionBtn}>
-                            <Feather name="folder" size={18} color="#F59E0B" />
+                        <TouchableOpacity onPress={() => openEditModal(item)} style={[styles.actionBtn, { backgroundColor: '#EFF6FF' }]}>
+                            <Feather name="edit-2" size={16} color="#3B82F6" />
+                            <Text style={[styles.actionLabel, { color: '#3B82F6' }]}>Edit</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity onPress={() => handleDelete(item)} style={styles.actionBtn}>
-                            <Feather name="trash-2" size={18} color="#EF4444" />
+                        <TouchableOpacity onPress={() => openSettingsModal(item, 'course')} style={[styles.actionBtn, { backgroundColor: '#F5F3FF' }]}>
+                            <Feather name="settings" size={16} color="#8B5CF6" />
+                            <Text style={[styles.actionLabel, { color: '#8B5CF6' }]}>Settings</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => openCategoryModal(item)} style={[styles.actionBtn, { backgroundColor: '#FFFBEB' }]}>
+                            <Feather name="folder" size={16} color="#F59E0B" />
+                            <Text style={[styles.actionLabel, { color: '#F59E0B' }]}>Bucket</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => handleDelete(item)} style={[styles.actionBtn, { backgroundColor: '#FEF2F2' }]}>
+                            <Feather name="trash-2" size={16} color="#EF4444" />
+                            <Text style={[styles.actionLabel, { color: '#EF4444' }]}>Delete</Text>
                         </TouchableOpacity>
                     </View>
                 )}
@@ -637,6 +748,7 @@ export default function ContentLibraryModal({ visible, onClose }) {
     };
 
     return (
+        <>
         <Modal visible={visible} animationType="slide" transparent>
             <View style={styles.overlay}>
                 <BlurView intensity={20} style={StyleSheet.absoluteFill} />
@@ -678,7 +790,7 @@ export default function ContentLibraryModal({ visible, onClose }) {
                             <View style={styles.bulkActionBar}>
                                 <TouchableOpacity
                                     onPress={() => {
-                                        console.log("🔵 Select All pressed");
+                                        console.log(" Select All pressed");
                                         selectAll();
                                     }}
                                     style={styles.bulkActionBtn}
@@ -692,7 +804,7 @@ export default function ContentLibraryModal({ visible, onClose }) {
                                 </TouchableOpacity>
                                 <TouchableOpacity
                                     onPress={() => {
-                                        console.log("🔴 DELETE BUTTON PRESSED!");
+                                        console.log(" DELETE BUTTON PRESSED!");
                                         console.log("Selected items size:", selectedItems.size);
                                         console.log("Bulk delete loading:", bulkDeleteLoading);
                                         handleBulkDelete();
@@ -727,7 +839,47 @@ export default function ContentLibraryModal({ visible, onClose }) {
                         )}
                     </LinearGradient>
 
-                    {/* Tabs */}
+                    {/* Learning Path Selector - Primary Tier */}
+                    <View style={styles.learningPathContainer}>
+                        {learningPaths.map((lp) => (
+                            <TouchableOpacity
+                                key={lp.id}
+                                style={[
+                                    styles.learningPathTab,
+                                    activeLearningPath === lp.id && styles.activeLearningPathTab,
+                                    { borderColor: lp.color }
+                                ]}
+                                onPress={() => {
+                                    setActiveLearningPath(lp.id);
+                                    setActiveTab('All'); // Reset category filter when switching learning path
+                                }}
+                            >
+                                <View style={[styles.learningPathIcon, { backgroundColor: lp.color + '20' }]}>
+                                    <Feather
+                                        name={lp.icon || 'folder'}
+                                        size={18}
+                                        color={activeLearningPath === lp.id ? lp.color : '#6B7280'}
+                                    />
+                                </View>
+                                <View style={styles.learningPathTextContainer}>
+                                    <Text style={[
+                                        styles.learningPathText,
+                                        activeLearningPath === lp.id && { color: lp.color, fontFamily: 'Poppins_700Bold' }
+                                    ]}>
+                                        {lp.name}
+                                    </Text>
+                                    <Text style={styles.learningPathCount}>
+                                        {lp.total_count || 0} items
+                                    </Text>
+                                </View>
+                                {activeLearningPath === lp.id && (
+                                    <View style={[styles.learningPathIndicator, { backgroundColor: lp.color }]} />
+                                )}
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+
+                    {/* Category Tabs - Secondary Tier */}
                     <View style={styles.tabsContainer}>
                         <FlatList
                             data={tabs}
@@ -874,9 +1026,261 @@ export default function ContentLibraryModal({ visible, onClose }) {
                         </View>
                     </Modal>
 
+                    {/* Content Preview Modal */}
+                    <Modal visible={previewModalVisible} transparent animationType="slide">
+                        <View style={styles.previewModalOverlay}>
+                            <View style={styles.previewModalContainer}>
+                                {/* Header */}
+                                <View style={styles.previewHeader}>
+                                    <View style={styles.previewHeaderLeft}>
+                                        <MaterialCommunityIcons
+                                            name={previewContent?.resource_type === 'Video' ? 'play-circle' :
+                                                previewContent?.resource_type === 'PDF' ? 'file-pdf-box' :
+                                                    previewContent?.resource_type === 'Presentation' ? 'file-powerpoint' :
+                                                        previewContent?.resource_type === 'Document' ? 'file-word' :
+                                                            'file-document-outline'}
+                                            size={24}
+                                            color="#3B82F6"
+                                        />
+                                        <View style={styles.previewTitleContainer}>
+                                            <Text style={styles.previewTitle} numberOfLines={1}>
+                                                {previewContent?.title}
+                                            </Text>
+                                            {previewContent?.resource_type && (
+                                                <Text style={styles.previewResourceType}>
+                                                    {previewContent.resource_type}
+                                                </Text>
+                                            )}
+                                        </View>
+                                    </View>
+                                    <TouchableOpacity
+                                        onPress={() => setPreviewModalVisible(false)}
+                                        style={styles.previewCloseBtn}
+                                    >
+                                        <Feather name="x" size={24} color="#6B7280" />
+                                    </TouchableOpacity>
+                                </View>
+
+                                {/* CSS to hide Google Docs download button */}
+                                {Platform.OS === 'web' && (
+                                    <style>{`
+                                        iframe {
+                                            pointer-events: auto !important;
+                                        }
+                                        /* Hide download/pop-out buttons in Google Docs viewer */
+                                        .ndfHFb-c4YZDc-Wrql6b {
+                                            display: none !important;
+                                        }
+                                        /* Hide toolbar buttons */
+                                        .ndfHFb-c4YZDc-to915-LgbsSe {
+                                            display: none !important;
+                                        }
+                                    `}</style>
+                                )}
+
+                                {/* Content Viewer */}
+                                <View style={styles.previewContent}>
+                                    {previewContent && previewContent.video_url ? (
+                                        (() => {
+                                            const resourceType = previewContent.resource_type;
+                                            const videoUrl = previewContent.video_url;
+
+                                            // For Videos: Use HTML5 video player
+                                            if (resourceType === 'Video') {
+                                                return Platform.OS === 'web' ? (
+                                                    <video
+                                                        controls
+                                                        controlsList="nodownload"
+                                                        style={{
+                                                            width: '100%',
+                                                            height: '100%',
+                                                            objectFit: 'contain',
+                                                            backgroundColor: '#000'
+                                                        }}
+                                                        onContextMenu={(e) => e.preventDefault()}
+                                                    >
+                                                        <source src={videoUrl} type="video/mp4" />
+                                                        Your browser does not support the video tag.
+                                                    </video>
+                                                ) : (
+                                                    <WebView
+                                                        source={{
+                                                            html: `
+                                                            <html>
+                                                            <head>
+                                                                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+                                                                <style>
+                                                                    body { margin: 0; padding: 0; background: #000; display: flex; align-items: center; justify-content: center; height: 100vh; }
+                                                                    video { width: 100%; height: 100%; object-fit: contain; }
+                                                                </style>
+                                                            </head>
+                                                            <body>
+                                                                <video controls controlsList="nodownload" playsinline>
+                                                                    <source src="${videoUrl}" type="video/mp4">
+                                                                </video>
+                                                            </body>
+                                                            </html>
+                                                        ` }}
+                                                        style={styles.previewWebView}
+                                                        allowsInlineMediaPlayback={true}
+                                                        mediaPlaybackRequiresUserAction={false}
+                                                    />
+                                                );
+                                            }
+
+                                            // For Audio: Use HTML5 audio player
+                                            if (resourceType === 'Audio') {
+                                                return Platform.OS === 'web' ? (
+                                                    <View style={styles.audioPreviewContainer}>
+                                                        <MaterialCommunityIcons name="music-circle" size={80} color="#3B82F6" />
+                                                        <Text style={styles.audioTitle}>{previewContent.title}</Text>
+                                                        <audio
+                                                            controls
+                                                            controlsList="nodownload"
+                                                            style={{
+                                                                width: '80%',
+                                                                marginTop: 20
+                                                            }}
+                                                            onContextMenu={(e) => e.preventDefault()}
+                                                        >
+                                                            <source src={videoUrl} type="audio/mpeg" />
+                                                            Your browser does not support the audio tag.
+                                                        </audio>
+                                                    </View>
+                                                ) : (
+                                                    <WebView
+                                                        source={{
+                                                            html: `
+                                                            <html>
+                                                            <head>
+                                                                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                                                <style>
+                                                                    body { margin: 0; padding: 40px; background: #F9FAFB; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+                                                                    h2 { color: #111827; text-align: center; }
+                                                                    audio { width: 100%; max-width: 500px; margin-top: 20px; }
+                                                                </style>
+                                                            </head>
+                                                            <body>
+                                                                <h2>${previewContent.title}</h2>
+                                                                <audio controls controlsList="nodownload">
+                                                                    <source src="${videoUrl}" type="audio/mpeg">
+                                                                </audio>
+                                                            </body>
+                                                            </html>
+                                                        ` }}
+                                                        style={styles.previewWebView}
+                                                    />
+                                                );
+                                            }
+
+                                            // For Documents, PDFs, Presentations: Use Google Docs Viewer (no download option in iframe)
+                                            if (['PDF', 'Document', 'Presentation', 'Spreadsheet'].includes(resourceType)) {
+                                                return Platform.OS === 'web' ? (
+                                                    <iframe
+                                                        src={`https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(videoUrl)}`}
+                                                        style={{
+                                                            width: '100%',
+                                                            height: '100%',
+                                                            border: 'none',
+                                                            borderRadius: 12
+                                                        }}
+                                                        title={previewContent.title}
+                                                    />
+                                                ) : (
+                                                    <WebView
+                                                        source={{
+                                                            uri: `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(videoUrl)}`
+                                                        }}
+                                                        style={styles.previewWebView}
+                                                        startInLoadingState={true}
+                                                        renderLoading={() => (
+                                                            <View style={styles.previewLoadingContainer}>
+                                                                <ActivityIndicator size="large" color="#3B82F6" />
+                                                                <Text style={styles.previewLoadingText}>Loading preview...</Text>
+                                                            </View>
+                                                        )}
+                                                    />
+                                                );
+                                            }
+
+                                            // For other types: Show message
+                                            return (
+                                                <View style={styles.previewEmptyState}>
+                                                    <Feather name="file" size={48} color="#D1D5DB" />
+                                                    <Text style={styles.previewEmptyText}>Preview not available for this file type</Text>
+                                                </View>
+                                            );
+                                        })()
+                                    ) : (
+                                        <View style={styles.previewEmptyState}>
+                                            <Feather name="alert-circle" size={48} color="#D1D5DB" />
+                                            <Text style={styles.previewEmptyText}>No preview available</Text>
+                                        </View>
+                                    )}
+                                </View>
+
+                                {/* Footer with actions */}
+                                <View style={styles.previewFooter}>
+                                    <TouchableOpacity
+                                        onPress={() => setPreviewModalVisible(false)}
+                                        style={styles.previewFooterBtn}
+                                    >
+                                        <Text style={styles.previewFooterBtnText}>Close</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        </View>
+                    </Modal>
+
+                    {/* Success Modal */}
+                    <Modal visible={successModalVisible} animationType="fade" transparent={true}>
+                        <View style={styles.successModalOverlay}>
+                            <View style={styles.successModalContent}>
+                                {/* Success Icon */}
+                                <View style={styles.successIconContainer}>
+                                    <Feather name="check-circle" size={64} color="#10B981" />
+                                </View>
+
+                                {/* Title */}
+                                <Text style={styles.successTitle}>{successMessage.title}</Text>
+
+                                {/* Message */}
+                                <Text style={styles.successMessage}>
+                                    {successMessage.count} item(s) deleted successfully.
+                                </Text>
+
+                                <Text style={styles.successSubMessage}>
+                                    Cleanup is happening in the background.
+                                </Text>
+
+                                {/* OK Button */}
+                                <TouchableOpacity
+                                    style={styles.successOkBtn}
+                                    onPress={() => setSuccessModalVisible(false)}
+                                >
+                                    <Text style={styles.successOkText}>OK</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </Modal>
+
                 </View>
             </View>
         </Modal>
+
+        {/* Course/Bucket Settings Modal */}
+        <CourseSettingsModal
+            visible={settingsModalVisible}
+            onClose={() => { setSettingsModalVisible(false); setSettingsItem(null); }}
+            item={settingsItem}
+            itemType={settingsItemType}
+            onSaveSuccess={() => {
+                // Refetch content and buckets after saving settings
+                fetchContent();
+                fetchBuckets();
+            }}
+        />
+        </>
     );
 }
 
@@ -945,6 +1349,68 @@ const styles = StyleSheet.create({
         color: '#FFF',
         fontFamily: 'Poppins_400Regular',
     },
+    // Learning Path Selector Styles (Primary Tier)
+    learningPathContainer: {
+        flexDirection: 'row',
+        backgroundColor: '#FFF',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: '#E5E7EB',
+        gap: 12,
+    },
+    learningPathTab: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#F9FAFB',
+        borderRadius: 16,
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+        borderWidth: 2,
+        borderColor: 'transparent',
+        position: 'relative',
+        overflow: 'hidden',
+    },
+    activeLearningPathTab: {
+        backgroundColor: '#FFF',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 8,
+        elevation: 3,
+    },
+    learningPathIcon: {
+        width: 36,
+        height: 36,
+        borderRadius: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+    },
+    learningPathTextContainer: {
+        flex: 1,
+    },
+    learningPathText: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#374151',
+    },
+    learningPathCount: {
+        fontSize: 11,
+        fontFamily: 'Poppins_500Medium',
+        color: '#9CA3AF',
+        marginTop: 2,
+    },
+    learningPathIndicator: {
+        position: 'absolute',
+        bottom: 0,
+        left: 16,
+        right: 16,
+        height: 3,
+        borderRadius: 2,
+    },
+    // Category Tabs Styles (Secondary Tier)
     tabsContainer: {
         backgroundColor: '#FFF',
         paddingVertical: 12,
@@ -1115,8 +1581,8 @@ const styles = StyleSheet.create({
         color: '#6B7280',
     },
     contentItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
+        flexDirection: 'column',
+        alignItems: 'stretch',
         backgroundColor: '#FFF',
         padding: 16,
         borderRadius: 16,
@@ -1126,6 +1592,10 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.03,
         shadowRadius: 8,
         elevation: 2,
+    },
+    contentItemTopRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
     },
     iconBox: {
         width: 48,
@@ -1177,12 +1647,24 @@ const styles = StyleSheet.create({
     },
     actionsContainer: {
         flexDirection: 'row',
-        gap: 8,
+        flexWrap: 'wrap',
+        gap: 6,
+        marginTop: 12,
+        paddingTop: 12,
+        borderTopWidth: 1,
+        borderTopColor: '#F3F4F6',
     },
     actionBtn: {
-        padding: 8,
-        backgroundColor: '#F3F4F6',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingVertical: 6,
+        paddingHorizontal: 10,
         borderRadius: 8,
+    },
+    actionLabel: {
+        fontSize: 11,
+        fontWeight: '600',
     },
 
     // Modal Styles
@@ -1355,5 +1837,196 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.3)',
+    },
+
+    // Preview Modal Styles
+    previewModalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.8)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20,
+    },
+    previewModalContainer: {
+        width: '100%',
+        maxWidth: 1200,
+        height: '90%',
+        backgroundColor: '#FFF',
+        borderRadius: 20,
+        overflow: 'hidden',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.3,
+        shadowRadius: 20,
+        elevation: 20,
+    },
+    previewHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: 20,
+        borderBottomWidth: 1,
+        borderBottomColor: '#E5E7EB',
+        backgroundColor: '#F9FAFB',
+    },
+    previewHeaderLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+        marginRight: 16,
+    },
+    previewTitleContainer: {
+        marginLeft: 12,
+        flex: 1,
+    },
+    previewTitle: {
+        fontSize: 18,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#111827',
+        marginBottom: 2,
+    },
+    previewResourceType: {
+        fontSize: 12,
+        fontFamily: 'Poppins_500Medium',
+        color: '#6B7280',
+    },
+    previewCloseBtn: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: '#F3F4F6',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    previewContent: {
+        flex: 1,
+        backgroundColor: '#F9FAFB',
+    },
+    previewWebView: {
+        flex: 1,
+        backgroundColor: '#FFF',
+    },
+    audioPreviewContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 40,
+    },
+    audioTitle: {
+        fontSize: 18,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#111827',
+        marginTop: 20,
+        textAlign: 'center',
+    },
+    previewLoadingContainer: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#F9FAFB',
+    },
+    previewLoadingText: {
+        marginTop: 12,
+        fontSize: 14,
+        fontFamily: 'Poppins_500Medium',
+        color: '#6B7280',
+    },
+    previewEmptyState: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    previewEmptyText: {
+        marginTop: 16,
+        fontSize: 16,
+        fontFamily: 'Poppins_500Medium',
+        color: '#9CA3AF',
+    },
+    previewFooter: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        padding: 20,
+        borderTopWidth: 1,
+        borderTopColor: '#E5E7EB',
+        backgroundColor: '#F9FAFB',
+    },
+    previewFooterBtn: {
+        paddingVertical: 12,
+        paddingHorizontal: 24,
+        borderRadius: 10,
+        backgroundColor: '#3B82F6',
+    },
+    previewFooterBtnText: {
+        fontSize: 15,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF',
+    },
+
+    // Success Modal Styles
+    successModalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20,
+    },
+    successModalContent: {
+        width: '100%',
+        maxWidth: 400,
+        backgroundColor: '#FFF',
+        borderRadius: 20,
+        padding: 32,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.25,
+        shadowRadius: 20,
+        elevation: 20,
+    },
+    successIconContainer: {
+        marginBottom: 20,
+    },
+    successTitle: {
+        fontSize: 22,
+        fontFamily: 'Poppins_700Bold',
+        color: '#111827',
+        marginBottom: 12,
+        textAlign: 'center',
+    },
+    successMessage: {
+        fontSize: 16,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#374151',
+        marginBottom: 8,
+        textAlign: 'center',
+    },
+    successSubMessage: {
+        fontSize: 14,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        marginBottom: 24,
+        textAlign: 'center',
+        lineHeight: 20,
+    },
+    successOkBtn: {
+        width: '100%',
+        paddingVertical: 14,
+        borderRadius: 12,
+        backgroundColor: '#10B981',
+        alignItems: 'center',
+        shadowColor: '#10B981',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 4,
+    },
+    successOkText: {
+        fontSize: 16,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF',
     },
 });

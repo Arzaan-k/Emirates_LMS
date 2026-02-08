@@ -4,7 +4,11 @@
       "Bash(python -c:*)",
       "Bash(python test_embeddings.py:*)",
       "Bash(alembic upgrade:*)",
-      "Bash(alembic heads:*)"
+      "Bash(alembic heads:*)",
+      "Bash(python:*)",
+      "Bash(findstr:*)",
+      "Bash(Select-String -Pattern \"Randomize|Exam ID|Allow Different\")",
+      "Bash(pip install:*)"
     ]
   }
 }

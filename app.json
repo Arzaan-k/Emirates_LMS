@@ -3,7 +3,7 @@
     "name": "BWC LMS Demo",
     "slug": "LMS_BW",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/BW_Logo.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,

@@ -11,7 +11,8 @@ import {
     Alert,
     Modal as RNModal,
     ActivityIndicator,
-    TextInput
+    TextInput,
+    Platform
 } from 'react-native';
 import { MaterialCommunityIcons, Feather, Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -29,6 +30,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Video, ResizeMode } from 'expo-av';
 import { WebView } from 'react-native-webview';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import API_URL from '../config';
 
 const { width, height } = Dimensions.get('window');
@@ -145,8 +147,139 @@ const MidVideoQuizModal = ({ visible, quiz, onSubmit, onClose }) => {
     );
 };
 
+// Cross-platform document viewer - uses Google Docs viewer for fast PDF rendering
+const CrossPlatformDocViewer = ({ uri, loadingText = "Loading...", onLoadEnd, disableDownload = true, fileType = 'pdf' }) => {
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(false);
+
+    const handleLoad = () => {
+        setLoading(false);
+        if (onLoadEnd) onLoadEnd();
+    };
+
+    const handleError = () => {
+        setError(true);
+        setLoading(false);
+    };
+
+    // Use Google Docs viewer for ALL documents (fast, reliable, no download button)
+    // This is much faster than native iframe PDF rendering
+    const getViewerUrl = () => {
+        // Google Docs viewer works great for PDFs and is much faster than native iframe
+        // It also hides download options in embedded mode
+        return `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(uri)}`;
+    };
+
+    const viewerUrl = getViewerUrl();
+
+    // Web platform - use iframe with Google Docs viewer
+    if (Platform.OS === 'web') {
+        return (
+            <View style={{ flex: 1, position: 'relative' }}>
+                {loading && !error && (
+                    <View style={docViewerStyles.loadingOverlay}>
+                        <ActivityIndicator size="large" color="#F59E0B" />
+                        <Text style={docViewerStyles.loadingText}>{loadingText}</Text>
+                    </View>
+                )}
+                {error && (
+                    <View style={docViewerStyles.errorOverlay}>
+                        <MaterialCommunityIcons name="file-alert-outline" size={64} color="#EF4444" />
+                        <Text style={docViewerStyles.errorText}>Unable to load document</Text>
+                        <Text style={docViewerStyles.errorSubtext}>Please try again later</Text>
+                    </View>
+                )}
+                <iframe
+                    src={viewerUrl}
+                    style={{
+                        width: '100%',
+                        height: '100%',
+                        border: 'none',
+                        backgroundColor: '#1F2937',
+                        display: error ? 'none' : 'block'
+                    }}
+                    onLoad={handleLoad}
+                    onError={handleError}
+                    title="Document Viewer"
+                    allow="fullscreen"
+                />
+            </View>
+        );
+    }
+
+    // Native platforms - use WebView
+    return (
+        <WebView
+            source={{ uri: disableDownload ? viewerUrl : uri }}
+            style={StyleSheet.absoluteFill}
+            startInLoadingState={true}
+            renderLoading={() => (
+                <View style={docViewerStyles.loadingOverlay}>
+                    <ActivityIndicator size="large" color="#F59E0B" />
+                    <Text style={docViewerStyles.loadingText}>{loadingText}</Text>
+                </View>
+            )}
+            renderError={() => (
+                <View style={docViewerStyles.errorOverlay}>
+                    <MaterialCommunityIcons name="file-alert-outline" size={64} color="#EF4444" />
+                    <Text style={docViewerStyles.errorText}>Unable to load document</Text>
+                    <Text style={docViewerStyles.errorSubtext}>Please check your connection</Text>
+                </View>
+            )}
+            javaScriptEnabled={true}
+            domStorageEnabled={true}
+            allowFileAccess={false}
+            allowUniversalAccessFromFileURLs={false}
+            onLoadEnd={handleLoad}
+            onError={handleError}
+            onShouldStartLoadWithRequest={(request) => {
+                // Block download attempts
+                if (request.url.includes('/download') || request.url.includes('Content-Disposition')) {
+                    return false;
+                }
+                return true;
+            }}
+        />
+    );
+};
+
+const docViewerStyles = StyleSheet.create({
+    loadingOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: '#1F2937',
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 10,
+    },
+    loadingText: {
+        color: '#FFF',
+        marginTop: 12,
+        fontFamily: 'Poppins_500Medium',
+        fontSize: 14,
+    },
+    errorOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: '#1F2937',
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 10,
+    },
+    errorText: {
+        color: '#EF4444',
+        marginTop: 16,
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 16,
+    },
+    errorSubtext: {
+        color: '#9CA3AF',
+        marginTop: 8,
+        fontFamily: 'Poppins_400Regular',
+        fontSize: 14,
+    },
+});
+
 // GOLDEN THEME Progress Component
-const CompletionProgress = ({ videoPercent, quizPassed, videoRequired = 90, quizRequired = 70 }) => {
+const CompletionProgress = ({ videoPercent, quizPassed, videoRequired = 90, quizRequired = 70, hasQuiz = true }) => {
     const videoOk = videoPercent >= videoRequired;
     const displayPercent = videoOk ? 100 : Math.min(100, videoPercent);
 
@@ -178,19 +311,22 @@ const CompletionProgress = ({ videoPercent, quizPassed, videoRequired = 90, quiz
 
             <View style={progressStyles.divider} />
 
-            {/* Quiz Status */}
+            {/* Quiz Status - or Video Only indicator */}
             <View style={progressStyles.item}>
-                <View style={[progressStyles.iconBg, quizPassed && progressStyles.iconBgDone]}>
+                <View style={[progressStyles.iconBg, (hasQuiz ? quizPassed : videoOk) && progressStyles.iconBgDone]}>
                     <MaterialCommunityIcons
-                        name={quizPassed ? "trophy" : "clipboard-text"}
+                        name={hasQuiz ? (quizPassed ? "trophy" : "clipboard-text") : (videoOk ? "check-decagram" : "video-outline")}
                         size={20}
-                        color={quizPassed ? "#F59E0B" : "#9CA3AF"}
+                        color={(hasQuiz ? quizPassed : videoOk) ? "#F59E0B" : "#9CA3AF"}
                     />
                 </View>
                 <View>
-                    <Text style={progressStyles.label}>Quiz Status</Text>
-                    <Text style={[progressStyles.value, quizPassed && progressStyles.valueDone]}>
-                        {quizPassed ? "Passed" : "Pending"}
+                    <Text style={progressStyles.label}>{hasQuiz ? 'Quiz Status' : 'Completion'}</Text>
+                    <Text style={[progressStyles.value, (hasQuiz ? quizPassed : videoOk) && progressStyles.valueDone]}>
+                        {hasQuiz
+                            ? (quizPassed ? "Passed" : "Pending")
+                            : (videoOk ? "Complete" : "Watch Video")
+                        }
                     </Text>
                 </View>
             </View>
@@ -223,6 +359,9 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
     const [endQuizPassed, setEndQuizPassed] = useState(false);
     const [nodeProgress, setNodeProgress] = useState(null);
 
+    // No-transcript/no-quiz detection
+    const [hasQuiz, setHasQuiz] = useState(true); // Default true, updated from server response
+
     // Mid-video quiz states
     const [midVideoQuizzes, setMidVideoQuizzes] = useState([]);
     const [currentMidQuiz, setCurrentMidQuiz] = useState(null);
@@ -241,13 +380,16 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
     // [FIX] Track highest server percent to avoid fluctuations
     const highestServerPercent = useRef(0);
 
+    // [NEW] Fullscreen and Orientation state
+    const [isFullscreen, setIsFullscreen] = useState(false);
+
     const toggleSpeed = () => {
         const rates = [1.0, 1.25, 1.5];
         const nextIdx = (rates.indexOf(playbackSpeed) + 1) % rates.length;
         setPlaybackSpeed(rates[nextIdx]);
     };
 
-    const transcriptText = lesson.transcript || lesson.desc || "No transcript available for this lesson.";
+    const transcriptText = lesson.transcript || lesson.desc || (hasQuiz ? "No transcript available for this lesson." : "This video does not have a transcript. Complete the video to proceed.");
 
     // Translation State
     const [translationLang, setTranslationLang] = useState('English');
@@ -329,6 +471,40 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
         }
     }, []);
 
+    // Lock orientation to portrait by default, allow changes during fullscreen (native only)
+    useEffect(() => {
+        // Skip orientation lock on web - it's not supported
+        if (Platform.OS === 'web') return;
+
+        // Lock to portrait when component mounts
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+
+        return () => {
+            // Restore to portrait when component unmounts
+            ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+        };
+    }, []);
+
+    // Handle fullscreen presentation mode changes
+    const handleFullscreenUpdate = async ({ fullscreenUpdate }) => {
+        switch (fullscreenUpdate) {
+            case 1: // FULLSCREEN_UPDATE_PLAYER_WILL_PRESENT
+                // Unlock orientation to allow landscape when entering fullscreen (native only)
+                if (Platform.OS !== 'web') {
+                    await ScreenOrientation.unlockAsync();
+                }
+                setIsFullscreen(true);
+                break;
+            case 3: // FULLSCREEN_UPDATE_PLAYER_WILL_DISMISS
+                // Lock back to portrait when exiting fullscreen (native only)
+                if (Platform.OS !== 'web') {
+                    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+                }
+                setIsFullscreen(false);
+                break;
+        }
+    };
+
     const handleDocumentViewed = async () => {
         // Mark document as 100% viewed since we can't track scroll/page progress
         const resourceType = lesson.resourceType || lesson.resource_type || 'Video';
@@ -372,6 +548,15 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
             }
             if (data.requirements) {
                 setRequirements(data.requirements);
+            }
+            // Detect if this content has a quiz (from server response)
+            if (data.has_quiz !== undefined) {
+                setHasQuiz(data.has_quiz);
+            } else {
+                // Fallback: check lesson data directly
+                const quizAvailable = lesson.quiz && Array.isArray(lesson.quiz) && lesson.quiz.length > 0;
+                const transcriptAvailable = lesson.transcript && lesson.transcript.trim().length > 0;
+                setHasQuiz(quizAvailable || false);
             }
         } catch (err) {
             console.log("Error fetching node progress:", err);
@@ -522,6 +707,18 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
         }
 
         // Fixed checkpoints at 33% and 66% of video duration
+        // Skip mid-video quizzes entirely if no transcript/quiz exists
+        if (!hasQuiz) {
+            // No transcript → no mid-video quizzes, just track video progress
+            if (status.didJustFinish) {
+                if (videoProgress >= requirements.video_watch_percent) {
+                    console.log("Video finished (no quiz). Attempting video-only completion...");
+                    attemptVideoOnlyCompletion();
+                }
+            }
+            return;
+        }
+
         const checkpoint33 = Math.floor(duration * 0.33);
         const checkpoint66 = Math.floor(duration * 0.66);
         const checkpoints = [checkpoint33, checkpoint66];
@@ -566,10 +763,35 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
             }
         }
 
-        // Check if video finished
+        // Check if video finished (only reached when hasQuiz is true)
         if (status.didJustFinish) {
-            // Don't auto-complete - user must pass quiz
             console.log("Video finished. Video progress:", videoProgress);
+        }
+    };
+
+    // Attempt to complete a node based on video progress alone (no quiz required)
+    const attemptVideoOnlyCompletion = async () => {
+        try {
+            const formData = new FormData();
+            formData.append("user_email", userEmail);
+            formData.append("node_id", lesson.id);
+
+            const response = await fetch(`${API_URL}/learning-path/complete-video-only`, {
+                method: "POST",
+                body: formData,
+            });
+            const result = await response.json();
+
+            if (result.status === "success" && result.result?.is_complete) {
+                setEndQuizPassed(true);
+                setModuleCompleted(true);
+                setCompletionResult(result.result);
+                await trackModuleCompletion();
+            } else if (result.status === "error") {
+                console.log("Video-only completion not yet ready:", result.message);
+            }
+        } catch (err) {
+            console.error("Error in video-only completion:", err);
         }
     };
 
@@ -734,6 +956,16 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
     useEffect(() => {
         if (nodeProgress && requirements && !moduleCompleted) {
             const videoOk = (nodeProgress.video_watched_percent || 0) >= requirements.video_watch_percent;
+
+            if (!hasQuiz) {
+                // No quiz required → complete based on video progress alone
+                if (videoOk) {
+                    console.log("Auto-completing course (no quiz, video complete)...");
+                    attemptVideoOnlyCompletion();
+                }
+                return;
+            }
+
             const quizOk = nodeProgress.end_quiz_passed;
 
             let midOk = true;
@@ -750,7 +982,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
                 trackModuleCompletion();
             }
         }
-    }, [nodeProgress, requirements, moduleCompleted]);
+    }, [nodeProgress, requirements, moduleCompleted, hasQuiz]);
 
     const handleClose = () => {
         onClose(completionResult);
@@ -787,7 +1019,13 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
     // Render content viewer based on resource type
     const renderContentViewer = () => {
         const resourceType = lesson.resourceType || lesson.resource_type || 'Video';
-        const contentUrl = lesson.videoUrl || lesson.video_url || lesson.fileUrl || lesson.file_url;
+
+        // Check for PDF version first (converted from PPT/DOCX for security)
+        const pdfUrl = lesson.pdfUrl || lesson.pdf_url;
+        const originalUrl = lesson.videoUrl || lesson.video_url || lesson.fileUrl || lesson.file_url;
+
+        // Use PDF version if available for documents/presentations, otherwise use original
+        const contentUrl = pdfUrl || originalUrl;
 
         // Video or Audio content
         if (resourceType === 'Video' || resourceType === 'Audio') {
@@ -804,6 +1042,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
                             shouldPlay={true}
                             rate={playbackSpeed}
                             onPlaybackStatusUpdate={handleVideoPlaybackStatus}
+                            onFullscreenUpdate={handleFullscreenUpdate}
                         />
 
                         {/* Speed Control Overlay */}
@@ -844,24 +1083,14 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
         // PDF content
         if (resourceType === 'PDF') {
             if (contentUrl) {
-                // Use Google Docs Viewer for better PDF compatibility
-                const viewerUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(contentUrl)}`;
+                // Direct Cloudflare URL - PDFs embedded with toolbar disabled
                 return (
                     <>
-                        <WebView
-                            source={{ uri: viewerUrl }}
-                            style={StyleSheet.absoluteFill}
-                            startInLoadingState={true}
-                            renderLoading={() => (
-                                <View style={styles.loadingOverlay}>
-                                    <ActivityIndicator size="large" color="#F59E0B" />
-                                    <Text style={styles.loadingText}>Loading PDF...</Text>
-                                </View>
-                            )}
-                            javaScriptEnabled={true}
-                            domStorageEnabled={true}
+                        <CrossPlatformDocViewer
+                            uri={contentUrl}
+                            fileType="pdf"
+                            loadingText="Loading PDF..."
                             onLoadEnd={() => {
-                                // Show hint for 4 seconds when document loads
                                 setShowDocumentHint(true);
                                 setTimeout(() => setShowDocumentHint(false), 4000);
                             }}
@@ -892,22 +1121,15 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
         // Presentation (PPT, PPTX) content
         if (resourceType === 'Presentation') {
             if (contentUrl) {
-                // Use Google Docs Viewer for presentations
-                const viewerUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(contentUrl)}`;
+                // If PDF version available: Direct Cloudflare viewing (fast, secure)
+                // Otherwise: Google Viewer (fallback for unconverted files)
+                const viewerFileType = pdfUrl ? 'pdf' : 'presentation';
                 return (
                     <>
-                        <WebView
-                            source={{ uri: viewerUrl }}
-                            style={StyleSheet.absoluteFill}
-                            startInLoadingState={true}
-                            renderLoading={() => (
-                                <View style={styles.loadingOverlay}>
-                                    <ActivityIndicator size="large" color="#F59E0B" />
-                                    <Text style={styles.loadingText}>Loading Presentation...</Text>
-                                </View>
-                            )}
-                            javaScriptEnabled={true}
-                            domStorageEnabled={true}
+                        <CrossPlatformDocViewer
+                            uri={contentUrl}
+                            fileType={viewerFileType}
+                            loadingText="Loading Presentation..."
                             onLoadEnd={() => {
                                 setShowDocumentHint(true);
                                 setTimeout(() => setShowDocumentHint(false), 4000);
@@ -939,22 +1161,15 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
         // Document (Word, DOCX) content
         if (resourceType === 'Document') {
             if (contentUrl) {
-                // Use Google Docs Viewer for Word documents
-                const viewerUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(contentUrl)}`;
+                // If PDF version available: Direct Cloudflare viewing (fast, secure)
+                // Otherwise: Google Viewer (fallback for unconverted files)
+                const viewerFileType = pdfUrl ? 'pdf' : 'document';
                 return (
                     <>
-                        <WebView
-                            source={{ uri: viewerUrl }}
-                            style={StyleSheet.absoluteFill}
-                            startInLoadingState={true}
-                            renderLoading={() => (
-                                <View style={styles.loadingOverlay}>
-                                    <ActivityIndicator size="large" color="#F59E0B" />
-                                    <Text style={styles.loadingText}>Loading Document...</Text>
-                                </View>
-                            )}
-                            javaScriptEnabled={true}
-                            domStorageEnabled={true}
+                        <CrossPlatformDocViewer
+                            uri={contentUrl}
+                            fileType={viewerFileType}
+                            loadingText="Loading Document..."
                             onLoadEnd={() => {
                                 setShowDocumentHint(true);
                                 setTimeout(() => setShowDocumentHint(false), 4000);
@@ -973,7 +1188,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
                         )}
                     </>
                 );
-            } else {
+            } else{
                 return (
                     <LinearGradient colors={['#374151', '#1F2937']} style={styles.videoPlaceholder}>
                         <MaterialCommunityIcons name="file-word" size={64} color="rgba(255,255,255,0.5)" />
@@ -985,18 +1200,11 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
 
         // Other/Unknown content types - use generic document viewer
         if (contentUrl) {
-            const viewerUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(contentUrl)}`;
             return (
-                <WebView
-                    source={{ uri: viewerUrl }}
-                    style={StyleSheet.absoluteFill}
-                    startInLoadingState={true}
-                    renderLoading={() => (
-                        <View style={styles.loadingOverlay}>
-                            <ActivityIndicator size="large" color="#F59E0B" />
-                            <Text style={styles.loadingText}>Loading Content...</Text>
-                        </View>
-                    )}
+                <CrossPlatformDocViewer
+                    uri={contentUrl}
+                    fileType="other"
+                    loadingText="Loading Content..."
                 />
             );
         } else {
@@ -1009,7 +1217,9 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
         }
     };
 
-    const canComplete = videoProgress >= requirements.video_watch_percent && endQuizPassed;
+    const canComplete = hasQuiz
+        ? (videoProgress >= requirements.video_watch_percent && endQuizPassed)
+        : (videoProgress >= requirements.video_watch_percent);
 
     return (
         <RNModal visible={true} animationType="slide" onRequestClose={handleClose} presentationStyle="fullScreen">
@@ -1037,6 +1247,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
                         quizPassed={endQuizPassed}
                         videoRequired={requirements.video_watch_percent}
                         quizRequired={requirements.quiz_pass_percent}
+                        hasQuiz={hasQuiz}
                     />
 
                     {/* CONTENT VIEWER (Video, PDF, Documents) */}
@@ -1057,12 +1268,14 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
                             active={activeTab === 'transcript'}
                             onPress={() => setActiveTab('transcript')}
                         />
-                        <TabButton
-                            title="Quiz"
-                            active={activeTab === 'quiz'}
-                            onPress={() => setActiveTab('quiz')}
-                            badge={!endQuizPassed && quizData.length > 0 ? "!" : null}
-                        />
+                        {hasQuiz && (
+                            <TabButton
+                                title="Quiz"
+                                active={activeTab === 'quiz'}
+                                onPress={() => setActiveTab('quiz')}
+                                badge={!endQuizPassed && quizData.length > 0 ? "!" : null}
+                            />
+                        )}
                         <TabButton
                             title="Resources"
                             active={activeTab === 'resources'}
@@ -1317,7 +1530,7 @@ const midQuizStyles = StyleSheet.create({
     container: {
         width: '100%',
         maxWidth: 400,
-        maxHeight: height * 0.8,
+        maxHeight: Platform.OS === 'web' ? '80vh' : height * 0.8,
         borderRadius: 24,
         overflow: 'hidden',
     },
@@ -1342,7 +1555,7 @@ const midQuizStyles = StyleSheet.create({
         marginBottom: 20,
     },
     questionsScroll: {
-        maxHeight: height * 0.45,
+        maxHeight: Platform.OS === 'web' ? '45vh' : height * 0.45,
     },
     questionCard: {
         marginBottom: 20,
@@ -1476,8 +1689,8 @@ const styles = StyleSheet.create({
         position: 'absolute',
         top: 0,
         left: 0,
-        width: width,
-        height: height,
+        width: Platform.OS === 'web' ? '100%' : width,
+        height: Platform.OS === 'web' ? '100%' : height,
         backgroundColor: '#111827',
         zIndex: 1000,
     },
@@ -1486,6 +1699,11 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingHorizontal: 20,
         paddingVertical: 15,
+        ...(Platform.OS === 'web' && {
+            maxWidth: 1200,
+            alignSelf: 'center',
+            width: '100%',
+        }),
     },
     closeBtn: {
         width: 40,
@@ -1513,24 +1731,36 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_500Medium',
     },
     videoContainer: {
-        width: width,
-        height: width * 0.5625,
+        width: Platform.OS === 'web' ? '100%' : width,
+        height: Platform.OS === 'web' ? undefined : width * 0.5625,
         backgroundColor: '#000',
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.3,
         shadowRadius: 4.65,
         elevation: 8,
+        ...(Platform.OS === 'web' && {
+            maxWidth: 1200,
+            alignSelf: 'center',
+            aspectRatio: 16 / 9,
+            minHeight: 300,
+            maxHeight: 600,
+        }),
     },
     documentContainer: {
-        width: width,
-        height: height * 0.35, // Use 35% of screen height for documents - leaves room for quiz/transcript
+        width: Platform.OS === 'web' ? '100%' : width,
+        height: Platform.OS === 'web' ? '50vh' : height * 0.35, // Use 50vh on web, 35% on native
         backgroundColor: '#000',
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.3,
         shadowRadius: 4.65,
         elevation: 8,
+        ...(Platform.OS === 'web' && {
+            maxWidth: 1200,
+            alignSelf: 'center',
+            minHeight: 400,
+        }),
     },
     videoPlaceholder: {
         flex: 1,
@@ -1570,6 +1800,12 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(245, 158, 11, 0.1)', // Gold divider
         marginTop: 10,
+        ...(Platform.OS === 'web' && {
+            justifyContent: 'center',
+            width: '100%',
+            maxWidth: 1200,
+            alignSelf: 'center',
+        }),
     },
     tabBtn: {
         paddingVertical: 15,
@@ -1615,6 +1851,11 @@ const styles = StyleSheet.create({
     },
     contentArea: {
         flex: 1,
+        ...(Platform.OS === 'web' && {
+            width: '100%',
+            maxWidth: 1200,
+            alignSelf: 'center',
+        }),
     },
     transcriptText: {
         color: '#D1D5DB',
