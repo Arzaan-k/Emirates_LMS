@@ -103,6 +103,7 @@ class CourseBucket(Base):
     description = Column(Text)
     parent_bucket_id = Column(String(100))  # ID of parent bucket for nested structure
     folder_path = Column(String(1000))  # Full path from root (e.g., 'BWC/Career/Module1')
+    learning_path_type = Column(String(100), default="career_progression")  # career_progression or self_learning
     color = Column(String(50))
     icon = Column(String(100))
     keywords = Column(JSON, default=list)  # Keywords for matching courses to this category
@@ -115,6 +116,7 @@ class CourseBucket(Base):
         Index('idx_bucket_active', 'is_active'),
         Index('idx_bucket_order', 'order_index'),
         Index('idx_bucket_parent', 'parent_bucket_id'),
+        Index('idx_bucket_learning_path', 'learning_path_type'),
     )
 
     def __repr__(self):
@@ -128,6 +130,7 @@ class CourseBucket(Base):
             "description": self.description,
             "parent_bucket_id": self.parent_bucket_id,
             "folder_path": self.folder_path,
+            "learning_path_type": self.learning_path_type or "career_progression",
             "color": self.color,
             "icon": self.icon,
             "keywords": self.keywords or [],

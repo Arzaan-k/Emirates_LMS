@@ -774,10 +774,12 @@ async def create_course_bucket(
     description: str = Form(""),
     color: str = Form("#6366F1"),
     icon: str = Form("folder"),
+    learning_path_type: str = Form("career_progression"),
     db: Session = Depends(get_db)
 ):
     """
     Create a new course bucket.
+    learning_path_type: 'career_progression' or 'self_learning'
     """
     service = ContentService(db)
     
@@ -787,11 +789,12 @@ async def create_course_bucket(
         "description": description,
         "color": color,
         "icon": icon,
+        "learning_path_type": learning_path_type,
     }
     
     try:
         bucket = service.create_bucket(bucket_data)
-        logger.info(f"Bucket created: {bucket_data['id']}")
+        logger.info(f"Bucket created: {bucket_data['id']} for {learning_path_type}")
         
         response = bucket.to_dict() if hasattr(bucket, 'to_dict') else dict(bucket)
         response["status"] = "success"
@@ -808,10 +811,12 @@ async def update_course_bucket(
     description: str = Form(None),
     color: str = Form(None),
     icon: str = Form(None),
+    learning_path_type: str = Form(None),
     db: Session = Depends(get_db)
 ):
     """
     Update an existing course bucket.
+    learning_path_type: 'career_progression' or 'self_learning'
     """
     service = ContentService(db)
     
@@ -824,6 +829,8 @@ async def update_course_bucket(
         updates["color"] = color
     if icon is not None:
         updates["icon"] = icon
+    if learning_path_type is not None:
+        updates["learning_path_type"] = learning_path_type
     
     try:
         bucket = service.update_bucket(bucket_id, updates)
@@ -835,6 +842,7 @@ async def update_course_bucket(
     except Exception as e:
         logger.error(f"Bucket update failed: {e}")
         raise
+
 
 
 @router.delete("/buckets/{bucket_id}")
@@ -1068,107 +1076,222 @@ async def update_content_progress(
 @router.get("/library/all")
 async def get_content_library(db: Session = Depends(get_db)):
     """
-    Get content grouped by bucket/category with hierarchical folder structure.
-    Returns nested tree matching the folder upload hierarchy.
+    Get content grouped by learning path type (Career Progression / Self Learning)
+    with hierarchical folder structure underneath.
+    Returns a two-tier structure:
+    1. Top level: Career Progression and Self Learning
+    2. Second level: Category folders (Product Training, Compliance, Safety, etc.)
     """
     from app.models.content import CourseBucket
 
     service = ContentService(db)
 
-    # Get all content
-    content_list = service.get_all_content()
+    try:
+        # Get all content
+        content_list = service.get_all_content()
 
-    # Get all buckets (folders)
-    all_buckets = db.query(CourseBucket).filter(CourseBucket.is_active == True).all()
+        # Get all buckets (folders)
+        all_buckets = db.query(CourseBucket).filter(CourseBucket.is_active == True).all()
 
-    # Build bucket lookup map
-    bucket_map = {bucket.id: bucket for bucket in all_buckets}
+        # Helper to safely get attribute from ORM object or dict
+        def get_attr(obj, attr, default=None):
+            if isinstance(obj, dict):
+                return obj.get(attr, default)
+            return getattr(obj, attr, default)
 
-    # Helper function to build hierarchical tree
-    def build_bucket_tree(bucket_id):
-        """Recursively build tree structure for a bucket and its children"""
-        bucket = bucket_map.get(bucket_id)
-        if not bucket:
-            return None
+        # Build bucket lookup map
+        bucket_map = {get_attr(bucket, 'id'): bucket for bucket in all_buckets}
 
-        # Get direct content items in this bucket
-        bucket_items = [
+        # Helper function to build hierarchical tree
+        def build_bucket_tree(bucket_id, target_path_type=None):
+            """Recursively build tree structure for a bucket and its children.
+
+            Args:
+                bucket_id: The ID of the bucket to build the tree for
+                target_path_type: The learning path type to filter content by.
+                                  If None, uses the bucket's learning_path_type.
+            """
+            bucket = bucket_map.get(bucket_id)
+            if not bucket:
+                return None
+
+            # Determine the path type to filter by
+            bucket_path_type = get_attr(bucket, 'learning_path_type') or "career_progression"
+            filter_path_type = target_path_type or bucket_path_type
+
+            # Get direct content items in this bucket - FILTER by both bucket_id AND learning_path_type
+            bucket_items = []
+            for content in content_list:
+                # Safely get bucket_id from content (could be obj or dict)
+                content_bucket_id = get_attr(content, 'bucket_id')
+                if content_bucket_id != bucket_id:
+                    continue
+                
+                # Determine effective path type for the item
+                item_path_type = get_attr(content, 'learning_path_type')
+                if not item_path_type:
+                    # Inherit from bucket if not set on item
+                    item_path_type = bucket_path_type
+                
+                # Check if item matches the filter path type
+                if item_path_type == filter_path_type:
+                    item_dict = content.to_dict() if hasattr(content, 'to_dict') else dict(content)
+                    # Ensure the item has the correct path type set in response
+                    item_dict['learning_path_type'] = item_path_type
+                    bucket_items.append(item_dict)
+
+            # Find child buckets
+            child_buckets = [
+                b for b in all_buckets
+                if get_attr(b, 'parent_bucket_id') == bucket_id
+            ]
+
+            # Recursively build children - pass down the filter_path_type
+            children = []
+            for child in child_buckets:
+                child_tree = build_bucket_tree(get_attr(child, 'id'), filter_path_type)
+                if child_tree and child_tree.get('total_count', 0) > 0:
+                    children.append(child_tree)
+
+            # Sort children by name
+            children.sort(key=lambda x: x.get('name', '').lower())
+
+            return {
+                "id": get_attr(bucket, 'id'),
+                "name": get_attr(bucket, 'name'),
+                "description": get_attr(bucket, 'description'),
+                "parent_bucket_id": get_attr(bucket, 'parent_bucket_id'),
+                "folder_path": get_attr(bucket, 'folder_path'),
+                "learning_path_type": filter_path_type,
+                "color": get_attr(bucket, 'color'),
+                "icon": get_attr(bucket, 'icon'),
+                "order_index": get_attr(bucket, 'order_index', 0),
+                "items": bucket_items,
+                "children": children,
+                "has_children": len(children) > 0,
+                "item_count": len(bucket_items),
+                "total_count": len(bucket_items) + sum(child.get('total_count', 0) for child in children)
+            }
+
+        # Find root buckets (no parent)
+        root_buckets = [b for b in all_buckets if not get_attr(b, 'parent_bucket_id')]
+
+        # Build tree for each root bucket FOR BOTH learning path types
+        # This ensures content with self_learning type in career_progression buckets still shows up
+        career_progression_buckets = []
+        self_learning_buckets = []
+
+        for root in root_buckets:
+            root_id = get_attr(root, 'id')
+
+            # Build tree for CAREER PROGRESSION content in this bucket
+            career_tree = build_bucket_tree(root_id, "career_progression")
+            if career_tree and career_tree.get('total_count', 0) > 0:
+                career_progression_buckets.append(career_tree)
+
+            # Build tree for SELF LEARNING content in this bucket
+            self_tree = build_bucket_tree(root_id, "self_learning")
+            if self_tree and self_tree.get('total_count', 0) > 0:
+                self_learning_buckets.append(self_tree)
+
+        # Sort buckets by order_index then name
+        career_progression_buckets.sort(key=lambda x: (x.get('order_index', 0), x.get('name', '').lower()))
+        self_learning_buckets.sort(key=lambda x: (x.get('order_index', 0), x.get('name', '').lower()))
+
+        # Add uncategorized items (content without bucket)
+        uncategorized_items = [
             content.to_dict() if hasattr(content, 'to_dict') else dict(content)
             for content in content_list
-            if content.bucket_id == bucket_id
+            if not content.bucket_id or content.bucket_id not in bucket_map
         ]
 
-        # Find child buckets
-        child_buckets = [
-            b for b in all_buckets
-            if b.parent_bucket_id == bucket_id
+        # Split uncategorized by their learning_path_type
+        uncategorized_career = [
+            item for item in uncategorized_items
+            if item.get('learning_path_type') != 'self_learning'
+        ]
+        uncategorized_self = [
+            item for item in uncategorized_items
+            if item.get('learning_path_type') == 'self_learning'
         ]
 
-        # Recursively build children
-        children = []
-        for child in child_buckets:
-            child_tree = build_bucket_tree(child.id)
-            if child_tree:
-                children.append(child_tree)
+        if uncategorized_career:
+            career_progression_buckets.append({
+                "id": "uncategorized_career",
+                "name": "Uncategorized",
+                "description": "Content without a folder",
+                "parent_bucket_id": None,
+                "folder_path": "Uncategorized",
+                "learning_path_type": "career_progression",
+                "color": "#9CA3AF",
+                "icon": "folder-outline",
+                "order_index": 9999,
+                "items": uncategorized_career,
+                "children": [],
+                "has_children": False,
+                "item_count": len(uncategorized_career),
+                "total_count": len(uncategorized_career)
+            })
 
-        # Sort children by name
-        children.sort(key=lambda x: x.get('name', '').lower())
+        if uncategorized_self:
+            self_learning_buckets.append({
+                "id": "uncategorized_self",
+                "name": "Uncategorized",
+                "description": "Content without a folder",
+                "parent_bucket_id": None,
+                "folder_path": "Uncategorized",
+                "learning_path_type": "self_learning",
+                "color": "#9CA3AF",
+                "icon": "folder-outline",
+                "order_index": 9999,
+                "items": uncategorized_self,
+                "children": [],
+                "has_children": False,
+                "item_count": len(uncategorized_self),
+                "total_count": len(uncategorized_self)
+            })
 
-        return {
-            "id": bucket.id,
-            "name": bucket.name,
-            "description": bucket.description,
-            "parent_bucket_id": bucket.parent_bucket_id,
-            "folder_path": bucket.folder_path,
-            "color": bucket.color,
-            "icon": bucket.icon,
-            "order_index": bucket.order_index,
-            "items": bucket_items,
-            "children": children,  # Nested child folders
-            "has_children": len(children) > 0,
-            "item_count": len(bucket_items),
-            "total_count": len(bucket_items) + sum(child.get('total_count', 0) for child in children)
+        # Calculate totals
+        career_total = sum(b.get('total_count', 0) for b in career_progression_buckets)
+        self_total = sum(b.get('total_count', 0) for b in self_learning_buckets)
+
+        # Build the two-tier result structure
+        result = {
+            "learning_paths": [
+                {
+                    "id": "career_progression",
+                    "name": "Career Progression",
+                    "description": "Structured learning for career advancement",
+                    "color": "#3B82F6",
+                    "icon": "trending-up",
+                    "buckets": career_progression_buckets,
+                    "total_count": career_total
+                },
+                {
+                    "id": "self_learning",
+                    "name": "Self Learning",
+                    "description": "Self-paced learning resources",
+                    "color": "#10B981",
+                    "icon": "book-open",
+                    "buckets": self_learning_buckets,
+                    "total_count": self_total
+                }
+            ],
+            # For backward compatibility - flat list of all buckets
+            "all_buckets": career_progression_buckets + self_learning_buckets,
+            "total_count": career_total + self_total
         }
 
-    # Find root buckets (no parent)
-    root_buckets = [b for b in all_buckets if not b.parent_bucket_id]
+        logger.info(f"Returning library with {career_total} career and {self_total} self-learning items")
+        return result
 
-    # Build tree for each root bucket
-    result = []
-    for root in root_buckets:
-        tree = build_bucket_tree(root.id)
-        if tree:
-            result.append(tree)
+    except Exception as e:
+        logger.error(f"Error in get_content_library: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to load content library: {str(e)}")
 
-    # Sort root buckets by order_index then name
-    result.sort(key=lambda x: (x.get('order_index', 0), x.get('name', '').lower()))
 
-    # Add uncategorized items (content without bucket)
-    uncategorized_items = [
-        content.to_dict() if hasattr(content, 'to_dict') else dict(content)
-        for content in content_list
-        if not content.bucket_id or content.bucket_id not in bucket_map
-    ]
-
-    if uncategorized_items:
-        result.append({
-            "id": "uncategorized",
-            "name": "Uncategorized",
-            "description": "Content without a folder",
-            "parent_bucket_id": None,
-            "folder_path": "Uncategorized",
-            "color": "#9CA3AF",
-            "icon": "folder-outline",
-            "order_index": 9999,
-            "items": uncategorized_items,
-            "children": [],
-            "has_children": False,
-            "item_count": len(uncategorized_items),
-            "total_count": len(uncategorized_items)
-        })
-
-    logger.info(f"Returning {len(result)} root buckets with hierarchical structure")
-    return result
 # ==========================================
 # BACKGROUND TASKS
 # ==========================================

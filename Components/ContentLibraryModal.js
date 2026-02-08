@@ -48,8 +48,10 @@ const showAlert = (title, message, buttons = []) => {
 
 export default function ContentLibraryModal({ visible, onClose }) {
     const [searchQuery, setSearchQuery] = useState('');
+    const [activeLearningPath, setActiveLearningPath] = useState('career_progression'); // career_progression or self_learning
     const [activeTab, setActiveTab] = useState('All');
     const [contentCategories, setContentCategories] = useState([]);
+    const [learningPaths, setLearningPaths] = useState([]);
     const [loading, setLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
 
@@ -85,9 +87,34 @@ export default function ContentLibraryModal({ visible, onClose }) {
         try {
             const response = await fetch(`${API_URL}/api/v1/content/library/all`);
             const data = await response.json();
-            // The endpoint returns buckets with items, so map it to categories format
-            if (Array.isArray(data)) {
+            
+            // Handle the new two-tier structure from backend
+            if (data.learning_paths) {
+                // New structure with learning paths
+                setLearningPaths(data.learning_paths);
+                setContentCategories(data.all_buckets || []);
+            } else if (Array.isArray(data)) {
+                // Legacy structure - flat array of buckets
                 setContentCategories(data);
+                // Create synthetic learning paths from the data
+                setLearningPaths([
+                    {
+                        id: 'career_progression',
+                        name: 'Career Progression',
+                        color: '#3B82F6',
+                        icon: 'trending-up',
+                        buckets: data.filter(b => b.learning_path_type !== 'self_learning'),
+                        total_count: data.filter(b => b.learning_path_type !== 'self_learning').reduce((sum, b) => sum + (b.total_count || 0), 0)
+                    },
+                    {
+                        id: 'self_learning',
+                        name: 'Self Learning',
+                        color: '#10B981',
+                        icon: 'book-open',
+                        buckets: data.filter(b => b.learning_path_type === 'self_learning'),
+                        total_count: data.filter(b => b.learning_path_type === 'self_learning').reduce((sum, b) => sum + (b.total_count || 0), 0)
+                    }
+                ]);
             } else if (data.categories) {
                 setContentCategories(data.categories);
             }
@@ -409,7 +436,12 @@ export default function ContentLibraryModal({ visible, onClose }) {
         });
     };
 
-    const tabs = Array.from(new Set(['All', ...availableBuckets.map(b => b.name)]));
+    // Get buckets for the currently active learning path
+    const currentLearningPath = learningPaths.find(lp => lp.id === activeLearningPath);
+    const currentBuckets = currentLearningPath?.buckets || contentCategories;
+    
+    // Generate sub-category tabs from current learning path's buckets
+    const tabs = Array.from(new Set(['All', ...currentBuckets.map(b => b.name)]));
 
     // Recursively filter folders and items based on search query
     const filterFolderTree = (folder) => {
@@ -444,10 +476,10 @@ export default function ContentLibraryModal({ visible, onClose }) {
         return null; // Exclude this folder
     };
 
-    // Filter by active tab - only filter at root level
+    // Filter by active tab (sub-category) - only filter at root level within current learning path
     const filteredCategories = activeTab === 'All'
-        ? contentCategories
-        : contentCategories.filter(cat => cat.name === activeTab);
+        ? currentBuckets
+        : currentBuckets.filter(cat => cat.name === activeTab);
 
     // Apply search filter recursively
     const displayCategories = filteredCategories
@@ -727,7 +759,47 @@ export default function ContentLibraryModal({ visible, onClose }) {
                         )}
                     </LinearGradient>
 
-                    {/* Tabs */}
+                    {/* Learning Path Selector - Primary Tier */}
+                    <View style={styles.learningPathContainer}>
+                        {learningPaths.map((lp) => (
+                            <TouchableOpacity
+                                key={lp.id}
+                                style={[
+                                    styles.learningPathTab,
+                                    activeLearningPath === lp.id && styles.activeLearningPathTab,
+                                    { borderColor: lp.color }
+                                ]}
+                                onPress={() => {
+                                    setActiveLearningPath(lp.id);
+                                    setActiveTab('All'); // Reset category filter when switching learning path
+                                }}
+                            >
+                                <View style={[styles.learningPathIcon, { backgroundColor: lp.color + '20' }]}>
+                                    <Feather 
+                                        name={lp.icon || 'folder'} 
+                                        size={18} 
+                                        color={activeLearningPath === lp.id ? lp.color : '#6B7280'} 
+                                    />
+                                </View>
+                                <View style={styles.learningPathTextContainer}>
+                                    <Text style={[
+                                        styles.learningPathText,
+                                        activeLearningPath === lp.id && { color: lp.color, fontFamily: 'Poppins_700Bold' }
+                                    ]}>
+                                        {lp.name}
+                                    </Text>
+                                    <Text style={styles.learningPathCount}>
+                                        {lp.total_count || 0} items
+                                    </Text>
+                                </View>
+                                {activeLearningPath === lp.id && (
+                                    <View style={[styles.learningPathIndicator, { backgroundColor: lp.color }]} />
+                                )}
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+
+                    {/* Category Tabs - Secondary Tier */}
                     <View style={styles.tabsContainer}>
                         <FlatList
                             data={tabs}
@@ -945,6 +1017,68 @@ const styles = StyleSheet.create({
         color: '#FFF',
         fontFamily: 'Poppins_400Regular',
     },
+    // Learning Path Selector Styles (Primary Tier)
+    learningPathContainer: {
+        flexDirection: 'row',
+        backgroundColor: '#FFF',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: '#E5E7EB',
+        gap: 12,
+    },
+    learningPathTab: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#F9FAFB',
+        borderRadius: 16,
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+        borderWidth: 2,
+        borderColor: 'transparent',
+        position: 'relative',
+        overflow: 'hidden',
+    },
+    activeLearningPathTab: {
+        backgroundColor: '#FFF',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 8,
+        elevation: 3,
+    },
+    learningPathIcon: {
+        width: 36,
+        height: 36,
+        borderRadius: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+    },
+    learningPathTextContainer: {
+        flex: 1,
+    },
+    learningPathText: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#374151',
+    },
+    learningPathCount: {
+        fontSize: 11,
+        fontFamily: 'Poppins_500Medium',
+        color: '#9CA3AF',
+        marginTop: 2,
+    },
+    learningPathIndicator: {
+        position: 'absolute',
+        bottom: 0,
+        left: 16,
+        right: 16,
+        height: 3,
+        borderRadius: 2,
+    },
+    // Category Tabs Styles (Secondary Tier)
     tabsContainer: {
         backgroundColor: '#FFF',
         paddingVertical: 12,
