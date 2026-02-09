@@ -133,6 +133,132 @@ async def get_self_learning_buckets(
     return {"buckets": result}
 
 
+@router.get("/buckets/hierarchy")
+async def get_self_learning_hierarchy(
+    user_email: str = "user",
+    db: Session = Depends(get_db)
+):
+    """
+    Get self-learning buckets in hierarchical tree structure.
+    Returns nested folders with progress at each level.
+    """
+    # Get all active self-learning buckets
+    all_buckets = db.query(CourseBucket).filter(
+        CourseBucket.learning_path_type == "self_learning",
+        CourseBucket.is_active == True
+    ).order_by(CourseBucket.order_index).all()
+
+    # Get user info
+    user = db.query(User).filter(User.email == user_email).first()
+
+    # Get all self-learning courses
+    now = datetime.utcnow()
+    all_courses = db.query(Content).filter(
+        Content.learning_path_type == "self_learning",
+        Content.is_path_node == True,
+        Content.is_published == True
+    ).all()
+
+    visible_courses = [
+        c for c in all_courses
+        if not c.scheduled_at or c.scheduled_at <= now
+    ]
+
+    # Get user completions
+    completed_ids = set()
+    if user_email != "user":
+        completions = db.query(CourseCompletion.course_id).filter(
+            CourseCompletion.user_email == user_email
+        ).all()
+        completed_ids = {r[0] for r in completions}
+
+    # Get user watch progress
+    progress_map = {}
+    if user_email != "user":
+        progress_rows = db.query(
+            VideoProgress.node_id,
+            VideoProgress.video_watched_percent,
+            VideoProgress.completed
+        ).filter(
+            VideoProgress.user_email == user_email
+        ).all()
+        for row in progress_rows:
+            progress_map[row[0]] = {
+                "watched_percent": row[1] or 0,
+                "completed": row[2] or False
+            }
+
+    def get_bucket_progress(bucket):
+        """Calculate progress for a bucket and its content."""
+        bucket_courses = [c for c in visible_courses if c.bucket == bucket.name or c.bucket_id == bucket.id]
+        total = len(bucket_courses)
+        completed = sum(1 for c in bucket_courses if c.id in completed_ids)
+        
+        total_progress = 0
+        for c in bucket_courses:
+            p = progress_map.get(c.id, {})
+            if p.get("completed") or c.id in completed_ids:
+                total_progress += 100
+            else:
+                total_progress += p.get("watched_percent", 0)
+        avg_progress = round(total_progress / total, 1) if total > 0 else 0
+        
+        return {
+            "total_courses": total,
+            "completed_courses": completed,
+            "progress_percent": avg_progress
+        }
+
+    def build_hierarchy(parent_id=None):
+        """Recursively build bucket hierarchy."""
+        children = []
+        for bucket in all_buckets:
+            bucket_parent = getattr(bucket, 'parent_bucket_id', None)
+            if bucket_parent == parent_id:
+                # Check access
+                if not _user_has_bucket_access(user, bucket):
+                    continue
+
+                progress = get_bucket_progress(bucket)
+                
+                # Get child buckets recursively
+                child_buckets = build_hierarchy(bucket.id)
+                
+                # If there are child buckets, aggregate their progress
+                if child_buckets:
+                    child_total = sum(cb.get("total_courses", 0) for cb in child_buckets)
+                    child_completed = sum(cb.get("completed_courses", 0) for cb in child_buckets)
+                    child_progress_sum = sum(cb.get("progress_percent", 0) * cb.get("total_courses", 0) for cb in child_buckets if cb.get("total_courses", 0) > 0)
+                    
+                    progress["total_courses"] += child_total
+                    progress["completed_courses"] += child_completed
+                    if progress["total_courses"] > 0:
+                        total_weight = sum(cb.get("total_courses", 0) for cb in child_buckets if cb.get("total_courses", 0) > 0)
+                        if total_weight > 0:
+                            child_avg = child_progress_sum / total_weight
+                            own_count = progress["total_courses"] - child_total
+                            if own_count > 0:
+                                progress["progress_percent"] = round(
+                                    ((progress["progress_percent"] * own_count) + (child_avg * child_total)) / progress["total_courses"], 1
+                                )
+                            else:
+                                progress["progress_percent"] = round(child_avg, 1)
+
+                bucket_data = {
+                    **bucket.to_dict(),
+                    **progress,
+                    "children": child_buckets,
+                    "has_children": len(child_buckets) > 0
+                }
+                children.append(bucket_data)
+        
+        return children
+
+    # Build tree from root (parent_id = None)
+    hierarchy = build_hierarchy(None)
+
+    return {"hierarchy": hierarchy}
+
 @router.get("/buckets/{bucket_id}/courses")
 async def get_bucket_courses(
     bucket_id: str,
