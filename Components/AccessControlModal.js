@@ -990,6 +990,195 @@ export default function AccessControlModal({ visible, onClose }) {
                                 }
                             </View>
 
+                            {/* ============================================ */}
+                            {/* QUIZ MANAGEMENT SECTION (Inline) */}
+                            {/* ============================================ */}
+                            <View style={[styles.sectionContainer, { marginTop: 16 }]}>
+                                <View style={qStyles.quizHeader}>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.sectionTitle}>
+                                            Level Advancement Quiz
+                                        </Text>
+                                        <Text style={{ fontSize: 11, color: '#6B7280', fontFamily: 'Poppins_400Regular' }}>
+                                            {(levelQuizzes[level.name]?.questions || []).length} questions
+                                            {levelQuizzes[level.name]?.source ? ` • ${levelQuizzes[level.name].source === 'ai_generated' ? 'AI Generated' : levelQuizzes[level.name].source === 'manual' ? 'Edited' : 'Mixed'}` : ''}
+                                        </Text>
+                                    </View>
+                                    <View style={qStyles.quizActions}>
+                                        <TouchableOpacity
+                                            style={qStyles.addQBtn}
+                                            onPress={() => addQuizQuestion(level.name)}
+                                        >
+                                            <Feather name="plus" size={14} color="#FFF" />
+                                            <Text style={qStyles.addQBtnText}>Add</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={qStyles.bulkBtn}
+                                            onPress={() => openBulkUpload(level.name)}
+                                        >
+                                            <MaterialCommunityIcons name="database-import-outline" size={14} color="#0EA5E9" />
+                                            <Text style={qStyles.bulkBtnText}>Bulk Upload</Text>
+                                        </TouchableOpacity>
+
+                                        <View style={qStyles.aiConfigWrap}>
+                                            <TextInput
+                                                style={qStyles.aiNumInput}
+                                                value={String(aiGenConfigByLevel[level.name]?.numQuestions ?? 10)}
+                                                onChangeText={(t) => setAiGenConfigByLevel(prev => ({
+                                                    ...prev,
+                                                    [level.name]: {
+                                                        ...(prev[level.name] || { difficulty: 'medium' }),
+                                                        numQuestions: t.replace(/[^0-9]/g, ''),
+                                                    }
+                                                }))}
+                                                keyboardType="numeric"
+                                                placeholder="#"
+                                            />
+                                            <TouchableOpacity
+                                                style={qStyles.aiDiffBtn}
+                                                onPress={() => {
+                                                    const current = (aiGenConfigByLevel[level.name]?.difficulty || 'medium');
+                                                    const order = ['easy', 'medium', 'hard'];
+                                                    const next = order[(order.indexOf(current) + 1) % order.length];
+                                                    setAiGenConfigByLevel(prev => ({
+                                                        ...prev,
+                                                        [level.name]: {
+                                                            ...(prev[level.name] || { numQuestions: 10 }),
+                                                            difficulty: next,
+                                                        }
+                                                    }));
+                                                }}
+                                            >
+                                                <Text style={qStyles.aiDiffBtnText}>
+                                                    {(aiGenConfigByLevel[level.name]?.difficulty || 'medium').toUpperCase()}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        </View>
+
+                                        <TouchableOpacity
+                                            style={qStyles.regenBtn}
+                                            onPress={() => regenerateQuizForLevel(level.name)}
+                                            disabled={levelQuizzes[level.name]?.loading}
+                                        >
+                                            <MaterialCommunityIcons name="robot" size={14} color="#6366F1" />
+                                            <Text style={qStyles.regenBtnText}>AI Generate</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={[qStyles.saveQBtn, quizSaving === level.name && { opacity: 0.6 }]}
+                                            onPress={() => saveQuizForLevel(level.name)}
+                                            disabled={quizSaving === level.name}
+                                        >
+                                            {quizSaving === level.name ? (
+                                                <ActivityIndicator size="small" color="#FFF" />
+                                            ) : (
+                                                <>
+                                                    <Feather name="save" size={14} color="#FFF" />
+                                                    <Text style={qStyles.saveQBtnText}>Save Quiz</Text>
+                                                </>
+                                            )}
+                                        </TouchableOpacity>
+                                    </View>
+                                </View>
+
+                                {/* Quiz Questions List */}
+                                {levelQuizzes[level.name]?.loading ? (
+                                    <View style={{ padding: 20, alignItems: 'center' }}>
+                                        <ActivityIndicator size="small" color="#F59E0B" />
+                                        <Text style={{ marginTop: 6, fontSize: 12, color: '#6B7280' }}>Loading questions...</Text>
+                                    </View>
+                                ) : (levelQuizzes[level.name]?.questions || []).length === 0 ? (
+                                    <View style={{ padding: 20, alignItems: 'center' }}>
+                                        <MaterialCommunityIcons name="help-circle-outline" size={32} color="#D1D5DB" />
+                                        <Text style={{ marginTop: 6, fontSize: 12, color: '#9CA3AF' }}>No quiz questions yet</Text>
+                                        <Text style={{ fontSize: 11, color: '#9CA3AF', textAlign: 'center', marginTop: 2 }}>
+                                            Click "AI Generate" to auto-create from course content, or "Add" to create manually
+                                        </Text>
+                                    </View>
+                                ) : (
+                                    <View style={{ marginTop: 8 }}>
+                                        {(levelQuizzes[level.name]?.questions || []).map((q, qIdx) => {
+                                            const isEditing = editingQuestionKey === `${level.name}:${qIdx}`;
+                                            return (
+                                                <View key={qIdx} style={qStyles.questionCard}>
+                                                    {isEditing ? (
+                                                        /* EDIT MODE */
+                                                        <View>
+                                                            <Text style={qStyles.editLabel}>Editing Question {qIdx + 1}</Text>
+                                                            <TextInput
+                                                                style={qStyles.qInput}
+                                                                value={editForm.question}
+                                                                onChangeText={(t) => setEditForm({ ...editForm, question: t })}
+                                                                placeholder="Enter question text"
+                                                                multiline
+                                                            />
+                                                            {(editForm.options || []).map((opt, oIdx) => (
+                                                                <View key={oIdx} style={qStyles.optionEditRow}>
+                                                                    <TouchableOpacity
+                                                                        style={[qStyles.correctToggle, editForm.correctIndex === oIdx && qStyles.correctToggleActive]}
+                                                                        onPress={() => setEditForm({ ...editForm, correctIndex: oIdx })}
+                                                                    >
+                                                                        <Feather
+                                                                            name={editForm.correctIndex === oIdx ? "check-circle" : "circle"}
+                                                                            size={16}
+                                                                            color={editForm.correctIndex === oIdx ? "#10B981" : "#9CA3AF"}
+                                                                        />
+                                                                    </TouchableOpacity>
+                                                                    <TextInput
+                                                                        style={[qStyles.qInput, { flex: 1, marginBottom: 0 }]}
+                                                                        value={opt}
+                                                                        onChangeText={(t) => {
+                                                                            const newOpts = [...editForm.options];
+                                                                            newOpts[oIdx] = t;
+                                                                            setEditForm({ ...editForm, options: newOpts });
+                                                                        }}
+                                                                        placeholder={`Option ${oIdx + 1}`}
+                                                                    />
+                                                                </View>
+                                                            ))}
+                                                            <View style={qStyles.editBtnRow}>
+                                                                <TouchableOpacity style={qStyles.cancelBtn} onPress={() => setEditingQuestionKey(null)}>
+                                                                    <Text style={{ color: '#6B7280', fontSize: 13, fontFamily: 'Poppins_500Medium' }}>Cancel</Text>
+                                                                </TouchableOpacity>
+                                                                <TouchableOpacity style={qStyles.confirmBtn} onPress={() => saveEditQuestion(level.name, qIdx)}>
+                                                                    <Feather name="check" size={14} color="#FFF" />
+                                                                    <Text style={{ color: '#FFF', fontSize: 13, fontFamily: 'Poppins_600SemiBold', marginLeft: 4 }}>Done</Text>
+                                                                </TouchableOpacity>
+                                                            </View>
+                                                        </View>
+                                                    ) : (
+                                                        /* VIEW MODE */
+                                                        <View>
+                                                            <View style={qStyles.qHeader}>
+                                                                <Text style={qStyles.qNumber}>Q{qIdx + 1}</Text>
+                                                                <View style={{ flexDirection: 'row', gap: 6 }}>
+                                                                    <TouchableOpacity onPress={() => startEditQuestion(level.name, qIdx)} style={{ padding: 4 }}>
+                                                                        <Feather name="edit-2" size={14} color="#F59E0B" />
+                                                                    </TouchableOpacity>
+                                                                    <TouchableOpacity onPress={() => deleteQuizQuestion(level.name, qIdx)} style={{ padding: 4 }}>
+                                                                        <Feather name="trash-2" size={14} color="#EF4444" />
+                                                                    </TouchableOpacity>
+                                                                </View>
+                                                            </View>
+                                                            <Text style={qStyles.qText}>{q.question}</Text>
+                                                            {(q.options || []).map((opt, oIdx) => (
+                                                                <View key={oIdx} style={[qStyles.optionRow, oIdx === q.correctIndex && qStyles.correctOptionRow]}>
+                                                                    <Text style={[qStyles.optionText, oIdx === q.correctIndex && { color: '#059669', fontFamily: 'Poppins_600SemiBold' }]}>
+                                                                        {String.fromCharCode(65 + oIdx)}. {opt}
+                                                                    </Text>
+                                                                    {oIdx === q.correctIndex && (
+                                                                        <Feather name="check-circle" size={12} color="#10B981" />
+                                                                    )}
+                                                                </View>
+                                                            ))}
+                                                        </View>
+                                                    )}
+                                                </View>
+                                            );
+                                        })}
+                                    </View>
+                                )}
+                            </View>
+
                             {/* Save Button */}
                             <TouchableOpacity
                                 style={[styles.saveBtn, savingCurriculum === level.id && styles.saveBtnDisabled]}
@@ -1013,7 +1202,17 @@ export default function AccessControlModal({ visible, onClose }) {
                 </View>
             </ScaleDecorator>
         );
-    }, [expandedRole, stagedAssignments, allCourses]);
+    }, [
+        expandedRole,
+        stagedAssignments,
+        allCourses,
+        levelQuizzes,
+        aiGenConfigByLevel,
+        quizSaving,
+        editingQuestionKey,
+        editForm,
+        savingCurriculum
+    ]);
 
     // =========================================================================
     // MAIN RENDER
@@ -1441,6 +1640,17 @@ export default function AccessControlModal({ visible, onClose }) {
                             keyExtractor={(item) => item.id}
                             renderItem={renderLevelItem}
                             contentContainerStyle={styles.listContainer}
+                            extraData={{
+                                levelQuizzes,
+                                expandedRole,
+                                stagedAssignments,
+                                aiGenConfigByLevel,
+                                quizSaving,
+                                savingCurriculum,
+                                editingQuestionKey,
+                                editForm,
+                                toast
+                            }}
                         />
                     )}
                 </View>

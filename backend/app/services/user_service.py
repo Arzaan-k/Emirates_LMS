@@ -868,9 +868,18 @@ class UserService:
         # Get user's completed courses from ALL sources
         user_completed = self.get_user_completed_courses(user_email)
         
+        # DEBUG: Log the comparison to diagnose eligibility issues
+        logger.info(f"[ELIGIBILITY DEBUG] User: {user_email}, Current Role: {current_role}")
+        logger.info(f"[ELIGIBILITY DEBUG] Required courses ({len(required_courses)}): {list(required_courses)[:5]}...")
+        logger.info(f"[ELIGIBILITY DEBUG] User completed ({len(user_completed)}): {list(user_completed)[:5]}...")
+        
         # Count completed required courses
         completed_required = required_courses.intersection(user_completed)
         incomplete_required = required_courses - user_completed
+        
+        logger.info(f"[ELIGIBILITY DEBUG] Completed required: {len(completed_required)}, Incomplete: {len(incomplete_required)}")
+        if incomplete_required:
+            logger.info(f"[ELIGIBILITY DEBUG] Incomplete IDs: {list(incomplete_required)[:5]}...")
         
         completed = len(completed_required)
         total = len(required_courses)
@@ -878,14 +887,19 @@ class UserService:
         requirements_met = []
         requirements_pending = []
         
-        if completed >= total and total > 0:
+        if total == 0:
+            # No courses assigned to this level - user is eligible by default
+            requirements_met.append("No courses required for this level")
+        elif completed >= total:
             requirements_met.append(f"Completed all {total} required courses")
         elif incomplete_required:
             remaining = len(incomplete_required)
             requirements_pending.append(f"Complete {remaining} more courses")
         
         # Eligible if ALL required courses for current level are completed
-        eligible = len(incomplete_required) == 0 and total > 0
+        # If no courses are required (total=0), user is eligible
+        eligible = len(incomplete_required) == 0
+        logger.info(f"[ELIGIBILITY DEBUG] Final eligibility: {eligible} (incomplete={len(incomplete_required)}, total={total})")
         
         # [NEW] Dynamic Exam Config (fetched from Target Level)
         exam_config = {

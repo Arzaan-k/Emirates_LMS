@@ -158,6 +158,10 @@ async def get_bucket_courses(
     # Filter scheduled
     courses = [c for c in courses if not c.scheduled_at or c.scheduled_at <= now]
 
+    # Filter per-course access control (if course has assigned_users set)
+    user = db.query(User).filter(User.email == user_email).first() if user_email != "user" else None
+    courses = [c for c in courses if _user_has_course_access(user, c)]
+
     # Get user progress
     completed_ids = set()
     progress_map = {}
@@ -217,6 +221,7 @@ async def get_bucket_courses(
             "allow_fast_forward": getattr(course, 'allow_fast_forward', True) if getattr(course, 'allow_fast_forward', None) is not None else True,
             "enable_feedback": getattr(course, 'enable_feedback', False) or False,
             "enable_certificate": getattr(course, 'enable_certificate', False) or False,
+            "certificate_template": getattr(course, 'certificate_template', 'classic') or 'classic',
             "has_quiz": bool(course.quiz and isinstance(course.quiz, list) and len(course.quiz) > 0),
             "order_index": course.order_index,
             "created_at": course.created_at.isoformat() if course.created_at else None,
@@ -353,7 +358,7 @@ async def update_course_settings(
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
 
-    allowed_fields = ['allow_fast_forward', 'enable_feedback', 'enable_certificate', 'xp', 'is_published', 'scheduled_at']
+    allowed_fields = ['allow_fast_forward', 'enable_feedback', 'enable_certificate', 'certificate_template', 'assigned_users', 'xp', 'is_published', 'scheduled_at']
     for key in allowed_fields:
         if key in settings:
             val = settings[key]
@@ -981,6 +986,7 @@ async def generate_certificate(
 
     certificate_data = {
         "certificate_id": cert_id,
+        "template": getattr(course, 'certificate_template', 'classic') or 'classic',
         "user_name": user.name,
         "user_email": user.email,
         "course_title": course.title,
@@ -1010,27 +1016,55 @@ def _user_has_bucket_access(user, bucket) -> bool:
     if not assigned:
         return True  # No restrictions = everyone can access
 
-    # assigned can be a dict with keys: emails, roles, stores, categories
+    # assigned can be a dict with keys: emails, roles, stores, categories, regions, cities, states, designations, departments
     if isinstance(assigned, dict):
         emails = assigned.get("emails", [])
         roles = assigned.get("roles", [])
         stores = assigned.get("stores", [])
         categories = assigned.get("categories", [])
+        regions = assigned.get("regions", [])
+        cities = assigned.get("cities", [])
+        states = assigned.get("states", [])
+        designations = assigned.get("designations", [])
+        departments = assigned.get("departments", [])
 
         # If all lists are empty, it's open to all
-        if not emails and not roles and not stores and not categories:
+        if not any([emails, roles, stores, categories, regions, cities, states, designations, departments]):
             return True
 
         if not user:
             return False
 
+        # Direct email match
         if user.email in emails:
             return True
+        # Role match
         if user.role and user.role in roles:
             return True
+        # Store match
         if user.store and user.store in stores:
             return True
+        # Category match
         if user.category and user.category in categories:
+            return True
+
+        # Profile data based matches (region, city, state, designation, department)
+        pd = user.profile_data if isinstance(getattr(user, 'profile_data', None), dict) else {}
+        user_region = pd.get("Region") or pd.get("region") or ""
+        user_city = pd.get("City") or pd.get("city") or ""
+        user_state = pd.get("State") or pd.get("state") or ""
+        user_designation = pd.get("Designation") or pd.get("designation") or ""
+        user_department = pd.get("Department") or pd.get("department") or ""
+
+        if user_region and user_region in regions:
+            return True
+        if user_city and user_city in cities:
+            return True
+        if user_state and user_state in states:
+            return True
+        if user_designation and user_designation in designations:
+            return True
+        if user_department and user_department in departments:
             return True
 
         return False
@@ -1044,3 +1078,17 @@ def _user_has_bucket_access(user, bucket) -> bool:
         return user.email in assigned
 
     return True
+
+
+def _user_has_course_access(user, course) -> bool:
+    """Check if a user has access to a specific course based on per-course assignment rules."""
+    assigned = getattr(course, 'assigned_users', None)
+    if not assigned or not isinstance(assigned, dict):
+        return True  # No per-course restrictions
+
+    # Reuse same logic as bucket access
+    class _FakeBucket:
+        pass
+    fb = _FakeBucket()
+    fb.assigned_users = assigned
+    return _user_has_bucket_access(user, fb)

@@ -47,14 +47,18 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
     const [allowFastForward, setAllowFastForward] = useState(true);
     const [enableFeedback, setEnableFeedback] = useState(false);
     const [enableCertificate, setEnableCertificate] = useState(false);
+    const [certificateTemplate, setCertificateTemplate] = useState('classic');
+    const [showCertPreview, setShowCertPreview] = useState(false);
     const [xpPoints, setXpPoints] = useState('50');
     const [isPublished, setIsPublished] = useState(true);
     const [scheduledAt, setScheduledAt] = useState('');
 
-    // Bucket settings
-    const [isLinear, setIsLinear] = useState(false);
+    // Shared: User Assignment (for both course and bucket)
     const [assignmentData, setAssignmentData] = useState({ emails: [], roles: [], stores: [], categories: [], regions: [], cities: [], states: [], designations: [], departments: [] });
     const [pickerVisible, setPickerVisible] = useState(false);
+
+    // Bucket settings
+    const [isLinear, setIsLinear] = useState(false);
 
     // Notification
     const [notifTitle, setNotifTitle] = useState('');
@@ -91,9 +95,23 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
                 setAllowFastForward(data.allow_fast_forward !== false);
                 setEnableFeedback(data.enable_feedback || false);
                 setEnableCertificate(data.enable_certificate || false);
+                setCertificateTemplate(data.certificate_template || 'classic');
                 setXpPoints(String(data.xp || 50));
                 setIsPublished(data.is_published !== false);
                 setScheduledAt(data.scheduled_at || '');
+                // Course-level user assignment
+                const cau = data.assigned_users || {};
+                setAssignmentData({
+                    emails: Array.isArray(cau.emails) ? cau.emails : [],
+                    roles: Array.isArray(cau.roles) ? cau.roles : [],
+                    stores: Array.isArray(cau.stores) ? cau.stores : [],
+                    categories: Array.isArray(cau.categories) ? cau.categories : [],
+                    regions: Array.isArray(cau.regions) ? cau.regions : [],
+                    cities: Array.isArray(cau.cities) ? cau.cities : [],
+                    states: Array.isArray(cau.states) ? cau.states : [],
+                    designations: Array.isArray(cau.designations) ? cau.designations : [],
+                    departments: Array.isArray(cau.departments) ? cau.departments : [],
+                });
             } else if (itemType === 'bucket' && Array.isArray(data)) {
                 // Find the specific bucket from the list
                 const bucket = data.find(b => b.id === item.id);
@@ -127,9 +145,23 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
             setAllowFastForward(item.allow_fast_forward !== false);
             setEnableFeedback(item.enable_feedback || false);
             setEnableCertificate(item.enable_certificate || false);
+            setCertificateTemplate(item.certificate_template || 'classic');
             setXpPoints(String(item.xp || 50));
             setIsPublished(item.is_published !== false);
             setScheduledAt(item.scheduled_at || '');
+            // Course-level user assignment
+            const cau = item.assigned_users || {};
+            setAssignmentData({
+                emails: Array.isArray(cau.emails) ? cau.emails : [],
+                roles: Array.isArray(cau.roles) ? cau.roles : [],
+                stores: Array.isArray(cau.stores) ? cau.stores : [],
+                categories: Array.isArray(cau.categories) ? cau.categories : [],
+                regions: Array.isArray(cau.regions) ? cau.regions : [],
+                cities: Array.isArray(cau.cities) ? cau.cities : [],
+                states: Array.isArray(cau.states) ? cau.states : [],
+                designations: Array.isArray(cau.designations) ? cau.designations : [],
+                departments: Array.isArray(cau.departments) ? cau.departments : [],
+            });
         } else {
             setIsLinear(item.is_linear || false);
             const au = item.assigned_users || {};
@@ -204,6 +236,8 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
                     allow_fast_forward: allowFastForward,
                     enable_feedback: enableFeedback,
                     enable_certificate: enableCertificate,
+                    certificate_template: certificateTemplate,
+                    assigned_users: assignmentData,
                     xp: parseInt(xpPoints) || 50,
                     is_published: isPublished,
                     scheduled_at: scheduledAt || null,
@@ -300,6 +334,76 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
 
     if (!item) return null;
 
+    const hasAssignment = assignmentData.emails.length > 0 || assignmentData.roles.length > 0 ||
+        assignmentData.stores.length > 0 || assignmentData.categories.length > 0 ||
+        (assignmentData.regions?.length > 0) || (assignmentData.cities?.length > 0) ||
+        (assignmentData.states?.length > 0) || (assignmentData.designations?.length > 0) ||
+        (assignmentData.departments?.length > 0);
+
+    const renderAssignmentSummary = (type) => {
+        if (hasAssignment) {
+            return (
+                <View style={styles.assignSummary}>
+                    {assignmentData.emails.length > 0 && (
+                        <View style={styles.assignSummaryRow}>
+                            <Feather name="mail" size={12} color="#3B82F6" />
+                            <Text style={styles.assignSummaryLabel}>{assignmentData.emails.length} user{assignmentData.emails.length !== 1 ? 's' : ''}</Text>
+                        </View>
+                    )}
+                    {assignmentData.roles.length > 0 && (
+                        <View style={styles.assignSummaryRow}>
+                            <Feather name="briefcase" size={12} color="#3B82F6" />
+                            <Text style={styles.assignSummaryLabel}>Roles: {assignmentData.roles.join(', ')}</Text>
+                        </View>
+                    )}
+                    {assignmentData.stores.length > 0 && (
+                        <View style={styles.assignSummaryRow}>
+                            <Feather name="map-pin" size={12} color="#8B5CF6" />
+                            <Text style={styles.assignSummaryLabel}>Stores: {assignmentData.stores.join(', ')}</Text>
+                        </View>
+                    )}
+                    {assignmentData.categories.length > 0 && (
+                        <View style={styles.assignSummaryRow}>
+                            <Feather name="tag" size={12} color="#10B981" />
+                            <Text style={styles.assignSummaryLabel}>Categories: {assignmentData.categories.join(', ')}</Text>
+                        </View>
+                    )}
+                    {assignmentData.regions?.length > 0 && (
+                        <View style={styles.assignSummaryRow}>
+                            <Feather name="globe" size={12} color="#F59E0B" />
+                            <Text style={styles.assignSummaryLabel}>Regions: {assignmentData.regions.join(', ')}</Text>
+                        </View>
+                    )}
+                    {assignmentData.cities?.length > 0 && (
+                        <View style={styles.assignSummaryRow}>
+                            <Feather name="map-pin" size={12} color="#EC4899" />
+                            <Text style={styles.assignSummaryLabel}>Cities: {assignmentData.cities.join(', ')}</Text>
+                        </View>
+                    )}
+                    {assignmentData.states?.length > 0 && (
+                        <View style={styles.assignSummaryRow}>
+                            <Feather name="map" size={12} color="#6366F1" />
+                            <Text style={styles.assignSummaryLabel}>States: {assignmentData.states.join(', ')}</Text>
+                        </View>
+                    )}
+                    {assignmentData.designations?.length > 0 && (
+                        <View style={styles.assignSummaryRow}>
+                            <Feather name="award" size={12} color="#0EA5E9" />
+                            <Text style={styles.assignSummaryLabel}>Designations: {assignmentData.designations.join(', ')}</Text>
+                        </View>
+                    )}
+                    {assignmentData.departments?.length > 0 && (
+                        <View style={styles.assignSummaryRow}>
+                            <Feather name="grid" size={12} color="#14B8A6" />
+                            <Text style={styles.assignSummaryLabel}>Departments: {assignmentData.departments.join(', ')}</Text>
+                        </View>
+                    )}
+                </View>
+            );
+        }
+        return <Text style={[styles.sectionDesc, { marginTop: 8, fontStyle: 'italic' }]}>All users can access this {type}</Text>;
+    };
+
     const sections = itemType === 'course'
         ? [
             { key: 'general', label: 'Settings', icon: 'settings' },
@@ -364,6 +468,101 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
                                     <SettingRow label="Enable Certificate" desc="Auto-generate certificate on completion" icon="award">
                                         <Switch value={enableCertificate} onValueChange={setEnableCertificate} trackColor={{ true: THEME.green }} />
                                     </SettingRow>
+
+                                    {/* Certificate Template & Preview (shown when certificate is enabled) */}
+                                    {enableCertificate && (
+                                        <View style={styles.certSection}>
+                                            <Text style={styles.certSectionTitle}>Certificate Template</Text>
+                                            <View style={styles.certTemplateRow}>
+                                                {[
+                                                    { key: 'classic', label: 'Classic', color: '#78350F', bg: '#FFFBEB', border: '#FDE68A', icon: 'certificate' },
+                                                    { key: 'modern', label: 'Modern', color: '#1E40AF', bg: '#EFF6FF', border: '#BFDBFE', icon: 'shield-check' },
+                                                    { key: 'elegant', label: 'Elegant', color: '#6B21A8', bg: '#F5F3FF', border: '#DDD6FE', icon: 'star-four-points' },
+                                                ].map(t => (
+                                                    <TouchableOpacity
+                                                        key={t.key}
+                                                        style={[
+                                                            styles.certTemplateCard,
+                                                            { backgroundColor: t.bg, borderColor: certificateTemplate === t.key ? t.color : t.border },
+                                                            certificateTemplate === t.key && { borderWidth: 2 }
+                                                        ]}
+                                                        onPress={() => setCertificateTemplate(t.key)}
+                                                    >
+                                                        <MaterialCommunityIcons name={t.icon} size={20} color={t.color} />
+                                                        <Text style={[styles.certTemplateLabel, { color: t.color }]}>{t.label}</Text>
+                                                        {certificateTemplate === t.key && (
+                                                            <View style={[styles.certCheckBadge, { backgroundColor: t.color }]}>
+                                                                <Feather name="check" size={10} color="#FFF" />
+                                                            </View>
+                                                        )}
+                                                    </TouchableOpacity>
+                                                ))}
+                                            </View>
+
+                                            {/* Certificate Preview Button */}
+                                            <TouchableOpacity
+                                                style={styles.certPreviewBtn}
+                                                onPress={() => setShowCertPreview(!showCertPreview)}
+                                            >
+                                                <Feather name={showCertPreview ? 'eye-off' : 'eye'} size={16} color="#78350F" />
+                                                <Text style={styles.certPreviewBtnText}>
+                                                    {showCertPreview ? 'Hide Preview' : 'Preview Certificate'}
+                                                </Text>
+                                            </TouchableOpacity>
+
+                                            {/* Certificate Preview */}
+                                            {showCertPreview && (
+                                                <View style={[
+                                                    styles.certPreviewContainer,
+                                                    certificateTemplate === 'classic' && { backgroundColor: '#FFFDF7', borderColor: '#D4A574' },
+                                                    certificateTemplate === 'modern' && { backgroundColor: '#F0F9FF', borderColor: '#3B82F6' },
+                                                    certificateTemplate === 'elegant' && { backgroundColor: '#FAF5FF', borderColor: '#8B5CF6' },
+                                                ]}>
+                                                    {/* Decorative top border */}
+                                                    <View style={[
+                                                        styles.certTopBorder,
+                                                        certificateTemplate === 'classic' && { backgroundColor: '#D4A574' },
+                                                        certificateTemplate === 'modern' && { backgroundColor: '#3B82F6' },
+                                                        certificateTemplate === 'elegant' && { backgroundColor: '#8B5CF6' },
+                                                    ]} />
+                                                    <Text style={[
+                                                        styles.certPreviewCompany,
+                                                        certificateTemplate === 'modern' && { color: '#1E40AF' },
+                                                        certificateTemplate === 'elegant' && { color: '#6B21A8', fontStyle: 'italic' },
+                                                    ]}>Belgian Waffle Co.</Text>
+                                                    <Text style={[
+                                                        styles.certPreviewHeading,
+                                                        certificateTemplate === 'modern' && { color: '#1E40AF', letterSpacing: 3 },
+                                                        certificateTemplate === 'elegant' && { color: '#6B21A8', letterSpacing: 2 },
+                                                    ]}>CERTIFICATE OF COMPLETION</Text>
+                                                    <Text style={styles.certPreviewSubtext}>This is to certify that</Text>
+                                                    <Text style={[
+                                                        styles.certPreviewName,
+                                                        certificateTemplate === 'modern' && { color: '#1E40AF' },
+                                                        certificateTemplate === 'elegant' && { color: '#6B21A8', fontStyle: 'italic' },
+                                                    ]}>John Doe</Text>
+                                                    <Text style={styles.certPreviewSubtext}>has successfully completed</Text>
+                                                    <Text style={[
+                                                        styles.certPreviewCourse,
+                                                        certificateTemplate === 'modern' && { color: '#1E40AF' },
+                                                        certificateTemplate === 'elegant' && { color: '#6B21A8' },
+                                                    ]}>{item?.title || 'Course Title'}</Text>
+                                                    <View style={styles.certPreviewFooter}>
+                                                        <Text style={styles.certPreviewDate}>Date: {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</Text>
+                                                        <Text style={styles.certPreviewId}>ID: CERT-XXXXXXXX</Text>
+                                                    </View>
+                                                    {/* Decorative bottom border */}
+                                                    <View style={[
+                                                        styles.certBottomBorder,
+                                                        certificateTemplate === 'classic' && { backgroundColor: '#D4A574' },
+                                                        certificateTemplate === 'modern' && { backgroundColor: '#3B82F6' },
+                                                        certificateTemplate === 'elegant' && { backgroundColor: '#8B5CF6' },
+                                                    ]} />
+                                                </View>
+                                            )}
+                                        </View>
+                                    )}
+
                                     <SettingRow label="Published" desc="Visible to assigned users" icon="eye">
                                         <Switch value={isPublished} onValueChange={setIsPublished} trackColor={{ true: THEME.green }} />
                                     </SettingRow>
@@ -381,6 +580,25 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
                                             maxLength={5}
                                         />
                                     </View>
+
+                                    {/* Assign Users for Course */}
+                                    <Text style={[styles.sectionTitle, { marginTop: 20, marginBottom: 4 }]}>Assign Users</Text>
+                                    <Text style={styles.sectionDesc}>Control who can access this course. Leave empty to allow everyone.</Text>
+
+                                    <TouchableOpacity style={styles.assignBtn} onPress={() => setPickerVisible(true)}>
+                                        <Feather name="users" size={18} color={THEME.primaryDark} />
+                                        <Text style={styles.assignBtnText}>Manage Assigned Users</Text>
+                                        <Feather name="chevron-right" size={16} color="#9CA3AF" />
+                                    </TouchableOpacity>
+
+                                    {renderAssignmentSummary('course')}
+
+                                    <UserAssignmentPicker
+                                        visible={pickerVisible}
+                                        onClose={() => setPickerVisible(false)}
+                                        currentAssignment={assignmentData}
+                                        onSave={(data) => setAssignmentData(data)}
+                                    />
                                 </>
                             ) : (
                                 <>
@@ -397,67 +615,7 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
                                         <Feather name="chevron-right" size={16} color="#9CA3AF" />
                                     </TouchableOpacity>
 
-                                    {/* Assignment Summary */}
-                                    {(assignmentData.emails.length > 0 || assignmentData.roles.length > 0 || assignmentData.stores.length > 0 || assignmentData.categories.length > 0) ? (
-                                        <View style={styles.assignSummary}>
-                                            {assignmentData.emails.length > 0 && (
-                                                <View style={styles.assignSummaryRow}>
-                                                    <Feather name="mail" size={12} color="#3B82F6" />
-                                                    <Text style={styles.assignSummaryLabel}>{assignmentData.emails.length} user{assignmentData.emails.length !== 1 ? 's' : ''}</Text>
-                                                </View>
-                                            )}
-                                            {assignmentData.roles.length > 0 && (
-                                                <View style={styles.assignSummaryRow}>
-                                                    <Feather name="briefcase" size={12} color="#3B82F6" />
-                                                    <Text style={styles.assignSummaryLabel}>Roles: {assignmentData.roles.join(', ')}</Text>
-                                                </View>
-                                            )}
-                                            {assignmentData.stores.length > 0 && (
-                                                <View style={styles.assignSummaryRow}>
-                                                    <Feather name="map-pin" size={12} color="#8B5CF6" />
-                                                    <Text style={styles.assignSummaryLabel}>Stores: {assignmentData.stores.join(', ')}</Text>
-                                                </View>
-                                            )}
-                                            {assignmentData.categories.length > 0 && (
-                                                <View style={styles.assignSummaryRow}>
-                                                    <Feather name="tag" size={12} color="#10B981" />
-                                                    <Text style={styles.assignSummaryLabel}>Categories: {assignmentData.categories.join(', ')}</Text>
-                                                </View>
-                                            )}
-                                            {assignmentData.regions?.length > 0 && (
-                                                <View style={styles.assignSummaryRow}>
-                                                    <Feather name="globe" size={12} color="#F59E0B" />
-                                                    <Text style={styles.assignSummaryLabel}>Regions: {assignmentData.regions.join(', ')}</Text>
-                                                </View>
-                                            )}
-                                            {assignmentData.cities?.length > 0 && (
-                                                <View style={styles.assignSummaryRow}>
-                                                    <Feather name="map-pin" size={12} color="#EC4899" />
-                                                    <Text style={styles.assignSummaryLabel}>Cities: {assignmentData.cities.join(', ')}</Text>
-                                                </View>
-                                            )}
-                                            {assignmentData.states?.length > 0 && (
-                                                <View style={styles.assignSummaryRow}>
-                                                    <Feather name="map" size={12} color="#6366F1" />
-                                                    <Text style={styles.assignSummaryLabel}>States: {assignmentData.states.join(', ')}</Text>
-                                                </View>
-                                            )}
-                                            {assignmentData.designations?.length > 0 && (
-                                                <View style={styles.assignSummaryRow}>
-                                                    <Feather name="award" size={12} color="#0EA5E9" />
-                                                    <Text style={styles.assignSummaryLabel}>Designations: {assignmentData.designations.join(', ')}</Text>
-                                                </View>
-                                            )}
-                                            {assignmentData.departments?.length > 0 && (
-                                                <View style={styles.assignSummaryRow}>
-                                                    <Feather name="grid" size={12} color="#14B8A6" />
-                                                    <Text style={styles.assignSummaryLabel}>Departments: {assignmentData.departments.join(', ')}</Text>
-                                                </View>
-                                            )}
-                                        </View>
-                                    ) : (
-                                        <Text style={[styles.sectionDesc, { marginTop: 8, fontStyle: 'italic' }]}>All users can access this bucket</Text>
-                                    )}
+                                    {renderAssignmentSummary('bucket')}
 
                                     <UserAssignmentPicker
                                         visible={pickerVisible}
@@ -798,6 +956,44 @@ const styles = StyleSheet.create({
     },
     loadBtnText: { fontSize: 14, fontWeight: '600', color: THEME.primaryDark },
     emptyText: { textAlign: 'center', color: THEME.textSub, marginTop: 20, fontSize: 13 },
+
+    // Certificate Section
+    certSection: {
+        backgroundColor: '#FFFBEB', borderRadius: 14, padding: 16, marginTop: 12, marginBottom: 4,
+        borderWidth: 1, borderColor: '#FDE68A',
+    },
+    certSectionTitle: { fontSize: 14, fontWeight: '700', color: '#78350F', marginBottom: 10 },
+    certTemplateRow: { flexDirection: 'row', gap: 8 },
+    certTemplateCard: {
+        flex: 1, alignItems: 'center', paddingVertical: 12, paddingHorizontal: 8,
+        borderRadius: 12, borderWidth: 1, gap: 4,
+    },
+    certTemplateLabel: { fontSize: 11, fontWeight: '700' },
+    certCheckBadge: {
+        position: 'absolute', top: -4, right: -4,
+        width: 18, height: 18, borderRadius: 9,
+        justifyContent: 'center', alignItems: 'center',
+    },
+    certPreviewBtn: {
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+        marginTop: 12, paddingVertical: 10, borderRadius: 10,
+        backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#FDE68A',
+    },
+    certPreviewBtnText: { fontSize: 12, fontWeight: '600', color: '#78350F' },
+    certPreviewContainer: {
+        marginTop: 12, borderRadius: 12, borderWidth: 2, padding: 20,
+        alignItems: 'center', overflow: 'hidden',
+    },
+    certTopBorder: { position: 'absolute', top: 0, left: 0, right: 0, height: 4 },
+    certBottomBorder: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 4 },
+    certPreviewCompany: { fontSize: 10, fontWeight: '600', color: '#78350F', letterSpacing: 2, marginBottom: 4 },
+    certPreviewHeading: { fontSize: 14, fontWeight: '800', color: '#78350F', letterSpacing: 1, marginBottom: 10 },
+    certPreviewSubtext: { fontSize: 9, color: '#6B7280', marginBottom: 2 },
+    certPreviewName: { fontSize: 18, fontWeight: '800', color: '#78350F', marginVertical: 4 },
+    certPreviewCourse: { fontSize: 12, fontWeight: '700', color: '#78350F', marginTop: 2, marginBottom: 10, textAlign: 'center' },
+    certPreviewFooter: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginTop: 8 },
+    certPreviewDate: { fontSize: 8, color: '#9CA3AF' },
+    certPreviewId: { fontSize: 8, color: '#9CA3AF' },
 
     // User Assignment
     assignBtn: {
