@@ -640,7 +640,9 @@ export default function UpcomingExamsCard({ userEmail, onStartExam, refreshKey }
                                     {exam.is_batch_exam && exam.batch_number && (
                                         <Text style={{ fontWeight: '700', color: '#FFD700' }}> (Batch {exam.batch_number})</Text>
                                     )}
-                                    {!exam.is_batch_exam && exam.shift && ` (${exam.shift})`}
+                                    {!exam.is_batch_exam && exam.shift && (
+                                        <Text> ({exam.shift})</Text>
+                                    )}
                                 </Text>
                             </View>
                             {exam.is_batch_exam && exam.batch_end_time && (

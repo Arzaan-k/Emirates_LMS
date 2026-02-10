@@ -27,13 +27,16 @@ import API_URL from '../config';
 
 const { width, height } = Dimensions.get('window');
 
-// Level colors and icons
+// Level colors and icons - must include all possible roles
 const LEVEL_COLORS = {
     'Waffler': '#9CA3AF',
     'Silver Waffler': '#60A5FA',
     'Gold Waffler': '#F59E0B',
     'Shift Manager': '#8B5CF6',
-    'Assistant Store Manager': '#EF4444'
+    'Assistant Store Manager': '#EF4444',
+    'Store Manager': '#C084FC',
+    // Default fallback
+    'default': '#6B7280'
 };
 
 const LEVEL_ICONS = {
@@ -41,8 +44,15 @@ const LEVEL_ICONS = {
     'Silver Waffler': 'medal-outline',
     'Gold Waffler': 'medal',
     'Shift Manager': 'account-tie',
-    'Assistant Store Manager': 'store'
+    'Assistant Store Manager': 'store',
+    'Store Manager': 'crown',
+    // Default fallback
+    'default': 'star'
 };
+
+// Helper function to safely get level color (prevents undefined color errors)
+const getLevelColor = (role) => LEVEL_COLORS[role] || LEVEL_COLORS['default'];
+const getLevelIcon = (role) => LEVEL_ICONS[role] || LEVEL_ICONS['default'];
 
 // Eligibility Check Component
 const EligibilityModal = ({ visible, eligibility, onGenerateExam, onClose, loading }) => {
@@ -76,13 +86,13 @@ const EligibilityModal = ({ visible, eligibility, onGenerateExam, onClose, loadi
                                 </Text>
 
                                 {/* Target Role */}
-                                <View style={[eligibilityStyles.roleBadge, { backgroundColor: LEVEL_COLORS[eligibility.target_role] + '30' }]}>
+                                <View style={[eligibilityStyles.roleBadge, { backgroundColor: getLevelColor(eligibility.target_role) + '30' }]}>
                                     <MaterialCommunityIcons
-                                        name={LEVEL_ICONS[eligibility.target_role] || 'star'}
+                                        name={getLevelIcon(eligibility.target_role)}
                                         size={28}
-                                        color={LEVEL_COLORS[eligibility.target_role]}
+                                        color={getLevelColor(eligibility.target_role)}
                                     />
-                                    <Text style={[eligibilityStyles.roleName, { color: LEVEL_COLORS[eligibility.target_role] }]}>
+                                    <Text style={[eligibilityStyles.roleName, { color: getLevelColor(eligibility.target_role) }]}>
                                         {eligibility.target_role}
                                     </Text>
                                 </View>
@@ -609,17 +619,17 @@ export default function RoleAdvancementExam({ userEmail, onComplete, visible, on
                                 entering={FadeInUp.delay(500).springify()}
                                 style={[
                                     styles.newRoleBadge,
-                                    { backgroundColor: LEVEL_COLORS[result.new_role] + '40' }
+                                    { backgroundColor: getLevelColor(result.new_role) + '40' }
                                 ]}
                             >
                                 <MaterialCommunityIcons
-                                    name={LEVEL_ICONS[result.new_role] || 'star'}
+                                    name={getLevelIcon(result.new_role)}
                                     size={32}
-                                    color={LEVEL_COLORS[result.new_role]}
+                                    color={getLevelColor(result.new_role)}
                                 />
                                 <View>
                                     <Text style={styles.newRoleLabel}>Your New Role</Text>
-                                    <Text style={[styles.newRoleText, { color: LEVEL_COLORS[result.new_role] }]}>
+                                    <Text style={[styles.newRoleText, { color: getLevelColor(result.new_role) }]}>
                                         {result.new_role}
                                     </Text>
                                 </View>

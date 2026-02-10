@@ -46,6 +46,8 @@ class Content(Base):
     allow_fast_forward = Column(Boolean, default=True)  # Allow playback speed control
     enable_feedback = Column(Boolean, default=False)  # Show feedback form after completion
     enable_certificate = Column(Boolean, default=False)  # Auto-generate certificate on completion
+    certificate_template = Column(String(100), default='classic')  # Certificate template: classic, modern, elegant
+    assigned_users = Column(JSON, default=dict)  # Per-course user assignment: {emails:[], roles:[], stores:[], ...}
     scheduled_at = Column(DateTime, nullable=True)  # Scheduled launch date (null = instant/published)
     is_published = Column(Boolean, default=True)  # Whether course is visible to users
 
@@ -99,6 +101,8 @@ class Content(Base):
             "allow_fast_forward": self.allow_fast_forward if self.allow_fast_forward is not None else True,
             "enable_feedback": self.enable_feedback or False,
             "enable_certificate": self.enable_certificate or False,
+            "certificate_template": self.certificate_template or 'classic',
+            "assigned_users": self.assigned_users or {},
             "scheduled_at": self.scheduled_at.isoformat() if self.scheduled_at else None,
             "is_published": self.is_published if self.is_published is not None else True,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
