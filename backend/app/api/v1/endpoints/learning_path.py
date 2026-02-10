@@ -100,6 +100,86 @@ async def get_node_progress(
 
 
 # ===========================================
+# RECENTLY VIEWED / JUMP BACK IN
+# ===========================================
+
+@router.get("/recently-viewed/{user_email}")
+async def get_recently_viewed(
+    user_email: str,
+    limit: int = Query(default=10, ge=1, le=50),
+    db: Session = Depends(get_db)
+):
+    """
+    Get recently viewed courses for a user, sorted by last watched time.
+    Powers the 'Jump Back In' section on the home screen.
+    Returns courses the user has started but not necessarily completed,
+    along with their watch progress and resume position.
+    """
+    from app.models.video_progress import VideoProgress
+    from app.models.content import Content
+    from sqlalchemy import desc
+
+    try:
+        # Query video_progress for this user, ordered by most recently updated
+        recent_progress = (
+            db.query(VideoProgress)
+            .filter(
+                VideoProgress.user_email == user_email,
+                VideoProgress.video_watched_percent > 0  # Only show started items
+            )
+            .order_by(desc(VideoProgress.updated_at))
+            .limit(limit)
+            .all()
+        )
+
+        if not recent_progress:
+            return {"status": "success", "items": []}
+
+        # Get the node IDs
+        node_ids = [p.node_id for p in recent_progress]
+
+        # Fetch content metadata for those nodes
+        contents = db.query(Content).filter(Content.id.in_(node_ids)).all()
+        content_map = {c.id: c for c in contents}
+
+        # Build result preserving order from progress (most recent first)
+        items = []
+        for progress in recent_progress:
+            content = content_map.get(progress.node_id)
+            if not content:
+                continue
+
+            items.append({
+                "id": content.id,
+                "title": content.title,
+                "description": content.description,
+                "videoUrl": content.video_url,
+                "file_url": content.file_url,
+                "resource_type": content.resource_type,
+                "bucket": content.bucket,
+                "bucket_id": content.bucket_id,
+                "thumbnail": content.thumbnail,
+                # Progress info for the progress bar and resume
+                "progress_percent": round(progress.video_watched_percent or 0, 1),
+                "resume_position": progress.video_position_seconds or 0,
+                "duration_seconds": progress.video_duration_seconds or 0,
+                "completed": progress.completed or False,
+                "last_watched": progress.updated_at.isoformat() if progress.updated_at else None,
+                # Keep these for compatibility with existing CourseList rendering
+                "xp": content.xp or 50,
+                "is_path_node": content.is_path_node,
+                "learning_path_type": content.learning_path_type,
+            })
+
+        logger.info(f"Recently viewed for {user_email}: {len(items)} items")
+        return {"status": "success", "items": items}
+
+    except Exception as e:
+        logger.error(f"Recently viewed fetch failed for {user_email}: {e}")
+        return {"status": "success", "items": []}
+
+
+# ===========================================
 # MID-VIDEO QUIZ GENERATION
 # ===========================================
 

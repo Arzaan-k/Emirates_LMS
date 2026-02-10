@@ -23,6 +23,7 @@ from app.api.v1.endpoints import (
     roleplay,
     reports,
     self_learning,
+    learning_path,
 )
 
 # Create the main API router
@@ -45,6 +46,7 @@ api_router.include_router(tracking.router)
 api_router.include_router(roleplay.router)
 api_router.include_router(reports.router)
 api_router.include_router(self_learning.router)
+api_router.include_router(learning_path.router)
 
 
 # Health check endpoint at root level
@@ -625,76 +627,64 @@ api_router.include_router(support_router)
 learning_path_router = APIRouter()
 
 
-@learning_path_router.get("/learning-path/node-progress/user/{content_id}")
+@learning_path_router.get("/learning-path/node-progress/{user_email}/{content_id}")
 async def get_node_progress_alias(
+    user_email: str,
     content_id: str,
-    user_email: str = "user",
     db: Session = Depends(__import__("app.config.database", fromlist=["get_db"]).get_db),
 ):
     """
     BACKWARD COMPATIBILITY: Get progress for a specific content node.
-    Frontend calls /learning-path/node-progress/user/{content_id} directly.
+    Frontend calls /learning-path/node-progress/{user_email}/{content_id} directly.
+    Routes to the VideoProgressService.
     """
-    from app.services.user_service import UserService
+    from app.services.video_progress_service import VideoProgressService
     import logging
 
     logger = logging.getLogger(__name__)
 
     try:
-        service = UserService(db)
-        progress = service.get_user_node_progress(user_email, content_id)
-
-        if progress:
-            return {
-                "node_id": progress.node_id,
-                "progress_percent": progress.progress_percent or 0,
-                "completed": progress.completed or False,
-                "last_position": progress.last_position or 0,
-                "time_spent_seconds": progress.time_spent_seconds or 0,
-            }
-        else:
-            return {
-                "node_id": content_id,
-                "progress_percent": 0,
-                "completed": False,
-                "last_position": 0,
-                "time_spent_seconds": 0,
-            }
+        service = VideoProgressService(db)
+        result = service.get_node_progress(
+            user_email=user_email,
+            node_id=content_id,
+            include_requirements=True
+        )
+        return result
     except Exception as e:
         logger.error(f"Node progress fetch failed: {e}")
         return {
-            "node_id": content_id,
-            "progress_percent": 0,
-            "completed": False,
-            "last_position": 0,
-            "time_spent_seconds": 0,
+            "progress": {
+                "video_watched_percent": 0,
+                "completed": False
+            },
+            "error": str(e)
         }
 
 
 @learning_path_router.get("/learning-path/mid-video-quizzes/{content_id}")
 async def get_mid_video_quizzes_alias(
     content_id: str,
-    user_email: str = "user",
+    user_email: str = None,
     db: Session = Depends(__import__("app.config.database", fromlist=["get_db"]).get_db),
 ):
     """
     BACKWARD COMPATIBILITY: Get mid-video quiz checkpoints for a content item.
     Frontend calls /learning-path/mid-video-quizzes/{content_id} directly.
+    Routes to the VideoProgressService.
     """
-    from app.services.content_service import ContentService
+    from app.services.video_progress_service import VideoProgressService
     import logging
 
     logger = logging.getLogger(__name__)
 
     try:
-        service = ContentService(db)
-        content = service.get_content_by_id(content_id)
-
-        if content and content.quiz:
-            # Return quiz checkpoints if they exist
-            return {"quizzes": content.quiz if isinstance(content.quiz, list) else []}
-        else:
-            return {"quizzes": []}
+        service = VideoProgressService(db)
+        quizzes = service.get_mid_video_quizzes(
+            node_id=content_id,
+            user_email=user_email
+        )
+        return {"quizzes": quizzes}
     except Exception as e:
         logger.error(f"Mid-video quizzes fetch failed: {e}")
         return {"quizzes": []}
@@ -704,36 +694,158 @@ async def get_mid_video_quizzes_alias(
 async def track_video_progress_alias(
     user_email: str = Form(...),
     node_id: str = Form(...),
-    progress_percent: float = Form(0),
-    last_position: float = Form(0),
-    time_spent_seconds: int = Form(0),
-    completed: bool = Form(False),
+    video_position_seconds: float = Form(0),
+    video_duration_seconds: float = Form(0),
+    explicit_progress_percent: float = Form(None),
     db: Session = Depends(__import__("app.config.database", fromlist=["get_db"]).get_db),
 ):
     """
     BACKWARD COMPATIBILITY: Track video watching progress.
     Frontend calls POST /learning-path/track-video-progress directly.
+    Routes to the actual VideoProgressService.
     """
-    from app.services.user_service import UserService
+    from app.services.video_progress_service import VideoProgressService
     import logging
 
     logger = logging.getLogger(__name__)
 
     try:
-        service = UserService(db)
-
-        progress_data = {
-            "progress_percent": progress_percent,
-            "last_position": last_position,
-            "time_spent_seconds": time_spent_seconds,
-            "completed": completed,
-        }
-
-        service.update_node_progress(user_email, node_id, progress_data)
-        return {"status": "success", "message": "Progress tracked"}
+        service = VideoProgressService(db)
+        result = service.track_video_progress(
+            user_email=user_email,
+            node_id=node_id,
+            video_position_seconds=video_position_seconds,
+            video_duration_seconds=video_duration_seconds,
+            explicit_progress_percent=explicit_progress_percent
+        )
+        return result
     except Exception as e:
         logger.error(f"Video progress tracking failed: {e}")
         return {"status": "error", "message": str(e)}
+
+
+@learning_path_router.post("/learning-path/generate-mid-video-quiz")
+async def generate_mid_video_quiz_alias(
+    node_id: str = Form(...),
+    transcript_segment: str = Form(...),
+    trigger_time_seconds: float = Form(...),
+    num_questions: int = Form(2),
+    user_email: str = Form(None),
+    video_duration_seconds: float = Form(None),
+    db: Session = Depends(__import__("app.config.database", fromlist=["get_db"]).get_db),
+):
+    """
+    BACKWARD COMPATIBILITY: Generate mid-video quiz at checkpoint.
+    Frontend calls POST /learning-path/generate-mid-video-quiz directly.
+    """
+    from app.api.v1.endpoints.learning_path import generate_mid_video_quiz
+    return await generate_mid_video_quiz(
+        node_id=node_id,
+        transcript_segment=transcript_segment,
+        trigger_time_seconds=trigger_time_seconds,
+        num_questions=num_questions,
+        user_email=user_email,
+        video_duration_seconds=video_duration_seconds,
+        db=db
+    )
+
+
+@learning_path_router.post("/learning-path/submit-mid-video-quiz")
+async def submit_mid_video_quiz_alias(
+    user_email: str = Form(...),
+    node_id: str = Form(...),
+    quiz_id: str = Form(...),
+    trigger_time_seconds: float = Form(...),
+    answers: str = Form(...),
+    db: Session = Depends(__import__("app.config.database", fromlist=["get_db"]).get_db),
+):
+    """
+    BACKWARD COMPATIBILITY: Submit mid-video quiz attempt.
+    Frontend calls POST /learning-path/submit-mid-video-quiz directly.
+    """
+    from app.api.v1.endpoints.learning_path import submit_mid_video_quiz
+    return await submit_mid_video_quiz(
+        user_email=user_email,
+        node_id=node_id,
+        quiz_id=quiz_id,
+        trigger_time_seconds=trigger_time_seconds,
+        answers=answers,
+        db=db
+    )
+
+
+@learning_path_router.post("/learning-path/submit-end-quiz")
+async def submit_end_quiz_alias(
+    user_email: str = Form(...),
+    node_id: str = Form(...),
+    score: int = Form(...),
+    total: int = Form(...),
+    db: Session = Depends(__import__("app.config.database", fromlist=["get_db"]).get_db),
+):
+    """
+    BACKWARD COMPATIBILITY: Submit end-of-lesson quiz.
+    Frontend calls POST /learning-path/submit-end-quiz directly.
+    """
+    from app.api.v1.endpoints.learning_path import submit_end_quiz
+    return await submit_end_quiz(
+        user_email=user_email,
+        node_id=node_id,
+        score=score,
+        total=total,
+        db=db
+    )
+
+
+@learning_path_router.post("/learning-path/complete-video-only")
+async def complete_video_only_alias(
+    user_email: str = Form(...),
+    node_id: str = Form(...),
+    db: Session = Depends(__import__("app.config.database", fromlist=["get_db"]).get_db),
+):
+    """
+    BACKWARD COMPATIBILITY: Complete a node based on video progress alone.
+    Frontend calls POST /learning-path/complete-video-only directly.
+    """
+    from app.api.v1.endpoints.learning_path import complete_node_video_only
+    return await complete_node_video_only(
+        user_email=user_email,
+        node_id=node_id,
+        db=db
+    )
+
+
+@learning_path_router.post("/recommendations/track-completion")
+async def track_completion_alias(
+    user_email: str = Form(...),
+    course_id: str = Form(...),
+    course_title: str = Form(""),
+    bucket: str = Form(None),
+    xp_earned: int = Form(50),
+    score: int = Form(0),
+    max_score: int = Form(100),
+    time_spent_seconds: int = Form(0),
+    quiz_correct: int = Form(0),
+    quiz_total: int = Form(0),
+    db: Session = Depends(__import__("app.config.database", fromlist=["get_db"]).get_db),
+):
+    """
+    BACKWARD COMPATIBILITY: Track course/module completion.
+    Frontend calls POST /recommendations/track-completion directly.
+    """
+    from app.api.v1.endpoints.learning_path import track_course_completion
+    return await track_course_completion(
+        user_email=user_email,
+        course_id=course_id,
+        course_title=course_title,
+        bucket=bucket,
+        xp_earned=xp_earned,
+        score=score,
+        max_score=max_score,
+        time_spent_seconds=time_spent_seconds,
+        quiz_correct=quiz_correct,
+        quiz_total=quiz_total,
+        db=db
+    )
 
 
 # Include the learning path router in the main API router
