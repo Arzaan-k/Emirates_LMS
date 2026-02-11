@@ -55,7 +55,7 @@ const getLevelColor = (role) => LEVEL_COLORS[role] || LEVEL_COLORS['default'];
 const getLevelIcon = (role) => LEVEL_ICONS[role] || LEVEL_ICONS['default'];
 
 // Eligibility Check Component
-const EligibilityModal = ({ visible, eligibility, onGenerateExam, onClose, loading }) => {
+const EligibilityModal = ({ visible, eligibility, onGenerateExam, onClose, loading, isReappear = false }) => {
     if (!visible) return null;
 
     const isEligible = eligibility?.eligible;
@@ -78,24 +78,41 @@ const EligibilityModal = ({ visible, eligibility, onGenerateExam, onClose, loadi
                             <>
                                 {/* Ready Banner */}
                                 <View style={eligibilityStyles.readyBanner}>
-                                    <MaterialCommunityIcons name="trophy-award" size={48} color="#F59E0B" />
+                                    <MaterialCommunityIcons
+                                        name={isReappear ? "refresh-circle" : "trophy-award"}
+                                        size={48}
+                                        color={isReappear ? "#60A5FA" : "#F59E0B"}
+                                    />
                                 </View>
-                                <Text style={eligibilityStyles.title}>Ready for Advancement! 🎉</Text>
+                                {isReappear && (
+                                    <View style={eligibilityStyles.practiceBanner}>
+                                        <MaterialCommunityIcons name="book-open-variant" size={16} color="#60A5FA" />
+                                        <Text style={eligibilityStyles.practiceBannerText}>Practice Mode — Won't affect your profile</Text>
+                                    </View>
+                                )}
+                                <Text style={eligibilityStyles.title}>
+                                    {isReappear ? 'Retake for Revision 📖' : 'Ready for Advancement! 🎉'}
+                                </Text>
                                 <Text style={eligibilityStyles.subtitle}>
-                                    You've completed all courses. Take the exam to advance to
+                                    {isReappear
+                                        ? "You've already passed this level. Retake the exam for practice and revision."
+                                        : "You've completed all courses. Take the exam to advance to"
+                                    }
                                 </Text>
 
-                                {/* Target Role */}
-                                <View style={[eligibilityStyles.roleBadge, { backgroundColor: getLevelColor(eligibility.target_role) + '30' }]}>
-                                    <MaterialCommunityIcons
-                                        name={getLevelIcon(eligibility.target_role)}
-                                        size={28}
-                                        color={getLevelColor(eligibility.target_role)}
-                                    />
-                                    <Text style={[eligibilityStyles.roleName, { color: getLevelColor(eligibility.target_role) }]}>
-                                        {eligibility.target_role}
-                                    </Text>
-                                </View>
+                                {/* Target Role — only shown in advancement mode */}
+                                {!isReappear && (
+                                    <View style={[eligibilityStyles.roleBadge, { backgroundColor: getLevelColor(eligibility.target_role) + '30' }]}>
+                                        <MaterialCommunityIcons
+                                            name={getLevelIcon(eligibility.target_role)}
+                                            size={28}
+                                            color={getLevelColor(eligibility.target_role)}
+                                        />
+                                        <Text style={[eligibilityStyles.roleName, { color: getLevelColor(eligibility.target_role) }]}>
+                                            {eligibility.target_role}
+                                        </Text>
+                                    </View>
+                                )}
 
                                 {/* Exam Details */}
                                 <View style={eligibilityStyles.detailsCard}>
@@ -147,7 +164,9 @@ const EligibilityModal = ({ visible, eligibility, onGenerateExam, onClose, loadi
                                         <ActivityIndicator color="#111827" />
                                     ) : (
                                         <>
-                                            <Text style={eligibilityStyles.startBtnText}>Start Exam</Text>
+                                            <Text style={eligibilityStyles.startBtnText}>
+                                                {isReappear ? 'Start Practice' : 'Start Exam'}
+                                            </Text>
                                             <Feather name="arrow-right" size={20} color="#111827" />
                                         </>
                                     )}
@@ -195,7 +214,7 @@ const EligibilityModal = ({ visible, eligibility, onGenerateExam, onClose, loadi
 };
 
 // Main Role Advancement Exam Component
-export default function RoleAdvancementExam({ userEmail, onComplete, visible, onClose }) {
+export default function RoleAdvancementExam({ userEmail, onComplete, visible, onClose, overrideCurrentRole, isReappear = false }) {
     const [status, setStatus] = useState('checking'); // checking, eligible, not_eligible, exam, result
     const [eligibility, setEligibility] = useState(null);
     const [exam, setExam] = useState(null);
@@ -241,10 +260,19 @@ export default function RoleAdvancementExam({ userEmail, onComplete, visible, on
     const checkEligibility = async () => {
         setStatus('checking');
         try {
-            const response = await fetch(`${API_URL}/api/v1/levels/role-advancement/eligibility/${userEmail}`);
+            const roleParam = overrideCurrentRole
+                ? `?current_role=${encodeURIComponent(overrideCurrentRole)}`
+                : '';
+            const response = await fetch(`${API_URL}/api/v1/levels/role-advancement/eligibility/${userEmail}${roleParam}`);
             const data = await response.json();
-            setEligibility(data);
-            setStatus(data.eligible ? 'eligible' : 'not_eligible');
+            // In reappear mode, user is always allowed to practice regardless of eligibility
+            if (isReappear) {
+                setEligibility({ ...data, eligible: true });
+                setStatus('eligible');
+            } else {
+                setEligibility(data);
+                setStatus(data.eligible ? 'eligible' : 'not_eligible');
+            }
         } catch (err) {
             console.error("Error checking eligibility:", err);
             Alert.alert("Error", "Failed to check eligibility");
@@ -270,6 +298,9 @@ export default function RoleAdvancementExam({ userEmail, onComplete, visible, on
 
             const formData = new FormData();
             formData.append("user_email", userEmail);
+            if (overrideCurrentRole) {
+                formData.append("current_role", overrideCurrentRole);
+            }
 
             const response = await fetch(`${API_URL}/api/v1/levels/role-advancement/generate-exam`, {
                 method: "POST",
@@ -279,7 +310,10 @@ export default function RoleAdvancementExam({ userEmail, onComplete, visible, on
 
             if (data.status === "success" || data.status === "exists") {
                 // Fetch the exam
-                const examResponse = await fetch(`${API_URL}/api/v1/levels/role-advancement/exam/${userEmail}`);
+                const roleParam = overrideCurrentRole
+                    ? `?current_role=${encodeURIComponent(overrideCurrentRole)}`
+                    : '';
+                const examResponse = await fetch(`${API_URL}/api/v1/levels/role-advancement/exam/${userEmail}${roleParam}`);
                 const examData = await examResponse.json();
 
                 if (examData.status === "success") {
@@ -361,6 +395,12 @@ export default function RoleAdvancementExam({ userEmail, onComplete, visible, on
             formData.append("breach_log", JSON.stringify(breachLog));
             formData.append("critical_breaches", criticalBreaches.toString());
             formData.append("warning_breaches", warningBreaches.toString());
+            if (isReappear) {
+                formData.append("is_practice", "true");
+            }
+            if (overrideCurrentRole) {
+                formData.append("current_role", overrideCurrentRole);
+            }
 
             const response = await fetch(`${API_URL}/api/v1/levels/role-advancement/submit-exam`, {
                 method: "POST",
@@ -371,6 +411,10 @@ export default function RoleAdvancementExam({ userEmail, onComplete, visible, on
             if (data.status === "success") {
                 setResult(data.result);
                 setStatus('result');
+                // Only trigger role advancement callback in normal (non-practice) mode
+                if (!isReappear && data.result?.passed) {
+                    onComplete?.(data.result);
+                }
             } else {
                 Alert.alert("Error", data.message || "Failed to submit exam");
             }
@@ -388,7 +432,8 @@ export default function RoleAdvancementExam({ userEmail, onComplete, visible, on
     };
 
     const handleClose = () => {
-        if (result?.passed && onComplete) {
+        // Only trigger role advancement in normal mode, not practice
+        if (!isReappear && result?.passed && onComplete) {
             onComplete(result);
         }
         onClose();
@@ -417,6 +462,7 @@ export default function RoleAdvancementExam({ userEmail, onComplete, visible, on
                 onGenerateExam={generateExam}
                 onClose={onClose}
                 loading={loading}
+                isReappear={isReappear}
             />
         );
     }
@@ -577,12 +623,26 @@ export default function RoleAdvancementExam({ userEmail, onComplete, visible, on
                             />
                         </View>
 
+                        {/* Practice Mode Badge */}
+                        {isReappear && (
+                            <View style={styles.practiceBadge}>
+                                <MaterialCommunityIcons name="book-open-variant" size={14} color="#60A5FA" />
+                                <Text style={styles.practiceBadgeText}>Practice Mode</Text>
+                            </View>
+                        )}
+
                         {/* Title */}
                         <Text style={styles.resultTitle}>
-                            {passed ? "Congratulations! 🎉" : "Keep Trying!"}
+                            {isReappear
+                                ? (passed ? "Great Practice! 📖" : "Keep Revising!")
+                                : (passed ? "Congratulations! 🎉" : "Keep Trying!")
+                            }
                         </Text>
                         <Text style={styles.resultSubtitle}>
-                            {result?.message}
+                            {isReappear
+                                ? (passed ? "You passed the practice exam. Your profile hasn't changed." : "Review the material and try again.")
+                                : result?.message
+                            }
                         </Text>
 
                         {/* Score Card */}
@@ -613,8 +673,8 @@ export default function RoleAdvancementExam({ userEmail, onComplete, visible, on
                             </View>
                         </View>
 
-                        {/* New Role Badge */}
-                        {passed && result?.new_role && (
+                        {/* New Role Badge — only in advancement mode */}
+                        {!isReappear && passed && result?.new_role && (
                             <Animated.View
                                 entering={FadeInUp.delay(500).springify()}
                                 style={[
@@ -679,6 +739,22 @@ const eligibilityStyles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: 16,
         marginTop: 20,
+    },
+    practiceBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(96, 165, 250, 0.12)',
+        borderRadius: 20,
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+        marginBottom: 8,
+        gap: 6,
+        alignSelf: 'center',
+    },
+    practiceBannerText: {
+        fontSize: 12,
+        fontFamily: 'Poppins_500Medium',
+        color: '#60A5FA',
     },
     notReadyBanner: {
         alignItems: 'center',
@@ -1069,6 +1145,21 @@ const styles = StyleSheet.create({
     },
     resultIconFail: {
         backgroundColor: 'rgba(239, 68, 68, 0.3)',
+    },
+    practiceBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(96, 165, 250, 0.15)',
+        borderRadius: 20,
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+        marginBottom: 12,
+        gap: 6,
+    },
+    practiceBadgeText: {
+        fontSize: 12,
+        fontFamily: 'Poppins_500Medium',
+        color: '#60A5FA',
     },
     resultTitle: {
         fontSize: 28,

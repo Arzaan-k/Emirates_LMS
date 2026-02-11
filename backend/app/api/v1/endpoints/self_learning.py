@@ -103,7 +103,8 @@ async def get_self_learning_buckets(
                 total_progress += 100
             else:
                 total_progress += p.get("watched_percent", 0)
-        avg_progress = round(total_progress / total, 1) if total > 0 else 0
+        # Empty folders (0 courses) are considered 100% complete
+        avg_progress = round(total_progress / total, 1) if total > 0 else 100
 
         # Last attended date
         last_attended = None
@@ -201,8 +202,9 @@ async def get_self_learning_hierarchy(
                 total_progress += 100
             else:
                 total_progress += p.get("watched_percent", 0)
-        avg_progress = round(total_progress / total, 1) if total > 0 else 0
-        
+        # Empty folders (0 courses) are considered 100% complete
+        avg_progress = round(total_progress / total, 1) if total > 0 else 100
+
         return {
             "total_courses": total,
             "completed_courses": completed,

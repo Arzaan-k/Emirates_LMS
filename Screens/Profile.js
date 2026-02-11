@@ -864,7 +864,7 @@ export default function Profile({ navigation, route }) {
                 {/* ORGANIZATIONAL HIERARCHY NAVIGATION */}
                 <TouchableOpacity
                     style={styles.navCard}
-                    onPress={() => navigation.navigate('Hierarchy')}
+                    onPress={() => navigation.navigate('Hierarchy', { userProfile })}
                 >
                     <LinearGradient
                         colors={["#4F46E5", "#7C3AED"]}

@@ -105,16 +105,16 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
         <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
             <View style={{ flex: 1, backgroundColor: '#000' }}>
                 {/* CLOSE BUTTON */}
-                <TouchableOpacity 
-                    style={[styles.closeVideoBtn, { position: 'absolute', top: 40, right: 20, zIndex: 10, backgroundColor: 'rgba(0,0,0,0.5)' }]} 
+                <TouchableOpacity
+                    style={[styles.closeVideoBtn, { position: 'absolute', top: 40, right: 20, zIndex: 10, backgroundColor: 'rgba(0,0,0,0.5)' }]}
                     onPress={onClose}
                 >
                     <Feather name="x" size={24} color="#FFF" />
                 </TouchableOpacity>
 
                 {/* CONTENT PLAYER */}
-                <View style={{ width: '100%', aspectRatio: isVideo ? 16/9 : undefined, height: isVideo ? undefined : '100%', backgroundColor: '#000', justifyContent: 'center' }}>
-                    
+                <View style={{ width: '100%', aspectRatio: isVideo ? 16 / 9 : undefined, height: isVideo ? undefined : '100%', backgroundColor: '#000', justifyContent: 'center' }}>
+
                     {isVideo ? (
                         <Video
                             source={{ uri: videoData.videoUrl || videoData.video_url }}
@@ -127,7 +127,7 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
                         />
                     ) : (
                         Platform.OS === 'web' ? (
-                            <iframe 
+                            <iframe
                                 src={`https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(videoData.file_url || videoData.videoUrl)}`}
                                 style={{ width: '100%', height: '100%', border: 'none' }}
                             />
@@ -637,10 +637,12 @@ export default function Courses({ userEmail = "user" }) {
     });
     const [loadingStatus, setLoadingStatus] = useState(true);
 
-    // [NEW] State for video playback and chat (lifted for SelfLearningView)
-    const [modalVisible, setModalVisible] = useState(false);
-    const [currentVideo, setCurrentVideo] = useState(null);
-    const [chatVisible, setChatVisible] = useState(false);
+    // State for self-learning lesson playback (uses LessonView for full progress tracking)
+    const [activeLesson, setActiveLesson] = useState(null);
+    const [activeLessonWasComplete, setActiveLessonWasComplete] = useState(false);
+    const [slRefreshKey, setSlRefreshKey] = useState(0);
+    const [slCongratsVisible, setSlCongratsVisible] = useState(false);
+    const [slCongratsInfo, setSlCongratsInfo] = useState(null);
 
     // Fetch self-learning status on mount
     React.useEffect(() => {
@@ -670,9 +672,9 @@ export default function Courses({ userEmail = "user" }) {
 
             {/* HEADER SECTION (Fixed at Top) */}
             <View style={styles.header}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                    <View>
-                        <Text style={styles.pageTitle}>My Learning Path</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <View style={{ flex: 1, marginRight: 10 }}>
+                        <Text style={styles.pageTitle} numberOfLines={1} adjustsFontSizeToFit>Employee Learning Path</Text>
                         <Text style={styles.subTitle}>
                             {learningPathTab === 'self_learning' ? '📚 Self Learning Journey' : '🚀 Career Progression'}
                         </Text>
@@ -686,35 +688,10 @@ export default function Courses({ userEmail = "user" }) {
                     </View>
                 </View>
 
-                {/* SEGMENTED TOGGLE */}
-                <View style={styles.toggleContainer}>
-                    <TouchableOpacity
-                        style={[styles.toggleBtn, activeTab === 'path' && styles.activeToggle]}
-                        onPress={() => setActiveTab('path')}
-                    >
-                        <Text style={[styles.toggleText, activeTab === 'path' && styles.activeToggleText]}>Path</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        style={[styles.toggleBtn, activeTab === 'quizzes' && styles.activeToggle]}
-                        onPress={() => setActiveTab('quizzes')}
-                    >
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <Text style={[styles.toggleText, activeTab === 'quizzes' && styles.activeToggleText]}>AI Quizzes</Text>
-                        </View>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        style={[styles.toggleBtn, activeTab === 'courses' && styles.activeToggle]}
-                        onPress={() => setActiveTab('courses')}
-                    >
-                        <Text style={[styles.toggleText, activeTab === 'courses' && styles.activeToggleText]}>All Courses</Text>
-                    </TouchableOpacity>
-                </View>
             </View>
 
-            {/* LEARNING PATH SUB-TABS (Only visible when Path tab is active) */}
-            {activeTab === 'path' && (
+            {/* LEARNING PATH SUB-TABS */}
+            {(
                 <View style={styles.learningPathTabsContainer}>
                     {/* Self Learning Tab */}
                     <TouchableOpacity
@@ -767,40 +744,76 @@ export default function Courses({ userEmail = "user" }) {
 
             {/* MAIN CONTENT */}
             <View style={{ flex: 1 }}>
-                {activeTab === 'path' && learningPathTab === 'self_learning' && (
+                {learningPathTab === 'self_learning' && (
                     <SelfLearningView
                         userEmail={userEmail}
+                        refreshKey={slRefreshKey}
                         onOpenCourse={(course) => {
-                            setCurrentVideo(course);
-                            setModalVisible(true);
+                            setActiveLessonWasComplete(!!(course.status === 'completed' || course.completed));
+                            setActiveLesson(course);
                         }}
                     />
                 )}
-                {activeTab === 'path' && learningPathTab === 'career_progression' && (
+                {learningPathTab === 'career_progression' && (
                     <CoursePath
                         userEmail={userEmail}
                         learningPathType="career_progression"
                         onComplete={fetchSelfLearningStatus}
                     />
                 )}
-                {activeTab === 'quizzes' && <QuizSection />}
-                {activeTab === 'courses' && <AllCourses />}
             </View>
 
-            {/* LESSON VIEW FOR SELF LEARNING (with progress tracking) */}
-            {currentVideo && modalVisible && (
+            {/* LESSON VIEW FOR SELF LEARNING - Full progress tracking */}
+            {activeLesson && (
                 <LessonView
-                    lesson={currentVideo}
-                    onClose={() => { setModalVisible(false); setCurrentVideo(null); }}
+                    lesson={activeLesson}
+                    onClose={(completionResult) => {
+                        const justCompleted = !activeLessonWasComplete && !!(completionResult);
+                        const lessonTitle = activeLesson.title || 'Module';
+                        setActiveLesson(null);
+                        setSlRefreshKey(k => k + 1);
+                        if (justCompleted) {
+                            setSlCongratsInfo({ title: lessonTitle, completedAt: new Date() });
+                            setSlCongratsVisible(true);
+                        }
+                    }}
                     userEmail={userEmail}
+                    allowFastForward={activeLesson.allow_fast_forward !== false}
+                    isSelfLearning={true}
                 />
             )}
 
-            <AskAIChatModal
-                visible={chatVisible}
-                courseData={currentVideo}
-                onClose={() => setChatVisible(false)}
-            />
+            {/* CONGRATULATIONS MODAL */}
+            <Modal
+                visible={slCongratsVisible}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setSlCongratsVisible(false)}
+            >
+                <View style={slStyles.overlay}>
+                    <View style={slStyles.card}>
+                        <View style={slStyles.trophyWrap}>
+                            <MaterialCommunityIcons name="trophy-award" size={56} color="#F59E0B" />
+                        </View>
+                        <Text style={slStyles.congrats}>Congratulations! 🎉</Text>
+                        <Text style={slStyles.message}>You have completed</Text>
+                        <Text style={slStyles.courseTitle} numberOfLines={3}>{slCongratsInfo?.title}</Text>
+                        {slCongratsInfo?.completedAt && (
+                            <View style={slStyles.dateRow}>
+                                <MaterialCommunityIcons name="calendar-check" size={15} color="#6B7280" />
+                                <Text style={slStyles.dateText}>
+                                    {slCongratsInfo.completedAt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                    {'  ·  '}
+                                    {slCongratsInfo.completedAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                                </Text>
+                            </View>
+                        )}
+                        <TouchableOpacity style={slStyles.closeBtn} onPress={() => setSlCongratsVisible(false)}>
+                            <Text style={slStyles.closeBtnText}>Continue Learning</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
 
         </View>
     );
@@ -1100,6 +1113,89 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     goToSelfLearningBtnText: {
+        fontSize: 15,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF',
+    },
+});
+
+const slStyles = StyleSheet.create({
+    overlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.55)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 24,
+    },
+    card: {
+        backgroundColor: '#FFF',
+        borderRadius: 20,
+        paddingVertical: 36,
+        paddingHorizontal: 28,
+        alignItems: 'center',
+        width: '100%',
+        maxWidth: 360,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.18,
+        shadowRadius: 20,
+        elevation: 12,
+    },
+    trophyWrap: {
+        width: 88,
+        height: 88,
+        borderRadius: 44,
+        backgroundColor: '#FEF3C7',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 18,
+    },
+    congrats: {
+        fontSize: 22,
+        fontFamily: 'Poppins_700Bold',
+        color: '#111827',
+        textAlign: 'center',
+        marginBottom: 6,
+    },
+    message: {
+        fontSize: 14,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        textAlign: 'center',
+    },
+    courseTitle: {
+        fontSize: 16,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#1F2937',
+        textAlign: 'center',
+        marginTop: 6,
+        marginBottom: 16,
+        lineHeight: 22,
+    },
+    dateRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        backgroundColor: '#F9FAFB',
+        borderRadius: 8,
+        paddingVertical: 7,
+        paddingHorizontal: 14,
+        marginBottom: 24,
+    },
+    dateText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+    },
+    closeBtn: {
+        backgroundColor: '#F59E0B',
+        borderRadius: 12,
+        paddingVertical: 13,
+        paddingHorizontal: 40,
+        alignItems: 'center',
+        width: '100%',
+    },
+    closeBtnText: {
         fontSize: 15,
         fontFamily: 'Poppins_600SemiBold',
         color: '#FFF',

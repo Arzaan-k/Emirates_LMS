@@ -756,15 +756,20 @@ async def regenerate_level_exam_questions(
 # ==========================================
 
 @router.get("/role-advancement/eligibility/{user_email}")
-async def check_eligibility(user_email: str, db: Session = Depends(get_db)):
+async def check_eligibility(
+    user_email: str,
+    current_role: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
     """
     Check if user is eligible for role advancement.
+    Optional current_role query param overrides the user's DB role (used when viewing a specific exam node).
     """
     from app.services.user_service import UserService
-    
+
     service = UserService(db)
     try:
-        return service.check_role_advancement_eligibility(user_email)
+        return service.check_role_advancement_eligibility(user_email, override_role=current_role)
     except Exception as e:
         logger.error(f"Eligibility check failed: {e}")
         raise
@@ -783,18 +788,23 @@ async def generate_role_exam(
 
 
 @router.get("/role-advancement/exam/{user_email}")
-async def get_role_exam(user_email: str, db: Session = Depends(get_db)):
+async def get_role_exam(
+    user_email: str,
+    current_role: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
     """
     Get the generated role advancement exam.
     Dynamically generates questions based on the content of the user's current level courses.
+    Optional current_role query param overrides the user's DB role.
     """
     from app.services.user_service import UserService
     from app.repositories.content_repository import AccessRuleRepository, ContentRepository
     from app.services.ai_service import AIService
-    
+
     service = UserService(db)
     user = service.get_user_by_email(user_email)
-    current_role = user.role or "Waffler"
+    current_role = current_role or user.role or "Waffler"
     
     # Dynamic Target Role
     from app.repositories.content_repository import ProgressionLevelRepository
@@ -819,6 +829,7 @@ async def get_role_exam(user_email: str, db: Session = Depends(get_db)):
     exam_questions_count = getattr(target_level, "exam_questions", 10) if target_level else 10
     exam_pass_percent = getattr(target_level, "pass_percent", 70) if target_level else 70
     exam_time_limit = getattr(target_level, "exam_time_minutes", 15) if target_level else 15
+    exam_proctored = getattr(target_level, "proctored", True) if target_level else True
 
     # PRIORITY 1: Check for admin-stored exam questions in LevelExamQuestion table
     from app.models.quiz import LevelExamQuestion
@@ -830,8 +841,8 @@ async def get_role_exam(user_email: str, db: Session = Depends(get_db)):
     questions = []
     
     if stored_exam and stored_exam.questions and len(stored_exam.questions) > 0:
-        # Use admin-managed questions (may be AI-generated then edited by admin)
-        questions = stored_exam.questions[:exam_questions_count]
+        # Use ALL admin-managed questions — admin explicitly set this count, don't truncate
+        questions = stored_exam.questions
         logger.info(f"Using {len(questions)} stored exam questions for {current_role} (source: {stored_exam.source})")
     else:
         # PRIORITY 2: Fallback to AI generation if no stored questions
@@ -882,8 +893,18 @@ async def get_role_exam(user_email: str, db: Session = Depends(get_db)):
                 logger.warning(f"Failed to auto-store exam questions: {store_err}")
                 db.rollback()
 
-    # Ensure we return valid metadata for the frontend
-    total_questions = len(questions) or exam_questions_count
+    # Total questions = exactly what we're sending (never fall back to config count)
+    total_questions = len(questions)
+    
+    # SECURITY: Strip correct answers before sending to frontend
+    # The answer key stays in DB (LevelExamQuestion) and is used during grading
+    safe_questions = []
+    for q in questions:
+        safe_q = {
+            "question": q.get("question", ""),
+            "options": q.get("options", []),
+        }
+        safe_questions.append(safe_q)
     
     return {
         "status": "success",
@@ -892,13 +913,15 @@ async def get_role_exam(user_email: str, db: Session = Depends(get_db)):
             "time_limit_minutes": exam_time_limit,
             "duration_minutes": exam_time_limit, # Duplicate for frontend compatibility
             "max_violations": 3,
+            "proctored": exam_proctored,
             "current_role": current_role,
             "target_role": target_role,
-            "questions": questions,
+            "questions": safe_questions,
             "total_questions": total_questions,
             "question_count": total_questions,
             "passing_score": exam_pass_percent,
             "passing_percentage": exam_pass_percent,
+            "pass_percent": exam_pass_percent,
             "min_passing_score": exam_pass_percent
         }
     }
@@ -915,6 +938,8 @@ async def submit_role_exam(
     breach_log: str = Form("[]"),
     critical_breaches: str = Form("0"),
     warning_breaches: str = Form("0"),
+    is_practice: str = Form("false"),
+    current_role: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     """
@@ -927,10 +952,11 @@ async def submit_role_exam(
     
     try:
         answers_list = json.loads(answers)
-        
+        practice_mode = is_practice.lower() == "true"
+
         # Determine passing criteria dynamically
         user = service.get_user_by_email(user_email)
-        current_role = user.role or "Waffler"
+        current_role = current_role or user.role or "Waffler"
         
         from app.repositories.content_repository import ProgressionLevelRepository
         level_repo = ProgressionLevelRepository(db)
@@ -939,48 +965,45 @@ async def submit_role_exam(
         # Default pass percent if not set
         pass_percent = getattr(next_level, "pass_percent", 70) if next_level else 70
         
-        # Mock grading: Assume simple correct answer index matching for demo
-        # Logic: In real app, we would cache correct answers by exam_id.
-        # Here we assume a simple pattern or trust client (insecure but consistent with existing mock)
-        # OR we just grade blindly as existing code did:
-        # Existing code: correct_answers = [0, 1, 1] (Hardcoded for 3 questions)
         
-        # IMPROVEMENT: Since we rely on AI generation which doesn't persist correct answers in DB here,
-        # we have a limitation. We will assume for this demo that if answers are provided, 
-        # we calculate a score.
-        # But wait, AI generated questions have 'correct_answer' index in the object sent to frontend.
-        # The frontend sends back user answers. We don't have the key here unless we stored it.
-        # For now, to keep it working without huge refactor, we'll keep the mock logic 
-        # BUT scale it to the number of answers provided.
-        
+        # Grade the exam using stored answer keys from LevelExamQuestion table
         total_questions = len(answers_list)
         score = 0
         
-        # MOCK GRADER: Randomly assign correct/incorrect for demo purposes if we don't have answer key
-        # Real implementation needs to store exam_id -> answer_key in DB/Cache
-        # Let's assume user got 80% correct for demo flow
-        for i, ans in enumerate(answers_list):
-            # Mock: correct if answer index is 0 or 1 or 2 (simulating some knowledge)
-            if ans != -1: 
-                 score += 1
+        # REAL GRADER: Look up stored exam questions to get correct answers
+        from app.models.quiz import LevelExamQuestion
         
-        # Adjust score to realistically reflect "passing" for demo
-        # (This is a simplified mock grader as requested to keep functionality)
-        # Actually existing code was hardcoded. 
-        # Let's try to be slightly smarter or just assume success if completed
+        stored_exam = db.query(LevelExamQuestion).filter(
+            LevelExamQuestion.level_name == current_role
+        ).first()
         
-        score = int(total_questions * 0.8) # Mock: User gets 80% 
+        if stored_exam and stored_exam.questions and len(stored_exam.questions) > 0:
+            # Grade against actual correct answers from the question bank
+            questions = stored_exam.questions
+            for i, user_answer in enumerate(answers_list):
+                if i < len(questions):
+                    correct_index = questions[i].get("correctIndex", -1)
+                    if user_answer == correct_index:
+                        score += 1
+            logger.info(f"Exam graded for {user_email}: {score}/{total_questions} using stored answer key")
+        else:
+            # Fallback: If no stored questions found, count answered questions
+            # (This should rarely happen since exams auto-store questions)
+            for i, ans in enumerate(answers_list):
+                if ans != -1:
+                    score += 1
+            logger.warning(f"No stored answer key found for {current_role}, using fallback grading")
         
         score_percent = int((score / total_questions) * 100) if total_questions > 0 else 0
         passed = score_percent >= pass_percent
         
         new_role = None
-        if passed:
-             if next_level:
-                 new_role = next_level.name
-                 service.promote_user(user_email, new_role)
-             else:
-                 new_role = current_role # Already at top
+        if passed and not practice_mode:
+            if next_level:
+                new_role = next_level.name
+                service.promote_user(user_email, new_role)
+            else:
+                new_role = current_role  # Already at top
         
         return {
             "status": "success",
