@@ -554,7 +554,7 @@ export default function ContentLibraryModal({ visible, onClose }) {
         const hasItems = folder.items && folder.items.length > 0;
 
         // Calculate indentation based on depth
-        const indentLeft = depth * 20;
+        const indentLeft = depth * 10;
 
         // Icon sizes get slightly smaller at deeper levels
         const iconSize = Math.max(18, 22 - depth * 2);
@@ -675,7 +675,7 @@ export default function ContentLibraryModal({ visible, onClose }) {
         else if (resourceType === 'Audio') { iconName = 'volume-high'; iconColor = '#EC4899'; }
 
         // Calculate indentation for nested content
-        const indentWidth = indentLevel * 24;
+        const indentWidth = indentLevel * 12;
         const isSelected = selectedItems.has(item.id);
 
         return (
@@ -749,321 +749,321 @@ export default function ContentLibraryModal({ visible, onClose }) {
 
     return (
         <>
-        <Modal visible={visible} animationType="slide" transparent>
-            <View style={styles.overlay}>
-                <BlurView intensity={20} style={StyleSheet.absoluteFill} />
-                <View style={styles.container}>
-                    {/* Header */}
-                    <LinearGradient
-                        colors={['#3B82F6', '#2563EB']}
-                        style={styles.header}
-                        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-                    >
-                        <View style={styles.headerTop}>
-                            <View style={styles.headerTitleRow}>
-                                <View style={styles.headerIcon}>
-                                    <MaterialCommunityIcons name="bookshelf" size={24} color="#FFF" />
-                                </View>
-                                <Text style={styles.headerTitle}>
-                                    {selectionMode ? `${selectedItems.size} Selected` : 'Content Library'}
-                                </Text>
-                            </View>
-                            <View style={{ flexDirection: 'row', gap: 8 }}>
-                                {/* Background Deletion Indicator */}
-                                {deletingInBackground && (
-                                    <View style={styles.backgroundDeleteIndicator}>
-                                        <ActivityIndicator size="small" color="#FFF" />
+            <Modal visible={visible} animationType="slide" transparent>
+                <View style={styles.overlay}>
+                    <BlurView intensity={20} style={StyleSheet.absoluteFill} />
+                    <View style={styles.container}>
+                        {/* Header */}
+                        <LinearGradient
+                            colors={['#3B82F6', '#2563EB']}
+                            style={styles.header}
+                            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                        >
+                            <View style={styles.headerTop}>
+                                <View style={styles.headerTitleRow}>
+                                    <View style={styles.headerIcon}>
+                                        <MaterialCommunityIcons name="bookshelf" size={24} color="#FFF" />
                                     </View>
-                                )}
-                                {/* Bulk Select Toggle Button */}
-                                <TouchableOpacity onPress={toggleSelectionMode} style={[styles.closeBtn, selectionMode && { backgroundColor: '#EF4444' }]}>
-                                    <MaterialCommunityIcons name={selectionMode ? "close" : "checkbox-multiple-marked-outline"} size={22} color="#FFF" />
-                                </TouchableOpacity>
-                                <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-                                    <Feather name="x" size={22} color="#FFF" />
-                                </TouchableOpacity>
+                                    <Text style={styles.headerTitle}>
+                                        {selectionMode ? `${selectedItems.size} Selected` : 'Content Library'}
+                                    </Text>
+                                </View>
+                                <View style={{ flexDirection: 'row', gap: 8 }}>
+                                    {/* Background Deletion Indicator */}
+                                    {deletingInBackground && (
+                                        <View style={styles.backgroundDeleteIndicator}>
+                                            <ActivityIndicator size="small" color="#FFF" />
+                                        </View>
+                                    )}
+                                    {/* Bulk Select Toggle Button */}
+                                    <TouchableOpacity onPress={toggleSelectionMode} style={[styles.closeBtn, selectionMode && { backgroundColor: '#EF4444' }]}>
+                                        <MaterialCommunityIcons name={selectionMode ? "close" : "checkbox-multiple-marked-outline"} size={22} color="#FFF" />
+                                    </TouchableOpacity>
+                                    <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+                                        <Feather name="x" size={22} color="#FFF" />
+                                    </TouchableOpacity>
+                                </View>
                             </View>
-                        </View>
 
-                        {/* Bulk Action Bar (shown in selection mode) */}
-                        {selectionMode && (
-                            <View style={styles.bulkActionBar}>
+                            {/* Bulk Action Bar (shown in selection mode) */}
+                            {selectionMode && (
+                                <View style={styles.bulkActionBar}>
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            console.log(" Select All pressed");
+                                            selectAll();
+                                        }}
+                                        style={styles.bulkActionBtn}
+                                    >
+                                        <Feather name="check-square" size={16} color="#FFF" />
+                                        <Text style={styles.bulkActionText}>Select All</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity onPress={deselectAll} style={styles.bulkActionBtn}>
+                                        <Feather name="square" size={16} color="#FFF" />
+                                        <Text style={styles.bulkActionText}>Deselect All</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            console.log(" DELETE BUTTON PRESSED!");
+                                            console.log("Selected items size:", selectedItems.size);
+                                            console.log("Bulk delete loading:", bulkDeleteLoading);
+                                            handleBulkDelete();
+                                        }}
+                                        disabled={selectedItems.size === 0 || bulkDeleteLoading || deletingInBackground}
+                                        style={[styles.bulkActionBtn, styles.bulkDeleteBtn, selectedItems.size === 0 && { opacity: 0.5 }]}
+                                    >
+                                        {bulkDeleteLoading || deletingInBackground ? (
+                                            <ActivityIndicator size="small" color="#FFF" />
+                                        ) : (
+                                            <>
+                                                <Feather name="trash-2" size={16} color="#FFF" />
+                                                <Text style={styles.bulkActionText}>Delete ({selectedItems.size})</Text>
+                                            </>
+                                        )}
+                                    </TouchableOpacity>
+                                </View>
+                            )}
+
+                            {/* Search Bar */}
+                            {!selectionMode && (
+                                <View style={styles.searchContainer}>
+                                    <Feather name="search" size={20} color="#93C5FD" style={{ marginLeft: 12 }} />
+                                    <TextInput
+                                        style={styles.searchInput}
+                                        placeholder="Search documents, videos..."
+                                        placeholderTextColor="#93C5FD"
+                                        value={searchQuery}
+                                        onChangeText={setSearchQuery}
+                                    />
+                                </View>
+                            )}
+                        </LinearGradient>
+
+                        {/* Learning Path Selector - Primary Tier */}
+                        <View style={styles.learningPathContainer}>
+                            {learningPaths.map((lp) => (
                                 <TouchableOpacity
+                                    key={lp.id}
+                                    style={[
+                                        styles.learningPathTab,
+                                        activeLearningPath === lp.id && styles.activeLearningPathTab,
+                                        { borderColor: lp.color }
+                                    ]}
                                     onPress={() => {
-                                        console.log(" Select All pressed");
-                                        selectAll();
+                                        setActiveLearningPath(lp.id);
+                                        setActiveTab('All'); // Reset category filter when switching learning path
                                     }}
-                                    style={styles.bulkActionBtn}
                                 >
-                                    <Feather name="check-square" size={16} color="#FFF" />
-                                    <Text style={styles.bulkActionText}>Select All</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity onPress={deselectAll} style={styles.bulkActionBtn}>
-                                    <Feather name="square" size={16} color="#FFF" />
-                                    <Text style={styles.bulkActionText}>Deselect All</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    onPress={() => {
-                                        console.log(" DELETE BUTTON PRESSED!");
-                                        console.log("Selected items size:", selectedItems.size);
-                                        console.log("Bulk delete loading:", bulkDeleteLoading);
-                                        handleBulkDelete();
-                                    }}
-                                    disabled={selectedItems.size === 0 || bulkDeleteLoading || deletingInBackground}
-                                    style={[styles.bulkActionBtn, styles.bulkDeleteBtn, selectedItems.size === 0 && { opacity: 0.5 }]}
-                                >
-                                    {bulkDeleteLoading || deletingInBackground ? (
-                                        <ActivityIndicator size="small" color="#FFF" />
-                                    ) : (
-                                        <>
-                                            <Feather name="trash-2" size={16} color="#FFF" />
-                                            <Text style={styles.bulkActionText}>Delete ({selectedItems.size})</Text>
-                                        </>
+                                    <View style={[styles.learningPathIcon, { backgroundColor: lp.color + '20' }]}>
+                                        <Feather
+                                            name={lp.icon || 'folder'}
+                                            size={18}
+                                            color={activeLearningPath === lp.id ? lp.color : '#6B7280'}
+                                        />
+                                    </View>
+                                    <View style={styles.learningPathTextContainer}>
+                                        <Text style={[
+                                            styles.learningPathText,
+                                            activeLearningPath === lp.id && { color: lp.color, fontFamily: 'Poppins_700Bold' }
+                                        ]}>
+                                            {lp.name}
+                                        </Text>
+                                        <Text style={styles.learningPathCount}>
+                                            {lp.total_count || 0} items
+                                        </Text>
+                                    </View>
+                                    {activeLearningPath === lp.id && (
+                                        <View style={[styles.learningPathIndicator, { backgroundColor: lp.color }]} />
                                     )}
                                 </TouchableOpacity>
-                            </View>
-                        )}
-
-                        {/* Search Bar */}
-                        {!selectionMode && (
-                            <View style={styles.searchContainer}>
-                                <Feather name="search" size={20} color="#93C5FD" style={{ marginLeft: 12 }} />
-                                <TextInput
-                                    style={styles.searchInput}
-                                    placeholder="Search documents, videos..."
-                                    placeholderTextColor="#93C5FD"
-                                    value={searchQuery}
-                                    onChangeText={setSearchQuery}
-                                />
-                            </View>
-                        )}
-                    </LinearGradient>
-
-                    {/* Learning Path Selector - Primary Tier */}
-                    <View style={styles.learningPathContainer}>
-                        {learningPaths.map((lp) => (
-                            <TouchableOpacity
-                                key={lp.id}
-                                style={[
-                                    styles.learningPathTab,
-                                    activeLearningPath === lp.id && styles.activeLearningPathTab,
-                                    { borderColor: lp.color }
-                                ]}
-                                onPress={() => {
-                                    setActiveLearningPath(lp.id);
-                                    setActiveTab('All'); // Reset category filter when switching learning path
-                                }}
-                            >
-                                <View style={[styles.learningPathIcon, { backgroundColor: lp.color + '20' }]}>
-                                    <Feather
-                                        name={lp.icon || 'folder'}
-                                        size={18}
-                                        color={activeLearningPath === lp.id ? lp.color : '#6B7280'}
-                                    />
-                                </View>
-                                <View style={styles.learningPathTextContainer}>
-                                    <Text style={[
-                                        styles.learningPathText,
-                                        activeLearningPath === lp.id && { color: lp.color, fontFamily: 'Poppins_700Bold' }
-                                    ]}>
-                                        {lp.name}
-                                    </Text>
-                                    <Text style={styles.learningPathCount}>
-                                        {lp.total_count || 0} items
-                                    </Text>
-                                </View>
-                                {activeLearningPath === lp.id && (
-                                    <View style={[styles.learningPathIndicator, { backgroundColor: lp.color }]} />
-                                )}
-                            </TouchableOpacity>
-                        ))}
-                    </View>
-
-                    {/* Category Tabs - Secondary Tier */}
-                    <View style={styles.tabsContainer}>
-                        <FlatList
-                            data={tabs}
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            keyExtractor={item => item}
-                            contentContainerStyle={{ paddingHorizontal: 16 }}
-                            renderItem={({ item }) => (
-                                <TouchableOpacity
-                                    style={[styles.tab, activeTab === item && styles.activeTab]}
-                                    onPress={() => setActiveTab(item)}
-                                >
-                                    <Text style={[styles.tabText, activeTab === item && styles.activeTabText]}>{item}</Text>
-                                </TouchableOpacity>
-                            )}
-                        />
-                    </View>
-
-                    {/* Content List */}
-                    {loading ? (
-                        <View style={styles.centerContent}>
-                            <ActivityIndicator size="large" color="#3B82F6" />
+                            ))}
                         </View>
-                    ) : (
-                        <ScrollView contentContainerStyle={styles.listContent}>
-                            {displayCategories.length === 0 ? (
-                                <View style={styles.emptyState}>
-                                    <Feather name="inbox" size={48} color="#D1D5DB" />
-                                    <Text style={styles.emptyStateText}>No content found</Text>
-                                </View>
-                            ) : (
-                                displayCategories.map(category => renderFolderTree(category, 0))
-                            )}
-                            <View style={{ height: 100 }} />
-                        </ScrollView>
-                    )}
 
-                    {/* Edit Content Modal */}
-                    <Modal visible={editModalVisible} transparent animationType="fade">
-                        <View style={styles.modalOverlay}>
-                            <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"}>
-                                <View style={styles.modalContent}>
-                                    <Text style={styles.modalTitle}>Edit Content</Text>
+                        {/* Category Tabs - Secondary Tier */}
+                        <View style={styles.tabsContainer}>
+                            <FlatList
+                                data={tabs}
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                keyExtractor={item => item}
+                                contentContainerStyle={{ paddingHorizontal: 16 }}
+                                renderItem={({ item }) => (
+                                    <TouchableOpacity
+                                        style={[styles.tab, activeTab === item && styles.activeTab]}
+                                        onPress={() => setActiveTab(item)}
+                                    >
+                                        <Text style={[styles.tabText, activeTab === item && styles.activeTabText]}>{item}</Text>
+                                    </TouchableOpacity>
+                                )}
+                            />
+                        </View>
 
-                                    <Text style={styles.inputLabel}>Title</Text>
-                                    <TextInput
-                                        style={styles.input}
-                                        value={editTitle}
-                                        onChangeText={setEditTitle}
-                                    />
+                        {/* Content List */}
+                        {loading ? (
+                            <View style={styles.centerContent}>
+                                <ActivityIndicator size="large" color="#3B82F6" />
+                            </View>
+                        ) : (
+                            <ScrollView contentContainerStyle={styles.listContent}>
+                                {displayCategories.length === 0 ? (
+                                    <View style={styles.emptyState}>
+                                        <Feather name="inbox" size={48} color="#D1D5DB" />
+                                        <Text style={styles.emptyStateText}>No content found</Text>
+                                    </View>
+                                ) : (
+                                    displayCategories.map(category => renderFolderTree(category, 0))
+                                )}
+                                <View style={{ height: 100 }} />
+                            </ScrollView>
+                        )}
 
-                                    <Text style={styles.inputLabel}>Description</Text>
-                                    <TextInput
-                                        style={[styles.input, styles.textArea]}
-                                        value={editDescription}
-                                        onChangeText={setEditDescription}
-                                        multiline
-                                    />
+                        {/* Edit Content Modal */}
+                        <Modal visible={editModalVisible} transparent animationType="fade">
+                            <View style={styles.modalOverlay}>
+                                <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"}>
+                                    <View style={styles.modalContent}>
+                                        <Text style={styles.modalTitle}>Edit Content</Text>
 
-                                    <Text style={styles.inputLabel}>Category</Text>
-                                    <View style={{ marginBottom: 16 }}>
-                                        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                                            <TouchableOpacity
-                                                onPress={() => setEditBucketId('uncategorized')}
-                                                style={{
-                                                    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginRight: 8,
-                                                    backgroundColor: editBucketId === 'uncategorized' ? '#6B7280' : '#F3F4F6',
-                                                    borderWidth: 1, borderColor: editBucketId === 'uncategorized' ? '#6B7280' : '#E5E7EB',
-                                                    flexDirection: 'row', alignItems: 'center'
-                                                }}
-                                            >
-                                                <Feather name="folder" size={14} color={editBucketId === 'uncategorized' ? '#FFF' : '#6B7280'} style={{ marginRight: 4 }} />
-                                                <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: editBucketId === 'uncategorized' ? '#FFF' : '#4B5563' }}>Uncategorized</Text>
-                                            </TouchableOpacity>
-                                            {availableBuckets.map(bucket => (
+                                        <Text style={styles.inputLabel}>Title</Text>
+                                        <TextInput
+                                            style={styles.input}
+                                            value={editTitle}
+                                            onChangeText={setEditTitle}
+                                        />
+
+                                        <Text style={styles.inputLabel}>Description</Text>
+                                        <TextInput
+                                            style={[styles.input, styles.textArea]}
+                                            value={editDescription}
+                                            onChangeText={setEditDescription}
+                                            multiline
+                                        />
+
+                                        <Text style={styles.inputLabel}>Category</Text>
+                                        <View style={{ marginBottom: 16 }}>
+                                            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                                                 <TouchableOpacity
-                                                    key={bucket.id}
-                                                    onPress={() => setEditBucketId(bucket.id)}
+                                                    onPress={() => setEditBucketId('uncategorized')}
                                                     style={{
                                                         paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginRight: 8,
-                                                        backgroundColor: editBucketId === bucket.id ? bucket.color : '#F3F4F6',
-                                                        borderWidth: 1, borderColor: editBucketId === bucket.id ? bucket.color : '#E5E7EB',
+                                                        backgroundColor: editBucketId === 'uncategorized' ? '#6B7280' : '#F3F4F6',
+                                                        borderWidth: 1, borderColor: editBucketId === 'uncategorized' ? '#6B7280' : '#E5E7EB',
                                                         flexDirection: 'row', alignItems: 'center'
                                                     }}
                                                 >
-                                                    <MaterialCommunityIcons name={bucket.icon} size={14} color={editBucketId === bucket.id ? '#FFF' : bucket.color} style={{ marginRight: 4 }} />
-                                                    <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: editBucketId === bucket.id ? '#FFF' : '#4B5563' }}>{bucket.name}</Text>
+                                                    <Feather name="folder" size={14} color={editBucketId === 'uncategorized' ? '#FFF' : '#6B7280'} style={{ marginRight: 4 }} />
+                                                    <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: editBucketId === 'uncategorized' ? '#FFF' : '#4B5563' }}>Uncategorized</Text>
                                                 </TouchableOpacity>
-                                            ))}
-                                        </ScrollView>
-                                    </View>
-
-                                    <View style={styles.modalActions}>
-                                        <TouchableOpacity style={[styles.modalBtn, styles.cancelBtn]} onPress={() => setEditModalVisible(false)}>
-                                            <Text style={styles.cancelBtnText}>Cancel</Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity style={[styles.modalBtn, styles.saveBtn]} onPress={handleSaveEdit}>
-                                            <Text style={styles.saveBtnText}>Save Changes</Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                </View>
-                            </KeyboardAvoidingView>
-                        </View>
-                    </Modal>
-
-                    {/* Change Category Modal */}
-                    <Modal visible={categoryModalVisible} transparent animationType="fade">
-                        <View style={styles.modalOverlay}>
-                            <View style={styles.modalContent}>
-                                <Text style={styles.modalTitle}>Change Category</Text>
-                                <Text style={styles.modalSubtitle}>Select new category for "{selectedContent?.title}"</Text>
-
-                                <ScrollView style={{ maxHeight: 300 }}>
-                                    {availableBuckets.map(bucket => (
-                                        <TouchableOpacity
-                                            key={bucket.id}
-                                            style={styles.bucketItem}
-                                            onPress={() => handleChangeCategory(bucket.id)}
-                                        >
-                                            <View style={[styles.bucketIcon, { backgroundColor: bucket.color + '20' }]}>
-                                                <MaterialCommunityIcons name={bucket.icon} size={20} color={bucket.color} />
-                                            </View>
-                                            <Text style={styles.bucketName}>{bucket.name}</Text>
-                                            {selectedContent?.bucket_id === bucket.id && (
-                                                <Feather name="check" size={20} color="#10B981" />
-                                            )}
-                                        </TouchableOpacity>
-                                    ))}
-                                    <TouchableOpacity
-                                        style={styles.bucketItem}
-                                        onPress={() => handleChangeCategory("uncategorized")}
-                                    >
-                                        <View style={[styles.bucketIcon, { backgroundColor: '#6B728020' }]}>
-                                            <MaterialCommunityIcons name="folder" size={20} color="#6B7280" />
+                                                {availableBuckets.map(bucket => (
+                                                    <TouchableOpacity
+                                                        key={bucket.id}
+                                                        onPress={() => setEditBucketId(bucket.id)}
+                                                        style={{
+                                                            paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginRight: 8,
+                                                            backgroundColor: editBucketId === bucket.id ? bucket.color : '#F3F4F6',
+                                                            borderWidth: 1, borderColor: editBucketId === bucket.id ? bucket.color : '#E5E7EB',
+                                                            flexDirection: 'row', alignItems: 'center'
+                                                        }}
+                                                    >
+                                                        <MaterialCommunityIcons name={bucket.icon} size={14} color={editBucketId === bucket.id ? '#FFF' : bucket.color} style={{ marginRight: 4 }} />
+                                                        <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: editBucketId === bucket.id ? '#FFF' : '#4B5563' }}>{bucket.name}</Text>
+                                                    </TouchableOpacity>
+                                                ))}
+                                            </ScrollView>
                                         </View>
-                                        <Text style={styles.bucketName}>Uncategorized</Text>
-                                    </TouchableOpacity>
-                                </ScrollView>
 
-                                <TouchableOpacity style={styles.closeModalBtn} onPress={() => setCategoryModalVisible(false)}>
-                                    <Text style={styles.closeModalText}>Cancel</Text>
-                                </TouchableOpacity>
+                                        <View style={styles.modalActions}>
+                                            <TouchableOpacity style={[styles.modalBtn, styles.cancelBtn]} onPress={() => setEditModalVisible(false)}>
+                                                <Text style={styles.cancelBtnText}>Cancel</Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity style={[styles.modalBtn, styles.saveBtn]} onPress={handleSaveEdit}>
+                                                <Text style={styles.saveBtnText}>Save Changes</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+                                </KeyboardAvoidingView>
                             </View>
-                        </View>
-                    </Modal>
+                        </Modal>
 
-                    {/* Content Preview Modal */}
-                    <Modal visible={previewModalVisible} transparent animationType="slide">
-                        <View style={styles.previewModalOverlay}>
-                            <View style={styles.previewModalContainer}>
-                                {/* Header */}
-                                <View style={styles.previewHeader}>
-                                    <View style={styles.previewHeaderLeft}>
-                                        <MaterialCommunityIcons
-                                            name={previewContent?.resource_type === 'Video' ? 'play-circle' :
-                                                previewContent?.resource_type === 'PDF' ? 'file-pdf-box' :
-                                                    previewContent?.resource_type === 'Presentation' ? 'file-powerpoint' :
-                                                        previewContent?.resource_type === 'Document' ? 'file-word' :
-                                                            'file-document-outline'}
-                                            size={24}
-                                            color="#3B82F6"
-                                        />
-                                        <View style={styles.previewTitleContainer}>
-                                            <Text style={styles.previewTitle} numberOfLines={1}>
-                                                {previewContent?.title}
-                                            </Text>
-                                            {previewContent?.resource_type && (
-                                                <Text style={styles.previewResourceType}>
-                                                    {previewContent.resource_type}
-                                                </Text>
-                                            )}
-                                        </View>
-                                    </View>
-                                    <TouchableOpacity
-                                        onPress={() => setPreviewModalVisible(false)}
-                                        style={styles.previewCloseBtn}
-                                    >
-                                        <Feather name="x" size={24} color="#6B7280" />
+                        {/* Change Category Modal */}
+                        <Modal visible={categoryModalVisible} transparent animationType="fade">
+                            <View style={styles.modalOverlay}>
+                                <View style={styles.modalContent}>
+                                    <Text style={styles.modalTitle}>Change Category</Text>
+                                    <Text style={styles.modalSubtitle}>Select new category for "{selectedContent?.title}"</Text>
+
+                                    <ScrollView style={{ maxHeight: 300 }}>
+                                        {availableBuckets.map(bucket => (
+                                            <TouchableOpacity
+                                                key={bucket.id}
+                                                style={styles.bucketItem}
+                                                onPress={() => handleChangeCategory(bucket.id)}
+                                            >
+                                                <View style={[styles.bucketIcon, { backgroundColor: bucket.color + '20' }]}>
+                                                    <MaterialCommunityIcons name={bucket.icon} size={20} color={bucket.color} />
+                                                </View>
+                                                <Text style={styles.bucketName}>{bucket.name}</Text>
+                                                {selectedContent?.bucket_id === bucket.id && (
+                                                    <Feather name="check" size={20} color="#10B981" />
+                                                )}
+                                            </TouchableOpacity>
+                                        ))}
+                                        <TouchableOpacity
+                                            style={styles.bucketItem}
+                                            onPress={() => handleChangeCategory("uncategorized")}
+                                        >
+                                            <View style={[styles.bucketIcon, { backgroundColor: '#6B728020' }]}>
+                                                <MaterialCommunityIcons name="folder" size={20} color="#6B7280" />
+                                            </View>
+                                            <Text style={styles.bucketName}>Uncategorized</Text>
+                                        </TouchableOpacity>
+                                    </ScrollView>
+
+                                    <TouchableOpacity style={styles.closeModalBtn} onPress={() => setCategoryModalVisible(false)}>
+                                        <Text style={styles.closeModalText}>Cancel</Text>
                                     </TouchableOpacity>
                                 </View>
+                            </View>
+                        </Modal>
 
-                                {/* CSS to hide Google Docs download button */}
-                                {Platform.OS === 'web' && (
-                                    <style>{`
+                        {/* Content Preview Modal */}
+                        <Modal visible={previewModalVisible} transparent animationType="slide">
+                            <View style={styles.previewModalOverlay}>
+                                <View style={styles.previewModalContainer}>
+                                    {/* Header */}
+                                    <View style={styles.previewHeader}>
+                                        <View style={styles.previewHeaderLeft}>
+                                            <MaterialCommunityIcons
+                                                name={previewContent?.resource_type === 'Video' ? 'play-circle' :
+                                                    previewContent?.resource_type === 'PDF' ? 'file-pdf-box' :
+                                                        previewContent?.resource_type === 'Presentation' ? 'file-powerpoint' :
+                                                            previewContent?.resource_type === 'Document' ? 'file-word' :
+                                                                'file-document-outline'}
+                                                size={24}
+                                                color="#3B82F6"
+                                            />
+                                            <View style={styles.previewTitleContainer}>
+                                                <Text style={styles.previewTitle} numberOfLines={1}>
+                                                    {previewContent?.title}
+                                                </Text>
+                                                {previewContent?.resource_type && (
+                                                    <Text style={styles.previewResourceType}>
+                                                        {previewContent.resource_type}
+                                                    </Text>
+                                                )}
+                                            </View>
+                                        </View>
+                                        <TouchableOpacity
+                                            onPress={() => setPreviewModalVisible(false)}
+                                            style={styles.previewCloseBtn}
+                                        >
+                                            <Feather name="x" size={24} color="#6B7280" />
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    {/* CSS to hide Google Docs download button */}
+                                    {Platform.OS === 'web' && (
+                                        <style>{`
                                         iframe {
                                             pointer-events: auto !important;
                                         }
@@ -1076,36 +1076,36 @@ export default function ContentLibraryModal({ visible, onClose }) {
                                             display: none !important;
                                         }
                                     `}</style>
-                                )}
+                                    )}
 
-                                {/* Content Viewer */}
-                                <View style={styles.previewContent}>
-                                    {previewContent && previewContent.video_url ? (
-                                        (() => {
-                                            const resourceType = previewContent.resource_type;
-                                            const videoUrl = previewContent.video_url;
+                                    {/* Content Viewer */}
+                                    <View style={styles.previewContent}>
+                                        {previewContent && previewContent.video_url ? (
+                                            (() => {
+                                                const resourceType = previewContent.resource_type;
+                                                const videoUrl = previewContent.video_url;
 
-                                            // For Videos: Use HTML5 video player
-                                            if (resourceType === 'Video') {
-                                                return Platform.OS === 'web' ? (
-                                                    <video
-                                                        controls
-                                                        controlsList="nodownload"
-                                                        style={{
-                                                            width: '100%',
-                                                            height: '100%',
-                                                            objectFit: 'contain',
-                                                            backgroundColor: '#000'
-                                                        }}
-                                                        onContextMenu={(e) => e.preventDefault()}
-                                                    >
-                                                        <source src={videoUrl} type="video/mp4" />
-                                                        Your browser does not support the video tag.
-                                                    </video>
-                                                ) : (
-                                                    <WebView
-                                                        source={{
-                                                            html: `
+                                                // For Videos: Use HTML5 video player
+                                                if (resourceType === 'Video') {
+                                                    return Platform.OS === 'web' ? (
+                                                        <video
+                                                            controls
+                                                            controlsList="nodownload"
+                                                            style={{
+                                                                width: '100%',
+                                                                height: '100%',
+                                                                objectFit: 'contain',
+                                                                backgroundColor: '#000'
+                                                            }}
+                                                            onContextMenu={(e) => e.preventDefault()}
+                                                        >
+                                                            <source src={videoUrl} type="video/mp4" />
+                                                            Your browser does not support the video tag.
+                                                        </video>
+                                                    ) : (
+                                                        <WebView
+                                                            source={{
+                                                                html: `
                                                             <html>
                                                             <head>
                                                                 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
@@ -1121,36 +1121,36 @@ export default function ContentLibraryModal({ visible, onClose }) {
                                                             </body>
                                                             </html>
                                                         ` }}
-                                                        style={styles.previewWebView}
-                                                        allowsInlineMediaPlayback={true}
-                                                        mediaPlaybackRequiresUserAction={false}
-                                                    />
-                                                );
-                                            }
+                                                            style={styles.previewWebView}
+                                                            allowsInlineMediaPlayback={true}
+                                                            mediaPlaybackRequiresUserAction={false}
+                                                        />
+                                                    );
+                                                }
 
-                                            // For Audio: Use HTML5 audio player
-                                            if (resourceType === 'Audio') {
-                                                return Platform.OS === 'web' ? (
-                                                    <View style={styles.audioPreviewContainer}>
-                                                        <MaterialCommunityIcons name="music-circle" size={80} color="#3B82F6" />
-                                                        <Text style={styles.audioTitle}>{previewContent.title}</Text>
-                                                        <audio
-                                                            controls
-                                                            controlsList="nodownload"
-                                                            style={{
-                                                                width: '80%',
-                                                                marginTop: 20
-                                                            }}
-                                                            onContextMenu={(e) => e.preventDefault()}
-                                                        >
-                                                            <source src={videoUrl} type="audio/mpeg" />
-                                                            Your browser does not support the audio tag.
-                                                        </audio>
-                                                    </View>
-                                                ) : (
-                                                    <WebView
-                                                        source={{
-                                                            html: `
+                                                // For Audio: Use HTML5 audio player
+                                                if (resourceType === 'Audio') {
+                                                    return Platform.OS === 'web' ? (
+                                                        <View style={styles.audioPreviewContainer}>
+                                                            <MaterialCommunityIcons name="music-circle" size={80} color="#3B82F6" />
+                                                            <Text style={styles.audioTitle}>{previewContent.title}</Text>
+                                                            <audio
+                                                                controls
+                                                                controlsList="nodownload"
+                                                                style={{
+                                                                    width: '80%',
+                                                                    marginTop: 20
+                                                                }}
+                                                                onContextMenu={(e) => e.preventDefault()}
+                                                            >
+                                                                <source src={videoUrl} type="audio/mpeg" />
+                                                                Your browser does not support the audio tag.
+                                                            </audio>
+                                                        </View>
+                                                    ) : (
+                                                        <WebView
+                                                            source={{
+                                                                html: `
                                                             <html>
                                                             <head>
                                                                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1168,118 +1168,118 @@ export default function ContentLibraryModal({ visible, onClose }) {
                                                             </body>
                                                             </html>
                                                         ` }}
-                                                        style={styles.previewWebView}
-                                                    />
-                                                );
-                                            }
+                                                            style={styles.previewWebView}
+                                                        />
+                                                    );
+                                                }
 
-                                            // For Documents, PDFs, Presentations: Use Google Docs Viewer (no download option in iframe)
-                                            if (['PDF', 'Document', 'Presentation', 'Spreadsheet'].includes(resourceType)) {
-                                                return Platform.OS === 'web' ? (
-                                                    <iframe
-                                                        src={`https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(videoUrl)}`}
-                                                        style={{
-                                                            width: '100%',
-                                                            height: '100%',
-                                                            border: 'none',
-                                                            borderRadius: 12
-                                                        }}
-                                                        title={previewContent.title}
-                                                    />
-                                                ) : (
-                                                    <WebView
-                                                        source={{
-                                                            uri: `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(videoUrl)}`
-                                                        }}
-                                                        style={styles.previewWebView}
-                                                        startInLoadingState={true}
-                                                        renderLoading={() => (
-                                                            <View style={styles.previewLoadingContainer}>
-                                                                <ActivityIndicator size="large" color="#3B82F6" />
-                                                                <Text style={styles.previewLoadingText}>Loading preview...</Text>
-                                                            </View>
-                                                        )}
-                                                    />
-                                                );
-                                            }
+                                                // For Documents, PDFs, Presentations: Use Google Docs Viewer (no download option in iframe)
+                                                if (['PDF', 'Document', 'Presentation', 'Spreadsheet'].includes(resourceType)) {
+                                                    return Platform.OS === 'web' ? (
+                                                        <iframe
+                                                            src={`https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(videoUrl)}`}
+                                                            style={{
+                                                                width: '100%',
+                                                                height: '100%',
+                                                                border: 'none',
+                                                                borderRadius: 12
+                                                            }}
+                                                            title={previewContent.title}
+                                                        />
+                                                    ) : (
+                                                        <WebView
+                                                            source={{
+                                                                uri: `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(videoUrl)}`
+                                                            }}
+                                                            style={styles.previewWebView}
+                                                            startInLoadingState={true}
+                                                            renderLoading={() => (
+                                                                <View style={styles.previewLoadingContainer}>
+                                                                    <ActivityIndicator size="large" color="#3B82F6" />
+                                                                    <Text style={styles.previewLoadingText}>Loading preview...</Text>
+                                                                </View>
+                                                            )}
+                                                        />
+                                                    );
+                                                }
 
-                                            // For other types: Show message
-                                            return (
-                                                <View style={styles.previewEmptyState}>
-                                                    <Feather name="file" size={48} color="#D1D5DB" />
-                                                    <Text style={styles.previewEmptyText}>Preview not available for this file type</Text>
-                                                </View>
-                                            );
-                                        })()
-                                    ) : (
-                                        <View style={styles.previewEmptyState}>
-                                            <Feather name="alert-circle" size={48} color="#D1D5DB" />
-                                            <Text style={styles.previewEmptyText}>No preview available</Text>
-                                        </View>
-                                    )}
+                                                // For other types: Show message
+                                                return (
+                                                    <View style={styles.previewEmptyState}>
+                                                        <Feather name="file" size={48} color="#D1D5DB" />
+                                                        <Text style={styles.previewEmptyText}>Preview not available for this file type</Text>
+                                                    </View>
+                                                );
+                                            })()
+                                        ) : (
+                                            <View style={styles.previewEmptyState}>
+                                                <Feather name="alert-circle" size={48} color="#D1D5DB" />
+                                                <Text style={styles.previewEmptyText}>No preview available</Text>
+                                            </View>
+                                        )}
+                                    </View>
+
+                                    {/* Footer with actions */}
+                                    <View style={styles.previewFooter}>
+                                        <TouchableOpacity
+                                            onPress={() => setPreviewModalVisible(false)}
+                                            style={styles.previewFooterBtn}
+                                        >
+                                            <Text style={styles.previewFooterBtnText}>Close</Text>
+                                        </TouchableOpacity>
+                                    </View>
                                 </View>
+                            </View>
+                        </Modal>
 
-                                {/* Footer with actions */}
-                                <View style={styles.previewFooter}>
+                        {/* Success Modal */}
+                        <Modal visible={successModalVisible} animationType="fade" transparent={true}>
+                            <View style={styles.successModalOverlay}>
+                                <View style={styles.successModalContent}>
+                                    {/* Success Icon */}
+                                    <View style={styles.successIconContainer}>
+                                        <Feather name="check-circle" size={64} color="#10B981" />
+                                    </View>
+
+                                    {/* Title */}
+                                    <Text style={styles.successTitle}>{successMessage.title}</Text>
+
+                                    {/* Message */}
+                                    <Text style={styles.successMessage}>
+                                        {successMessage.count} item(s) deleted successfully.
+                                    </Text>
+
+                                    <Text style={styles.successSubMessage}>
+                                        Cleanup is happening in the background.
+                                    </Text>
+
+                                    {/* OK Button */}
                                     <TouchableOpacity
-                                        onPress={() => setPreviewModalVisible(false)}
-                                        style={styles.previewFooterBtn}
+                                        style={styles.successOkBtn}
+                                        onPress={() => setSuccessModalVisible(false)}
                                     >
-                                        <Text style={styles.previewFooterBtnText}>Close</Text>
+                                        <Text style={styles.successOkText}>OK</Text>
                                     </TouchableOpacity>
                                 </View>
                             </View>
-                        </View>
-                    </Modal>
+                        </Modal>
 
-                    {/* Success Modal */}
-                    <Modal visible={successModalVisible} animationType="fade" transparent={true}>
-                        <View style={styles.successModalOverlay}>
-                            <View style={styles.successModalContent}>
-                                {/* Success Icon */}
-                                <View style={styles.successIconContainer}>
-                                    <Feather name="check-circle" size={64} color="#10B981" />
-                                </View>
-
-                                {/* Title */}
-                                <Text style={styles.successTitle}>{successMessage.title}</Text>
-
-                                {/* Message */}
-                                <Text style={styles.successMessage}>
-                                    {successMessage.count} item(s) deleted successfully.
-                                </Text>
-
-                                <Text style={styles.successSubMessage}>
-                                    Cleanup is happening in the background.
-                                </Text>
-
-                                {/* OK Button */}
-                                <TouchableOpacity
-                                    style={styles.successOkBtn}
-                                    onPress={() => setSuccessModalVisible(false)}
-                                >
-                                    <Text style={styles.successOkText}>OK</Text>
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                    </Modal>
-
+                    </View>
                 </View>
-            </View>
-        </Modal>
+            </Modal>
 
-        {/* Course/Bucket Settings Modal */}
-        <CourseSettingsModal
-            visible={settingsModalVisible}
-            onClose={() => { setSettingsModalVisible(false); setSettingsItem(null); }}
-            item={settingsItem}
-            itemType={settingsItemType}
-            onSaveSuccess={() => {
-                // Refetch content and buckets after saving settings
-                fetchContent();
-                fetchBuckets();
-            }}
-        />
+            {/* Course/Bucket Settings Modal */}
+            <CourseSettingsModal
+                visible={settingsModalVisible}
+                onClose={() => { setSettingsModalVisible(false); setSettingsItem(null); }}
+                item={settingsItem}
+                itemType={settingsItemType}
+                onSaveSuccess={() => {
+                    // Refetch content and buckets after saving settings
+                    fetchContent();
+                    fetchBuckets();
+                }}
+            />
         </>
     );
 }
@@ -1310,6 +1310,8 @@ const styles = StyleSheet.create({
     headerTitleRow: {
         flexDirection: 'row',
         alignItems: 'center',
+        flex: 1,
+        marginRight: 8,
     },
     headerIcon: {
         width: 40,
@@ -1321,9 +1323,10 @@ const styles = StyleSheet.create({
         marginRight: 12,
     },
     headerTitle: {
-        fontSize: 22,
+        fontSize: 20,
         fontFamily: 'Poppins_700Bold',
         color: '#FFF',
+        flex: 1,
     },
     closeBtn: {
         width: 36,
@@ -1365,8 +1368,8 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         backgroundColor: '#F9FAFB',
         borderRadius: 16,
-        paddingVertical: 14,
-        paddingHorizontal: 16,
+        paddingVertical: 12,
+        paddingHorizontal: 8,
         borderWidth: 2,
         borderColor: 'transparent',
         position: 'relative',
@@ -1381,18 +1384,18 @@ const styles = StyleSheet.create({
         elevation: 3,
     },
     learningPathIcon: {
-        width: 36,
-        height: 36,
+        width: 32,
+        height: 32,
         borderRadius: 10,
         justifyContent: 'center',
         alignItems: 'center',
-        marginRight: 12,
+        marginRight: 8,
     },
     learningPathTextContainer: {
         flex: 1,
     },
     learningPathText: {
-        fontSize: 14,
+        fontSize: 12,
         fontFamily: 'Poppins_600SemiBold',
         color: '#374151',
     },
@@ -1659,11 +1662,11 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         gap: 4,
         paddingVertical: 6,
-        paddingHorizontal: 10,
+        paddingHorizontal: 8,
         borderRadius: 8,
     },
     actionLabel: {
-        fontSize: 11,
+        fontSize: 10,
         fontWeight: '600',
     },
 

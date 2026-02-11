@@ -1034,7 +1034,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
                     <>
                         <Video
                             ref={videoRef}
-                            style={StyleSheet.absoluteFill}
+                            style={{ width: '100%', height: '100%' }}
                             source={{ uri: contentUrl }}
                             useNativeControls
                             resizeMode={ResizeMode.CONTAIN}
@@ -1731,20 +1731,19 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_500Medium',
     },
     videoContainer: {
-        width: Platform.OS === 'web' ? '100%' : width,
-        height: Platform.OS === 'web' ? undefined : width * 0.5625,
+        width: '100%',
+        height: Platform.OS === 'web' ? '50vh' : width * 0.5625,
         backgroundColor: '#000',
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.3,
         shadowRadius: 4.65,
         elevation: 8,
+        position: 'relative',
         ...(Platform.OS === 'web' && {
             maxWidth: 1200,
             alignSelf: 'center',
-            aspectRatio: 16 / 9,
-            minHeight: 300,
-            maxHeight: 600,
+            minHeight: 350,
         }),
     },
     documentContainer: {
@@ -1800,6 +1799,7 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(245, 158, 11, 0.1)', // Gold divider
         marginTop: 10,
+        flexShrink: 0,
         ...(Platform.OS === 'web' && {
             justifyContent: 'center',
             width: '100%',
@@ -1855,6 +1855,8 @@ const styles = StyleSheet.create({
             width: '100%',
             maxWidth: 1200,
             alignSelf: 'center',
+            maxHeight: 200,
+            overflow: 'auto',
         }),
     },
     transcriptText: {

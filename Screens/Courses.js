@@ -15,6 +15,7 @@ import { MaterialCommunityIcons, Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import CoursePath from "../Components/CoursePath";
 import SelfLearningView from "../Components/SelfLearningView";
+import LessonView from "../Components/LessonView";
 import NotificationBell from "../Components/NotificationBell";
 import QuizSection from "../Components/QuizSection";
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -786,12 +787,14 @@ export default function Courses({ userEmail = "user" }) {
                 {activeTab === 'courses' && <AllCourses />}
             </View>
 
-            {/* VIDEO PLAYER MODAL & AI CHAT FOR SELF LEARNING */}
-            <VideoPlayerModal
-                visible={modalVisible}
-                videoData={currentVideo}
-                onClose={() => setModalVisible(false)}
-            />
+            {/* LESSON VIEW FOR SELF LEARNING (with progress tracking) */}
+            {currentVideo && modalVisible && (
+                <LessonView
+                    lesson={currentVideo}
+                    onClose={() => { setModalVisible(false); setCurrentVideo(null); }}
+                    userEmail={userEmail}
+                />
+            )}
 
             <AskAIChatModal
                 visible={chatVisible}

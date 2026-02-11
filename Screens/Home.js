@@ -196,11 +196,13 @@ function NotificationDetailModal({ visible, notification, onClose }) {
 
 // --- NEW: VIDEO PLAYER MODAL ---
 // --- NEW: VIDEO PLAYER MODAL ---
-function VideoPlayerModal({ visible, videoData, onClose }) {
+function VideoPlayerModal({ visible, videoData, userEmail, onClose }) {
   const [activeTab, setActiveTab] = useState('transcript');
   const [quizIndex, setQuizIndex] = useState(0);
   const [score, setScore] = useState(0);
   const [showResult, setShowResult] = useState(false);
+  const videoRef = useRef(null);
+  const progressTrackTimer = useRef(null);
 
   // Translation State
   const [translationLang, setTranslationLang] = useState('English');
@@ -219,6 +221,32 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
     // International Languages
     "Spanish", "French", "German", "Chinese", "Japanese", "Arabic", "Portuguese", "Russian"
   ];
+
+  // Track progress periodically while watching from Jump Back In
+  const handlePlaybackStatusUpdate = (status) => {
+    if (!status.isLoaded || !videoData?.id || !userEmail) return;
+    if (!status.isPlaying) return;
+
+    const position = status.positionMillis / 1000;
+    const duration = status.durationMillis ? status.durationMillis / 1000 : 0;
+    if (duration <= 0) return;
+
+    // Throttle: only send update every 10 seconds
+    const now = Date.now();
+    if (progressTrackTimer.current && now - progressTrackTimer.current < 10000) return;
+    progressTrackTimer.current = now;
+
+    const formData = new FormData();
+    formData.append("user_email", userEmail);
+    formData.append("node_id", videoData.id);
+    formData.append("video_position_seconds", position.toString());
+    formData.append("video_duration_seconds", duration.toString());
+
+    fetch(`${API_URL}/api/v1/learning-path/track-video-progress`, {
+      method: "POST",
+      body: formData,
+    }).catch(() => {});
+  };
 
   if (!visible || !videoData) return null;
 
@@ -271,7 +299,7 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
   const hasQuiz = videoData.quiz && videoData.quiz.length > 0;
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" statusBarTranslucent={true}>
       <View style={{ flex: 1, backgroundColor: '#000' }}>
         {/* CLOSE BUTTON */}
         <TouchableOpacity style={styles.closeVideoBtn} onPress={onClose}>
@@ -286,11 +314,14 @@ function VideoPlayerModal({ visible, videoData, onClose }) {
           />
         ) : (
           <Video
+            ref={videoRef}
             source={{ uri: videoData.videoUrl }}
             style={{ width: '100%', height: 250, marginTop: 40 }}
             useNativeControls
             resizeMode={ResizeMode.CONTAIN}
             shouldPlay
+            positionMillis={videoData.resumePosition ? videoData.resumePosition * 1000 : 0}
+            onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
             onError={(e) => console.log("Video Error:", e)}
             onFullscreenUpdate={handleVideoFullscreenUpdate}
           />
@@ -1073,6 +1104,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail }) {
 
   const [assignedProctoring, setAssignedProctoring] = useState([]);
   const [pathNodes, setPathNodes] = useState([]);
+  const [hasRealWatchHistory, setHasRealWatchHistory] = useState(false);
   const [crucialNotif, setCrucialNotif] = useState(null);
   const acknowledgedNotifIds = useRef(new Set()); // Track acknowledged notifications locally
   const [goalModalVisible, setGoalModalVisible] = useState(false);
@@ -1119,14 +1151,32 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail }) {
     navigation.navigate("CoursesTab");
   };
 
-  // FETCH PATH NODES
+  // FETCH RECENTLY VIEWED (Jump Back In) - per-user based on real watch history
   const fetchPathNodes = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/v1/content/path-nodes`);
-      const data = await response.json();
-      setPathNodes(data.courses || (Array.isArray(data) ? data : []));
+      // Get email - either from props or AsyncStorage
+      const email = userEmail || await AsyncStorage.getItem('userEmail');
+      if (email) {
+        const response = await fetch(`${API_URL}/api/v1/learning-path/recently-viewed/${encodeURIComponent(email)}?limit=10`);
+        const data = await response.json();
+        if (data.status === 'success' && data.items && data.items.length > 0) {
+          // Real watch history found - show it
+          setPathNodes(data.items);
+          setHasRealWatchHistory(true);
+          return;
+        }
+        // No watch history yet - show empty state (don't show fake data)
+        setPathNodes([]);
+        setHasRealWatchHistory(false);
+        return;
+      }
+      // No email yet - keep empty, will re-fetch when userEmail prop arrives
+      setPathNodes([]);
+      setHasRealWatchHistory(false);
     } catch (error) {
-      console.error("Error fetching path:", error);
+      console.error("Error fetching recently viewed:", error);
+      setPathNodes([]);
+      setHasRealWatchHistory(false);
     }
   };
 
@@ -1279,6 +1329,8 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail }) {
   useEffect(() => {
     if (userEmail) {
       fetchNotifications();
+      // Re-fetch recently viewed now that we have the user email
+      fetchPathNodes();
     }
   }, [userEmail]);
 
@@ -1476,7 +1528,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail }) {
           }}
         />
 
-        <CourseList items={pathNodes} onPlay={(item) => setSelectedVideo(item)} />
+        <CourseList items={pathNodes} hasRealWatchHistory={hasRealWatchHistory} onPlay={(item) => setSelectedVideo(item)} />
         <NewArrivals
           news={newsData}
           onOpenNews={(news) => {
@@ -1521,7 +1573,8 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail }) {
       <VideoPlayerModal
         visible={!!selectedVideo}
         videoData={selectedVideo}
-        onClose={() => setSelectedVideo(null)}
+        userEmail={userEmail}
+        onClose={() => { setSelectedVideo(null); fetchPathNodes(); }}
       />
 
       <QuizTakingModal
@@ -1934,48 +1987,101 @@ function AIToolsSection({ onOpenTool }) {
   )
 }
 
-function CourseList({ items, onPlay }) {
+function CourseList({ items, hasRealWatchHistory, onPlay }) {
   const { t } = useLanguage();
 
-  // Use passed items or fallback to empty array
-  const displayItems = (items && items.length > 0) ? items : [];
+  const formatResumeTime = (seconds) => {
+    if (!seconds || seconds <= 0) return null;
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+  };
 
   return (
     <View style={styles.sectionContainer}>
       <View style={[styles.sectionHeader, { paddingHorizontal: 20 }]}>
         <Text style={styles.sectionTitle}>{t('jumpBackIn')}</Text>
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20, paddingBottom: 20 }}>
-        {displayItems.map((item, index) => (
-          <Animated.View key={item.id || index} entering={FadeInRight.delay(600 + index * 100)}>
-            <TouchableOpacity style={styles.courseCard} onPress={() => item.videoUrl && onPlay(item)}>
-              <Image
-                source={{ uri: "https://images.unsplash.com/photo-1497935586351-b67a49e012bf?q=80&w=2000" }} // Placeholder or thumbnail 
-                style={styles.courseImg}
-              />
-              <BlurView intensity={20} tint="dark" style={styles.playOverlay}>
-                <Ionicons name="play-circle" size={40} color="rgba(255,255,255,0.9)" />
-              </BlurView>
-              <View style={styles.courseMeta}>
-                <Text style={styles.courseTitle} numberOfLines={1}>{item.title}</Text>
-                <View style={styles.progressRow}>
-                  <View style={styles.progressBar}>
-                    <View style={[styles.progressFill, { width: `${item.xp ? 20 : 0}%` }]} />
-                  </View>
-                  <Text style={styles.durationText}>{item.xp || 50} XP</Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          </Animated.View>
-        ))}
-        {displayItems.length === 0 && (
-          <View style={{ padding: 20 }}>
-            <Text style={{ color: '#6B7280' }}>No active courses. Start your journey!</Text>
+
+      {/* Empty state - no watch history yet */}
+      {!hasRealWatchHistory && (
+        <View style={{ paddingHorizontal: 20, paddingBottom: 20 }}>
+          <View style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 16, padding: 24, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
+            <Ionicons name="play-circle-outline" size={40} color="#4B5563" />
+            <Text style={{ color: '#9CA3AF', fontSize: 14, fontFamily: 'Poppins_500Medium', marginTop: 10, textAlign: 'center' }}>
+              Nothing here yet
+            </Text>
+            <Text style={{ color: '#6B7280', fontSize: 12, fontFamily: 'Poppins_400Regular', marginTop: 4, textAlign: 'center' }}>
+              Start watching a course and it'll appear here
+            </Text>
           </View>
-        )}
-      </ScrollView>
+        </View>
+      )}
+
+      {/* Real watch history */}
+      {hasRealWatchHistory && items.length > 0 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20, paddingBottom: 20 }}>
+          {items.map((item, index) => {
+            const progressPct = item.progress_percent ?? 0;
+            const resumeTime = formatResumeTime(item.resume_position);
+            const isCompleted = item.completed || progressPct >= 100;
+
+            return (
+              <Animated.View key={item.id || index} entering={FadeInRight.delay(600 + index * 100)}>
+                <TouchableOpacity
+                  style={styles.courseCard}
+                  onPress={() => (item.videoUrl || item.video_url) && onPlay({ ...item, videoUrl: item.videoUrl || item.video_url, resumePosition: item.resume_position || 0 })}
+                >
+                  <Image
+                    source={{ uri: item.thumbnail || "https://images.unsplash.com/photo-1497935586351-b67a49e012bf?q=80&w=2000" }}
+                    style={styles.courseImg}
+                  />
+                  <BlurView intensity={20} tint="dark" style={styles.playOverlay}>
+                    <Ionicons name={isCompleted ? "checkmark-circle" : "play-circle"} size={40} color={isCompleted ? "#10B981" : "rgba(255,255,255,0.9)"} />
+                  </BlurView>
+
+                  {/* Resume time badge */}
+                  {resumeTime && !isCompleted && (
+                    <View style={styles.resumeBadge}>
+                      <Ionicons name="time-outline" size={10} color="#FFF" />
+                      <Text style={styles.resumeBadgeText}>{resumeTime}</Text>
+                    </View>
+                  )}
+
+                  {/* Learning path type tag */}
+                  <View style={[
+                    styles.pathTypeBadge,
+                    { backgroundColor: item.learning_path_type === 'self_learning' ? 'rgba(16, 185, 129, 0.9)' : 'rgba(99, 102, 241, 0.9)' }
+                  ]}>
+                    <Ionicons
+                      name={item.learning_path_type === 'self_learning' ? 'book-outline' : 'trending-up-outline'}
+                      size={10}
+                      color="#FFF"
+                    />
+                    <Text style={styles.pathTypeBadgeText}>
+                      {item.learning_path_type === 'self_learning' ? 'Self Learning' : 'Career'}
+                    </Text>
+                  </View>
+
+                  <View style={styles.courseMeta}>
+                    <Text style={styles.courseTitle} numberOfLines={1}>{item.title}</Text>
+                    <View style={styles.progressRow}>
+                      <View style={styles.progressBar}>
+                        <View style={[styles.progressFill, { width: `${Math.min(100, progressPct)}%`, backgroundColor: isCompleted ? '#10B981' : '#F59E0B' }]} />
+                      </View>
+                      <Text style={styles.durationText}>
+                        {isCompleted ? '✓ Done' : `${Math.round(progressPct)}%`}
+                      </Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              </Animated.View>
+            );
+          })}
+        </ScrollView>
+      )}
     </View>
-  )
+  );
 }
 
 function NewArrivals({ news = [], onOpenNews }) {
@@ -2380,6 +2486,10 @@ const styles = StyleSheet.create({
   courseCard: { width: 220, marginRight: 20, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.6)', overflow: 'hidden', borderWidth: 1, borderColor: '#FFF', shadowColor: "#D97706", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10 },
   courseImg: { width: '100%', height: 130 },
   playOverlay: { position: 'absolute', top: 0, left: 0, right: 0, height: 130, justifyContent: 'center', alignItems: 'center' },
+  resumeBadge: { position: 'absolute', top: 8, right: 8, flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8 },
+  resumeBadgeText: { fontSize: 9, color: '#FFF', fontFamily: 'Poppins_600SemiBold' },
+  pathTypeBadge: { position: 'absolute', top: 8, left: 8, flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  pathTypeBadgeText: { fontSize: 9, color: '#FFF', fontFamily: 'Poppins_600SemiBold' },
   courseMeta: { padding: 16 },
   courseTitle: { fontSize: 15, fontFamily: "Poppins_600SemiBold", color: "#1E293B", marginBottom: 10 },
   progressRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
