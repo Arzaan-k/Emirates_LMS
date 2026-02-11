@@ -716,6 +716,19 @@ export default function ContentLibraryModal({ visible, onClose }) {
                         </View>
                     )}
 
+                    {/* Cross-Displayed Badge */}
+                    {(folder.show_in_both_paths || folder.cross_displayed) && (
+                        <View style={[styles.linearBadge, { backgroundColor: '#DBEAFE', marginRight: 6 }]}>
+                            <Feather name="copy" size={10} color="#2563EB" />
+                            <Text style={[styles.linearBadgeText, { color: '#2563EB' }]}>
+                                {folder.cross_displayed
+                                    ? `From ${folder.original_learning_path_type === 'career_progression' ? 'Career' : 'Self Learning'}`
+                                    : 'Shared'
+                                }
+                            </Text>
+                        </View>
+                    )}
+
                     {/* Item Count Badge */}
                     <View style={[
                         styles.folderBadge,
