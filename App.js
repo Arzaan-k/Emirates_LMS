@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as SecureStore from "expo-secure-store";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { usePreventScreenCapture } from "expo-screen-capture";
 import Intro from "./Screens/Intro";
 import {
   useFonts,
@@ -92,6 +93,9 @@ function AuthGate({ navigation }) {
 }
 
 function App() {
+  // Prevent screenshots and screen recordings on all screens (native only)
+  usePreventScreenCapture();
+
   const [fontsLoaded] = useFonts({
     Poppins_600SemiBold,
     Poppins_300Light,

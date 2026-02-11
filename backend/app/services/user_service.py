@@ -828,15 +828,17 @@ class UserService:
         """Get user count grouped by store."""
         return self.user_repo.get_user_count_by_store()
 
-    def check_role_advancement_eligibility(self, user_email: str) -> Dict[str, Any]:
+    def check_role_advancement_eligibility(self, user_email: str, override_role: str = None) -> Dict[str, Any]:
         """
         Check if user is eligible for role advancement.
-        
+
         Eligibility is based on completing all courses assigned to the user's current level
         via access rules (configured in admin panel).
+
+        override_role: when set, uses this role instead of the user's DB role (for exam node clicks).
         """
         user = self.get_user_by_email_optional(user_email)
-        
+
         if not user:
             return {
                 "eligible": False,
@@ -845,8 +847,8 @@ class UserService:
                 "requirements_met": [],
                 "requirements_pending": []
             }
-        
-        current_role = user.role or "Waffler"
+
+        current_role = override_role or user.role or "Waffler"
         level_index = self.get_user_level_index(current_role)
         
         # Check if already at max level
@@ -906,26 +908,36 @@ class UserService:
             "exam_questions": 10,
             "exam_time_minutes": 15,
             "pass_percent": 70,
-            "proctored": False
+            "proctored": True
         }
         
         if next_role:
             try:
                 from app.repositories.content_repository import ProgressionLevelRepository
                 # Local import to prevent circular dependency
-                
+
                 level_repo = ProgressionLevelRepository(self.db)
                 target_level = level_repo.get_by_name(next_role)
-                
+
                 if target_level:
-                    # Use getattr to be safe if migration hasn't run yet (though SQLAlchemy might still error on query)
-                    # The try/catch block handles any DB schema mismatch errors safely
                     exam_config["exam_questions"] = getattr(target_level, "exam_questions", 10) or 10
                     exam_config["exam_time_minutes"] = getattr(target_level, "exam_time_minutes", 15) or 15
                     exam_config["pass_percent"] = getattr(target_level, "pass_percent", 70) or 70
-                    exam_config["proctored"] = getattr(target_level, "proctored", False)
+                    exam_config["proctored"] = getattr(target_level, "proctored", True)
             except Exception as e:
                 logger.warning(f"Could not load dynamic exam config for {next_role} (using defaults): {e}")
+
+        # Override exam_questions with the actual stored question count (admin-managed bank)
+        # This ensures the eligibility modal shows the real number, not the level config default
+        try:
+            from app.models.quiz import LevelExamQuestion
+            stored_exam = self.db.query(LevelExamQuestion).filter(
+                LevelExamQuestion.level_name == current_role
+            ).first()
+            if stored_exam and stored_exam.questions and len(stored_exam.questions) > 0:
+                exam_config["exam_questions"] = len(stored_exam.questions)
+        except Exception as e:
+            logger.warning(f"Could not load stored question count for {current_role}: {e}")
 
         return {
             "eligible": eligible,

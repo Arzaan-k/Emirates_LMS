@@ -1450,13 +1450,15 @@ async def get_content_library(db: Session = Depends(get_db)):
                 "parent_bucket_id": get_attr(bucket, 'parent_bucket_id'),
                 "folder_path": get_attr(bucket, 'folder_path'),
                 "learning_path_type": filter_path_type,
+                "original_learning_path_type": bucket_path_type,
                 "color": get_attr(bucket, 'color'),
                 "icon": get_attr(bucket, 'icon'),
                 "order_index": get_attr(bucket, 'order_index', 0),
                 "is_linear": get_attr(bucket, 'is_linear', False) or False,
                 "assigned_users": get_attr(bucket, 'assigned_users', []) or [],
+                "show_in_both_paths": get_attr(bucket, 'show_in_both_paths', False) or False,
                 "thumbnail": get_attr(bucket, 'thumbnail'),
-                "items": bucket_items,
+                "items": sorted(bucket_items, key=lambda x: x.get('order_index', 0) or 0),
                 "children": children,
                 "has_children": len(children) > 0,
                 "item_count": len(bucket_items),
@@ -1476,7 +1478,17 @@ async def get_content_library(db: Session = Depends(get_db)):
             if get_attr(b, 'learning_path_type') == 'self_learning'
         ]
 
-        # Build trees for career progression buckets only
+        # Find cross-displayed buckets (show_in_both_paths == True)
+        career_cross_display = [
+            b for b in root_buckets
+            if get_attr(b, 'learning_path_type') == 'career_progression' and (get_attr(b, 'show_in_both_paths', False) or False)
+        ]
+        self_cross_display = [
+            b for b in root_buckets
+            if get_attr(b, 'learning_path_type') == 'self_learning' and (get_attr(b, 'show_in_both_paths', False) or False)
+        ]
+
+        # Build trees for career progression buckets
         career_progression_buckets = []
         for root in career_root_buckets:
             root_id = get_attr(root, 'id')
@@ -1484,13 +1496,33 @@ async def get_content_library(db: Session = Depends(get_db)):
             if career_tree and career_tree.get('total_count', 0) > 0:
                 career_progression_buckets.append(career_tree)
 
-        # Build trees for self learning buckets only
+        # Also add self-learning buckets that are cross-displayed INTO career progression
+        for root in self_cross_display:
+            root_id = get_attr(root, 'id')
+            cross_tree = build_bucket_tree(root_id, "self_learning")
+            if cross_tree and cross_tree.get('total_count', 0) > 0:
+                cross_tree['cross_displayed'] = True
+                cross_tree['learning_path_type'] = 'career_progression'
+                cross_tree['original_learning_path_type'] = 'self_learning'
+                career_progression_buckets.append(cross_tree)
+
+        # Build trees for self learning buckets
         self_learning_buckets = []
         for root in self_learning_root_buckets:
             root_id = get_attr(root, 'id')
             self_tree = build_bucket_tree(root_id, "self_learning")
             if self_tree and self_tree.get('total_count', 0) > 0:
                 self_learning_buckets.append(self_tree)
+
+        # Also add career progression buckets that are cross-displayed INTO self learning
+        for root in career_cross_display:
+            root_id = get_attr(root, 'id')
+            cross_tree = build_bucket_tree(root_id, "career_progression")
+            if cross_tree and cross_tree.get('total_count', 0) > 0:
+                cross_tree['cross_displayed'] = True
+                cross_tree['learning_path_type'] = 'self_learning'
+                cross_tree['original_learning_path_type'] = 'career_progression'
+                self_learning_buckets.append(cross_tree)
 
         # Sort buckets by order_index then name
         career_progression_buckets.sort(key=lambda x: (x.get('order_index', 0), x.get('name', '').lower()))

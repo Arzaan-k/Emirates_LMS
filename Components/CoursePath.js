@@ -425,6 +425,8 @@ export default function CoursePath(props) {
     const [showAdvancementExam, setShowAdvancementExam] = useState(false);
     const [isEligibleForAdvancement, setIsEligibleForAdvancement] = useState(false);
     const [advancementTarget, setAdvancementTarget] = useState(null);
+    const [selectedExamRole, setSelectedExamRole] = useState(null); // Role of the tapped EXAM node
+    const [isReappearExam, setIsReappearExam] = useState(false); // True when user retakes a past-level exam
 
 
     // Animation State
@@ -911,6 +913,14 @@ export default function CoursePath(props) {
 
         // [NEW] Exam Node Handler
         if (item.type === 'EXAM') {
+            const examRole = item.roleTarget || null;
+            const userCurrentLevel = userProgress?.current_level || 'Waffler';
+            const examLevelIdx = HIERARCHY.indexOf(examRole);
+            const userLevelIdx = HIERARCHY.indexOf(userCurrentLevel);
+            // Reappear = user has already advanced past this exam's level
+            const reappear = examLevelIdx >= 0 && userLevelIdx > examLevelIdx;
+            setSelectedExamRole(examRole);
+            setIsReappearExam(reappear);
             setShowAdvancementExam(true);
             return;
         }
@@ -978,7 +988,7 @@ export default function CoursePath(props) {
                         </View>
                         <View style={{ flex: 1 }}>
                             <Text style={styles.progressTitle}>
-                                {HIERARCHY.includes(userProgress.current_level) ? userProgress.current_level : 'Waffler'}
+                                {userProgress.current_level || 'Waffler'}
                             </Text>
                             <Text style={styles.progressSubtitle}>
                                 {userProgress.completed_nodes || 0} courses completed
@@ -1068,9 +1078,13 @@ export default function CoursePath(props) {
             <RoleAdvancementExam
                 visible={showAdvancementExam}
                 userEmail={userEmail}
+                overrideCurrentRole={selectedExamRole}
+                isReappear={isReappearExam}
                 onComplete={handleAdvancementComplete}
                 onClose={() => {
                     setShowAdvancementExam(false);
+                    setSelectedExamRole(null);
+                    setIsReappearExam(false);
                     checkAdvancementEligibility(); // Re-check in case exam was taken
                 }}
             />

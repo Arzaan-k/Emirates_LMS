@@ -342,7 +342,7 @@ const TabButton = ({ title, active, onPress, badge }) => (
     </TouchableOpacity>
 );
 
-export default function LessonView({ lesson, onClose, userEmail = "user" }) {
+export default function LessonView({ lesson, onClose, userEmail = "user", allowFastForward = false, isSelfLearning = false }) {
     const [activeTab, setActiveTab] = useState('transcript');
     const [currentQuizIdx, setCurrentQuizIdx] = useState(0);
     const [quizScore, setQuizScore] = useState(0);
@@ -369,6 +369,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
     const [midQuizzesPassed, setMidQuizzesPassed] = useState([]);
     const [isVideoPlaying, setIsVideoPlaying] = useState(true);
     const [isLoading, setIsLoading] = useState(false);
+    const [videoBuffering, setVideoBuffering] = useState(true);
 
     // Track which mid-quiz intervals have been shown
     const shownMidQuizTimes = useRef(new Set());
@@ -489,9 +490,9 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
     const handleFullscreenUpdate = async ({ fullscreenUpdate }) => {
         switch (fullscreenUpdate) {
             case 1: // FULLSCREEN_UPDATE_PLAYER_WILL_PRESENT
-                // Unlock orientation to allow landscape when entering fullscreen (native only)
+                // Lock to landscape when entering fullscreen (native only)
                 if (Platform.OS !== 'web') {
-                    await ScreenOrientation.unlockAsync();
+                    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
                 }
                 setIsFullscreen(true);
                 break;
@@ -512,13 +513,13 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
             setVideoProgress(100);
             highestServerPercent.current = 100;
 
-            // Update server
+            // Step 1: Save 100% progress to VideoProgress table
             try {
                 const formData = new FormData();
                 formData.append("user_email", userEmail);
                 formData.append("node_id", lesson.id);
                 formData.append("video_position_seconds", "0");
-                formData.append("video_duration_seconds", "1"); // Dummy duration for documents
+                formData.append("video_duration_seconds", "1");
                 formData.append("explicit_progress_percent", "100");
 
                 await fetch(`${API_URL}/learning-path/track-video-progress`, {
@@ -528,6 +529,9 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
             } catch (err) {
                 console.log("Error updating document progress:", err);
             }
+
+            // Step 2: Trigger completion to create CourseCompletion record
+            attemptVideoOnlyCompletion();
         }
     };
 
@@ -550,12 +554,15 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
                 setRequirements(data.requirements);
             }
             // Detect if this content has a quiz (from server response)
-            if (data.has_quiz !== undefined) {
+            const hasNoTranscript = !lesson.transcript || lesson.transcript.trim().length === 0;
+            if (isSelfLearning && hasNoTranscript) {
+                // Self-learning with no transcript → skip quiz, video-only completion
+                setHasQuiz(false);
+            } else if (data.has_quiz !== undefined) {
                 setHasQuiz(data.has_quiz);
             } else {
                 // Fallback: check lesson data directly
                 const quizAvailable = lesson.quiz && Array.isArray(lesson.quiz) && lesson.quiz.length > 0;
-                const transcriptAvailable = lesson.transcript && lesson.transcript.trim().length > 0;
                 setHasQuiz(quizAvailable || false);
             }
         } catch (err) {
@@ -669,6 +676,9 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
     // Handle video playback status
     const handleVideoPlaybackStatus = async (status) => {
         if (!status.isLoaded) return;
+
+        // Clear buffering spinner once video is loaded
+        if (videoBuffering) setVideoBuffering(false);
 
         const position = status.positionMillis / 1000;
         const duration = status.durationMillis / 1000;
@@ -1045,29 +1055,75 @@ export default function LessonView({ lesson, onClose, userEmail = "user" }) {
                             onFullscreenUpdate={handleFullscreenUpdate}
                         />
 
-                        {/* Speed Control Overlay */}
-                        <TouchableOpacity
-                            onPress={toggleSpeed}
-                            style={{
-                                position: 'absolute',
-                                top: 10,
-                                right: 10,
-                                backgroundColor: 'rgba(0,0,0,0.6)',
-                                paddingHorizontal: 10,
-                                paddingVertical: 5,
-                                borderRadius: 15,
-                                borderWidth: 1,
-                                borderColor: 'rgba(255,255,255,0.2)',
-                                flexDirection: 'row',
+                        {/* Video buffering overlay */}
+                        {videoBuffering && (
+                            <View style={{
+                                ...StyleSheet.absoluteFillObject,
+                                backgroundColor: '#0F172A',
+                                justifyContent: 'center',
                                 alignItems: 'center',
-                                zIndex: 10
-                            }}
-                        >
-                            <Feather name="fast-forward" size={12} color="#FBBF24" style={{ marginRight: 4 }} />
-                            <Text style={{ color: '#FFF', fontFamily: 'Poppins_600SemiBold', fontSize: 12 }}>
-                                {playbackSpeed.toFixed(1)}x
-                            </Text>
-                        </TouchableOpacity>
+                                zIndex: 5,
+                            }}>
+                                <ActivityIndicator size="large" color="#F59E0B" />
+                                <Text style={{ color: '#94A3B8', fontSize: 13, marginTop: 10, fontFamily: 'Poppins_400Regular' }}>
+                                    Loading video...
+                                </Text>
+                            </View>
+                        )}
+
+                        {/* Speed Control Overlay — only shown when admin has enabled fast-forward */}
+                        {allowFastForward && (
+                            <TouchableOpacity
+                                onPress={toggleSpeed}
+                                style={{
+                                    position: 'absolute',
+                                    top: 10,
+                                    right: 10,
+                                    backgroundColor: 'rgba(0,0,0,0.6)',
+                                    paddingHorizontal: 10,
+                                    paddingVertical: 5,
+                                    borderRadius: 15,
+                                    borderWidth: 1,
+                                    borderColor: 'rgba(255,255,255,0.2)',
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    zIndex: 10
+                                }}
+                            >
+                                <Feather name="fast-forward" size={12} color="#FBBF24" style={{ marginRight: 4 }} />
+                                <Text style={{ color: '#FFF', fontFamily: 'Poppins_600SemiBold', fontSize: 12 }}>
+                                    {playbackSpeed.toFixed(1)}x
+                                </Text>
+                            </TouchableOpacity>
+                        )}
+
+                        {/* Fullscreen / Landscape Button */}
+                        {Platform.OS !== 'web' && (
+                            <TouchableOpacity
+                                onPress={async () => {
+                                    if (videoRef.current) {
+                                        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+                                        await videoRef.current.presentFullscreenPlayer();
+                                    }
+                                }}
+                                style={{
+                                    position: 'absolute',
+                                    bottom: 10,
+                                    right: 10,
+                                    backgroundColor: 'rgba(0,0,0,0.55)',
+                                    width: 34,
+                                    height: 34,
+                                    borderRadius: 8,
+                                    justifyContent: 'center',
+                                    alignItems: 'center',
+                                    zIndex: 10,
+                                    borderWidth: 1,
+                                    borderColor: 'rgba(255,255,255,0.15)',
+                                }}
+                            >
+                                <MaterialCommunityIcons name="fullscreen" size={20} color="#FFF" />
+                            </TouchableOpacity>
+                        )}
                     </>
                 );
             } else {
