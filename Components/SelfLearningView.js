@@ -47,7 +47,7 @@ const CircularProgress = ({ size = 36, strokeWidth = 3, progress = 0, color = TH
     return (
         <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
             <Svg width={size} height={size}>
-                <G rotation="-90" origin={`${size / 2}, ${size / 2}`}>
+                <G transform={`rotate(-90, ${size / 2}, ${size / 2})`}>
                     <Circle cx={size / 2} cy={size / 2} r={radius} stroke="#E2E8F0" strokeWidth={strokeWidth} fill="transparent" />
                     <Circle cx={size / 2} cy={size / 2} r={radius} stroke={isCompleted ? THEME.green : color} strokeWidth={strokeWidth} fill="transparent" strokeDasharray={circumference} strokeDashoffset={strokeDashoffset} strokeLinecap="round" />
                 </G>
@@ -63,7 +63,7 @@ const CircularProgress = ({ size = 36, strokeWidth = 3, progress = 0, color = TH
     );
 };
 
-export default function SelfLearningView({ userEmail = 'user', onOpenCourse }) {
+export default function SelfLearningView({ userEmail = 'user', onOpenCourse, refreshKey = 0 }) {
     const [allBuckets, setAllBuckets] = useState([]); // Flat list of all buckets
     const [hierarchy, setHierarchy] = useState([]); // Root level buckets
     const [loading, setLoading] = useState(true);
@@ -82,6 +82,11 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse }) {
     useEffect(() => {
         fetchData();
     }, []);
+
+    // Refresh data when a lesson is closed (refreshKey incremented by parent)
+    useEffect(() => {
+        if (refreshKey > 0) fetchData();
+    }, [refreshKey]);
 
     const fetchData = async () => {
         try {
@@ -238,7 +243,7 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse }) {
                     </TouchableOpacity>
                     
                     {currentPath.map((segment, idx) => (
-                        <React.Fragment key={segment.id}>
+                        <React.Fragment key={`${segment.id}_${idx}`}>
                             <Feather name="chevron-right" size={14} color="#94A3B8" />
                             <TouchableOpacity style={styles.pathSegment} onPress={() => goToPathIndex(idx)}>
                                 <Text style={[styles.pathText, idx === currentPath.length - 1 && styles.pathTextActive]}>

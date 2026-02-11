@@ -45,25 +45,31 @@ export default function Hierarchy({ navigation, route }) {
             const data = await res.json();
             if (Array.isArray(data) && data.length > 0) {
                 // Add bg color based on color if not present
+                const userRole = (userProfile.role || '').toLowerCase().trim();
                 const processedData = data.map(item => ({
                     ...item,
-                    bg: item.bg || `${item.color}20`, // Use color with 20% opacity as bg
-                    current: item.role === userProfile.role
+                    bg: item.bg || `${item.color}20`,
+                    current: (item.role || '').toLowerCase() === userRole ||
+                        (item.name || '').toLowerCase() === userRole
                 }));
                 setHierarchy(processedData);
             } else {
                 // Use fallback with current user marked
+                const fallbackUserRole = (userProfile.role || '').toLowerCase().trim();
                 setHierarchy(FALLBACK_HIERARCHY.map(item => ({
                     ...item,
-                    current: item.role === userProfile.role
+                    current: (item.role || '').toLowerCase() === fallbackUserRole ||
+                        (item.name || '').toLowerCase() === fallbackUserRole
                 })));
             }
         } catch (e) {
             console.error('Error fetching hierarchy:', e);
             // Use fallback
+            const errUserRole = (userProfile.role || '').toLowerCase().trim();
             setHierarchy(FALLBACK_HIERARCHY.map(item => ({
                 ...item,
-                current: item.role === userProfile.role
+                current: (item.role || '').toLowerCase() === errUserRole ||
+                    (item.name || '').toLowerCase() === errUserRole
             })));
         } finally {
             setLoading(false);
