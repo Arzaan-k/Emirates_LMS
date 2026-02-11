@@ -37,20 +37,31 @@ async def get_self_learning_buckets(
     Get all self-learning buckets (folders) visible to a user.
     Returns buckets with course counts and user progress.
     """
-    # Get all active self-learning buckets
+    # Get all active self-learning buckets + career_progression buckets with show_in_both_paths
     buckets = db.query(CourseBucket).filter(
-        CourseBucket.learning_path_type == "self_learning",
-        CourseBucket.is_active == True
+        CourseBucket.is_active == True,
+        (
+            (CourseBucket.learning_path_type == "self_learning") |
+            (
+                (CourseBucket.learning_path_type == "career_progression") &
+                (CourseBucket.show_in_both_paths == True)
+            )
+        )
     ).order_by(CourseBucket.order_index).all()
 
     # Get user info for access filtering
     user = db.query(User).filter(User.email == user_email).first()
 
-    # Get all self-learning courses
+    # Get all self-learning courses + career courses from cross-displayed buckets
+    cross_bucket_ids = [b.id for b in buckets if b.learning_path_type == 'career_progression']
+    course_filter = Content.learning_path_type == "self_learning"
+    if cross_bucket_ids:
+        from sqlalchemy import or_
+        course_filter = or_(Content.learning_path_type == "self_learning", Content.bucket_id.in_(cross_bucket_ids))
     all_courses = db.query(Content).filter(
-        Content.learning_path_type == "self_learning",
         Content.is_path_node == True,
-        Content.is_published == True
+        Content.is_published == True,
+        course_filter
     ).all()
 
     # Check scheduled courses - hide if not yet launched
@@ -143,22 +154,34 @@ async def get_self_learning_hierarchy(
     Get self-learning buckets in hierarchical tree structure.
     Returns nested folders with progress at each level.
     """
-    # Get all active self-learning buckets
+    # Get all active self-learning buckets + career_progression buckets with show_in_both_paths
     all_buckets = db.query(CourseBucket).filter(
-        CourseBucket.learning_path_type == "self_learning",
-        CourseBucket.is_active == True
+        CourseBucket.is_active == True,
+        (
+            (CourseBucket.learning_path_type == "self_learning") |
+            (
+                (CourseBucket.learning_path_type == "career_progression") &
+                (CourseBucket.show_in_both_paths == True)
+            )
+        )
     ).order_by(CourseBucket.order_index).all()
 
     # Get user info
     user = db.query(User).filter(User.email == user_email).first()
 
-    # Get all self-learning courses
-    now = datetime.utcnow()
+    # Get all self-learning courses + career courses from cross-displayed buckets
+    cross_bucket_ids = [b.id for b in all_buckets if b.learning_path_type == 'career_progression']
+    course_filter = Content.learning_path_type == "self_learning"
+    if cross_bucket_ids:
+        from sqlalchemy import or_
+        course_filter = or_(Content.learning_path_type == "self_learning", Content.bucket_id.in_(cross_bucket_ids))
     all_courses = db.query(Content).filter(
-        Content.learning_path_type == "self_learning",
         Content.is_path_node == True,
-        Content.is_published == True
+        Content.is_published == True,
+        course_filter
     ).all()
+
+    now = datetime.utcnow()
 
     visible_courses = [
         c for c in all_courses
@@ -276,12 +299,19 @@ async def get_bucket_courses(
         raise HTTPException(status_code=404, detail="Bucket not found")
 
     now = datetime.utcnow()
-    courses = db.query(Content).filter(
+    # If bucket is cross-displayed, don't filter by learning_path_type
+    # (career courses should appear when cross-displayed into self learning)
+    bucket_is_cross = getattr(bucket, 'show_in_both_paths', False) or False
+    base_query = db.query(Content).filter(
         Content.is_path_node == True,
-        Content.learning_path_type == "self_learning",
         Content.is_published == True,
         (Content.bucket == bucket.name) | (Content.bucket_id == bucket.id)
-    ).order_by(Content.order_index, Content.timestamp).all()
+    )
+    if not bucket_is_cross:
+        base_query = base_query.filter(
+            Content.learning_path_type == (bucket.learning_path_type or "self_learning")
+        )
+    courses = base_query.order_by(Content.order_index, Content.timestamp).all()
 
     # Filter scheduled
     courses = [c for c in courses if not c.scheduled_at or c.scheduled_at <= now]
@@ -460,7 +490,7 @@ async def update_bucket_settings(
     if not bucket:
         raise HTTPException(status_code=404, detail="Bucket not found")
 
-    allowed_fields = ['is_linear', 'assigned_users', 'thumbnail', 'description', 'name', 'color', 'icon']
+    allowed_fields = ['is_linear', 'assigned_users', 'thumbnail', 'description', 'name', 'color', 'icon', 'show_in_both_paths']
     for key in allowed_fields:
         if key in settings:
             setattr(bucket, key, settings[key])

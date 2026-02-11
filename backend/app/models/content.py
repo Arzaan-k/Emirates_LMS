@@ -134,6 +134,7 @@ class CourseBucket(Base):
     # Self-Learning Settings
     is_linear = Column(Boolean, default=False)  # True = sequential, False = random access
     assigned_users = Column(JSON, default=list)  # Filter: {"emails":[], "roles":[], "stores":[], "categories":[]}
+    show_in_both_paths = Column(Boolean, default=False)  # Show this bucket in both Career Progression & Self Learning
     
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -165,6 +166,7 @@ class CourseBucket(Base):
             "thumbnail": self.thumbnail,
             "is_linear": self.is_linear or False,
             "assigned_users": self.assigned_users or [],
+            "show_in_both_paths": self.show_in_both_paths or False,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
