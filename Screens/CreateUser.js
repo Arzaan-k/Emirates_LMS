@@ -31,6 +31,17 @@ const THEME = {
     border: '#FDE68A',     // Amber 200
 };
 
+// Shared style constants for privilege segmented controls
+const privRowStyle = { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingVertical: 2 };
+const privLabelStyle = { fontSize: 12, color: '#1F2937', fontWeight: '500', flex: 1, marginRight: 8 };
+const segStyle = { flexDirection: 'row', borderRadius: 8, borderWidth: 1, borderColor: '#FDE68A', overflow: 'hidden' };
+const segBtnStyle = { paddingHorizontal: 9, paddingVertical: 6, backgroundColor: '#FFFFFF' };
+const segTxtStyle = { fontSize: 10, fontWeight: '500', color: '#9CA3AF' };
+const segDivider = { width: 1, backgroundColor: '#FDE68A' };
+const segOffActive = { backgroundColor: '#F3F4F6' };
+const segViewActive = { backgroundColor: '#EFF6FF' };
+const segManageActive = { backgroundColor: '#FEF3C7' };
+
 const CreateUser = ({
     visible = false,
     onClose = () => { },
@@ -70,6 +81,13 @@ const CreateUser = ({
     const [isExternal, setIsExternal] = useState(false);
     const [joinedAtLevel, setJoinedAtLevel] = useState('');
 
+    // Profile data state (all extended fields from bulk upload)
+    const [profileData, setProfileData] = useState({});
+    const [showProfileSection, setShowProfileSection] = useState(false);
+
+    // Grouped privileges for UI
+    const [privilegeGroups, setPrivilegeGroups] = useState([]);
+
     // Store management state
     const [showNewStore, setShowNewStore] = useState(false);
     const [newStoreName, setNewStoreName] = useState('');
@@ -105,9 +123,10 @@ const CreateUser = ({
             fetchCategories();
             fetchPrivileges();
             fetchStores();
-            fetchDisplayRoles(); // Fetch dynamic progression levels
+            fetchDisplayRoles();
             setBulkResult(null);
             setStoreSearch('');
+            setShowProfileSection(false);
 
             if (isEditing && initialData) {
                 setName(initialData.name || '');
@@ -118,6 +137,13 @@ const CreateUser = ({
                 setSelectedStore(initialData.store || '');
                 setIsExternal(initialData.is_external || false);
                 setJoinedAtLevel(initialData.joined_at_level || '');
+                // Normalize profile_data keys: trim whitespace to handle Excel column header inconsistencies
+                const rawPD = initialData.profile_data || {};
+                const normalizedPD = {};
+                Object.entries(rawPD).forEach(([k, v]) => {
+                    normalizedPD[k.trim()] = v;
+                });
+                setProfileData(normalizedPD);
                 setPassword('');
             } else {
                 setName('');
@@ -129,6 +155,7 @@ const CreateUser = ({
                 setSelectedStore('');
                 setIsExternal(false);
                 setJoinedAtLevel('');
+                setProfileData({});
             }
         }
     }, [visible, isEditing, initialData]);
@@ -225,6 +252,14 @@ const CreateUser = ({
             const data = await response.json();
             if (Array.isArray(data)) {
                 setPrivileges(data);
+                // Build grouped structure from flat list
+                const groups = {};
+                data.forEach(p => {
+                    const g = p.group || 'Other';
+                    if (!groups[g]) groups[g] = { label: g, icon: p.group_icon || 'check', items: [] };
+                    groups[g].items.push(p);
+                });
+                setPrivilegeGroups(Object.values(groups));
             }
         } catch (error) {
             console.error('Error fetching privileges:', error);
@@ -456,6 +491,7 @@ const CreateUser = ({
             store: selectedStore,
             is_external: isExternal,
             joined_at_level: isExternal ? (joinedAtLevel || role) : null,
+            profile_data: profileData,
         };
 
         if (password) {
@@ -541,9 +577,11 @@ const CreateUser = ({
             setBulkResult(data);
 
             if (data.status === 'success') {
+                const updatedMsg = data.updated > 0 ? `\n${data.updated} existing users updated.` : '';
+                const skippedMsg = data.skipped > 0 ? `\n${data.skipped} rows skipped (invalid/missing email).` : '';
                 Alert.alert(
                     'Upload Complete',
-                    `Successfully created ${data.created} users.\n${data.skipped} were skipped.`,
+                    `Successfully created ${data.created} new users.${updatedMsg}${skippedMsg}`,
                     [{ text: 'OK' }]
                 );
             } else {
@@ -714,8 +752,13 @@ const CreateUser = ({
                                         </Text>
                                         {bulkResult.status === 'success' && (
                                             <>
-                                                <Text style={styles.resultText}>Created: {bulkResult.created} users</Text>
-                                                <Text style={styles.resultText}>Skipped: {bulkResult.skipped} users</Text>
+                                                <Text style={styles.resultText}>Created: {bulkResult.created} new users</Text>
+                                                {bulkResult.updated > 0 && (
+                                                    <Text style={styles.resultText}>Updated: {bulkResult.updated} existing users</Text>
+                                                )}
+                                                {bulkResult.skipped > 0 && (
+                                                    <Text style={styles.resultText}>Skipped: {bulkResult.skipped} rows (invalid/missing email)</Text>
+                                                )}
                                             </>
                                         )}
                                     </View>
@@ -1136,7 +1179,7 @@ const CreateUser = ({
                                     )}
                                 </View>
 
-                                {/* Privileges Section */}
+                                {/* Privileges Section — grouped view/manage */}
                                 {isSuperAdmin && (
                                     <View style={styles.section}>
                                         <View style={styles.privilegeHeader}>
@@ -1156,43 +1199,242 @@ const CreateUser = ({
                                             Selected: {selectedPrivileges.length} / {privileges.length}
                                         </Text>
 
-                                        <View style={styles.privilegeGrid}>
-                                            {privileges.map((priv) => (
-                                                <TouchableOpacity
-                                                    key={priv.id}
-                                                    style={[
-                                                        styles.privilegeItem,
-                                                        selectedPrivileges.includes(priv.id) && styles.privilegeItemActive
-                                                    ]}
-                                                    onPress={() => togglePrivilege(priv.id)}
-                                                >
-                                                    <View style={[
-                                                        styles.privilegeCheck,
-                                                        selectedPrivileges.includes(priv.id) && styles.privilegeCheckActive
-                                                    ]}>
-                                                        {selectedPrivileges.includes(priv.id) && (
-                                                            <Feather name="check" size={10} color="#FFF" />
-                                                        )}
+                                        {privilegeGroups.length > 0 ? (() => {
+                                            // Helper: select/deselect specific IDs
+                                            const grantIds = (ids) => setSelectedPrivileges(prev => {
+                                                const s = new Set(prev);
+                                                ids.forEach(id => s.add(id));
+                                                return Array.from(s);
+                                            });
+                                            const revokeIds = (ids) => setSelectedPrivileges(prev =>
+                                                prev.filter(p => !ids.includes(p))
+                                            );
+
+                                            return privilegeGroups.map((group) => {
+                                                // Separate paired (feature-keyed) from standalone items
+                                                const featureMap = {};
+                                                const standalone = [];
+                                                group.items.forEach(item => {
+                                                    if (item.feature) {
+                                                        if (!featureMap[item.feature]) featureMap[item.feature] = { label: item.label };
+                                                        featureMap[item.feature][item.access] = item;
+                                                    } else {
+                                                        standalone.push(item);
+                                                    }
+                                                });
+
+                                                const rows = [
+                                                    ...Object.entries(featureMap).map(([feat, pair]) => ({ type: 'paired', key: feat, ...pair })),
+                                                    ...standalone.map(item => ({ type: 'standalone', key: item.id, item })),
+                                                ];
+
+                                                return (
+                                                    <View key={group.label} style={{ marginBottom: 14 }}>
+                                                        {/* Group header */}
+                                                        <View style={{
+                                                            flexDirection: 'row', alignItems: 'center', gap: 6,
+                                                            marginBottom: 8, paddingBottom: 5,
+                                                            borderBottomWidth: 1, borderBottomColor: THEME.border,
+                                                        }}>
+                                                            <Feather name={group.icon || 'box'} size={13} color={THEME.primaryDark} />
+                                                            <Text style={{ fontSize: 12, fontWeight: '700', color: THEME.textMain }}>
+                                                                {group.label}
+                                                            </Text>
+                                                        </View>
+
+                                                        {rows.map(row => {
+                                                            if (row.type === 'paired') {
+                                                                // 3-state: OFF | VIEW | MANAGE
+                                                                const viewId = row.view?.id;
+                                                                const manageId = row.manage?.id;
+                                                                const hasManage = manageId && selectedPrivileges.includes(manageId);
+                                                                const hasView = viewId && selectedPrivileges.includes(viewId);
+                                                                const level = hasManage ? 'manage' : hasView ? 'view' : 'none';
+
+                                                                const allIds = [viewId, manageId].filter(Boolean);
+                                                                const setLevel = (newLevel) => {
+                                                                    revokeIds(allIds);
+                                                                    if (newLevel === 'view' && viewId) grantIds([viewId]);
+                                                                    if (newLevel === 'manage') grantIds(allIds);
+                                                                };
+
+                                                                return (
+                                                                    <View key={row.key} style={privRowStyle}>
+                                                                        <Text style={privLabelStyle} numberOfLines={1}>{row.label}</Text>
+                                                                        <View style={segStyle}>
+                                                                            <TouchableOpacity onPress={() => setLevel('none')} style={[segBtnStyle, level === 'none' && segOffActive]}>
+                                                                                <Text style={[segTxtStyle, level === 'none' && { color: '#374151', fontWeight: '700' }]}>OFF</Text>
+                                                                            </TouchableOpacity>
+                                                                            <View style={segDivider} />
+                                                                            {viewId && (<>
+                                                                                <TouchableOpacity onPress={() => setLevel('view')} style={[segBtnStyle, level === 'view' && segViewActive]}>
+                                                                                    <Text style={[segTxtStyle, level === 'view' && { color: '#1D4ED8', fontWeight: '700' }]}>VIEW</Text>
+                                                                                </TouchableOpacity>
+                                                                                <View style={segDivider} />
+                                                                            </>)}
+                                                                            {manageId && (
+                                                                                <TouchableOpacity onPress={() => setLevel('manage')} style={[segBtnStyle, level === 'manage' && segManageActive]}>
+                                                                                    <Text style={[segTxtStyle, level === 'manage' && { color: '#92400E', fontWeight: '700' }]}>MANAGE</Text>
+                                                                                </TouchableOpacity>
+                                                                            )}
+                                                                        </View>
+                                                                    </View>
+                                                                );
+                                                            } else {
+                                                                // Standalone: OFF | VIEW or OFF | MANAGE
+                                                                const priv = row.item;
+                                                                const active = selectedPrivileges.includes(priv.id);
+                                                                const isView = priv.access === 'view';
+                                                                return (
+                                                                    <View key={row.key} style={privRowStyle}>
+                                                                        <Text style={privLabelStyle} numberOfLines={1}>{priv.label}</Text>
+                                                                        <View style={segStyle}>
+                                                                            <TouchableOpacity
+                                                                                onPress={() => active && revokeIds([priv.id])}
+                                                                                style={[segBtnStyle, !active && segOffActive]}
+                                                                            >
+                                                                                <Text style={[segTxtStyle, !active && { color: '#374151', fontWeight: '700' }]}>OFF</Text>
+                                                                            </TouchableOpacity>
+                                                                            <View style={segDivider} />
+                                                                            <TouchableOpacity
+                                                                                onPress={() => !active && grantIds([priv.id])}
+                                                                                style={[segBtnStyle, active && (isView ? segViewActive : segManageActive)]}
+                                                                            >
+                                                                                <Text style={[segTxtStyle, active && { color: isView ? '#1D4ED8' : '#92400E', fontWeight: '700' }]}>
+                                                                                    {isView ? 'VIEW' : 'MANAGE'}
+                                                                                </Text>
+                                                                            </TouchableOpacity>
+                                                                        </View>
+                                                                    </View>
+                                                                );
+                                                            }
+                                                        })}
                                                     </View>
-                                                    <View style={styles.privilegeInfo}>
-                                                        <Feather
-                                                            name={priv.icon || 'box'}
-                                                            size={12}
-                                                            color={selectedPrivileges.includes(priv.id) ? THEME.textMain : THEME.textSub}
-                                                        />
-                                                        <Text
-                                                            style={[
-                                                                styles.privilegeName,
-                                                                selectedPrivileges.includes(priv.id) && styles.privilegeNameActive
-                                                            ]}
-                                                            numberOfLines={1}
-                                                        >
-                                                            {priv.name}
-                                                        </Text>
-                                                    </View>
-                                                </TouchableOpacity>
-                                            ))}
-                                        </View>
+                                                );
+                                            });
+                                        })() : (
+                                            <View style={styles.privilegeGrid}>
+                                                {privileges.map((priv) => (
+                                                    <TouchableOpacity
+                                                        key={priv.id}
+                                                        style={[styles.privilegeItem, selectedPrivileges.includes(priv.id) && styles.privilegeItemActive]}
+                                                        onPress={() => togglePrivilege(priv.id)}
+                                                    >
+                                                        <View style={[styles.privilegeCheck, selectedPrivileges.includes(priv.id) && styles.privilegeCheckActive]}>
+                                                            {selectedPrivileges.includes(priv.id) && <Feather name="check" size={10} color="#FFF" />}
+                                                        </View>
+                                                        <View style={styles.privilegeInfo}>
+                                                            <Feather name={priv.icon || 'box'} size={12} color={selectedPrivileges.includes(priv.id) ? THEME.textMain : THEME.textSub} />
+                                                            <Text style={[styles.privilegeName, selectedPrivileges.includes(priv.id) && styles.privilegeNameActive]} numberOfLines={1}>
+                                                                {priv.name}
+                                                            </Text>
+                                                        </View>
+                                                    </TouchableOpacity>
+                                                ))}
+                                            </View>
+                                        )}
+                                    </View>
+                                )}
+
+                                {/* Full Profile Data Section (edit mode only) */}
+                                {isEditing && (
+                                    <View style={styles.section}>
+                                        <TouchableOpacity
+                                            style={{
+                                                flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                                                paddingVertical: 8,
+                                            }}
+                                            onPress={() => setShowProfileSection(!showProfileSection)}
+                                        >
+                                            <Text style={styles.sectionTitle}>
+                                                <Feather name="file-text" size={16} color={THEME.primaryDark} /> Full Profile Details
+                                            </Text>
+                                            <Feather name={showProfileSection ? 'chevron-up' : 'chevron-down'} size={20} color={THEME.primaryDark} />
+                                        </TouchableOpacity>
+                                        <Text style={styles.sectionDesc}>Edit all employee record fields</Text>
+
+                                        {showProfileSection && (() => {
+                                            const profileFields = [
+                                                { section: 'Personal', fields: [
+                                                    { key: 'Employee Code', label: 'Employee Code' },
+                                                    { key: 'Temporary Employee Code', label: 'Temp Employee Code' },
+                                                    { key: 'User Name', label: 'Username' },
+                                                    { key: 'Date of Birth', label: 'Date of Birth (DD-MM-YYYY)' },
+                                                    { key: 'Gender', label: 'Gender' },
+                                                    { key: 'Contact Number', label: 'Contact Number' },
+                                                    { key: 'Address', label: 'Address' },
+                                                    { key: 'Marital Status', label: 'Marital Status' },
+                                                    { key: 'Blood Group', label: 'Blood Group' },
+                                                    { key: 'Shirt Size', label: 'Shirt Size' },
+                                                    { key: 'Denim Size', label: 'Denim Size' },
+                                                ]},
+                                                { section: 'Identity', fields: [
+                                                    { key: 'Proof Type', label: 'Proof Type' },
+                                                    { key: 'Proof ID', label: 'Proof ID' },
+                                                ]},
+                                                { section: 'Qualification', fields: [
+                                                    { key: 'Qualification', label: 'Qualification' },
+                                                    { key: 'Specialization', label: 'Specialization' },
+                                                    { key: 'Qualification Status', label: 'Qualification Status' },
+                                                    { key: 'Previous Experience Designation', label: 'Prev. Designation' },
+                                                    { key: 'Previous Experience', label: 'Previous Experience' },
+                                                ]},
+                                                { section: 'Employment', fields: [
+                                                    { key: 'Joining Date', label: 'Joining Date' },
+                                                    { key: 'Date of Resign', label: 'Date of Resign' },
+                                                    { key: 'Date of Leaving', label: 'Date of Leaving' },
+                                                    { key: 'Reason for Leaving', label: 'Reason for Leaving' },
+                                                    { key: 'User Status', label: 'User Status (ACTIVE/In-Active)' },
+                                                    { key: 'Account Verified', label: 'Account Verified (YES/NO)' },
+                                                    { key: 'Account Approved', label: 'Account Approved (YES/NO)' },
+                                                    { key: 'Approved By', label: 'Approved By' },
+                                                    { key: 'Grade', label: 'Grade' },
+                                                    { key: 'User Created On', label: 'User Created On' },
+                                                ]},
+                                                { section: 'Organisation', fields: [
+                                                    { key: 'Designation', label: 'Designation' },
+                                                    { key: 'Department', label: 'Department' },
+                                                    { key: 'Sub Department', label: 'Sub Department' },
+                                                    { key: 'Function', label: 'Function' },
+                                                    { key: 'Sub Function', label: 'Sub Function' },
+                                                    { key: 'Job Role', label: 'Job Role' },
+                                                    { key: 'Career Job Roles', label: 'Career Job Roles' },
+                                                    { key: 'Concept', label: 'Concept' },
+                                                    { key: 'Franchise', label: 'Franchise' },
+                                                ]},
+                                                { section: 'Location', fields: [
+                                                    { key: 'Store Name', label: 'Store Name' },
+                                                    { key: 'Store Code', label: 'Store Code' },
+                                                    { key: 'Region', label: 'Region' },
+                                                    { key: 'City', label: 'City' },
+                                                    { key: 'State', label: 'State' },
+                                                ]},
+                                            ];
+
+                                            return profileFields.map(({ section, fields }) => (
+                                                <View key={section} style={{ marginBottom: 16 }}>
+                                                    <Text style={{
+                                                        fontSize: 12, fontWeight: '700', color: THEME.textSub,
+                                                        textTransform: 'uppercase', letterSpacing: 0.5,
+                                                        marginBottom: 8, marginTop: 4,
+                                                    }}>{section}</Text>
+                                                    {fields.map(({ key, label }) => (
+                                                        <View key={key} style={{ marginBottom: 10 }}>
+                                                            <Text style={styles.label}>{label}</Text>
+                                                            <View style={styles.inputBox}>
+                                                                <TextInput
+                                                                    placeholder={label}
+                                                                    placeholderTextColor="#92400E"
+                                                                    style={styles.input}
+                                                                    value={profileData[key] != null ? String(profileData[key]) : ''}
+                                                                    onChangeText={(val) => setProfileData(prev => ({ ...prev, [key]: val }))}
+                                                                />
+                                                            </View>
+                                                        </View>
+                                                    ))}
+                                                </View>
+                                            ));
+                                        })()}
                                     </View>
                                 )}
 

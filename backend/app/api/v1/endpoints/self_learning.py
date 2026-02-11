@@ -500,6 +500,43 @@ async def update_course_settings(
     return {"status": "success", "course": course.to_dict()}
 
 
+@router.post("/admin/buckets/{bucket_id}/reorder-courses")
+async def reorder_bucket_courses(
+    bucket_id: str,
+    body: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """
+    Reorder courses within a self-learning bucket.
+    body: { "course_ids": ["id1", "id2", "id3", ...] }
+    Updates the order_index of each course to match the given order.
+    """
+    bucket = db.query(CourseBucket).filter(CourseBucket.id == bucket_id).first()
+    if not bucket:
+        raise HTTPException(status_code=404, detail="Bucket not found")
+
+    course_ids = body.get("course_ids", [])
+    if not course_ids:
+        raise HTTPException(status_code=400, detail="course_ids list is required")
+
+    # Update order_index for each course
+    for index, course_id in enumerate(course_ids):
+        course = db.query(Content).filter(Content.id == course_id).first()
+        if course:
+            course.order_index = index
+            course.updated_at = datetime.utcnow()
+
+    db.commit()
+    logger.info(f"Reordered {len(course_ids)} courses in bucket {bucket_id}")
+
+    return {
+        "status": "success",
+        "message": f"Reordered {len(course_ids)} courses",
+        "bucket_id": bucket_id,
+    }
+
+
 # ==========================================
 # ADMIN: COURSE SCHEDULING
 # ==========================================

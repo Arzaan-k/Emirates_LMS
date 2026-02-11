@@ -79,7 +79,7 @@ export default function AccessControlModal({ visible, onClose }) {
     }, [visible]);
 
     const getAuthHeaders = async () => {
-        const token = (await AsyncStorage.getItem('userToken')) || (await AsyncStorage.getItem('accessToken'));
+        const token = await AsyncStorage.getItem('userToken');
         return {
             'Content-Type': 'application/json',
             ...(token ? { 'Authorization': `Bearer ${token}` } : {}),

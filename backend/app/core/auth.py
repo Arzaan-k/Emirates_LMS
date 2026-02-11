@@ -194,20 +194,22 @@ def verify_token(
     """
     # Check blacklist first
     if check_blacklist and is_blacklisted(token):
-        logger.debug("Token is blacklisted")
+        logger.warning(f"Token is blacklisted (first 20 chars): {token[:20]}...")
         return None
 
     # Decode and validate
     payload = decode_token(token)
 
     if payload is None:
+        logger.warning(f"Token decode failed (expired or invalid) - first 20 chars: {token[:20]}...")
         return None
 
     # Check token type
     if payload.get("type") != token_type:
-        logger.debug(f"Token type mismatch: expected {token_type}, got {payload.get('type')}")
+        logger.warning(f"Token type mismatch: expected {token_type}, got {payload.get('type')} - first 20 chars: {token[:20]}...")
         return None
 
+    logger.debug(f"Token verified successfully: type={token_type}, email={payload.get('email')}")
     return payload
 
 

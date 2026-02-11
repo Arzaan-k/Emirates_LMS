@@ -75,23 +75,28 @@ async def get_current_user(
             return {"email": user["email"]}
     """
     if credentials is None:
+        logger.warning("No credentials provided in request")
         raise AuthenticationError(
             detail="Authentication required",
             error_code="AUTH_REQUIRED"
         )
 
     token = credentials.credentials
+    logger.debug(f"Received token (first 20 chars): {token[:20]}...")
 
     # Check blacklist
     if is_blacklisted(token):
+        logger.warning("Token is blacklisted")
         raise InvalidTokenError(detail="Token has been revoked")
 
     # Verify token
     payload = verify_token(token, "access", check_blacklist=False)
 
     if payload is None:
+        logger.warning(f"Token verification failed for token: {token[:20]}...")
         raise InvalidTokenError(detail="Invalid or expired token")
 
+    logger.debug(f"Token verified successfully for user: {payload.get('email')}")
     return payload
 
 

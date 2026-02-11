@@ -976,7 +976,7 @@ export default function ManagerDashboard({ route, navigation }) {
             const confirm = window.confirm("Are you sure you want to logout?");
             if (confirm) {
                 try {
-                    await AsyncStorage.removeItem('accessToken');
+                    await AsyncStorage.removeItem('userToken');
                     await AsyncStorage.removeItem('userRole');
                     navigation.dispatch(
                         CommonActions.reset({
@@ -1002,7 +1002,7 @@ export default function ManagerDashboard({ route, navigation }) {
                     style: "destructive",
                     onPress: async () => {
                         try {
-                            await SecureStore.deleteItemAsync('accessToken');
+                            await SecureStore.deleteItemAsync('userToken');
                             await SecureStore.deleteItemAsync('userRole');
 
                             navigation.dispatch(

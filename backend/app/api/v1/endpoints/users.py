@@ -7,7 +7,7 @@ import json
 import logging
 from typing import Dict, Any, Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, BackgroundTasks, Request, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, BackgroundTasks, Request, Form, Query
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
 import io
@@ -17,6 +17,7 @@ from app.core.dependencies import get_current_user, require_admin, require_privi
 from app.core.middleware import limiter
 from app.services.user_service import UserService
 from app.schemas.user import UserCreate, UserResponse, UserUpdate
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/users", tags=["Users"])
@@ -26,32 +27,169 @@ router = APIRouter(prefix="/users", tags=["Users"])
 # USER CRUD ENDPOINTS
 # ==========================================
 
+@router.get("/filters")
+def list_filters(db: Session = Depends(get_db)):
+    """
+    Get all available filter options for users.
+    Returns distinct values for roles, stores, and profile fields.
+    """
+    all_users = db.query(User).all()
+
+    filters = {
+        "roles": set(),
+        "stores": set(),
+        "departments": set(),
+        "sub_departments": set(),
+        "designations": set(),
+        "regions": set(),
+        "cities": set(),
+        "states": set(),
+        "grades": set(),
+        "statuses": set(),
+        "qualifications": set(),
+        "genders": set(),
+        "franchises": set(),
+        "concepts": set(),
+        "functions": set(),
+        "sub_functions": set(),
+        "job_roles": set(),
+        "marital_statuses": set(),
+        "blood_groups": set(),
+    }
+
+    _INVALID = {'nan', 'none', 'n/a', 'na', '', 'unassigned'}
+
+    def _clean(val):
+        if val is None:
+            return None
+        s = str(val).strip()
+        return None if s.lower() in _INVALID else s
+
+    for user in all_users:
+        r = _clean(user.role)
+        if r:
+            filters["roles"].add(r)
+        s = _clean(user.store)
+        if s:
+            filters["stores"].add(s)
+
+        pd = user.profile_data or {}
+
+        def add_if_exists(key_set, *keys):
+            for k in keys:
+                v = _clean(pd.get(k))
+                if v:
+                    filters[key_set].add(v)
+                    return
+
+        add_if_exists("departments", "Department")
+        add_if_exists("sub_departments", "Sub Department")
+        add_if_exists("designations", "Designation")
+        add_if_exists("regions", "Region")
+        add_if_exists("cities", "City")
+        add_if_exists("states", "State")
+        add_if_exists("grades", "Grade")
+        add_if_exists("statuses", "User Status")
+        add_if_exists("qualifications", "Qualification")
+        add_if_exists("genders", "Gender")
+        add_if_exists("franchises", "Franchise")
+        add_if_exists("concepts", "Concept")
+        add_if_exists("functions", "Function")
+        add_if_exists("sub_functions", "Sub Function")
+        add_if_exists("job_roles", "Job Role")
+        add_if_exists("marital_statuses", "Marital Status")
+        add_if_exists("blood_groups", "Blood Group")
+
+    # Remove empty sets from result
+    return {k: sorted(list(v)) for k, v in filters.items() if v}
+
+
 @router.get("/", response_model=Dict[str, Any])
 def list_users(
     page: int = 1,
     limit: int = 50,
     search: str = "",
-    store: str = "",
-    role: str = "",
+    store: List[str] = Query(None),
+    role: List[str] = Query(None),
+    department: List[str] = Query(None),
+    sub_department: List[str] = Query(None),
+    designation: List[str] = Query(None),
+    region: List[str] = Query(None),
+    city: List[str] = Query(None),
+    state: List[str] = Query(None),
+    grade: List[str] = Query(None),
+    user_status: List[str] = Query(None),
+    is_external: Optional[bool] = None,
+    qualification: List[str] = Query(None),
+    gender: List[str] = Query(None),
+    franchise: List[str] = Query(None),
+    concept: List[str] = Query(None),
+    function: List[str] = Query(None),
+    sub_function: List[str] = Query(None),
+    job_role: List[str] = Query(None),
+    marital_status: List[str] = Query(None),
+    blood_group: List[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     """
     Optimized users list with pagination and filtering.
-    Uses single DB round-trip via UserService.
     """
 
     skip = (page - 1) * limit
     service = UserService(db)
 
+    # Profile data JSON keys (capital-cased as stored in profile_data)
+    filters = {}
+    if department:     filters["Department"] = department
+    if sub_department: filters["Sub Department"] = sub_department
+    if designation:    filters["Designation"] = designation
+    if region:         filters["Region"] = region
+    if city:           filters["City"] = city
+    if state:          filters["State"] = state
+    if grade:          filters["Grade"] = grade
+    if user_status:    filters["User Status"] = user_status
+    if qualification:  filters["Qualification"] = qualification
+    if gender:         filters["Gender"] = gender
+    if franchise:      filters["Franchise"] = franchise
+    if concept:        filters["Concept"] = concept
+    if function:       filters["Function"] = function
+    if sub_function:   filters["Sub Function"] = sub_function
+    if job_role:       filters["Job Role"] = job_role
+    if marital_status: filters["Marital Status"] = marital_status
+    if blood_group:    filters["Blood Group"] = blood_group
+    
+    # direct column filters
+    if is_external is not None:
+        # We handle direct column 'is_external' in service if we pass it as part of filters 
+        # but UserService.get_users_with_count handles 'store' and 'role' explicitly.
+        # We need to pass is_external to the filters dict and ensure service handles it.
+        # Our modified service checks hasattr(User, key), so 'is_external' will work if passed in filters.
+        filters["is_external"] = is_external
+        
+    # Handle store and role if they are lists (service expects values)
+    # The service method get_users_with_count currently takes single `store` and `role` arguments
+    # but I modified it to check `filters` dict too.
+    # However, I should pass them via `filters` if I want list supoort, 
+    # OR update service signature.
+    # In my previous edit to UserService, I kept `store` and `role` as strict args, 
+    # BUT I also added `filters` loop which checks `hasattr(User, key)`.
+    # `User` has `store` and `role`.
+    # So if I pass them in `filters`, they will be applied using `in_` operator if list.
+    # So I should pass them in `filters` and pass `None` to the specific args.
+    
+    if store: filters["store"] = store
+    if role: filters["role"] = role
+
     users, total = service.get_users_with_count(
         skip=skip,
         limit=limit,
-        store=store or None,
-        role=role or None,
+        store=None, # Passed in filters
+        role=None,  # Passed in filters
         search=search or None,
+        filters=filters
     )
 
-    # Fast serialization (no password ever fetched)
+    # Fast serialization
     user_list = [
         {
             **(
@@ -89,14 +227,43 @@ def list_users_alias(
     page: int = 1,
     limit: int = 50,
     search: str = "",
-    store: str = "",
-    role: str = "",
+    store: List[str] = Query(None),
+    role: List[str] = Query(None),
+    department: List[str] = Query(None),
+    sub_department: List[str] = Query(None),
+    designation: List[str] = Query(None),
+    region: List[str] = Query(None),
+    city: List[str] = Query(None),
+    state: List[str] = Query(None),
+    grade: List[str] = Query(None),
+    user_status: List[str] = Query(None),
+    is_external: Optional[bool] = None,
+    qualification: List[str] = Query(None),
+    gender: List[str] = Query(None),
+    franchise: List[str] = Query(None),
+    concept: List[str] = Query(None),
+    function: List[str] = Query(None),
+    sub_function: List[str] = Query(None),
+    job_role: List[str] = Query(None),
+    marital_status: List[str] = Query(None),
+    blood_group: List[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     """
     Alias for /users/ - backward compatibility with frontend.
     """
-    return list_users(page, limit, search, store, role, db)
+    return list_users(
+        page=page, limit=limit, search=search,
+        store=store, role=role, department=department,
+        sub_department=sub_department, designation=designation,
+        region=region, city=city, state=state, grade=grade,
+        user_status=user_status, is_external=is_external,
+        qualification=qualification, gender=gender,
+        franchise=franchise, concept=concept, function=function,
+        sub_function=sub_function, job_role=job_role,
+        marital_status=marital_status, blood_group=blood_group,
+        db=db,
+    )
 
 
 @router.post("/create")
@@ -144,6 +311,8 @@ async def update_user_alias(
         updates["joined_at_level"] = data["joined_at_level"]
     if "password" in data and data["password"]:
         updates["password"] = data["password"]
+    if "profile_data" in data:
+        updates["profile_data"] = data["profile_data"]
 
     try:
         user = service.update_user(email, updates)
@@ -213,47 +382,48 @@ async def create_user(
 @router.get("/privileges")
 async def get_privileges_alias():
     """
-    Alias for /users/privileges/all - returns list as array (backward compatibility).
+    Returns grouped privileges with view/manage access levels.
+    Each item includes id, name, icon, access (view|manage), description, and group.
+    Flat array format retained for backward compat — frontend can use 'group' field to group UI.
     """
-    from app.services.user_service import ALL_PRIVILEGES
+    from app.services.user_service import PRIVILEGE_GROUPS
 
-    PRIVILEGE_ICONS = {
-        "team_list": "users",
-        "reports": "bar-chart-2",
-        "assign_quiz": "check-square",
-        "audits": "shield",
-        "upload_training": "upload-cloud",
-        "bulk_upload": "database",
-        "post_news": "bell",
-        "post_quiz": "edit-3",
-        "create_user": "user-plus",
-        "live_tracking": "map-pin",
-        "proctored_assessment": "monitor",
-        "proctored_create_manage": "settings",
-        "proctored_view_results": "file-text",
-        "view_analytics": "trending-up",
-        "send_notification": "send",
-        "access_control": "lock",
-        "manage_buckets": "folder-plus",
-        "schedule_meeting": "video",
-        "crm_tickets": "tag",
-        "manage_simulations": "play-circle",
-        "manage_learning_path": "git-merge",
-        "scheduled_exams": "calendar",
-        "exam_reports": "file-text",
-        "support_library": "book-open",
-        "view_audit_logs": "clipboard",
+    flat = []
+    for group in PRIVILEGE_GROUPS:
+        for item in group["items"]:
+            entry = {
+                "id": item["id"],
+                "name": item["label"],
+                "label": item["label"],
+                "icon": _privilege_icon(item["id"]),
+                "access": item["access"],
+                "description": item.get("description", ""),
+                "group": group["group"],
+                "group_icon": group["icon"],
+            }
+            if "feature" in item:
+                entry["feature"] = item["feature"]
+            flat.append(entry)
+    return flat
+
+
+def _privilege_icon(priv_id: str) -> str:
+    ICONS = {
+        "team_list_view": "eye", "team_list": "users", "bulk_upload": "database",
+        "create_user": "user-plus", "upload_training_view": "eye",
+        "upload_training": "upload-cloud", "manage_buckets": "folder-plus",
+        "manage_learning_path": "git-merge", "post_news": "bell",
+        "send_notification": "send", "assign_quiz": "check-square",
+        "post_quiz": "edit-3", "scheduled_exams": "calendar",
+        "exam_reports": "file-text", "proctored_assessment": "monitor",
+        "proctored_create_manage": "settings", "proctored_view_results": "file-text",
+        "view_analytics": "trending-up", "reports": "bar-chart-2",
+        "live_tracking": "map-pin", "audits_view": "eye", "audits": "shield",
+        "view_audit_logs": "clipboard", "access_control": "lock",
+        "schedule_meeting": "video", "crm_tickets": "tag",
+        "manage_simulations": "play-circle", "support_library": "book-open",
     }
-
-    # Return as array directly (what frontend expects)
-    return [
-        {
-            "id": priv,
-            "name": priv.replace("_", " ").title(),
-            "icon": PRIVILEGE_ICONS.get(priv, "check")
-        }
-        for priv in ALL_PRIVILEGES
-    ]
+    return ICONS.get(priv_id, "check")
 
 @router.get("/privileges/all")
 async def get_all_privileges(db: Session = Depends(get_db)):
@@ -624,52 +794,75 @@ def process_bulk_upload_task(task_id: str, contents: bytes):
         upload_tasks[task_id]["total"] = total_rows
         
         created = 0
+        updated = 0
         skipped = 0
         errors = []
-        
+
         for index, row in df.iterrows():
             # Update progress every 5 rows or so to avoid lock contention if tracking was heavy
             upload_tasks[task_id]["current"] = index + 1
             upload_tasks[task_id]["progress"] = int(((index + 1) / total_rows) * 100) if total_rows > 0 else 100
-            
+
             try:
                 row_dict = {k: (v if pd.notna(v) else None) for k, v in row.items()}
-                
+
                 # Extract core fields
                 email = str(row_dict.get('Email', row_dict.get('email', ''))).strip()
                 if not email or email.lower() == 'nan' or email.lower() == 'none' or '@' not in email:
                     skipped += 1
                     continue
-                    
+
                 name = str(row_dict.get('Full Name', row_dict.get('Name', row_dict.get('name', '')))).strip()
                 if not name: name = email.split('@')[0]
-                
+
                 raw_role = str(row_dict.get('Designation', row_dict.get('Role', 'Waffler'))).strip()
                 role = raw_role if raw_role and raw_role.lower() != 'nan' else "Waffler"
-                
+
                 raw_cat = str(row_dict.get('Category', row_dict.get('Department', 'Employee'))).strip()
                 category = "Employee"
                 if raw_cat and raw_cat.lower() != 'nan':
                     if "manager" in raw_cat.lower(): category = "Manager"
                     elif "super" in raw_cat.lower(): category = "Supervisor"
                     elif "admin" in raw_cat.lower(): category = "Super Admin"
-                
+
                 store = str(row_dict.get('Store Name', row_dict.get('Store', 'Unassigned'))).strip()
                 if not store or store.lower() == 'nan': store = "Unassigned"
-                
+
                 # External user flag from CSV
                 raw_external = str(row_dict.get('Is External', row_dict.get('External', 'No'))).strip().lower()
                 is_external = raw_external in ('yes', 'true', '1', 'y', 'external')
-                
+
                 raw_joined_level = str(row_dict.get('Joined At Level', row_dict.get('joined_at_level', ''))).strip()
                 joined_at_level = raw_joined_level if raw_joined_level and raw_joined_level.lower() not in ('nan', 'none', '') else None
                 # If external but no joined_at_level specified, default to their role
                 if is_external and not joined_at_level:
                     joined_at_level = role
-                
+
                 password = str(row_dict.get('Password', 'Welcome@123')).strip()
                 profile_data = row_dict
-                
+
+                # Check if user already exists
+                existing_user = service.get_user_by_email_optional(email)
+                if existing_user:
+                    # Update profile_data and non-sensitive fields with latest data from sheet
+                    # Preserve credentials (password, privileges, is_superadmin, has_admin_access)
+                    updates = {
+                        "name": name,
+                        "store": store,
+                        "profile_data": profile_data,
+                    }
+                    # Only update role/category if the sheet has a meaningful value
+                    if role and role != "Waffler":
+                        updates["role"] = role
+                    if category and category != "Employee":
+                        updates["category"] = category
+                    if is_external:
+                        updates["is_external"] = is_external
+                        updates["joined_at_level"] = joined_at_level
+                    service.update_user(email, updates)
+                    updated += 1
+                    continue
+
                 user_data = {
                     "name": name, "email": email, "password": password,
                     "role": role, "category": category, "store": store,
@@ -677,16 +870,10 @@ def process_bulk_upload_task(task_id: str, contents: bytes):
                     "is_external": is_external, "joined_at_level": joined_at_level,
                     "profile_data": profile_data
                 }
-                
-                # Check exist - use optional to not raise exception
-                existing_user = service.get_user_by_email_optional(email)
-                if existing_user:
-                    skipped += 1
-                    continue
-                
+
                 service.create_user(user_data)
                 created += 1
-                
+
             except Exception as e:
                 errors.append({"email": row_dict.get("Email", "unknown"), "error": str(e)})
                 logger.error(f"Bulk upload row error: {e}")
@@ -695,10 +882,11 @@ def process_bulk_upload_task(task_id: str, contents: bytes):
         upload_tasks[task_id]["status"] = "completed"
         upload_tasks[task_id]["results"] = {
             "created": created,
+            "updated": updated,
             "skipped": skipped,
             "errors": errors
         }
-        logger.info(f"Bulk upload completed: {created} created, {skipped} skipped, {len(errors)} errors")
+        logger.info(f"Bulk upload completed: {created} created, {updated} updated, {skipped} skipped, {len(errors)} errors")
         
     except Exception as e:
         upload_tasks[task_id]["status"] = "failed"
@@ -1290,3 +1478,148 @@ async def bulk_delete_users(
     except Exception as e:
         logger.error(f"Bulk deletion failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================
+# SELF-PROFILE UPDATE (Employee-facing)
+# ==========================================
+
+@router.put("/me/profile")
+async def update_my_profile(
+    data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Employee updates their own profile: contact number, name, profile picture.
+    Profile picture must be a base64 data URL string.
+    """
+    email = current_user.get("email") or current_user.get("sub")
+    service = UserService(db)
+    user = service.get_user_by_email(email)
+
+    # Allowed self-edit fields
+    if "name" in data and data["name"]:
+        user.name = data["name"].strip()
+
+    # Merge updatable profile_data keys
+    updatable_profile_keys = {"Contact Number", "Address", "profile_pic"}
+    pd = dict(user.profile_data or {})
+    for key in updatable_profile_keys:
+        if key in data:
+            pd[key] = data[key]
+    user.profile_data = pd
+
+    db.commit()
+    db.refresh(user)
+    user_dict = user.to_dict()
+    user_dict.pop("password", None)
+    return {"status": "success", "user": user_dict}
+
+
+@router.post("/me/change-email/request")
+async def request_email_change(
+    data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Step 1: Employee requests email change.
+    Generates a 6-digit OTP and stores it (reuses reset_token column).
+    In production, send via email. Here we return it in the response for testing.
+    """
+    import secrets as _secrets
+    from datetime import datetime as _dt, timedelta as _td
+
+    email = current_user.get("email") or current_user.get("sub")
+    new_email = (data.get("new_email") or "").lower().strip()
+
+    if not new_email:
+        raise HTTPException(status_code=400, detail="new_email is required")
+
+    service = UserService(db)
+    # Check new email not already taken
+    existing = service.get_user_by_email_optional(new_email)
+    if existing and existing.email != email:
+        raise HTTPException(status_code=409, detail="Email already in use")
+
+    user = service.get_user_by_email(email)
+
+    # Generate OTP and store pending email in profile_data
+    otp = f"{_secrets.randbelow(1000000):06d}"
+    user.reset_token = otp
+    user.reset_token_expires = _dt.utcnow() + _td(minutes=15)
+
+    pd = dict(user.profile_data or {})
+    pd["_pending_email"] = new_email
+    user.profile_data = pd
+
+    db.commit()
+    logger.info(f"Email change OTP generated for {email} → {new_email}")
+
+    # In production: send OTP to NEW email via email service
+    # For now return it so frontend can display (remove in prod)
+    return {"status": "success", "message": "OTP sent to new email address", "otp": otp}
+
+
+@router.post("/me/change-email/verify")
+async def verify_email_change(
+    data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Step 2: Employee verifies OTP and completes email change.
+    """
+    from datetime import datetime as _dt
+
+    email = current_user.get("email") or current_user.get("sub")
+    otp = str(data.get("otp", "")).strip()
+
+    service = UserService(db)
+    user = service.get_user_by_email(email)
+
+    if not user.reset_token or user.reset_token != otp:
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+    if not user.reset_token_expires or user.reset_token_expires < _dt.utcnow():
+        raise HTTPException(status_code=400, detail="OTP has expired")
+
+    pd = dict(user.profile_data or {})
+    new_email = pd.pop("_pending_email", None)
+    if not new_email:
+        raise HTTPException(status_code=400, detail="No pending email change found")
+
+    user.email = new_email
+    user.reset_token = None
+    user.reset_token_expires = None
+    user.profile_data = pd
+
+    db.commit()
+    db.refresh(user)
+    user_dict = user.to_dict()
+    user_dict.pop("password", None)
+    return {"status": "success", "message": "Email updated successfully", "user": user_dict}
+
+
+@router.put("/me/change-password")
+async def change_my_password(
+    data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Employee changes their own password. Requires current password verification.
+    """
+    email = current_user.get("email") or current_user.get("sub")
+    current_password = data.get("current_password", "")
+    new_password = data.get("new_password", "")
+
+    if not current_password or not new_password:
+        raise HTTPException(status_code=400, detail="current_password and new_password required")
+
+    service = UserService(db)
+    try:
+        service.change_password(email, current_password, new_password)
+        return {"status": "success", "message": "Password changed successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))

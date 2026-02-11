@@ -13,8 +13,10 @@ import {
     ActivityIndicator,
     ScrollView,
     KeyboardAvoidingView,
-    Platform
+    Platform,
+    Switch
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { WebView } from 'react-native-webview';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -59,6 +61,11 @@ export default function ContentLibraryModal({ visible, onClose }) {
 
     // Folder/Bucket collapse state (tracks which folders are expanded)
     const [expandedFolders, setExpandedFolders] = useState(new Set());
+
+    // Reorder state for linear buckets
+    const [reorderingBucketId, setReorderingBucketId] = useState(null);
+    const [reorderedItems, setReorderedItems] = useState([]);
+    const [savingReorder, setSavingReorder] = useState(false);
 
     // Edit Modal State
     const [editModalVisible, setEditModalVisible] = useState(false);
@@ -486,11 +493,94 @@ export default function ContentLibraryModal({ visible, onClose }) {
             const newSet = new Set(prev);
             if (newSet.has(folderId)) {
                 newSet.delete(folderId); // Collapse
+                // Cancel reordering if collapsing
+                if (reorderingBucketId === folderId) {
+                    setReorderingBucketId(null);
+                    setReorderedItems([]);
+                }
             } else {
                 newSet.add(folderId); // Expand
             }
             return newSet;
         });
+    };
+
+    // ===== REORDER FUNCTIONS =====
+    const startReordering = (folder) => {
+        const items = [...(folder.items || [])].sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+        setReorderedItems(items);
+        setReorderingBucketId(folder.id);
+    };
+
+    const moveItemUp = (index) => {
+        if (index === 0) return;
+        const newItems = [...reorderedItems];
+        [newItems[index - 1], newItems[index]] = [newItems[index], newItems[index - 1]];
+        setReorderedItems(newItems);
+    };
+
+    const moveItemDown = (index) => {
+        if (index === reorderedItems.length - 1) return;
+        const newItems = [...reorderedItems];
+        [newItems[index], newItems[index + 1]] = [newItems[index + 1], newItems[index]];
+        setReorderedItems(newItems);
+    };
+
+    const saveReorder = async (bucketId) => {
+        setSavingReorder(true);
+        try {
+            const token = await AsyncStorage.getItem('userToken');
+            const courseIds = reorderedItems.map(item => item.id);
+            const res = await fetch(`${API_URL}/api/v1/self-learning/admin/buckets/${bucketId}/reorder-courses`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify({ course_ids: courseIds }),
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                Alert.alert('Success', 'Course order saved successfully');
+                setReorderingBucketId(null);
+                setReorderedItems([]);
+                fetchContent(); // Refresh to show new order
+            } else {
+                Alert.alert('Error', 'Failed to save course order');
+            }
+        } catch (error) {
+            console.error('Reorder save error:', error);
+            Alert.alert('Error', 'Failed to save course order');
+        } finally {
+            setSavingReorder(false);
+        }
+    };
+
+    const cancelReordering = () => {
+        setReorderingBucketId(null);
+        setReorderedItems([]);
+    };
+
+    const toggleLinearMode = async (folder) => {
+        const newValue = !folder.is_linear;
+        try {
+            const token = await AsyncStorage.getItem('userToken');
+            const res = await fetch(`${API_URL}/api/v1/self-learning/admin/buckets/${folder.id}/settings`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify({ is_linear: newValue }),
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                fetchContent(); // Refresh to reflect change
+            }
+        } catch (error) {
+            console.error('Toggle linear error:', error);
+            Alert.alert('Error', 'Failed to update linear mode');
+        }
     };
 
     // Get buckets for the currently active learning path
@@ -606,6 +696,26 @@ export default function ContentLibraryModal({ visible, onClose }) {
                         {folder.name}
                     </Text>
 
+                    {/* Linear Badge - Only for self_learning buckets */}
+                    {(folder.learning_path_type === 'self_learning' || activeLearningPath === 'self_learning') && (
+                        <View style={[
+                            styles.linearBadge,
+                            folder.is_linear ? styles.linearBadgeActive : styles.linearBadgeInactive
+                        ]}>
+                            <MaterialCommunityIcons
+                                name={folder.is_linear ? 'format-list-numbered' : 'shuffle-variant'}
+                                size={12}
+                                color={folder.is_linear ? '#059669' : '#64748B'}
+                            />
+                            <Text style={[
+                                styles.linearBadgeText,
+                                { color: folder.is_linear ? '#059669' : '#64748B' }
+                            ]}>
+                                {folder.is_linear ? 'Linear' : 'Free'}
+                            </Text>
+                        </View>
+                    )}
+
                     {/* Item Count Badge */}
                     <View style={[
                         styles.folderBadge,
@@ -632,20 +742,110 @@ export default function ContentLibraryModal({ visible, onClose }) {
                         styles.folderContents,
                         depth > 0 && styles.nestedFolderContents
                     ]}>
+                        {/* Linear Mode Controls Bar */}
+                        {(folder.learning_path_type === 'self_learning' || activeLearningPath === 'self_learning') && !hasChildren && hasItems && (
+                            <View style={styles.linearControlBar}>
+                                <View style={styles.linearSwitchRow}>
+                                    <MaterialCommunityIcons
+                                        name={folder.is_linear ? 'format-list-numbered' : 'shuffle-variant'}
+                                        size={16}
+                                        color={folder.is_linear ? '#059669' : '#64748B'}
+                                    />
+                                    <Text style={styles.linearSwitchLabel}>
+                                        {folder.is_linear ? 'Linear (Sequential)' : 'Non-Linear (Free Access)'}
+                                    </Text>
+                                    <Switch
+                                        value={folder.is_linear || false}
+                                        onValueChange={() => toggleLinearMode(folder)}
+                                        trackColor={{ false: '#D1D5DB', true: '#A7F3D0' }}
+                                        thumbColor={folder.is_linear ? '#059669' : '#9CA3AF'}
+                                        style={{ transform: [{ scale: 0.8 }] }}
+                                    />
+                                </View>
+                                {folder.is_linear && reorderingBucketId !== folder.id && (
+                                    <TouchableOpacity
+                                        style={styles.reorderStartBtn}
+                                        onPress={() => startReordering(folder)}
+                                    >
+                                        <Feather name="list" size={14} color="#FFF" />
+                                        <Text style={styles.reorderStartBtnText}>Reorder Courses</Text>
+                                    </TouchableOpacity>
+                                )}
+                                {reorderingBucketId === folder.id && (
+                                    <View style={styles.reorderActionRow}>
+                                        <TouchableOpacity
+                                            style={styles.reorderCancelBtn}
+                                            onPress={cancelReordering}
+                                        >
+                                            <Text style={styles.reorderCancelText}>Cancel</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={styles.reorderSaveBtn}
+                                            onPress={() => saveReorder(folder.id)}
+                                            disabled={savingReorder}
+                                        >
+                                            {savingReorder ? (
+                                                <ActivityIndicator size="small" color="#FFF" />
+                                            ) : (
+                                                <>
+                                                    <Feather name="save" size={14} color="#FFF" />
+                                                    <Text style={styles.reorderSaveText}>Save Order</Text>
+                                                </>
+                                            )}
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
+                            </View>
+                        )}
+
                         {/* Recursively render child folders FIRST */}
                         {hasChildren && folder.children.map(childFolder =>
                             renderFolderTree(childFolder, depth + 1)
                         )}
 
-                        {/* Then render content items in this folder */}
-                        {hasItems && folder.items.map((item, idx) => {
-                            const uniqueKey = `${folder.id}-${item.id}-${idx}`;
-                            return (
-                                <View key={uniqueKey}>
-                                    {renderContentItem(item, depth + 1, uniqueKey)}
-                                </View>
-                            );
-                        })}
+                        {/* Render courses - use reordered list if in reorder mode */}
+                        {reorderingBucketId === folder.id ? (
+                            /* Reorder Mode: Show numbered list with arrows */
+                            reorderedItems.map((item, idx) => {
+                                const uniqueKey = `reorder-${folder.id}-${item.id}-${idx}`;
+                                return (
+                                    <View key={uniqueKey} style={styles.reorderItemRow}>
+                                        <View style={styles.reorderNumber}>
+                                            <Text style={styles.reorderNumberText}>{idx + 1}</Text>
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                            {renderContentItem(item, depth + 1, uniqueKey)}
+                                        </View>
+                                        <View style={styles.reorderArrows}>
+                                            <TouchableOpacity
+                                                style={[styles.reorderArrowBtn, idx === 0 && styles.reorderArrowDisabled]}
+                                                onPress={() => moveItemUp(idx)}
+                                                disabled={idx === 0}
+                                            >
+                                                <Feather name="chevron-up" size={18} color={idx === 0 ? '#D1D5DB' : '#059669'} />
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={[styles.reorderArrowBtn, idx === reorderedItems.length - 1 && styles.reorderArrowDisabled]}
+                                                onPress={() => moveItemDown(idx)}
+                                                disabled={idx === reorderedItems.length - 1}
+                                            >
+                                                <Feather name="chevron-down" size={18} color={idx === reorderedItems.length - 1 ? '#D1D5DB' : '#059669'} />
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+                                );
+                            })
+                        ) : (
+                            /* Normal Mode: Regular content items */
+                            hasItems && folder.items.map((item, idx) => {
+                                const uniqueKey = `${folder.id}-${item.id}-${idx}`;
+                                return (
+                                    <View key={uniqueKey}>
+                                        {renderContentItem(item, depth + 1, uniqueKey)}
+                                    </View>
+                                );
+                            })
+                        )}
 
                         {/* Show empty state if no children and no items */}
                         {!hasChildren && !hasItems && (
@@ -2031,5 +2231,133 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontFamily: 'Poppins_600SemiBold',
         color: '#FFF',
+    },
+
+    // ===== LINEAR / REORDER STYLES =====
+    linearBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 3,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 10,
+        marginRight: 6,
+    },
+    linearBadgeActive: {
+        backgroundColor: '#D1FAE5',
+    },
+    linearBadgeInactive: {
+        backgroundColor: '#F1F5F9',
+    },
+    linearBadgeText: {
+        fontSize: 10,
+        fontWeight: '700',
+    },
+    linearControlBar: {
+        backgroundColor: '#F8FAFC',
+        borderRadius: 10,
+        padding: 10,
+        marginBottom: 8,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+    },
+    linearSwitchRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    linearSwitchLabel: {
+        flex: 1,
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#374151',
+    },
+    reorderStartBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        marginTop: 8,
+        backgroundColor: '#059669',
+        paddingVertical: 8,
+        paddingHorizontal: 14,
+        borderRadius: 8,
+    },
+    reorderStartBtnText: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#FFF',
+    },
+    reorderActionRow: {
+        flexDirection: 'row',
+        gap: 8,
+        marginTop: 8,
+    },
+    reorderCancelBtn: {
+        flex: 1,
+        alignItems: 'center',
+        paddingVertical: 8,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#D1D5DB',
+        backgroundColor: '#FFF',
+    },
+    reorderCancelText: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#6B7280',
+    },
+    reorderSaveBtn: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        paddingVertical: 8,
+        borderRadius: 8,
+        backgroundColor: '#059669',
+    },
+    reorderSaveText: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#FFF',
+    },
+    reorderItemRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 4,
+    },
+    reorderNumber: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: '#059669',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 4,
+    },
+    reorderNumberText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#FFF',
+    },
+    reorderArrows: {
+        flexDirection: 'column',
+        marginLeft: 4,
+    },
+    reorderArrowBtn: {
+        width: 32,
+        height: 28,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#F0FDF4',
+        borderRadius: 6,
+        marginVertical: 1,
+        borderWidth: 1,
+        borderColor: '#D1FAE5',
+    },
+    reorderArrowDisabled: {
+        backgroundColor: '#F9FAFB',
+        borderColor: '#E5E7EB',
     },
 });

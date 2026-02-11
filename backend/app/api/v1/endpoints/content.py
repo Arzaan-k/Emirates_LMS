@@ -1456,7 +1456,7 @@ async def get_content_library(db: Session = Depends(get_db)):
                 "is_linear": get_attr(bucket, 'is_linear', False) or False,
                 "assigned_users": get_attr(bucket, 'assigned_users', []) or [],
                 "thumbnail": get_attr(bucket, 'thumbnail'),
-                "items": bucket_items,
+                "items": sorted(bucket_items, key=lambda x: x.get('order_index', 0) or 0),
                 "children": children,
                 "has_children": len(children) > 0,
                 "item_count": len(bucket_items),
