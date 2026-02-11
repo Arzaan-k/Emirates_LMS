@@ -191,6 +191,41 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
         }
     };
 
+    const handleDeleteExam = (exam) => {
+        Alert.alert(
+            "Delete Exam",
+            `Are you sure you want to delete "${exam.title}"? This action cannot be undone.`,
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                        try {
+                            setLoading(true);
+                            const res = await fetch(`${API_URL}/api/v1/assessments/scheduled/${exam.id}`, {
+                                method: 'DELETE',
+                            });
+
+                            if (res.ok) {
+                                Alert.alert("Success", "Exam deleted successfully");
+                                fetchExams();
+                            } else {
+                                const data = await res.json();
+                                Alert.alert("Error", data.detail || "Failed to delete exam");
+                            }
+                        } catch (error) {
+                            console.error("Delete error:", error);
+                            Alert.alert("Error", "Network error while deleting exam");
+                        } finally {
+                            setLoading(false);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
     const openEditModal = (exam) => {
         console.log('[Edit Modal] Opening for exam:', exam);
 
@@ -260,54 +295,62 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
                                     <View style={styles.examCard}>
                                         <View style={{ flexDirection: 'row', gap: 16 }}>
                                             {/* Left Column: Exam Details */}
-                                            <TouchableOpacity
-                                                style={{ flex: 1 }}
-                                                onPress={() => onSelectExam(item)}
-                                            >
-                                                <View style={styles.cardHeader}>
-                                                    <View style={{ flex: 1 }}>
-                                                        <Text style={styles.examTitle}>{item.title}</Text>
-                                                        <Text style={styles.examDate}>
-                                                            {item.exam_date} at {item.exam_time} • {item.location}
-                                                        </Text>
+                                            <View style={{ flex: 1 }}>
+                                                <TouchableOpacity onPress={() => onSelectExam(item)}>
+                                                    <View style={styles.cardHeader}>
+                                                        <View style={{ flex: 1 }}>
+                                                            <Text style={styles.examTitle}>{item.title}</Text>
+                                                            <Text style={styles.examDate}>
+                                                                {item.exam_date} at {item.exam_time} • {item.location}
+                                                            </Text>
+                                                        </View>
+                                                        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + '20' }]}>
+                                                            <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
+                                                                {item.status?.toUpperCase() || 'SCHEDULED'}
+                                                            </Text>
+                                                        </View>
                                                     </View>
-                                                    <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + '20' }]}>
-                                                        <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
-                                                            {item.status?.toUpperCase() || 'SCHEDULED'}
-                                                        </Text>
-                                                    </View>
-                                                </View>
 
-                                                <View style={styles.cardFooter}>
-                                                    <View style={styles.stat}>
-                                                        <Feather name="users" size={14} color="#6B7280" />
-                                                        <Text style={styles.statText}>{item.assigned_users?.length || 0} assigned</Text>
+                                                    <View style={styles.cardFooter}>
+                                                        <View style={styles.stat}>
+                                                            <Feather name="users" size={14} color="#6B7280" />
+                                                            <Text style={styles.statText}>{item.assigned_users?.length || 0} assigned</Text>
+                                                        </View>
+                                                        <View style={styles.stat}>
+                                                            <Feather name="clock" size={14} color="#6B7280" />
+                                                            <Text style={styles.statText}>{item.time_limit_minutes} mins</Text>
+                                                        </View>
+                                                        <View style={styles.stat}>
+                                                            <MaterialCommunityIcons name="clipboard-check-outline" size={14} color="#6B7280" />
+                                                            <Text style={styles.statText}>Pass: {item.passing_score}%</Text>
+                                                        </View>
                                                     </View>
-                                                    <View style={styles.stat}>
-                                                        <Feather name="clock" size={14} color="#6B7280" />
-                                                        <Text style={styles.statText}>{item.time_limit_minutes} mins</Text>
-                                                    </View>
-                                                    <View style={styles.stat}>
-                                                        <MaterialCommunityIcons name="clipboard-check-outline" size={14} color="#6B7280" />
-                                                        <Text style={styles.statText}>Pass: {item.passing_score}%</Text>
-                                                    </View>
-                                                </View>
 
-                                                <Text style={[styles.supervisorText, item.supervisor_email === userProfile?.email && { color: '#10B981', fontWeight: 'bold' }]}>
-                                                    Supervisor: {item.supervisor_name} {item.supervisor_email === userProfile?.email ? '(You)' : ''}
-                                                </Text>
+                                                    <Text style={[styles.supervisorText, item.supervisor_email === userProfile?.email && { color: '#10B981', fontWeight: 'bold' }]}>
+                                                        Supervisor: {item.supervisor_name} {item.supervisor_email === userProfile?.email ? '(You)' : ''}
+                                                    </Text>
+                                                </TouchableOpacity>
 
-                                                {/* Edit Button - Only for admin/supervisor */}
                                                 {(userProfile?.is_superadmin || item.supervisor_email === userProfile?.email) && (
-                                                    <TouchableOpacity
-                                                        style={styles.editButton}
-                                                        onPress={() => openEditModal(item)}
-                                                    >
-                                                        <Feather name="edit-2" size={16} color="#6366F1" />
-                                                        <Text style={styles.editButtonText}>Edit</Text>
-                                                    </TouchableOpacity>
+                                                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+                                                        <TouchableOpacity
+                                                            style={[styles.editButton, { marginTop: 0 }]}
+                                                            onPress={() => openEditModal(item)}
+                                                        >
+                                                            <Feather name="edit-2" size={16} color="#6366F1" />
+                                                            <Text style={styles.editButtonText}>Edit</Text>
+                                                        </TouchableOpacity>
+
+                                                        <TouchableOpacity
+                                                            style={[styles.editButton, { marginTop: 0, backgroundColor: '#FEE2E2' }]}
+                                                            onPress={() => handleDeleteExam(item)}
+                                                        >
+                                                            <Feather name="trash-2" size={16} color="#EF4444" />
+                                                            <Text style={[styles.editButtonText, { color: '#EF4444' }]}>Delete</Text>
+                                                        </TouchableOpacity>
+                                                    </View>
                                                 )}
-                                            </TouchableOpacity>
+                                            </View>
 
                                             {/* Right Column: PIN Management (Admin/Supervisor Only) */}
                                             {(userProfile?.is_superadmin || item.supervisor_email === userProfile?.email) && (
