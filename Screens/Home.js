@@ -245,7 +245,7 @@ function VideoPlayerModal({ visible, videoData, userEmail, onClose }) {
     fetch(`${API_URL}/api/v1/learning-path/track-video-progress`, {
       method: "POST",
       body: formData,
-    }).catch(() => {});
+    }).catch(() => { });
   };
 
   if (!visible || !videoData) return null;
@@ -1455,8 +1455,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
     <View style={{ flex: 1 }}>
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.decorCircle} />
-
-        <Header onNotificationPress={() => setShowNotifications(true)} userName={userProfile?.name} />
+        <Header onNotificationPress={() => setShowNotifications(true)} userName={userProfile?.name} userProfile={userProfile} />
         <SearchBar />
 
         {/* [NEW] SCHEDULED EXAMS - High Priority */}
@@ -1692,11 +1691,13 @@ const AI_TOOLS = [
   { id: 'flashcards', title: 'Wiki Cards', desc: 'Rapid Recall', icon: 'cards-playing-outline', color: ['#F59E0B', '#D97706'], accent: '#FFF' },
 ];
 
-function Header({ onNotificationPress, userName }) {
+function Header({ onNotificationPress, userName, userProfile }) {
   const insets = useSafeAreaInsets();
   const { t } = useLanguage();
   const displayName = userName || 'User';
   const avatarName = encodeURIComponent(displayName.replace(/\s+/g, '+'));
+  const profilePic = userProfile?.profile_data?.profile_pic;
+
   return (
     <Animated.View entering={FadeInDown.duration(600).springify()} style={[styles.headerContainer, { paddingTop: insets.top + 10 }]}>
       <View style={{ flex: 1 }}>
@@ -1720,7 +1721,7 @@ function Header({ onNotificationPress, userName }) {
         {/* PROFILE */}
         <TouchableOpacity style={styles.profileBtn}>
           <Image
-            source={{ uri: `https://ui-avatars.com/api/?name=${avatarName}&background=0F172A&color=fff` }}
+            source={{ uri: profilePic || `https://ui-avatars.com/api/?name=${avatarName}&background=0F172A&color=fff` }}
             style={styles.profileImage}
           />
         </TouchableOpacity>
@@ -2294,51 +2295,54 @@ export default function Home() {
   const [userProfile, setUserProfile] = useState(null);
 
   // Get user profile from navigation params OR fallback to fetching from context
-  useEffect(() => {
-    const getUserEmail = async () => {
-      try {
-        // Try multiple sources for user email
-        // 1. Try route params (from Login navigation)
-        const parentRoute = navigation.getParent()?.getState()?.routes?.[0]?.params?.userProfile;
-        if (parentRoute?.email) {
-          console.log('[Home] Got email from parent route:', parentRoute.email);
-          setUserEmail(parentRoute.email);
-          setUserProfile(parentRoute);
-          return;
+  useFocusEffect(
+    React.useCallback(() => {
+      const getUserEmail = async () => {
+        try {
+          // 1. Try AsyncStorage (Source of Truth for updates)
+          const stored = await AsyncStorage.getItem('userProfile');
+          if (stored) {
+            const profile = JSON.parse(stored);
+            console.log('[Home] User profile from AsyncStorage:', profile.email);
+            setUserEmail(profile.email);
+            setUserProfile(profile);
+            return;
+          }
+
+          // 2. Try route params (from Login navigation - fallback)
+          const parentRoute = navigation.getParent()?.getState()?.routes?.[0]?.params?.userProfile;
+          if (parentRoute?.email) {
+            console.log('[Home] Got email from parent route:', parentRoute.email);
+            setUserEmail(parentRoute.email);
+            setUserProfile(parentRoute);
+            // Save to AsyncStorage for future use
+            await AsyncStorage.setItem('userProfile', JSON.stringify(parentRoute));
+            return;
+          }
+
+          // 3. Fallback: Fetch current user from login API session or use default
+          const loginEmail = await AsyncStorage.getItem('userEmail');
+          if (loginEmail) {
+            console.log('[Home] User email from userEmail key:', loginEmail);
+            setUserEmail(loginEmail);
+            setUserProfile({ email: loginEmail, name: 'User' });
+            return;
+          }
+
+          // 4. Last resort: default user for testing
+          console.log('[Home] No user email found in any source, using default');
+          setUserEmail('user'); // Default test user
+          setUserProfile({ email: 'user', name: 'Test User' });
+
+        } catch (e) {
+          console.error('Error getting user email:', e);
+          setUserEmail('user'); // Fallback to default
+          setUserProfile({ email: 'user', name: 'Test User' });
         }
-
-        // 2. Try AsyncStorage
-        const stored = await AsyncStorage.getItem('userProfile');
-        if (stored) {
-          const profile = JSON.parse(stored);
-          console.log('[Home] User profile from AsyncStorage:', profile.email);
-          setUserEmail(profile.email);
-          setUserProfile(profile);
-          return;
-        }
-
-        // 3. Fallback: Fetch current user from login API session or use default
-        const loginEmail = await AsyncStorage.getItem('userEmail');
-        if (loginEmail) {
-          console.log('[Home] User email from userEmail key:', loginEmail);
-          setUserEmail(loginEmail);
-          setUserProfile({ email: loginEmail, name: 'User' });
-          return;
-        }
-
-        // 4. Last resort: default user for testing
-        console.log('[Home] No user email found in any source, using default');
-        setUserEmail('user'); // Default test user
-        setUserProfile({ email: 'user', name: 'Test User' });
-
-      } catch (e) {
-        console.error('Error getting user email:', e);
-        setUserEmail('user'); // Fallback to default
-        setUserProfile({ email: 'user', name: 'Test User' });
-      }
-    };
-    getUserEmail();
-  }, [navigation]);
+      };
+      getUserEmail();
+    }, [navigation])
+  );
 
   return (
     <View style={{ flex: 1 }}>

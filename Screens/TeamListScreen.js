@@ -11,16 +11,21 @@ import {
     FlatList,
     Platform,
     Alert,
+    Modal,
+    ScrollView,
+    Image,
+    Pressable,
+    Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Feather, MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import CreateUser from './CreateUser';
 import API_URL from '../config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 const ITEMS_PER_PAGE = 30;
 
 // BELGIAN WAFFLE THEME COLORS
@@ -35,11 +40,14 @@ const THEME = {
     border: '#FDE68A',     // Light Yellow Border
     success: '#10B981',
     error: '#EF4444',
+    surface: '#FFFFFF',
+    surfaceHighlight: '#FEF3C7',
 };
 
 const TeamListScreen = ({ navigation, route }) => {
     const { userProfile } = route.params || {};
     const isSuperAdmin = userProfile?.is_superadmin || userProfile?.role === 'Super Admin';
+    const canEditUsers = isSuperAdmin || userProfile?.has_admin_access || (userProfile?.privileges || []).some(p => ['create_user', 'team_list'].includes(p));
 
     const [users, setUsers] = useState([]);
     const [initialLoading, setInitialLoading] = useState(true);
@@ -47,12 +55,6 @@ const TeamListScreen = ({ navigation, route }) => {
     const [refreshing, setRefreshing] = useState(false);
     const [loadingMore, setLoadingMore] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
-    const [selectedFilter, setSelectedFilter] = useState('All');
-    const [selectedStore, setSelectedStore] = useState('All');
-    const [stores, setStores] = useState([]);
-    const [showFilters, setShowFilters] = useState(false);
-    const [roleFilters, setRoleFilters] = useState(['All']);
-    const [levelColorMap, setLevelColorMap] = useState({});
 
     // Pagination
     const [page, setPage] = useState(1);
@@ -60,26 +62,50 @@ const TeamListScreen = ({ navigation, route }) => {
     const [totalPages, setTotalPages] = useState(1);
     const [hasMore, setHasMore] = useState(true);
 
+    // Filter State
+    const [filterModalVisible, setFilterModalVisible] = useState(false);
+    const [filterOptions, setFilterOptions] = useState({});
+    const [activeFilters, setActiveFilters] = useState({});
+    const [tempFilters, setTempFilters] = useState({}); // For modal state before apply
+    const [expandedFilterSection, setExpandedFilterSection] = useState(null);
+
     // Edit State
     const [editModalVisible, setEditModalVisible] = useState(false);
     const [editingUser, setEditingUser] = useState(null);
+
+    // Profile View State
+    const [profileModalVisible, setProfileModalVisible] = useState(false);
+    const [viewingUser, setViewingUser] = useState(null);
 
     // Bulk Selection State
     const [selectionMode, setSelectionMode] = useState(false);
     const [selectedUsers, setSelectedUsers] = useState([]);
 
+    // Delete Confirmation State
+    const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+    const [deleteInput, setDeleteInput] = useState('');
+    const [isDeleting, setIsDeleting] = useState(false);
+
+    // Role Colors
+    const [levelColorMap, setLevelColorMap] = useState({});
+
     useEffect(() => {
-        fetchStores();
-        fetchLevels(); // Fetch dynamic levels for role filters
+        fetchLevels();
+        fetchFilterOptions();
         fetchUsers(1, true, true);
     }, []);
 
     useEffect(() => {
         const timer = setTimeout(() => {
             fetchUsers(1, true, false);
-        }, 800); // 800ms debounce for smoother typing
+        }, 800);
         return () => clearTimeout(timer);
-    }, [searchQuery, selectedFilter, selectedStore]);
+    }, [searchQuery]);
+
+    // Apply filters when they change (after modal apply)
+    useEffect(() => {
+        fetchUsers(1, true, false);
+    }, [activeFilters]);
 
     // Exit selection mode if user navigates away or list changes significantly
     useEffect(() => {
@@ -88,20 +114,12 @@ const TeamListScreen = ({ navigation, route }) => {
         }
     }, [selectionMode]);
 
-    // ... (fetch logic same as before) ...
-    // Fetch dynamic levels from backend
     const fetchLevels = async () => {
         try {
             const response = await fetch(`${API_URL}/api/v1/levels/`);
             const data = await response.json();
             if (data.levels && Array.isArray(data.levels)) {
-                // Sort by order and extract names
                 const sortedLevels = data.levels.sort((a, b) => a.order - b.order);
-                const levelNames = sortedLevels.map(l => l.name);
-                // Add 'All' at start and 'Super Admin' at end (not a progression level)
-                setRoleFilters(['All', ...levelNames, 'Super Admin']);
-
-                // Build color map
                 const colorMap = {};
                 sortedLevels.forEach(l => {
                     colorMap[l.name] = l.color || '#6B7280';
@@ -110,19 +128,16 @@ const TeamListScreen = ({ navigation, route }) => {
             }
         } catch (error) {
             console.error('Failed to fetch levels:', error);
-            // Keep default roleFilters on error
         }
     };
 
-    const fetchStores = async () => {
+    const fetchFilterOptions = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/v1/users/stores/all`);
+            const response = await fetch(`${API_URL}/api/v1/users/filters`);
             const data = await response.json();
-            if (Array.isArray(data)) {
-                setStores([{ id: 'all', name: 'All' }, ...data]);
-            }
+            setFilterOptions(data);
         } catch (error) {
-            console.error('Failed to fetch stores:', error);
+            console.error('Failed to fetch filter options:', error);
         }
     };
 
@@ -140,11 +155,19 @@ const TeamListScreen = ({ navigation, route }) => {
                 page: pageNum.toString(),
                 limit: ITEMS_PER_PAGE.toString(),
                 search: searchQuery,
-                store: selectedStore === 'All' ? '' : selectedStore,
-                role: selectedFilter === 'All' ? '' : selectedFilter
             });
 
-            const response = await fetch(`${API_URL}/api/v1/users/list?${params}`);
+            // Append active filters
+            Object.keys(activeFilters).forEach(key => {
+                const val = activeFilters[key];
+                if (Array.isArray(val) && val.length > 0) {
+                    val.forEach(v => params.append(key, v));
+                } else if (val && !Array.isArray(val)) {
+                    params.append(key, val);
+                }
+            });
+
+            const response = await fetch(`${API_URL}/api/v1/users/list?${params.toString()}`);
             const data = await response.json();
 
             if (data.users) {
@@ -170,6 +193,7 @@ const TeamListScreen = ({ navigation, route }) => {
 
     const onRefresh = () => {
         setRefreshing(true);
+        fetchFilterOptions(); // Refresh options too
         fetchUsers(1, true, false);
     };
 
@@ -179,9 +203,46 @@ const TeamListScreen = ({ navigation, route }) => {
         }
     };
 
+    // Filter Logic
+    const toggleFilter = (category, value) => {
+        setTempFilters(prev => {
+            const current = prev[category] || [];
+            if (current.includes(value)) {
+                return { ...prev, [category]: current.filter(item => item !== value) };
+            } else {
+                return { ...prev, [category]: [...current, value] };
+            }
+        });
+    };
+
+    const applyFilters = () => {
+        setActiveFilters(tempFilters);
+        setFilterModalVisible(false);
+    };
+
+    const clearFilters = () => {
+        setTempFilters({});
+        setActiveFilters({});
+        setFilterModalVisible(false);
+    };
+
+    const getActiveFilterCount = () => {
+        let count = 0;
+        Object.values(activeFilters).forEach(val => {
+            if (Array.isArray(val)) count += val.length;
+            else if (val) count++;
+        });
+        return count;
+    };
+
     const handleEditUser = (user) => {
         setEditingUser(user);
         setEditModalVisible(true);
+    };
+
+    const handleViewProfile = (user) => {
+        setViewingUser(user);
+        setProfileModalVisible(true);
     };
 
     // Bulk Delete Functions
@@ -206,33 +267,35 @@ const TeamListScreen = ({ navigation, route }) => {
             setSelectedUsers([]);
             setSelectionMode(false);
         } else {
-            // Select all loaded users
             const allEmails = users.map(u => u.email);
-            // Filter out superadmins if needed, but backend handles it
             setSelectedUsers(allEmails);
         }
     };
 
-    const handleBulkDelete = async () => {
+    const handleBulkDelete = () => {
         if (selectedUsers.length === 0) return;
+        setDeleteModalVisible(true);
+    };
 
-        // Confirm
-        const confirmMsg = `Are you sure you want to delete ${selectedUsers.length} users?`;
-        if (Platform.OS === 'web' && window.confirm && !window.confirm(confirmMsg)) return;
+    const handleConfirmDelete = async () => {
+        if (deleteInput !== 'DELETE') {
+            Alert.alert('Confirmation Failed', 'Please type DELETE to confirm.');
+            return;
+        }
 
-        // --- OPTIMISTIC UPDATE START ---
-        // 1. Snapshot current state for rollback
+        setIsDeleting(true);
         const previousUsers = [...users];
         const previousTotal = totalUsers;
-
-        // 2. Immediately update UI
         const usersToDelete = [...selectedUsers];
+
+        // Optimistic update
         setUsers(prevUsers => prevUsers.filter(u => !usersToDelete.includes(u.email)));
         setTotalUsers(prevTotal => Math.max(0, prevTotal - usersToDelete.length));
         setSelectionMode(false);
         setSelectedUsers([]);
+        setDeleteModalVisible(false);
+        setDeleteInput('');
 
-        // 3. Background API Call
         try {
             const token = await AsyncStorage.getItem('userToken');
             const response = await fetch(`${API_URL}/api/v1/users/bulk-delete`, {
@@ -244,55 +307,23 @@ const TeamListScreen = ({ navigation, route }) => {
                 body: JSON.stringify({ emails: usersToDelete })
             });
 
-            const result = await response.json();
-
             if (!response.ok) {
+                const result = await response.json();
                 throw new Error(result.detail || 'Failed to delete users');
             }
-            console.log(`Successfully deleted ${result.deleted} users in background.`);
-
+            Alert.alert("Success", "Users deleted successfully");
         } catch (error) {
             console.error('Bulk delete error:', error);
-            // 4. Rollback on Error
             Alert.alert("Deletion Failed", "Could not delete users. Restoring list.");
             setUsers(previousUsers);
             setTotalUsers(previousTotal);
-        }
-    };
-
-    const handleUpdateUser = async (updatedData) => {
-        try {
-            const response = await fetch(`${API_URL}/api/v1/users/update`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(updatedData)
-            });
-            const result = await response.json();
-
-            if (result.status === 'success') {
-                setEditModalVisible(false);
-                setEditingUser(null);
-                fetchUsers(1, true);
-                alert('User updated successfully');
-            } else {
-                alert(result.message || 'Failed to update user');
-            }
-        } catch (error) {
-            console.error('Update error:', error);
-            alert('Error updating user');
+        } finally {
+            setIsDeleting(false);
         }
     };
 
     const handleToggleExternal = async (user) => {
         const newExternal = !user.is_external;
-        const confirmMsg = newExternal
-            ? `Mark ${user.name} as an External User? Their learning path will merge all levels up to ${user.role}.`
-            : `Mark ${user.name} as a Normal User? Their learning path will return to standard progression.`;
-
-        if (Platform.OS === 'web') {
-            if (!window.confirm(confirmMsg)) return;
-        }
-
         // Optimistic update
         setUsers(prev => prev.map(u =>
             u.email === user.email
@@ -302,7 +333,7 @@ const TeamListScreen = ({ navigation, route }) => {
 
         try {
             const token = await AsyncStorage.getItem('userToken');
-            const response = await fetch(`${API_URL}/api/v1/users/toggle-external`, {
+            await fetch(`${API_URL}/api/v1/users/toggle-external`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -314,35 +345,88 @@ const TeamListScreen = ({ navigation, route }) => {
                     joined_at_level: newExternal ? user.role : null,
                 })
             });
-            const result = await response.json();
-            if (result.status !== 'success') {
-                // Rollback
-                setUsers(prev => prev.map(u =>
-                    u.email === user.email ? { ...u, is_external: user.is_external, joined_at_level: user.joined_at_level } : u
-                ));
-                Alert.alert('Error', result.detail || 'Failed to update external status');
-            }
         } catch (error) {
             console.error('Toggle external error:', error);
-            // Rollback
             setUsers(prev => prev.map(u =>
                 u.email === user.email ? { ...u, is_external: user.is_external, joined_at_level: user.joined_at_level } : u
             ));
-            Alert.alert('Error', 'Failed to update external status');
+        }
+    };
+
+    const handleCreateUser = async (userData) => {
+        try {
+            const token = await AsyncStorage.getItem('userToken');
+            const response = await fetch(`${API_URL}/api/v1/users/create`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(userData)
+            });
+            const result = await response.json();
+            if (response.ok) {
+                setEditModalVisible(false);
+                fetchUsers(1, true, false);
+                Alert.alert("Success", "User created successfully");
+            } else {
+                Alert.alert("Error", result.detail || "Failed to create user");
+            }
+        } catch (error) {
+            console.error(error);
+            Alert.alert("Error", "Failed to create user");
+        }
+    };
+
+    const processUserUpdate = async (userData) => {
+        try {
+            const token = await AsyncStorage.getItem('userToken');
+            const response = await fetch(`${API_URL}/api/v1/users/update`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(userData)
+            });
+            const result = await response.json();
+
+            console.log('=== USER UPDATE RESPONSE ===');
+            console.log('Response status:', result.status);
+            console.log('User data from server:', result.user);
+
+            // Check for success status as per alias endpoint definition
+            if (result.status === 'success' || response.ok) {
+                setEditModalVisible(false);
+
+                // Use the updated user data from the server response if available
+                // This ensures we have the complete, authoritative data from the database
+                const updatedUserData = result.user || userData;
+
+                console.log('Updating local state with user:', updatedUserData.name, updatedUserData.email);
+
+                // Update local state with server data
+                setUsers(prev => prev.map(u =>
+                    u.email === userData.email ? { ...u, ...updatedUserData } : u
+                ));
+
+                Alert.alert("Success", "User updated successfully");
+            } else {
+                Alert.alert("Error", result.detail || result.message || "Failed to update user");
+            }
+        } catch (error) {
+            console.error(error);
+            Alert.alert("Error", "Failed to update user");
         }
     };
 
     const getRoleColor = (role) => {
-        // First check dynamic colors from API
-        if (levelColorMap[role]) {
-            return levelColorMap[role];
-        }
-        // Fallback defaults
+        if (levelColorMap[role]) return levelColorMap[role];
         const colors = {
-            'Super Admin': '#7C2D12', // Strong Brown
-            'Store Manager': '#B45309', // Deep Amber
-            'Shift Manager': '#D97706', // Amber
-            'Gold Waffler': '#F59E0B', // Waffle Yellow
+            'Super Admin': '#7C2D12',
+            'Store Manager': '#B45309',
+            'Shift Manager': '#D97706',
+            'Gold Waffler': '#F59E0B',
             'Silver Waffler': '#9CA3AF',
             'Waffler': '#6B7280',
         };
@@ -364,46 +448,48 @@ const TeamListScreen = ({ navigation, route }) => {
                 onPress={() => {
                     if (selectionMode) {
                         toggleSelection(user.email);
+                    } else {
+                        handleViewProfile(user);
                     }
                 }}
-                disabled={!isSuperAdmin && !selectionMode} // Only allow interaction if superadmin or in selection mode
             >
                 <Animated.View
                     entering={FadeInDown.delay(Math.min(index * 30, 300))}
                     style={[
                         styles.userCard,
                         isSelected && styles.userCardSelected,
-                        selectionMode && { transform: [{ scale: 0.98 }] } // Subtle shrink in selection mode
+                        selectionMode && { transform: [{ scale: 0.98 }] }
                     ]}
                 >
-                    {/* Selection Indicator */}
                     {selectionMode && (
                         <View style={[styles.selectionCheckbox, isSelected && styles.selectionCheckboxActive]}>
                             {isSelected && <Feather name="check" size={14} color="#FFF" />}
                         </View>
                     )}
 
-                    <View style={[styles.userAvatar, { backgroundColor: getRoleColor(user.role) }]}>
-                        <Text style={styles.userAvatarText}>
-                            {getInitials(user.name)}
-                        </Text>
-                    </View>
+                    {user.profile_data?.profile_pic ? (
+                        <Image
+                            source={{ uri: user.profile_data.profile_pic }}
+                            style={styles.userAvatar}
+                            resizeMode="cover"
+                        />
+                    ) : (
+                        <View style={[styles.userAvatar, { backgroundColor: getRoleColor(user.role) }]}>
+                            <Text style={styles.userAvatarText}>
+                                {getInitials(user.name)}
+                            </Text>
+                        </View>
+                    )}
 
                     <View style={styles.userInfo}>
                         <Text style={styles.userName} numberOfLines={1}>{user.name}</Text>
                         <Text style={styles.userEmail} numberOfLines={1}>{user.email}</Text>
                         <View style={styles.tagsRow}>
-                            <View style={[styles.roleBadge, { backgroundColor: '#FFFBEB', borderColor: getRoleColor(user.role), borderWidth: 1 }]}>
+                            <View style={[styles.roleBadge, { borderColor: getRoleColor(user.role) }]}>
                                 <Text style={[styles.roleText, { color: getRoleColor(user.role) }]}>
                                     {user.role}
                                 </Text>
                             </View>
-                            {user.is_external && (
-                                <View style={{ backgroundColor: '#FEF3C7', borderColor: '#F59E0B', borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                                    <MaterialCommunityIcons name="account-arrow-right" size={11} color="#B45309" />
-                                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#B45309' }}>EXTERNAL</Text>
-                                </View>
-                            )}
                             {user.store && user.store !== 'Unassigned' && (
                                 <View style={styles.storeBadge}>
                                     <MaterialCommunityIcons name="store" size={12} color="#78350F" />
@@ -414,704 +500,1013 @@ const TeamListScreen = ({ navigation, route }) => {
                     </View>
 
                     <View style={styles.actionsColumn}>
-                        <View style={[styles.statusDot, { backgroundColor: user.has_admin_access ? '#10B981' : '#D1D5DB' }]} />
-                        {isSuperAdmin && !selectionMode && (
-                            <>
-                                <TouchableOpacity
-                                    style={{ padding: 4, marginBottom: 2 }}
-                                    onPress={() => handleToggleExternal(user)}
-                                >
-                                    <MaterialCommunityIcons
-                                        name={user.is_external ? "account-convert" : "account-arrow-right-outline"}
-                                        size={16}
-                                        color={user.is_external ? '#F59E0B' : '#9CA3AF'}
-                                    />
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={styles.editBtn}
-                                    onPress={() => handleEditUser(user)}
-                                >
-                                    <Feather name="edit-2" size={16} color="#78350F" />
-                                </TouchableOpacity>
-                            </>
-                        )}
+                        <View style={[styles.statusDot, {
+                            backgroundColor: (user.profile_data?.['User Status'] || '').toLowerCase() === 'active'
+                                ? '#10B981'   // green = ACTIVE
+                                : '#D1D5DB'   // grey = inactive / unset
+                        }]} />
                     </View>
                 </Animated.View>
             </TouchableOpacity>
         );
     }, [isSuperAdmin, selectionMode, selectedUsers]);
-    const headerContent = useMemo(() => (
-        <>
-            {/* SELECTION BAR OVERLAY / HEADER */}
-            {selectionMode ? (
-                <View style={styles.selectionBar}>
-                    <TouchableOpacity onPress={() => { setSelectedUsers([]); setSelectionMode(false); }}>
-                        <Feather name="x" size={24} color="#78350F" />
-                    </TouchableOpacity>
-                    <Text style={styles.selectionTitle}>{selectedUsers.length} Selected</Text>
 
-                    <View style={styles.selectionActions}>
-                        <TouchableOpacity onPress={handleSelectAll} style={styles.selectAllBtn}>
-                            <Text style={styles.selectAllText}>
-                                {selectedUsers.length === users.length ? 'Deselect All' : 'Select All'}
-                            </Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            onPress={handleBulkDelete}
-                            style={[styles.deleteBtn, selectedUsers.length === 0 && { opacity: 0.5 }]}
-                            disabled={selectedUsers.length === 0}
-                        >
-                            <Feather name="trash-2" size={20} color="#FFF" />
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            ) : (
-                /* NORMAL HEADER CONTENT */
-                <>
-                    {/* SEARCH BAR */}
-                    <View style={styles.searchContainer}>
-                        <Feather name="search" size={20} color="#B45309" />
-                        <TextInput
-                            style={styles.searchInput}
-                            placeholder="Search team members..."
-                            placeholderTextColor="#92400E"
-                            value={searchQuery}
-                            onChangeText={setSearchQuery}
-                        />
-                        {searchQuery.length > 0 && (
-                            <TouchableOpacity onPress={() => setSearchQuery('')}>
-                                <Feather name="x" size={20} color="#92400E" />
-                            </TouchableOpacity>
-                        )}
+    const renderFilterModal = () => {
+        // Maps: filterOptions key → query param key sent to backend
+        const FILTER_DEFS = [
+            { id: 'statuses', paramKey: 'user_status', label: 'Status', icon: 'activity' },
+            { id: 'roles', paramKey: 'role', label: 'LMS Role', icon: 'shield' },
+            { id: 'designations', paramKey: 'designation', label: 'Designation', icon: 'award' },
+            { id: 'departments', paramKey: 'department', label: 'Department', icon: 'briefcase' },
+            { id: 'sub_departments', paramKey: 'sub_department', label: 'Sub Department', icon: 'layers' },
+            { id: 'functions', paramKey: 'function', label: 'Function', icon: 'git-branch' },
+            { id: 'sub_functions', paramKey: 'sub_function', label: 'Sub Function', icon: 'git-merge' },
+            { id: 'job_roles', paramKey: 'job_role', label: 'Job Role', icon: 'user-check' },
+            { id: 'stores', paramKey: 'store', label: 'Store', icon: 'shopping-bag' },
+            { id: 'regions', paramKey: 'region', label: 'Region', icon: 'map' },
+            { id: 'cities', paramKey: 'city', label: 'City', icon: 'map-pin' },
+            { id: 'states', paramKey: 'state', label: 'State', icon: 'flag' },
+            { id: 'franchises', paramKey: 'franchise', label: 'Franchise', icon: 'home' },
+            { id: 'concepts', paramKey: 'concept', label: 'Concept', icon: 'tag' },
+            { id: 'grades', paramKey: 'grade', label: 'Grade', icon: 'star' },
+            { id: 'qualifications', paramKey: 'qualification', label: 'Qualification', icon: 'book' },
+            { id: 'genders', paramKey: 'gender', label: 'Gender', icon: 'users' },
+            { id: 'blood_groups', paramKey: 'blood_group', label: 'Blood Group', icon: 'heart' },
+            { id: 'marital_statuses', paramKey: 'marital_status', label: 'Marital Status', icon: 'user' },
+        ];
 
-                        {/* Manual Selection Toggle (Web primarily) */}
-                        {isSuperAdmin && (
-                            <TouchableOpacity
-                                onPress={() => setSelectionMode(true)}
-                                style={{ padding: 4 }}
-                            >
-                                <Feather name="check-square" size={20} color="#B45309" />
-                            </TouchableOpacity>
-                        )}
+        const availableDefs = FILTER_DEFS.filter(d => filterOptions[d.id]?.length > 0);
+        const totalActive = getActiveFilterCount();
 
-                        <TouchableOpacity
-                            style={[styles.filterToggle, showFilters && styles.filterToggleActive]}
-                            onPress={() => setShowFilters(!showFilters)}
-                        >
-                            <Feather name="filter" size={18} color={showFilters ? '#FFF' : '#B45309'} />
-                        </TouchableOpacity>
-                    </View>
-
-                    {/* ADVANCED FILTERS */}
-                    {showFilters && (
-                        <View style={styles.advancedFilters}>
-                            {/* Store Filter */}
-                            <Text style={styles.filterLabel}>Store Location</Text>
-                            <View style={styles.filterChipContainer}>
-                                {stores.slice(0, 6).map((store) => (
-                                    <TouchableOpacity
-                                        key={store.id}
-                                        style={[
-                                            styles.filterChip,
-                                            selectedStore === store.name && styles.filterChipActive
-                                        ]}
-                                        onPress={() => setSelectedStore(store.name)}
-                                    >
-                                        <Text style={[
-                                            styles.filterChipText,
-                                            selectedStore === store.name && styles.filterChipTextActive
-                                        ]}>
-                                            {store.name}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </View>
-
-                            {/* Role Filter */}
-                            <Text style={styles.filterLabel}>Role</Text>
-                            <View style={styles.filterChipContainer}>
-                                {roleFilters.map((role) => (
-                                    <TouchableOpacity
-                                        key={role}
-                                        style={[
-                                            styles.filterChip,
-                                            selectedFilter === role && styles.filterChipActive
-                                        ]}
-                                        onPress={() => setSelectedFilter(role)}
-                                    >
-                                        <Text style={[
-                                            styles.filterChipText,
-                                            selectedFilter === role && styles.filterChipTextActive
-                                        ]}>
-                                            {role}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </View>
-
-                            {/* Clear Filters */}
-                            {(selectedStore !== 'All' || selectedFilter !== 'All') && (
-                                <TouchableOpacity
-                                    style={styles.clearFiltersBtn}
-                                    onPress={() => {
-                                        setSelectedStore('All');
-                                        setSelectedFilter('All');
-                                    }}
-                                >
-                                    <Feather name="x-circle" size={14} color="#EF4444" />
-                                    <Text style={styles.clearFiltersText}>Reset Filters</Text>
-                                </TouchableOpacity>
-                            )}
-                        </View>
-                    )}
-                </>
-            )}
-
-            {/* STATS BAR */}
-            <View style={styles.statsBar}>
-                <View style={styles.statItem}>
-                    <Text style={styles.statValue}>{totalUsers.toLocaleString()}</Text>
-                    <Text style={styles.statLabel}>Total Members</Text>
-                </View>
-                <View style={styles.statDivider} />
-                <View style={styles.statItem}>
-                    <Text style={styles.statValue}>{users.length}</Text>
-                    <Text style={styles.statLabel}>Displaying</Text>
-                </View>
-            </View>
-        </>
-    ), [selectionMode, selectedUsers, users.length, totalUsers, searchQuery, showFilters, selectedStore, selectedFilter, isSuperAdmin, stores, roleFilters]);
-
-    const renderFooter = () => {
-        if (!loadingMore) return null;
         return (
-            <View style={styles.loadingMore}>
-                <ActivityIndicator size="small" color={THEME.primary} />
-                <Text style={styles.loadingMoreText}>Fetching more...</Text>
-            </View>
+            <Modal
+                visible={filterModalVisible}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => setFilterModalVisible(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.filterModalContainer}>
+                        <View style={styles.filterHeader}>
+                            <View>
+                                <Text style={styles.filterTitle}>Filter Team</Text>
+                                {totalActive > 0 && (
+                                    <Text style={{ fontSize: 12, color: '#F59E0B', fontWeight: '600' }}>
+                                        {totalActive} filter{totalActive > 1 ? 's' : ''} active
+                                    </Text>
+                                )}
+                            </View>
+                            <TouchableOpacity onPress={() => setFilterModalVisible(false)}>
+                                <Feather name="x" size={24} color="#1F2937" />
+                            </TouchableOpacity>
+                        </View>
+
+                        <ScrollView style={styles.filterContent}>
+                            {/* Dynamic filter sections from backend */}
+                            {availableDefs.map((def) => {
+                                const isExpanded = expandedFilterSection === def.id;
+                                const currentSelections = tempFilters[def.paramKey] || [];
+
+                                return (
+                                    <View key={def.id} style={styles.filterSection}>
+                                        <TouchableOpacity
+                                            style={styles.filterSectionHeader}
+                                            onPress={() => setExpandedFilterSection(isExpanded ? null : def.id)}
+                                        >
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                                                <Feather name={def.icon} size={16} color={THEME.chocolate} />
+                                                <Text style={styles.filterSectionTitle}>{def.label}</Text>
+                                                {currentSelections.length > 0 && (
+                                                    <View style={styles.filterCountBadge}>
+                                                        <Text style={styles.filterCountText}>{currentSelections.length}</Text>
+                                                    </View>
+                                                )}
+                                            </View>
+                                            <Feather name={isExpanded ? "chevron-up" : "chevron-down"} size={20} color="#6B7280" />
+                                        </TouchableOpacity>
+
+                                        {isExpanded && (
+                                            <View style={styles.filterOptionsContainer}>
+                                                {filterOptions[def.id].map(option => (
+                                                    <TouchableOpacity
+                                                        key={option}
+                                                        style={[
+                                                            styles.filterOptionChip,
+                                                            currentSelections.includes(option) && styles.filterOptionChipSelected
+                                                        ]}
+                                                        onPress={() => toggleFilter(def.paramKey, option)}
+                                                    >
+                                                        <Text style={[
+                                                            styles.filterOptionText,
+                                                            currentSelections.includes(option) && styles.filterOptionTextSelected
+                                                        ]}>
+                                                            {option}
+                                                        </Text>
+                                                        {currentSelections.includes(option) && (
+                                                            <Feather name="check" size={14} color="#FFF" />
+                                                        )}
+                                                    </TouchableOpacity>
+                                                ))}
+                                            </View>
+                                        )}
+                                    </View>
+                                );
+                            })}
+
+                            {/* External account toggle */}
+                            <View style={styles.filterSection}>
+                                <View style={[styles.filterSectionHeader, { paddingVertical: 14 }]}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                                        <Feather name="external-link" size={16} color={THEME.chocolate} />
+                                        <Text style={styles.filterSectionTitle}>External Users Only</Text>
+                                    </View>
+                                    <Switch
+                                        value={tempFilters['is_external'] === true}
+                                        onValueChange={(val) => setTempFilters(prev => ({
+                                            ...prev,
+                                            is_external: val ? true : undefined
+                                        }))}
+                                        trackColor={{ false: '#D1D5DB', true: '#FCD34D' }}
+                                        thumbColor={tempFilters['is_external'] ? '#F59E0B' : '#F4F4F5'}
+                                    />
+                                </View>
+                            </View>
+
+                            {availableDefs.length === 0 && (
+                                <View style={{ padding: 32, alignItems: 'center' }}>
+                                    <Feather name="inbox" size={40} color="#D1D5DB" />
+                                    <Text style={{ color: '#9CA3AF', marginTop: 12, fontSize: 14 }}>
+                                        No filter data available yet.{'\n'}Upload users to populate filters.
+                                    </Text>
+                                </View>
+                            )}
+                        </ScrollView>
+
+                        <View style={styles.filterFooter}>
+                            <TouchableOpacity style={styles.resetFilterBtn} onPress={clearFilters}>
+                                <Text style={styles.resetFilterText}>Reset All</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.applyFilterBtn} onPress={applyFilters}>
+                                <Text style={styles.applyFilterText}>Apply Filters</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         );
     };
 
-    const renderEmpty = () => (
-        <View style={styles.emptyState}>
-            <View style={styles.emptyIconContainer}>
-                <MaterialCommunityIcons name="account-search" size={64} color="#FCD34D" />
-            </View>
-            <Text style={styles.emptyTitle}>No team members found</Text>
-            <Text style={styles.emptyText}>
-                {searchQuery ? 'Try adjusting your search criteria' : 'No users match the selected filters'}
-            </Text>
-        </View>
-    );
+    const renderDeleteModal = () => (
+        <Modal
+            visible={deleteModalVisible}
+            transparent={true}
+            animationType="fade"
+            onRequestClose={() => setDeleteModalVisible(false)}
+        >
+            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+                <View style={{ backgroundColor: '#FFF', borderRadius: 20, padding: 24, width: '100%', maxWidth: 400, alignItems: 'center' }}>
+                    <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: '#FEE2E2', justifyContent: 'center', alignItems: 'center', marginBottom: 16 }}>
+                        <Feather name="alert-triangle" size={32} color="#EF4444" />
+                    </View>
 
-    if (initialLoading && users.length === 0) {
-        return (
-            <SafeAreaView style={styles.container} edges={['top']}>
-                <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color={THEME.primary} />
-                    <Text style={styles.loadingText}>Loading Team...</Text>
+                    <Text style={{ fontSize: 20, fontWeight: '700', color: '#1F2937', marginBottom: 8, textAlign: 'center' }}>
+                        Delete {selectedUsers.length} Users?
+                    </Text>
+
+                    <Text style={{ fontSize: 14, color: '#4B5563', textAlign: 'center', marginBottom: 24, lineHeight: 20 }}>
+                        You are about to delete all data permanently for these users. This action cannot be undone.{"\n"}
+                        Please type <Text style={{ fontWeight: '700', color: '#EF4444' }}>DELETE</Text> to confirm.
+                    </Text>
+
+                    <TextInput
+                        value={deleteInput}
+                        onChangeText={setDeleteInput}
+                        placeholder="Type DELETE"
+                        placeholderTextColor="#9CA3AF"
+                        style={{
+                            width: '100%',
+                            height: 50,
+                            borderWidth: 1,
+                            borderColor: deleteInput === 'DELETE' ? '#EF4444' : '#E5E7EB',
+                            borderRadius: 12,
+                            paddingHorizontal: 16,
+                            fontSize: 16,
+                            color: '#1F2937',
+                            marginBottom: 24,
+                            backgroundColor: '#F9FAFB'
+                        }}
+                        autoCapitalize="characters"
+                    />
+
+                    <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
+                        <TouchableOpacity
+                            onPress={() => {
+                                setDeleteModalVisible(false);
+                                setDeleteInput('');
+                            }}
+                            style={{ flex: 1, height: 48, borderRadius: 12, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' }}
+                        >
+                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#4B5563' }}>Cancel</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            onPress={handleConfirmDelete}
+                            disabled={deleteInput !== 'DELETE' || isDeleting}
+                            style={{
+                                flex: 1,
+                                height: 48,
+                                borderRadius: 12,
+                                backgroundColor: deleteInput === 'DELETE' ? '#EF4444' : '#FECACA',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                opacity: isDeleting ? 0.7 : 1
+                            }}
+                        >
+                            {isDeleting ? (
+                                <ActivityIndicator color="#FFF" />
+                            ) : (
+                                <Text style={{ fontSize: 16, fontWeight: '600', color: '#FFF' }}>Delete</Text>
+                            )}
+                        </TouchableOpacity>
+                    </View>
                 </View>
-            </SafeAreaView>
+            </View>
+        </Modal>
+    );
+    const renderProfileModal = () => {
+        if (!viewingUser) return null;
+
+        // Use profile_data if available, ensuring fallbacks
+        const profile = viewingUser.profile_data || {};
+
+        // Sections configuration
+        const sections = [
+            {
+                title: "Personal Information",
+                icon: "user",
+                data: [
+                    { label: "Full Name", value: viewingUser.name },
+                    { label: "Date of Birth", value: profile['Date of Birth'] },
+                    { label: "Gender", value: profile['Gender'] },
+                    { label: "Marital Status", value: profile['Marital Status'] },
+                    { label: "Blood Group", value: profile['Blood Group'] },
+                    { label: "Contact Number", value: profile['Contact Number'] },
+                    { label: "Email", value: viewingUser.email },
+                    { label: "Address", value: profile['Address'] },
+                ]
+            },
+            {
+                title: "Identity Proof",
+                icon: "credit-card",
+                data: [
+                    { label: "Proof Type", value: profile['Proof Type'] },
+                    { label: "Proof ID", value: profile['Proof ID'] },
+                ]
+            },
+            {
+                title: "Qualification & Experience",
+                icon: "book",
+                data: [
+                    { label: "Qualification", value: profile['Qualification'] },
+                    { label: "Specialization", value: profile['Specialization'] },
+                    { label: "Qualification Status", value: profile['Qualification Status'] },
+                    { label: "Previous Experience", value: profile['Previous Experience'] },
+                    { label: "Prev. Designation", value: profile['Previous Experience Designation'] },
+                ]
+            },
+            {
+                title: "Employment Details",
+                icon: "briefcase",
+                data: [
+                    { label: "Employee Code", value: profile['Employee Code'] },
+                    { label: "Temp Code", value: profile['Temporary Employee Code'] },
+                    { label: "Joining Date", value: profile['Joining Date'] },
+                    { label: "Confirmation Date", value: profile['Date of Confirmation'] }, // Adjusted key guess
+                    { label: "Account Verified", value: profile['Account Verified'] },
+                    { label: "User Status", value: profile['User Status'] },
+                ]
+            },
+            {
+                title: "Organization",
+                icon: "layers",
+                data: [
+                    { label: "Designation", value: profile['Designation'] || viewingUser.role },
+                    { label: "Department", value: profile['Department'] },
+                    { label: "Sub Department", value: profile['Sub Department'] },
+                    { label: "Function", value: profile['Function'] },
+                    { label: "Job Role", value: profile['Job Role'] },
+                    { label: "Grade", value: profile['Grade'] },
+                ]
+            },
+            {
+                title: "Location",
+                icon: "map-pin",
+                data: [
+                    { label: "Store Name", value: viewingUser.store },
+                    { label: "Store Code", value: profile['Store Code'] },
+                    { label: "Region", value: profile['Region'] },
+                    { label: "City", value: profile['City'] },
+                    { label: "State", value: profile['State'] },
+                ]
+            }
+        ];
+
+        return (
+            <Modal
+                visible={profileModalVisible}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => setProfileModalVisible(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.filterModalContainer}>
+                        <View style={styles.filterHeader}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                                <View style={[styles.userAvatar, { backgroundColor: getRoleColor(viewingUser.role), width: 40, height: 40 }]}>
+                                    <Text style={[styles.userAvatarText, { fontSize: 16 }]}>
+                                        {getInitials(viewingUser.name)}
+                                    </Text>
+                                </View>
+                                <View>
+                                    <Text style={styles.filterTitle}>{viewingUser.name}</Text>
+                                    <Text style={{ color: '#6B7280', fontSize: 12 }}>{viewingUser.role} • {viewingUser.store}</Text>
+                                </View>
+                            </View>
+                            <TouchableOpacity onPress={() => setProfileModalVisible(false)}>
+                                <Feather name="x" size={24} color="#1F2937" />
+                            </TouchableOpacity>
+                        </View>
+
+                        <ScrollView style={styles.filterContent} contentContainerStyle={{ padding: 20 }}>
+                            {sections.map((section, idx) => (
+                                <View key={idx} style={{ marginBottom: 24 }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}>
+                                        <Feather name={section.icon} size={18} color={THEME.primary} />
+                                        <Text style={{ fontSize: 16, fontWeight: '700', color: THEME.primaryDark }}>
+                                            {section.title}
+                                        </Text>
+                                    </View>
+                                    <View style={{ backgroundColor: '#F9FAFB', borderRadius: 12, padding: 12, gap: 12 }}>
+                                        {section.data.map((item, i) => (
+                                            item.value ? (
+                                                <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                                    <Text style={{ color: '#6B7280', fontSize: 13, flex: 1 }}>{item.label}</Text>
+                                                    <Text style={{ color: '#1F2937', fontSize: 13, fontWeight: '500', flex: 1, textAlign: 'right' }}>
+                                                        {item.value}
+                                                    </Text>
+                                                </View>
+                                            ) : null
+                                        ))}
+                                        {section.data.every(i => !i.value) && (
+                                            <Text style={{ color: '#9CA3AF', fontSize: 12, fontStyle: 'italic' }}>No info available</Text>
+                                        )}
+                                    </View>
+                                </View>
+                            ))}
+                        </ScrollView>
+
+                        {canEditUsers && (
+                            <View style={styles.filterFooter}>
+                                <TouchableOpacity
+                                    style={[styles.applyFilterBtn, { backgroundColor: '#FFF', borderWidth: 1, borderColor: '#D1D5DB' }]}
+                                    onPress={() => {
+                                        setProfileModalVisible(false);
+                                        handleEditUser(viewingUser);
+                                    }}
+                                >
+                                    <Text style={[styles.applyFilterText, { color: '#374151' }]}>Edit Profile</Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
+                    </View>
+                </View>
+            </Modal>
         );
-    }
+    };
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
-            {/* HEADER */}
-            <LinearGradient
-                colors={['#F59E0B', '#D97706']}
-                style={styles.header}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-            >
+            {/* Header */}
+            <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
                     <Feather name="arrow-left" size={24} color="#FFF" />
                 </TouchableOpacity>
-
-                <View style={styles.headerCenter}>
+                <View style={{ flex: 1 }}>
                     <Text style={styles.headerTitle}>Team Directory</Text>
                     <Text style={styles.headerSubtitle}>Manage your waffle family</Text>
                 </View>
-
-                {/* Show spinner in header if refreshing lists in background */}
-                {listLoading && !refreshing && (
-                    <ActivityIndicator size="small" color="#FFF" style={{ marginRight: 10 }} />
-                )}
-
-                <TouchableOpacity onPress={onRefresh} style={styles.refreshBtn}>
+                <TouchableOpacity onPress={onRefresh} style={styles.headerActionBtn}>
                     <Feather name="refresh-cw" size={20} color="#FFF" />
                 </TouchableOpacity>
-            </LinearGradient>
-
-            <View style={styles.contentContainer}>
-                <FlatList
-                    data={users}
-                    renderItem={renderUserCard}
-                    keyExtractor={(item) => item.email}
-                    ListHeaderComponent={headerContent}
-                    ListFooterComponent={renderFooter}
-                    ListEmptyComponent={initialLoading || listLoading ? null : renderEmpty}
-                    onEndReached={loadMore}
-                    onEndReachedThreshold={0.3}
-                    refreshControl={
-                        <RefreshControl
-                            refreshing={refreshing}
-                            onRefresh={onRefresh}
-                            tintColor="#B45309"
-                            colors={['#F59E0B']}
-                        />
-                    }
-                    contentContainerStyle={styles.listContent}
-                    showsVerticalScrollIndicator={false}
-                    initialNumToRender={15}
-                    maxToRenderPerBatch={10}
-                    removeClippedSubviews={true}
-                />
             </View>
+
+            {/* Search & Filter Bar */}
+            <View style={styles.searchContainer}>
+                <View style={styles.searchBar}>
+                    <Feather name="search" size={20} color="#92400E" />
+                    <TextInput
+                        style={styles.searchInput}
+                        placeholder="Search team..."
+                        placeholderTextColor="#92400E"
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                    />
+                    {searchQuery.length > 0 && (
+                        <TouchableOpacity onPress={() => setSearchQuery('')}>
+                            <Feather name="x" size={18} color="#92400E" />
+                        </TouchableOpacity>
+                    )}
+                </View>
+                <TouchableOpacity
+                    style={[styles.filterBtn, getActiveFilterCount() > 0 && styles.filterBtnActive]}
+                    onPress={() => {
+                        setTempFilters({ ...activeFilters }); // Load current filters into temp
+                        setFilterModalVisible(true);
+                    }}
+                >
+                    <Feather name="filter" size={20} color={getActiveFilterCount() > 0 ? "#FFF" : "#B45309"} />
+                    {getActiveFilterCount() > 0 && (
+                        <View style={styles.badge}>
+                            <Text style={styles.badgeText}>{getActiveFilterCount()}</Text>
+                        </View>
+                    )}
+                </TouchableOpacity>
+
+                {canEditUsers && (
+                    <TouchableOpacity
+                        style={[styles.filterBtn, selectionMode && styles.filterBtnActive]}
+                        onPress={() => {
+                            if (selectionMode) {
+                                setSelectionMode(false);
+                                setSelectedUsers([]);
+                            } else {
+                                setSelectionMode(true);
+                            }
+                        }}
+                    >
+                        <Feather name="check-square" size={20} color={selectionMode ? "#FFF" : "#B45309"} />
+                    </TouchableOpacity>
+                )}
+            </View>
+
+            {/* Selection Toolbar */}
+            {selectionMode && (
+                <View style={styles.selectionBar}>
+                    <Text style={styles.selectionText}>{selectedUsers.length} Selected</Text>
+                    <View style={styles.selectionActions}>
+                        <TouchableOpacity onPress={handleSelectAll} style={styles.textActionBtn}>
+                            <Text style={styles.textActionLabel}>Select All</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={handleBulkDelete} style={[styles.iconActionBtn, { backgroundColor: '#EF4444' }]}>
+                            <Feather name="trash-2" size={18} color="#FFF" />
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            )}
+
+            {/* List */}
+            <FlatList
+                data={users}
+                renderItem={renderUserCard}
+                keyExtractor={(item) => item.email}
+                contentContainerStyle={styles.listContent}
+                refreshControl={
+                    <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[THEME.primary]} />
+                }
+                onEndReached={loadMore}
+                onEndReachedThreshold={0.3}
+                ListFooterComponent={() => loadingMore && <ActivityIndicator size="small" color={THEME.primary} style={{ marginVertical: 20 }} />}
+                ListEmptyComponent={() => !initialLoading && (
+                    <View style={styles.emptyState}>
+                        <MaterialCommunityIcons name="account-search-outline" size={64} color="#FCD34D" />
+                        <Text style={styles.emptyText}>No team members found</Text>
+                        <Text style={styles.emptySubtext}>Try adjusting filters or search</Text>
+                    </View>
+                )}
+            />
+
+            {/* Drawers/Modals */}
+            {renderFilterModal()}
+            {renderProfileModal()}
+            {renderDeleteModal()}
 
             <CreateUser
                 visible={editModalVisible}
-                onClose={() => {
-                    setEditModalVisible(false);
-                    setEditingUser(null);
-                }}
-                userProfile={userProfile}
-                isEditing={true}
+                onClose={() => setEditModalVisible(false)}
+                isEditing={!!editingUser}
                 initialData={editingUser}
-                onUpdate={handleUpdateUser}
+                userProfile={userProfile}
+                onCreate={handleCreateUser}
+                onUpdate={processUserUpdate}
+                onBulkUploadStart={(taskId) => {
+                    setEditModalVisible(false);
+                    // Can show a toast or alert here
+                    Alert.alert("Upload Queued", `Task ID: ${taskId}`);
+                }}
             />
-        </SafeAreaView >
+        </SafeAreaView>
     );
 };
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#FFFBEB', // Cream background
-    },
-    contentContainer: {
-        flex: 1,
         backgroundColor: '#FFFBEB',
     },
-    loadingContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: '#FFFBEB',
-    },
-    loadingText: {
-        marginTop: 12,
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#92400E',
-    },
-
-    // HEADER
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 20,
-        paddingVertical: 16,
-        paddingBottom: 24, // Extra padding for curve effect if added later
-        borderBottomLeftRadius: 24,
-        borderBottomRightRadius: 24,
-        shadowColor: "#F59E0B",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 8,
-        elevation: 5,
-        zIndex: 10,
-        marginBottom: -10, // Pull stats/search up
+        paddingVertical: 15,
+        backgroundColor: '#F59E0B',
     },
     backBtn: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: 'rgba(255,255,255,0.2)',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    headerCenter: {
-        flex: 1,
-        marginLeft: 16,
+        padding: 8,
+        marginRight: 12,
     },
     headerTitle: {
-        fontSize: 22,
-        fontWeight: '800',
+        fontSize: 20,
+        fontWeight: '700',
         color: '#FFF',
-        textShadowColor: 'rgba(0,0,0,0.1)',
-        textShadowOffset: { width: 0, height: 1 },
-        textShadowRadius: 2,
     },
     headerSubtitle: {
-        fontSize: 13,
+        fontSize: 12,
         color: 'rgba(255,255,255,0.9)',
-        fontWeight: '500',
     },
-    refreshBtn: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+    headerActionBtn: {
+        padding: 8,
         backgroundColor: 'rgba(255,255,255,0.2)',
-        justifyContent: 'center',
-        alignItems: 'center',
+        borderRadius: 8,
     },
-
-    listContent: {
-        paddingTop: 24,
-        paddingBottom: 40,
-    },
-
-    // SEARCH
     searchContainer: {
         flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#FFFFFF',
-        marginHorizontal: 16,
         paddingHorizontal: 16,
         paddingVertical: 12,
-        borderRadius: 16,
-        gap: 12,
+        gap: 10,
+    },
+    searchBar: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFF',
+        borderRadius: 12,
+        paddingHorizontal: 12,
+        height: 48,
         borderWidth: 1,
-        borderColor: '#FEF3C7',
-        shadowColor: '#78350F',
-        shadowOffset: { width: 0, height: 2 },
+        borderColor: '#E5E7EB',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
         shadowOpacity: 0.05,
-        shadowRadius: 4,
-        elevation: 3,
+        shadowRadius: 2,
+        elevation: 1,
     },
     searchInput: {
         flex: 1,
+        marginLeft: 10,
         fontSize: 15,
-        fontWeight: '500',
-        color: '#451A03',
+        color: '#1F2937',
     },
-    filterToggle: {
-        padding: 8,
-        borderRadius: 10,
-        backgroundColor: '#FFFBEB',
-        borderWidth: 1,
-        borderColor: '#FDE68A',
-    },
-    filterToggleActive: {
-        backgroundColor: '#F59E0B',
-        borderColor: '#F59E0B',
-    },
-
-    // ADVANCED FILTERS
-    advancedFilters: {
-        marginHorizontal: 16,
-        marginTop: 12,
-        backgroundColor: '#FFFFFF',
-        padding: 16,
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: '#FEF3C7',
-        shadowColor: '#000',
-        shadowOpacity: 0.05,
-        shadowRadius: 3,
-        elevation: 2,
-    },
-    filterLabel: {
-        fontSize: 12,
-        fontWeight: '700',
-        color: '#92400E',
-        marginBottom: 8,
-        marginTop: 8,
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
-    },
-    filterChipContainer: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 8,
-    },
-    filterChip: {
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+    filterBtn: {
+        width: 48,
+        height: 48,
         borderRadius: 12,
-        backgroundColor: '#FFFBEB',
-        borderWidth: 1,
-        borderColor: '#FDE68A',
-    },
-    filterChipActive: {
-        backgroundColor: '#F59E0B',
-        borderColor: '#F59E0B',
-    },
-    filterChipText: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: '#92400E',
-    },
-    filterChipTextActive: {
-        color: '#FFF',
-    },
-    clearFiltersBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginTop: 16,
-        paddingVertical: 8,
-        gap: 6,
-        borderTopWidth: 1,
-        borderTopColor: '#FEF3C7',
-    },
-    clearFiltersText: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: '#EF4444',
-    },
-
-    // STATS BAR
-    statsBar: {
-        flexDirection: 'row',
-        marginHorizontal: 16,
-        marginTop: 16,
-        marginBottom: 8,
-        backgroundColor: '#FFFFFF',
-        padding: 12,
-        borderRadius: 12,
-        justifyContent: 'space-around',
-        borderWidth: 1,
-        borderColor: '#FEF3C7',
-    },
-    statItem: {
-        alignItems: 'center',
-    },
-    statValue: {
-        fontSize: 18,
-        fontWeight: '800',
-        color: '#D97706',
-    },
-    statLabel: {
-        fontSize: 11,
-        color: '#92400E',
-        fontWeight: '500',
-    },
-    statDivider: {
-        width: 1,
-        backgroundColor: '#FDE68A',
-    },
-
-    // USER CARD
-    userCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#FFFFFF',
-        marginHorizontal: 16,
-        marginTop: 12,
-        padding: 16,
-        borderRadius: 18,
-        borderWidth: 1,
-        borderColor: '#FEF3C7',
-        shadowColor: '#D97706',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 4,
-        elevation: 2,
-    },
-    userAvatar: {
-        width: 52,
-        height: 52,
-        borderRadius: 26,
-        justifyContent: 'center',
-        alignItems: 'center',
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 3,
-        elevation: 2,
-    },
-    userAvatarText: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#FFF',
-    },
-    userInfo: {
-        flex: 1,
-        marginLeft: 14,
-    },
-    userName: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: '#451A03',
-        marginBottom: 2,
-    },
-    userEmail: {
-        fontSize: 12,
-        color: '#92400E',
-        marginBottom: 6,
-    },
-    tagsRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        flexWrap: 'wrap',
-    },
-    roleBadge: {
-        paddingHorizontal: 8,
-        paddingVertical: 2,
-        borderRadius: 6,
-    },
-    roleText: {
-        fontSize: 10,
-        fontWeight: '700',
-    },
-    storeBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
         backgroundColor: '#FEF3C7',
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-        borderRadius: 6,
-        gap: 4,
-    },
-    storeText: {
-        fontSize: 10,
-        fontWeight: '600',
-        color: '#78350F',
-    },
-    actionsColumn: {
         alignItems: 'center',
-        gap: 12,
-        paddingLeft: 8,
-    },
-    statusDot: {
-        width: 10,
-        height: 10,
-        borderRadius: 5,
+        justifyContent: 'center',
         borderWidth: 1,
+        borderColor: '#FDE68A',
+        position: 'relative',
+    },
+    filterBtnActive: {
+        backgroundColor: '#F59E0B',
+        borderColor: '#B45309',
+    },
+    badge: {
+        position: 'absolute',
+        top: -5,
+        right: -5,
+        backgroundColor: '#EF4444',
+        borderRadius: 10,
+        width: 20,
+        height: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 2,
         borderColor: '#FFF',
     },
-    editBtn: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        backgroundColor: '#FFFBEB',
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 1,
-        borderColor: '#FDE68A',
-    },
-
-    // LOADING MORE
-    loadingMore: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 20,
-        gap: 8,
-    },
-    loadingMoreText: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: '#92400E',
-    },
-
-    // EMPTY STATE
-    emptyState: {
-        alignItems: 'center',
-        paddingVertical: 60,
-        paddingHorizontal: 40,
-    },
-    emptyIconContainer: {
-        width: 100,
-        height: 100,
-        borderRadius: 50,
-        backgroundColor: '#FFFBEB',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 20,
-        borderWidth: 4,
-        borderColor: '#FEF3C7',
-    },
-    emptyTitle: {
-        fontSize: 18,
+    badgeText: {
+        color: '#FFF',
+        fontSize: 10,
         fontWeight: '700',
-        color: '#451A03',
-        marginBottom: 8,
     },
-    emptyText: {
-        fontSize: 14,
-        color: '#92400E',
-        textAlign: 'center',
-        lineHeight: 20,
-    },
-
-    // SELECTION MODE STYLES
     selectionBar: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#FEF3C7', // Highlight color
-        marginHorizontal: 16,
+        justifyContent: 'space-between',
+        backgroundColor: '#FEF3C7',
         paddingHorizontal: 16,
-        paddingVertical: 12,
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: '#F59E0B',
-        shadowColor: '#D97706',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 4,
+        paddingVertical: 10,
+        marginHorizontal: 16,
         marginBottom: 8,
-    },
-    selectionTitle: {
-        flex: 1,
-        fontSize: 16,
-        fontWeight: '700',
-        color: '#78350F',
-        marginLeft: 12,
-    },
-    selectionActions: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-    },
-    selectAllBtn: {
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        backgroundColor: '#FDE68A',
         borderRadius: 8,
         borderWidth: 1,
         borderColor: '#F59E0B',
     },
-    selectAllText: {
-        fontSize: 12,
-        fontWeight: '700',
+    selectionText: {
+        fontWeight: '600',
         color: '#92400E',
     },
-    deleteBtn: {
+    selectionActions: {
+        flexDirection: 'row',
+        gap: 10,
+        alignItems: 'center',
+    },
+    textActionBtn: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+    },
+    textActionLabel: {
+        color: '#B45309',
+        fontWeight: '600',
+    },
+    iconActionBtn: {
         width: 36,
         height: 36,
-        borderRadius: 18,
-        backgroundColor: '#EF4444',
-        justifyContent: 'center',
+        borderRadius: 8,
         alignItems: 'center',
-        borderWidth: 1,
-        borderColor: '#B91C1C',
+        justifyContent: 'center',
     },
-
-    // User Card Selection Overrides
+    listContent: {
+        paddingHorizontal: 16,
+        paddingBottom: 40,
+    },
+    userCard: {
+        backgroundColor: '#FFF',
+        borderRadius: 16,
+        padding: 12,
+        marginBottom: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+        elevation: 2,
+        borderWidth: 1,
+        borderColor: 'transparent',
+    },
     userCardSelected: {
         borderColor: '#F59E0B',
-        backgroundColor: '#FEF3C7',
-        borderWidth: 2,
+        backgroundColor: '#FFFBEB',
     },
     selectionCheckbox: {
         width: 20,
         height: 20,
         borderRadius: 6,
         borderWidth: 2,
-        borderColor: '#D97706',
-        marginRight: 10,
-        justifyContent: 'center',
+        borderColor: '#D1D5DB',
+        marginRight: 12,
         alignItems: 'center',
-        backgroundColor: '#FFF',
+        justifyContent: 'center',
     },
     selectionCheckboxActive: {
         backgroundColor: '#F59E0B',
         borderColor: '#F59E0B',
+    },
+    userAvatar: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+    },
+    userAvatarText: {
+        color: '#FFF',
+        fontSize: 18,
+        fontWeight: '700',
+    },
+    userInfo: {
+        flex: 1,
+    },
+    userName: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#1F2937',
+        marginBottom: 2,
+    },
+    userEmail: {
+        fontSize: 13,
+        color: '#6B7280',
+        marginBottom: 6,
+    },
+    tagsRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 6,
+    },
+    roleBadge: {
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 6,
+        borderWidth: 1,
+        backgroundColor: '#FFF',
+    },
+    roleText: {
+        fontSize: 11,
+        fontWeight: '600',
+    },
+    storeBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 6,
+        backgroundColor: '#FEF3C7',
+    },
+    storeText: {
+        fontSize: 11,
+        color: '#92400E',
+        fontWeight: '500',
+    },
+    actionsColumn: {
+        alignItems: 'flex-end',
+        justifyContent: 'center',
+        paddingLeft: 8,
+    },
+    statusDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+    },
+    emptyState: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingTop: 60,
+    },
+    emptyText: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#4B5563',
+        marginTop: 16,
+    },
+    emptySubtext: {
+        fontSize: 14,
+        color: '#9CA3AF',
+        marginTop: 4,
+    },
+
+    // MODAL STYLES
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'flex-end',
+    },
+    filterModalContainer: {
+        backgroundColor: '#FFF',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        height: height * 0.8,
+        paddingBottom: 20,
+    },
+    filterHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: 20,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F3F4F6',
+    },
+    filterTitle: {
+        fontSize: 20,
+        fontWeight: '700',
+        color: '#111827',
+    },
+    filterContent: {
+        flex: 1,
+    },
+    filterSection: {
+        borderBottomWidth: 1,
+        borderBottomColor: '#F3F4F6',
+    },
+    filterSectionHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: 16,
+        backgroundColor: '#FFF',
+    },
+    filterSectionTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#374151',
+    },
+    filterCountBadge: {
+        backgroundColor: '#F59E0B',
+        borderRadius: 12,
+        paddingHorizontal: 6,
+        paddingVertical: 1,
+    },
+    filterCountText: {
+        color: '#FFF',
+        fontSize: 10,
+        fontWeight: '700',
+    },
+    filterOptionsContainer: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        padding: 16,
+        paddingTop: 0,
+        gap: 8,
+        backgroundColor: '#F9FAFB',
+    },
+    filterOptionChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 20,
+        backgroundColor: '#FFF',
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    filterOptionChipSelected: {
+        backgroundColor: '#F59E0B',
+        borderColor: '#B45309',
+    },
+    filterOptionText: {
+        fontSize: 13,
+        color: '#4B5563',
+    },
+    filterOptionTextSelected: {
+        color: '#FFF',
+        fontWeight: '600',
+    },
+    filterFooter: {
+        flexDirection: 'row',
+        padding: 20,
+        gap: 12,
+        borderTopWidth: 1,
+        borderTopColor: '#F3F4F6',
+    },
+    resetFilterBtn: {
+        flex: 1,
+        paddingVertical: 14,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#D1D5DB',
+        alignItems: 'center',
+    },
+    resetFilterText: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#6B7280',
+    },
+    applyFilterBtn: {
+        flex: 2,
+        paddingVertical: 14,
+        borderRadius: 12,
+        backgroundColor: '#F59E0B',
+        alignItems: 'center',
+        shadowColor: '#F59E0B',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+    },
+    applyFilterText: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#FFF',
+    },
+    switchRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingBottom: 16,
+    },
+    switchLabel: {
+        fontSize: 14,
+        color: '#6B7280',
+    },
+
+    // Profile Modal specific styles
+    profileOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'flex-end',
+    },
+    profileCard: {
+        backgroundColor: '#FFF',
+        height: '90%',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        overflow: 'hidden',
+    },
+    profileHeaderGradient: {
+        padding: 20,
+        paddingTop: 20,
+    },
+    profileHeaderContent: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+    },
+    profileAvatarLarge: {
+        width: 64,
+        height: 64,
+        borderRadius: 32,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 3,
+        borderColor: 'rgba(255,255,255,0.3)',
+    },
+    profileAvatarTextLarge: {
+        fontSize: 24,
+        fontWeight: 'bold',
+        color: '#FFF',
+    },
+    profileHeaderName: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        color: '#FFF',
+        marginBottom: 2,
+    },
+    profileHeaderEmail: {
+        fontSize: 14,
+        color: 'rgba(255,255,255,0.9)',
+    },
+    profileHeaderBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 12,
+        borderWidth: 1,
+        gap: 4,
+    },
+    profileHeaderBadgeText: {
+        color: '#FFF',
+        fontSize: 10,
+        fontWeight: '600',
+    },
+    profileCloseBtn: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    profileEditBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFF',
+        alignSelf: 'flex-start',
+        marginTop: 16,
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+        borderRadius: 20,
+        gap: 6,
+    },
+    profileEditBtnText: {
+        color: '#451A03',
+        fontWeight: '600',
+        fontSize: 13,
+    },
+    profileSection: {
+        marginBottom: 24,
+    },
+    profileSectionHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 12,
+    },
+    profileSectionTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#B45309',
+    },
+    profileInfoRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        paddingVertical: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F3F4F6',
+    },
+    profileInfoLabel: {
+        color: '#6B7280',
+        fontSize: 14,
+        flex: 1,
+    },
+    profileInfoValue: {
+        color: '#1F2937',
+        fontSize: 14,
+        fontWeight: '500',
+        flex: 1,
+        textAlign: 'right',
     },
 });
 
