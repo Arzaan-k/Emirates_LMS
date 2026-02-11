@@ -59,6 +59,7 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
 
     // Bucket settings
     const [isLinear, setIsLinear] = useState(false);
+    const [showInBothPaths, setShowInBothPaths] = useState(false);
 
     // Notification
     const [notifTitle, setNotifTitle] = useState('');
@@ -117,6 +118,7 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
                 const bucket = data.find(b => b.id === item.id);
                 if (bucket) {
                     setIsLinear(bucket.is_linear || false);
+                    setShowInBothPaths(bucket.show_in_both_paths || false);
                     const au = bucket.assigned_users || {};
                     setAssignmentData({
                         emails: Array.isArray(au.emails) ? au.emails : [],
@@ -164,6 +166,7 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
             });
         } else {
             setIsLinear(item.is_linear || false);
+            setShowInBothPaths(item.show_in_both_paths || false);
             const au = item.assigned_users || {};
             setAssignmentData({
                 emails: Array.isArray(au.emails) ? au.emails : [],
@@ -245,6 +248,7 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
                 : {
                     is_linear: isLinear,
                     assigned_users: assignmentData,
+                    show_in_both_paths: showInBothPaths,
                 };
 
             const res = await fetch(endpoint, {
@@ -604,6 +608,14 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
                                 <>
                                     <SettingRow label="Linear (Sequential)" desc="Users must complete modules in order" icon="list">
                                         <Switch value={isLinear} onValueChange={setIsLinear} trackColor={{ true: THEME.green }} />
+                                    </SettingRow>
+
+                                    <SettingRow
+                                        label={`Also show in ${(item?.original_learning_path_type || item?.learning_path_type) === 'self_learning' ? 'Career Progression' : 'Self Learning'}`}
+                                        desc={`Display this folder and its courses in the ${(item?.original_learning_path_type || item?.learning_path_type) === 'self_learning' ? 'Career Progression' : 'Self Learning'} section as well`}
+                                        icon="copy"
+                                    >
+                                        <Switch value={showInBothPaths} onValueChange={setShowInBothPaths} trackColor={{ true: '#3B82F6' }} />
                                     </SettingRow>
 
                                     <Text style={[styles.sectionTitle, { marginTop: 20, marginBottom: 4 }]}>User Assignment</Text>

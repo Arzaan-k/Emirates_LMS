@@ -1086,7 +1086,7 @@ const crucialStyles = StyleSheet.create({
   },
 });
 
-function HomeContent({ onOpenTool, onOpenTwin, userEmail }) {
+function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
   const navigation = useNavigation();
   const { t } = useLanguage();
   const [liveUpdates, setLiveUpdates] = useState([]);
@@ -1456,7 +1456,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail }) {
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.decorCircle} />
 
-        <Header onNotificationPress={() => setShowNotifications(true)} />
+        <Header onNotificationPress={() => setShowNotifications(true)} userName={userProfile?.name} />
         <SearchBar />
 
         {/* [NEW] SCHEDULED EXAMS - High Priority */}
@@ -1692,14 +1692,16 @@ const AI_TOOLS = [
   { id: 'flashcards', title: 'Wiki Cards', desc: 'Rapid Recall', icon: 'cards-playing-outline', color: ['#F59E0B', '#D97706'], accent: '#FFF' },
 ];
 
-function Header({ onNotificationPress }) {
+function Header({ onNotificationPress, userName }) {
   const insets = useSafeAreaInsets();
   const { t } = useLanguage();
+  const displayName = userName || 'User';
+  const avatarName = encodeURIComponent(displayName.replace(/\s+/g, '+'));
   return (
     <Animated.View entering={FadeInDown.duration(600).springify()} style={[styles.headerContainer, { paddingTop: insets.top + 10 }]}>
       <View style={{ flex: 1 }}>
         <Text style={styles.greetingText}>{t('goodMorning')}</Text>
-        <Text style={styles.nameText}>Aditya</Text>
+        <Text style={styles.nameText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{displayName}</Text>
       </View>
 
       <View style={styles.headerRight}>
@@ -1718,7 +1720,7 @@ function Header({ onNotificationPress }) {
         {/* PROFILE */}
         <TouchableOpacity style={styles.profileBtn}>
           <Image
-            source={{ uri: "https://ui-avatars.com/api/?name=Aditya+User&background=0F172A&color=fff" }}
+            source={{ uri: `https://ui-avatars.com/api/?name=${avatarName}&background=0F172A&color=fff` }}
             style={styles.profileImage}
           />
         </TouchableOpacity>
@@ -2410,7 +2412,7 @@ export default function Home() {
             ),
           })}
         >
-          <Tab.Screen name="HomeTab" children={() => <HomeContent onOpenTool={setActiveTool} onOpenTwin={() => setActiveTool('videosim')} userEmail={userEmail} />} />
+          <Tab.Screen name="HomeTab" children={() => <HomeContent onOpenTool={setActiveTool} onOpenTwin={() => setActiveTool('videosim')} userEmail={userEmail} userProfile={userProfile} />} />
           <Tab.Screen name="CoursesTab" children={() => <Courses userEmail={userEmail} />} />
           <Tab.Screen name="ResourcesTab" component={Resources} />
           <Tab.Screen name="ProfileTab" children={() => <Profile navigation={navigation} route={{ params: { userProfile: userProfile } }} />} />
