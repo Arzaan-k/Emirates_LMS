@@ -22,6 +22,7 @@ from app.api.v1.endpoints import (
     tracking,
     roleplay,
     reports,
+    detailed_reports,
     self_learning,
     learning_path,
 )
@@ -45,6 +46,7 @@ api_router.include_router(ai.router)
 api_router.include_router(tracking.router)
 api_router.include_router(roleplay.router)
 api_router.include_router(reports.router)
+api_router.include_router(detailed_reports.router)
 api_router.include_router(self_learning.router)
 api_router.include_router(learning_path.router)
 

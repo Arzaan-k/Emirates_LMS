@@ -380,7 +380,8 @@ class QuizService:
         self,
         quiz_id: str,
         user_name: str,
-        answers: List[int]
+        answers: List[int],
+        user_email: Optional[str] = None
     ) -> Dict[str, Any]:
         """Submit answers for a live quiz."""
         quiz = self.get_live_quiz_by_id(quiz_id)
@@ -398,6 +399,12 @@ class QuizService:
         score = (correct_count / total_questions * 100) if total_questions > 0 else 0
 
         logger.info(f"Live quiz submitted: {user_name} - {quiz_id} Score: {score}%")
+
+        if user_email:
+            try:
+                self.submit_live_quiz_answer(quiz_id, user_email, user_name, score, 0)
+            except Exception as e:
+                logger.error(f"Failed to update leaderboard: {e}")
 
         return {
             "quiz_id": quiz_id,

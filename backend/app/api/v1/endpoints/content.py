@@ -1132,18 +1132,84 @@ async def update_course_bucket(
 
 
 
-@router.delete("/buckets/{bucket_id}")
-async def delete_course_bucket(
+@router.get("/buckets/{bucket_id}/contents")
+async def get_bucket_contents(
     bucket_id: str,
     db: Session = Depends(get_db)
 ):
     """
-    Delete a course bucket.
+    Get all content items in a specific bucket.
     """
-    service = ContentService(db)
+    from app.models.content import Content
     
     try:
+        # Query by bucket_id or bucket name (legacy)
+        service = ContentService(db)
+        bucket = service.get_bucket_by_id(bucket_id)
+        
+        contents = db.query(Content).filter(
+            (Content.bucket_id == bucket_id) | (Content.bucket == bucket.name)
+        ).all()
+        
+        return [c.to_dict() if hasattr(c, 'to_dict') else dict(c) for c in contents]
+    except Exception as e:
+        logger.error(f"Failed to fetch bucket contents: {e}")
+        return []
+
+@router.delete("/buckets/{bucket_id}")
+async def delete_course_bucket(
+    bucket_id: str,
+    delete_contents: bool = False,
+    background_tasks: BackgroundTasks = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a course bucket.
+    If delete_contents is True, also deletes all content within the bucket.
+    Otherwise, moves content to 'Uncategorized'.
+    """
+    service = ContentService(db)
+    cdn_service = CDNService()
+    
+    try:
+        if delete_contents:
+            logger.info(f"Deleting bucket {bucket_id} AND its contents...")
+            # 1. Get all content in the bucket
+            from app.models.content import Content
+            bucket = service.get_bucket_by_id(bucket_id)
+            
+            contents = db.query(Content).filter(
+                (Content.bucket_id == bucket_id) | (Content.bucket == bucket.name)
+            ).all()
+            
+            # 2. Delete each content item (Files + DB)
+            for content in contents:
+                try:
+                    # Delete from CDN in background
+                    if cdn_service.enabled and content.video_url:
+                        if background_tasks:
+                            background_tasks.add_task(cdn_service.delete_file, content.video_url)
+                    
+                    # Delete local file
+                    local_patterns = [
+                        os.path.join(settings.UPLOAD_DIR, f"{content.id}*"),
+                    ]
+                    for pattern in local_patterns:
+                        import glob
+                        for filepath in glob.glob(pattern):
+                            try:
+                                os.remove(filepath)
+                            except:
+                                pass
+                    
+                    # Delete from DB
+                    service.delete_content(content.id)
+                except Exception as e:
+                    logger.error(f"Failed to delete content {content.id} during bucket deletion: {e}")
+        
+        # 3. Delete the bucket (any remaining content will be moved to Uncategorized by service logic)
         service.delete_bucket(bucket_id)
+        
         logger.info(f"Bucket deleted: {bucket_id}")
         return {"status": "success", "message": f"Bucket {bucket_id} deleted successfully"}
     except Exception as e:
@@ -1450,13 +1516,15 @@ async def get_content_library(db: Session = Depends(get_db)):
                 "parent_bucket_id": get_attr(bucket, 'parent_bucket_id'),
                 "folder_path": get_attr(bucket, 'folder_path'),
                 "learning_path_type": filter_path_type,
+                "original_learning_path_type": bucket_path_type,
                 "color": get_attr(bucket, 'color'),
                 "icon": get_attr(bucket, 'icon'),
                 "order_index": get_attr(bucket, 'order_index', 0),
                 "is_linear": get_attr(bucket, 'is_linear', False) or False,
                 "assigned_users": get_attr(bucket, 'assigned_users', []) or [],
+                "show_in_both_paths": get_attr(bucket, 'show_in_both_paths', False) or False,
                 "thumbnail": get_attr(bucket, 'thumbnail'),
-                "items": bucket_items,
+                "items": sorted(bucket_items, key=lambda x: x.get('order_index', 0) or 0),
                 "children": children,
                 "has_children": len(children) > 0,
                 "item_count": len(bucket_items),
@@ -1476,7 +1544,17 @@ async def get_content_library(db: Session = Depends(get_db)):
             if get_attr(b, 'learning_path_type') == 'self_learning'
         ]
 
-        # Build trees for career progression buckets only
+        # Find cross-displayed buckets (show_in_both_paths == True)
+        career_cross_display = [
+            b for b in root_buckets
+            if get_attr(b, 'learning_path_type') == 'career_progression' and (get_attr(b, 'show_in_both_paths', False) or False)
+        ]
+        self_cross_display = [
+            b for b in root_buckets
+            if get_attr(b, 'learning_path_type') == 'self_learning' and (get_attr(b, 'show_in_both_paths', False) or False)
+        ]
+
+        # Build trees for career progression buckets
         career_progression_buckets = []
         for root in career_root_buckets:
             root_id = get_attr(root, 'id')
@@ -1484,13 +1562,33 @@ async def get_content_library(db: Session = Depends(get_db)):
             if career_tree and career_tree.get('total_count', 0) > 0:
                 career_progression_buckets.append(career_tree)
 
-        # Build trees for self learning buckets only
+        # Also add self-learning buckets that are cross-displayed INTO career progression
+        for root in self_cross_display:
+            root_id = get_attr(root, 'id')
+            cross_tree = build_bucket_tree(root_id, "self_learning")
+            if cross_tree and cross_tree.get('total_count', 0) > 0:
+                cross_tree['cross_displayed'] = True
+                cross_tree['learning_path_type'] = 'career_progression'
+                cross_tree['original_learning_path_type'] = 'self_learning'
+                career_progression_buckets.append(cross_tree)
+
+        # Build trees for self learning buckets
         self_learning_buckets = []
         for root in self_learning_root_buckets:
             root_id = get_attr(root, 'id')
             self_tree = build_bucket_tree(root_id, "self_learning")
             if self_tree and self_tree.get('total_count', 0) > 0:
                 self_learning_buckets.append(self_tree)
+
+        # Also add career progression buckets that are cross-displayed INTO self learning
+        for root in career_cross_display:
+            root_id = get_attr(root, 'id')
+            cross_tree = build_bucket_tree(root_id, "career_progression")
+            if cross_tree and cross_tree.get('total_count', 0) > 0:
+                cross_tree['cross_displayed'] = True
+                cross_tree['learning_path_type'] = 'self_learning'
+                cross_tree['original_learning_path_type'] = 'career_progression'
+                self_learning_buckets.append(cross_tree)
 
         # Sort buckets by order_index then name
         career_progression_buckets.sort(key=lambda x: (x.get('order_index', 0), x.get('name', '').lower()))

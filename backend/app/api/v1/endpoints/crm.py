@@ -352,65 +352,324 @@ async def complete_crm_task(
 # STORE AUDIT ENDPOINTS
 # ==========================================
 
-audit_checklists: List[dict] = []
-audit_submissions: List[dict] = []
-
-
-@router.get("/audits/checklists")
-async def get_audit_checklists():
+@router.get("/audits/templates")
+async def get_audit_templates(db: Session = Depends(get_db)):
     """
-    Get all audit checklists.
+    Get all audit templates (definitions).
     """
-    if not audit_checklists:
-        # Return default checklist
-        return [{
-            "id": "default",
-            "name": "Store Hygiene Audit",
-            "sections": [
-                {
-                    "name": "Kitchen",
-                    "items": [
-                        {"id": "k1", "text": "Cooking surfaces clean", "type": "checkbox"},
-                        {"id": "k2", "text": "Equipment sanitized", "type": "checkbox"},
-                        {"id": "k3", "text": "Temperature logs updated", "type": "checkbox"},
-                    ]
-                },
-                {
-                    "name": "Storage",
-                    "items": [
-                        {"id": "s1", "text": "FIFO followed", "type": "checkbox"},
-                        {"id": "s2", "text": "Proper labeling", "type": "checkbox"},
-                    ]
-                }
-            ]
-        }]
-    return audit_checklists
+    from app.models.crm import AuditTemplate
+    templates = db.query(AuditTemplate).all()
+    # Map to legacy format if needed, but better to use new format
+    return [t.to_dict() for t in templates]
 
 
-@router.post("/audits/checklists")
-async def create_audit_checklist(
-    name: str = Form(...),
-    sections: str = Form(...),
+@router.post("/audits/templates")
+async def create_audit_template(
+    title: str = Form(...),
+    description: str = Form(""),
+    checklist_items: str = Form(...), # JSON string
+    icon: str = Form("clipboard"),
+    color: str = Form("#10B981"),
+    current_user: Dict[str, Any] = Depends(require_admin), # Admin only
+    db: Session = Depends(get_db)
 ):
     """
-    Create a new audit checklist.
+    Create a new audit template.
     """
+    from app.models.crm import AuditTemplate
+    
     try:
-        sections_list = json.loads(sections)
+        items = json.loads(checklist_items)
     except:
-        raise HTTPException(status_code=400, detail="Invalid sections format")
+        raise HTTPException(status_code=400, detail="Invalid checklist_items JSON")
+
+    template = AuditTemplate(
+        id=str(uuid.uuid4()),
+        title=title,
+        description=description,
+        icon=icon,
+        color=color,
+        checklist_items=items,
+        created_at=datetime.utcnow(),
+    )
+    # created_by not in model yet, assumed handling user context elsewhere or add it to model if needed
     
-    checklist = {
-        "id": f"checklist_{uuid.uuid4().hex[:8]}",
-        "name": name,
-        "sections": sections_list,
-        "created_at": datetime.utcnow().isoformat(),
+    db.add(template)
+    db.commit()
+    logger.info(f"Audit template created: {template.id} by {current_user.get('email')}")
+    
+    return template.to_dict()
+
+
+@router.post("/audits/assign")
+async def assign_audit(
+    template_id: str = Form(...),
+    assigned_to: str = Form(None), # Single User email (optional if target_users provided)
+    target_users: str = Form(None), # JSON string for bulk assignment
+    store_id: str = Form(""),
+    due_date: str = Form(None), # ISO format
+    current_user: Dict[str, Any] = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Assign an audit to a user or a set of users.
+    """
+    from app.models.crm import AuditAssignment, AuditTemplate
+    from app.models.user import User
+    from sqlalchemy import or_
+
+    # Validate template
+    template = db.query(AuditTemplate).filter(AuditTemplate.id == template_id).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Audit template not found")
+
+    # Determine target users
+    users_to_assign = []
+    
+    if target_users:
+        try:
+            assignment_data = json.loads(target_users)
+            
+            # Start with all users query
+            query = db.query(User)
+            
+            # Collect filter conditions
+            conditions = []
+            
+            # Specific emails - if provided, these are added specifically
+            specific_emails = assignment_data.get('emails', [])
+            if specific_emails:
+                # If only emails are provided and no groups, just use these
+                has_groups = any(assignment_data.get(k) for k in ['roles', 'stores', 'categories', 'regions', 'cities', 'states', 'designations', 'departments'])
+                if not has_groups:
+                    users_to_assign = db.query(User).filter(User.email.in_(specific_emails)).all()
+            
+            # Group filters
+            # If groups are selected, we find users matching ANY of the groups (OR logic within types? usually AND across types, OR within type)
+            # But the UserAssignmentPicker logic usually implies:
+            # Users matching (Role A OR Role B) AND (Store X OR Store Y) ...
+            
+            # Actually, let's follow a simpler approach:
+            # 1. Fetch all users suitable for assignment
+            # 2. Filter them in python to match the assignment_data logic exactly as Frontend does
+            # This is safer to ensure consistency
+            
+            all_candidates = db.query(User).all()
+            
+            roles = set(assignment_data.get('roles', []))
+            stores = set(assignment_data.get('stores', []))
+            categories = set(assignment_data.get('categories', []))
+            regions = set(assignment_data.get('regions', []))
+            cities = set(assignment_data.get('cities', []))
+            states = set(assignment_data.get('states', []))
+            designations = set(assignment_data.get('designations', []))
+            departments = set(assignment_data.get('departments', []))
+            
+            # Emails explicitly selected
+            selected_emails_set = set(specific_emails)
+            
+            for user in all_candidates:
+                # Check if explicitly selected
+                if user.email in selected_emails_set:
+                    users_to_assign.append(user)
+                    continue
+                
+                # Check if matches group filters
+                # Logic: matches IF defined in filter. If filter empty, ignore it.
+                # Must match ALL non-empty filter types.
+                
+                matches = True
+                if roles and user.role not in roles: matches = False
+                if stores and user.store not in stores: matches = False
+                if categories and user.category not in categories: matches = False
+                
+                # Optional fields on user model
+                u_region = getattr(user, 'region', None)
+                if regions and (not u_region or u_region not in regions): matches = False
+                
+                u_city = getattr(user, 'city', None)
+                if cities and (not u_city or u_city not in cities): matches = False
+                
+                u_state = getattr(user, 'state', None)
+                if states and (not u_state or u_state not in states): matches = False
+                
+                u_desig = getattr(user, 'designation', None)
+                if designations and (not u_desig or u_desig not in designations): matches = False
+
+                u_dept = getattr(user, 'department', None)
+                if departments and (not u_dept or u_dept not in departments): matches = False
+                
+                if matches and (roles or stores or categories or regions or cities or states or designations or departments):
+                    users_to_assign.append(user)
+            
+            # Deduplicate just in case
+            users_to_assign = list({u.email: u for u in users_to_assign}.values())
+            
+        except Exception as e:
+            logger.error(f"Error parsing target_users: {e}")
+            raise HTTPException(status_code=400, detail="Invalid target_users format")
+
+    elif assigned_to:
+        # Single user legacy
+        user = db.query(User).filter(User.email == assigned_to).first()
+        if user:
+            users_to_assign.append(user)
+    
+    if not users_to_assign:
+        raise HTTPException(status_code=404, detail="No users found for assignment")
+
+    # Parse due date
+    due_dt = None
+    if due_date:
+        try:
+            due_dt = datetime.fromisoformat(due_date.replace("Z", "+00:00"))
+        except:
+             pass 
+
+    created_assignments = []
+    
+    for user in users_to_assign:
+        # Check if already assigned (optional, but good practice)
+        # For now, allow multiple assignments
+        
+        assignment = AuditAssignment(
+            id=str(uuid.uuid4()),
+            template_id=template_id,
+            assigned_to=user.email,
+            store_id=store_id or user.store or "Unassigned",
+            due_date=due_dt,
+            status="pending",
+            assigned_by=current_user.get("email"),
+            assigned_at=datetime.utcnow()
+        )
+        db.add(assignment)
+        created_assignments.append(assignment)
+    
+    db.commit()
+    
+    return {
+        "status": "success",
+        "message": f"Assigned to {len(created_assignments)} users",
+        "assignments_count": len(created_assignments)
     }
+
+
+@router.get("/audits/my-assignments")
+async def get_my_audit_assignments(
+    status: str = "pending",
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get audits assigned to the current user.
+    """
+    from app.models.crm import AuditAssignment, AuditTemplate
     
-    audit_checklists.append(checklist)
-    logger.info(f"Audit checklist created: {checklist['id']}")
+    filters = [AuditAssignment.assigned_to == current_user["email"]]
+    if status != "all":
+        filters.append(AuditAssignment.status == status)
+        
+    assignments = db.query(AuditAssignment).filter(*filters).all()
     
-    return checklist
+    results = []
+    for a in assignments:
+        d = a.to_dict()
+        # Ensure template details are included
+        if a.template:
+             d['template'] = a.template.to_dict()
+        results.append(d)
+        
+    return results
+
+
+@router.get("/audits/all-assignments")
+async def get_all_audit_assignments(
+    store_id: str = None,
+    status: str = None,
+    current_user: Dict[str, Any] = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all audit assignments (Admin only).
+    """
+    from app.models.crm import AuditAssignment, AuditTemplate
+    from app.models.user import User
+    
+    query = db.query(AuditAssignment)
+    
+    if store_id:
+        query = query.filter(AuditAssignment.store_id == store_id)
+    if status and status != 'all':
+        query = query.filter(AuditAssignment.status == status)
+        
+    assignments = query.order_by(AuditAssignment.assigned_at.desc()).all()
+    
+    results = []
+    for a in assignments:
+        d = a.to_dict()
+        # Enrich with template and user info
+        if a.template:
+             d['template'] = a.template.to_dict()
+        
+        # Fetch user name manually if not in relation
+        user = db.query(User).filter(User.email == a.assigned_to).first()
+        if user:
+            d['user_name'] = user.name
+            d['user_role'] = user.role
+            
+        results.append(d)
+        
+    return results
+
+
+# Legacy checklist endpoint - map to templates for backward compatibility
+@router.get("/audits/checklists")
+async def get_audit_checklists(db: Session = Depends(get_db)):
+    """
+    Get all audit checklists/templates.
+    """
+    from app.models.crm import AuditTemplate
+    templates = db.query(AuditTemplate).all()
+    
+    if not templates:
+        # Return default checklist if no templates in DB (bootstrap)
+        return [{
+            "id": "safety", # Match frontend ID
+            "name": "Safety Compliance",
+            "checklist_items": ["Fire extinguishers", "Exits marked"]
+        }]
+
+    # Convert to format expected by frontend or use standardized format
+    # Frontend AuditsScreen expects:
+    # filters object? NO. AuditsScreen calls this but uses result as setFilters(data).
+    # IF AuditsScreen expects filters, we should return filters here??
+    
+    # Wait, Step 451: 
+    # const response = await fetch(`${API_URL}/api/v1/crm/audits/checklists`);
+    # const data = await response.json();
+    # setFilters(data);
+    # And filters state is { stores: [], employees: [], categories: [] }.
+    
+    # So this endpoint MUST return { stores: [], employees: [], categories: [] }!!!
+    # The previous implementation (Step 466) returned a LIST of checklists!
+    # So the current frontend code was receiving a list and setting it to `filters`.
+    # This implies `filters.stores` was undefined.
+    # So filters were broken.
+    
+    # I should fix this to return correct filters!
+    
+    # Get all stores and employees for filtering
+    from app.models.user import User
+    
+    stores = [u.store for u in db.query(User.store).distinct().all() if u.store]
+    employees = [{"name": u.name, "email": u.email} for u in db.query(User).all()]
+    categories = [t.title for t in templates]
+    
+    return {
+        "stores": stores,
+        "employees": employees,
+        "categories": categories
+    }
 
 
 @router.post("/audits/submit")
@@ -418,16 +677,17 @@ async def submit_audit(
     user_email: str = Form(...),
     user_name: str = Form(...),
     store: str = Form(...),
-    category: str = Form(...),
+    category: str = Form(...), # template_id basically
     checklist_items: str = Form(...),
     checked_items: str = Form(...),
+    assignment_id: str = Form(None), # NEW
     db: Session = Depends(get_db)
 ):
     """
     Submit an audit for a store.
-    Matches the old backend format for frontend compatibility.
     """
     from app.repositories.crm_repository import CRMRepository
+    from app.models.crm import AuditAssignment
     
     repo = CRMRepository(db)
 
@@ -439,7 +699,10 @@ async def submit_audit(
 
     # Calculate completion rate
     total_items = len(items_list)
-    checked_count = sum(1 for key, val in checked_dict.items() if val and key.startswith(category))
+    # checked_items keys might be "cat-idx" or just "idx" or "text"?
+    # Frontend AuditsScreen uses "category-idx".
+    # We count how many entries in checked_items are True.
+    checked_count = sum(1 for val in checked_dict.values() if val)
     completion_rate = round((checked_count / total_items) * 100) if total_items > 0 else 0
 
     submission_data = {
@@ -451,13 +714,22 @@ async def submit_audit(
         "checklist_items": items_list,
         "checked_items": checked_dict,
         "completion_rate": completion_rate,
-        "submitted_at": datetime.utcnow().isoformat(),
-        "status": "completed"
+        "submitted_at": datetime.utcnow(),
+        "status": "completed",
+        "assignment_id": assignment_id
     }
 
     try:
         audit = repo.submit_audit(submission_data)
-        logger.info(f"Audit submitted: {submission_data['id']} - {category} - {completion_rate}%")
+        logger.info(f"Audit submitted: {submission_data['id']} - {completion_rate}%")
+        
+        # If assignment_id provided, mark assignment as completed
+        if assignment_id:
+            assign = db.query(AuditAssignment).filter(AuditAssignment.id == assignment_id).first()
+            if assign:
+                assign.status = "completed"
+                assign.completed_at = datetime.utcnow()
+                db.commit()
         
         # Convert to dict for response
         submission_dict = audit.to_dict() if hasattr(audit, 'to_dict') else dict(audit)
@@ -470,67 +742,35 @@ async def submit_audit(
 @router.get("/audits/submissions")
 async def get_audit_submissions(
     store: str = None,
+    user_email: str = None, # Added filter
+    category: str = None, # Added filter
     current_user: Dict[str, Any] = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Get audit submissions, optionally filtered by store.
+    Get audit submissions, filtered by store, user, or category.
     """
-    from app.repositories.crm_repository import CRMRepository
+    from app.models.crm import AuditSubmission
     
-    repo = CRMRepository(db)
+    query = db.query(AuditSubmission)
     
-    try:
-        audits = repo.get_audits(store)
-        result = []
-        for audit in audits:
-            audit_dict = audit.to_dict() if hasattr(audit, 'to_dict') else dict(audit)
-            result.append(audit_dict)
-            
-        # Calculate stats for frontend (as it expects {audits: [], total_count: ...})
-        # If the frontend expects just a list, we return list.
-        # But looking at AuditsScreen.js: `data.audits` and `data.avg_completion_rate`.
-        # So we need to match that format!
+    if store:
+        query = query.filter(AuditSubmission.store == store)
+    if user_email:
+        query = query.filter(AuditSubmission.user_email == user_email)
+    if category:
+        query = query.filter(AuditSubmission.category == category)
         
-        total_count = len(result)
-        avg_completion = sum(a.get('completion_rate', 0) for a in result) / total_count if total_count > 0 else 0
-        
-        return {
-            "audits": result,
-            "total_count": total_count,
-            "avg_completion_rate": round(avg_completion),
-            "category_stats": {} # Implement if needed
-        }
-    except Exception as e:
-        logger.error(f"Audit fetch failed: {e}")
-        return {
-            "audits": [],
-            "total_count": 0,
-            "avg_completion_rate": 0
-        }
-
-
-@router.get("/audits/submissions/{submission_id}")
-async def get_audit_submission(submission_id: str, db: Session = Depends(get_db)):
-    """
-    Get a specific audit submission.
-    """
-    from app.repositories.crm_repository import CRMRepository
+    audits = query.order_by(AuditSubmission.submitted_at.desc()).limit(100).all()
     
-    # We don't have get_by_id exposed in CRMRepo wrapper yet, let's just use audit_repo direct
-    # or implement it. For now, let's assume get_audits returns all and filter (inefficient but safe)
-    # OR better, use the base repository method if possible.
-    # Actually, let's just use the repo's db session directly or add a method.
-    repo = CRMRepository(db)
+    result = [a.to_dict() for a in audits]
     
-    try:
-        # Utilizing the underlying repository
-        audit = repo.audit_repo.get_by_id(submission_id)
-        if not audit:
-            raise HTTPException(status_code=404, detail="Audit submission not found")
-        return audit.to_dict() if hasattr(audit, 'to_dict') else dict(audit)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Audit fetch failed: {e}")
-        raise HTTPException(status_code=404, detail="Audit not found")
+    total_count = len(result)
+    avg_completion = sum(a.get('completion_rate', 0) for a in result) / total_count if total_count > 0 else 0
+    
+    return {
+        "audits": result,
+        "total_count": total_count,
+        "avg_completion_rate": round(avg_completion),
+        "category_stats": {} 
+    }

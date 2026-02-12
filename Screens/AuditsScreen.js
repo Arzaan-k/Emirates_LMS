@@ -10,6 +10,7 @@ import {
     Modal,
     ActivityIndicator,
     FlatList,
+    TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -18,6 +19,7 @@ import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 import API_URL from '../config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import UserAssignmentPicker from '../Components/UserAssignmentPicker';
 
 const { width, height } = Dimensions.get('window');
 
@@ -38,6 +40,24 @@ const AuditsScreen = ({ navigation, route }) => {
     const [selectedEmployee, setSelectedEmployee] = useState(null);
     const [selectedHistoryCategory, setSelectedHistoryCategory] = useState(null);
     const [historyStats, setHistoryStats] = useState({});
+
+    // Create Audit State
+    const [createModalVisible, setCreateModalVisible] = useState(false);
+    const [createTab, setCreateTab] = useState('template'); // 'template' or 'assign'
+    const [newAuditTitle, setNewAuditTitle] = useState('');
+    const [newItemText, setNewItemText] = useState('');
+    const [newChecklistItems, setNewChecklistItems] = useState([]);
+    const [auditTemplates, setAuditTemplates] = useState([]);
+    const [assignTemplateId, setAssignTemplateId] = useState(null);
+    const [assignTargetType, setAssignTargetType] = useState('user'); // 'user' or 'store'
+    const [assignTarget, setAssignTarget] = useState('');
+    const [assignmentPickerVisible, setAssignmentPickerVisible] = useState(false);
+    const [assignmentData, setAssignmentData] = useState({ emails: [] });
+    const [assignDate, setAssignDate] = useState(new Date());
+
+    // Active Assignments State
+    const [allAssignments, setAllAssignments] = useState([]);
+    const [assignmentsLoading, setAssignmentsLoading] = useState(false);
 
     const auditCategories = [
         {
@@ -235,6 +255,131 @@ const AuditsScreen = ({ navigation, route }) => {
     const currentChecklist = auditChecklists[selectedCategory] || [];
     const completionRate = getCompletionRate(selectedCategory);
 
+    // Fetch Templates
+    const fetchTemplates = async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/v1/crm/audits/templates`);
+            const data = await response.json();
+            if (data && Array.isArray(data)) {
+                setAuditTemplates(data);
+            }
+        } catch (error) {
+            console.error('Fetch Templates Error:', error);
+        }
+    };
+
+    // Handle Create Template
+    const handleCreateTemplate = async () => {
+        if (!newAuditTitle.trim()) {
+            Alert.alert('Error', 'Please enter an audit title');
+            return;
+        }
+        if (newChecklistItems.length === 0) {
+            Alert.alert('Error', 'Please add at least one checklist item');
+            return;
+        }
+
+        try {
+            const formData = new FormData();
+            formData.append('title', newAuditTitle);
+            formData.append('checklist_items', JSON.stringify(newChecklistItems));
+            formData.append('icon', 'clipboard'); // Default
+            formData.append('color', '#10B981'); // Default
+
+            const token = await AsyncStorage.getItem('userToken');
+            const response = await fetch(`${API_URL}/api/v1/crm/audits/templates`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: formData
+            });
+            const result = await response.json();
+
+            if (response.ok) {
+                Alert.alert('Success', 'Audit template created successfully');
+                setNewAuditTitle('');
+                setNewChecklistItems([]);
+                fetchTemplates(); // Refresh
+                setCreateTab('assign'); // Switch to assign tab
+            } else {
+                Alert.alert('Error', 'Failed to create template');
+            }
+        } catch (error) {
+            Alert.alert('Error', 'Network error');
+        }
+    };
+
+    // Handle Assign Audit
+    const handleAssignAudit = async () => {
+        if (!assignTemplateId) {
+            Alert.alert('Error', 'Please select an audit template');
+            return;
+        }
+
+        const hasAssignment = (assignmentData.emails && assignmentData.emails.length > 0) ||
+            Object.values(assignmentData).some(arr => Array.isArray(arr) && arr.length > 0 && arr !== assignmentData.emails);
+
+        if (!hasAssignment && !assignTarget) {
+            Alert.alert('Error', 'Please select users or groups to assign');
+            return;
+        }
+
+        try {
+            const formData = new FormData();
+            formData.append('template_id', assignTemplateId);
+
+            if (hasAssignment) {
+                formData.append('target_users', JSON.stringify(assignmentData));
+                formData.append('assigned_to', ''); // Not used if target_users present
+            } else if (assignTarget) {
+                formData.append('assigned_to', assignTarget);
+            }
+
+            const token = await AsyncStorage.getItem('userToken');
+            const response = await fetch(`${API_URL}/api/v1/crm/audits/assign`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (response.ok) {
+                Alert.alert('Success', result.message || 'Audit assigned successfully');
+                setAssignmentData({ emails: [] });
+                setAssignTarget('');
+                // Switch to view assignments
+                setCreateTab('view_assignments');
+                fetchAssignments();
+            } else {
+                Alert.alert('Error', result.detail || 'Failed to assign audit');
+            }
+        } catch (error) {
+            console.error('Assign Audit Error:', error);
+            Alert.alert('Error', 'Network error');
+        }
+    };
+
+    // Render History Item
+
+    // Fetch Active Assignments (Admin)
+    const fetchAssignments = async () => {
+        setAssignmentsLoading(true);
+        try {
+            const token = await AsyncStorage.getItem('userToken');
+            const response = await fetch(`${API_URL}/api/v1/crm/audits/all-assignments`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await response.json();
+            if (response.ok) {
+                setAllAssignments(data);
+            }
+        } catch (error) {
+            console.error('Fetch Assignments Error:', error);
+        } finally {
+            setAssignmentsLoading(false);
+        }
+    };
+
     // Render History Item
     const renderHistoryItem = ({ item, index }) => {
         const catInfo = auditCategories.find(c => c.id === item.category) || {};
@@ -394,6 +539,213 @@ const AuditsScreen = ({ navigation, route }) => {
         </Modal>
     );
 
+    // Create Audit Modal
+    const renderCreateAuditModal = () => (
+        <Modal visible={createModalVisible} animationType="slide" transparent>
+            <View style={styles.historyOverlay}>
+                <BlurView intensity={80} style={StyleSheet.absoluteFill} />
+                <View style={styles.historyContainer}>
+                    <LinearGradient colors={['#1F2937', '#111827']} style={styles.historyGradient}>
+                        <View style={styles.historyHeader}>
+                            <TouchableOpacity onPress={() => setCreateModalVisible(false)} style={styles.historyCloseBtn}>
+                                <Feather name="x" size={24} color="#FFF" />
+                            </TouchableOpacity>
+                            <Text style={styles.historyTitle}>Create & Assign Audit</Text>
+                            <View style={{ width: 40 }} />
+                        </View>
+
+                        {/* Tabs */}
+                        <View style={styles.tabRow}>
+                            <TouchableOpacity
+                                style={[styles.tabBtn, createTab === 'template' && styles.tabBtnActive]}
+                                onPress={() => setCreateTab('template')}
+                            >
+                                <Text style={[styles.tabText, createTab === 'template' && styles.tabTextActive]}>New Template</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.tabBtn, createTab === 'assign' && styles.tabBtnActive]}
+                                onPress={() => {
+                                    setCreateTab('assign');
+                                    fetchTemplates();
+                                    fetchFilters();
+                                }}
+                            >
+                                <Text style={[styles.tabText, createTab === 'assign' && styles.tabTextActive]}>Assign Audit</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.tabBtn, createTab === 'view_assignments' && styles.tabBtnActive]}
+                                onPress={() => {
+                                    setCreateTab('view_assignments');
+                                    fetchAssignments();
+                                }}
+                            >
+                                <Text style={[styles.tabText, createTab === 'view_assignments' && styles.tabTextActive]}>Active List</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        <ScrollView style={{ padding: 20 }}>
+                            {createTab === 'template' ? (
+                                <>
+                                    <Text style={styles.label}>Audit Title</Text>
+                                    <TextInput
+                                        style={styles.input}
+                                        placeholder="e.g. Fire Safety Upgrade"
+                                        placeholderTextColor="#6B7280"
+                                        value={newAuditTitle}
+                                        onChangeText={setNewAuditTitle}
+                                    />
+
+                                    <Text style={styles.label}>Checklist Items</Text>
+                                    <View style={styles.addItemRow}>
+                                        <TextInput
+                                            style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                                            placeholder="Add item..."
+                                            placeholderTextColor="#6B7280"
+                                            value={newItemText}
+                                            onChangeText={setNewItemText}
+                                        />
+                                        <TouchableOpacity
+                                            style={styles.addBtn}
+                                            onPress={() => {
+                                                if (newItemText.trim()) {
+                                                    setNewChecklistItems([...newChecklistItems, newItemText]);
+                                                    setNewItemText('');
+                                                }
+                                            }}
+                                        >
+                                            <Feather name="plus" size={24} color="#FFF" />
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    {newChecklistItems.map((item, idx) => (
+                                        <View key={idx} style={styles.checklistItemRow}>
+                                            <Text style={styles.checklistItemTextModal}>{item}</Text>
+                                            <TouchableOpacity onPress={() => {
+                                                const newItems = [...newChecklistItems];
+                                                newItems.splice(idx, 1);
+                                                setNewChecklistItems(newItems);
+                                            }}>
+                                                <Feather name="trash-2" size={18} color="#EF4444" />
+                                            </TouchableOpacity>
+                                        </View>
+                                    ))}
+
+                                    <TouchableOpacity style={styles.createBtn} onPress={handleCreateTemplate}>
+                                        <Text style={styles.createBtnText}>Save Template</Text>
+                                    </TouchableOpacity>
+                                </>
+                            ) : createTab === 'assign' ? (
+                                <>
+                                    <Text style={styles.label}>Select Template</Text>
+                                    <ScrollView horizontal style={{ marginBottom: 20 }}>
+                                        {auditTemplates.map(t => (
+                                            <TouchableOpacity
+                                                key={t.id}
+                                                style={[styles.templatePill, assignTemplateId === t.id && styles.templatePillActive]}
+                                                onPress={() => setAssignTemplateId(t.id)}
+                                            >
+                                                <Text style={[styles.templatePillText, assignTemplateId === t.id && styles.templatePillTextActive]}>{t.title}</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </ScrollView>
+
+                                    <Text style={styles.label}>Assign To User / Group</Text>
+
+                                    <View style={styles.assignmentPreviewContainer}>
+                                        <TouchableOpacity
+                                            style={styles.assignPickerBtn}
+                                            onPress={() => setAssignmentPickerVisible(true)}
+                                        >
+                                            <Feather name="users" size={20} color="#FFF" />
+                                            <Text style={styles.assignPickerBtnText}>Select Users or Groups</Text>
+                                        </TouchableOpacity>
+
+                                        {((assignmentData.emails && assignmentData.emails.length > 0) ||
+                                            Object.keys(assignmentData).some(k => k !== 'emails' && assignmentData[k]?.length > 0)) && (
+                                                <View style={styles.assignmentSummary}>
+                                                    <Text style={styles.assignmentSummaryText}>
+                                                        Selected: {assignmentData.emails?.length || 0} individuals
+                                                    </Text>
+                                                    {Object.entries(assignmentData).map(([key, val]) => {
+                                                        if (key === 'emails' || !val || val.length === 0) return null;
+                                                        return (
+                                                            <Text key={key} style={styles.assignmentSummaryText}>
+                                                                • {val.length} {key}
+                                                            </Text>
+                                                        );
+                                                    })}
+                                                </View>
+                                            )}
+                                    </View>
+
+                                    <TouchableOpacity style={styles.createBtn} onPress={handleAssignAudit}>
+                                        <Text style={styles.createBtnText}>Assign Audit</Text>
+                                    </TouchableOpacity>
+                                </>
+                            ) : (
+                                // Active Assignments Tab
+                                <View>
+                                    <View style={styles.sectionHeaderRow}>
+                                        <Text style={styles.label}>Active Assignments</Text>
+                                        <TouchableOpacity onPress={fetchAssignments}>
+                                            <Feather name="refresh-cw" size={16} color="#10B981" />
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    {assignmentsLoading ? (
+                                        <ActivityIndicator size="small" color="#10B981" style={{ marginVertical: 20 }} />
+                                    ) : allAssignments.length === 0 ? (
+                                        <View style={styles.emptyStateSimple}>
+                                            <Text style={styles.emptyTextSimple}>No active assignments found.</Text>
+                                        </View>
+                                    ) : (
+                                        allAssignments.map((assign, index) => (
+                                            <View key={index} style={styles.assignmentCard}>
+                                                <View style={styles.assignCardHeader}>
+                                                    <View style={styles.assignCardIcon}>
+                                                        <Feather name="clipboard" size={16} color="#FFF" />
+                                                    </View>
+                                                    <View style={{ flex: 1 }}>
+                                                        <Text style={styles.assignCardTitle}>{assign.template?.title || 'Audit'}</Text>
+                                                        <Text style={styles.assignCardDate}>
+                                                            Assigned: {new Date(assign.assigned_at).toLocaleDateString()}
+                                                        </Text>
+                                                    </View>
+                                                    <View style={[styles.statusBadge, { backgroundColor: assign.status === 'completed' ? '#059669' : '#D97706' }]}>
+                                                        <Text style={styles.statusText}>{assign.status}</Text>
+                                                    </View>
+                                                </View>
+
+                                                <View style={styles.assignCardUser}>
+                                                    <View style={styles.userAvatarSmall}>
+                                                        <Text style={styles.userAvatarText}>
+                                                            {assign.user_name?.charAt(0) || assign.assigned_to?.charAt(0) || 'U'}
+                                                        </Text>
+                                                    </View>
+                                                    <View>
+                                                        <Text style={styles.assignUserName}>{assign.user_name || 'User'}</Text>
+                                                        <Text style={styles.assignUserEmail}>{assign.assigned_to}</Text>
+                                                    </View>
+                                                </View>
+                                            </View>
+                                        ))
+                                    )}
+                                </View>
+                            )}
+                        </ScrollView>
+                    </LinearGradient>
+                </View>
+            </View >
+
+            <UserAssignmentPicker
+                visible={assignmentPickerVisible}
+                onClose={() => setAssignmentPickerVisible(false)}
+                currentAssignment={assignmentData}
+                onSave={setAssignmentData}
+            />
+        </Modal >
+    );
+
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
             {/* GRADIENT BACKGROUND */}
@@ -415,9 +767,14 @@ const AuditsScreen = ({ navigation, route }) => {
 
                 {/* History Button - Super Admin Only */}
                 {isSuperAdmin ? (
-                    <TouchableOpacity onPress={openHistory} style={styles.historyBtn}>
-                        <MaterialCommunityIcons name="history" size={24} color="#7C3AED" />
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', gap: 10 }}>
+                        <TouchableOpacity onPress={() => setCreateModalVisible(true)} style={styles.historyBtn}>
+                            <Feather name="plus-circle" size={24} color="#10B981" />
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={openHistory} style={styles.historyBtn}>
+                            <MaterialCommunityIcons name="history" size={24} color="#7C3AED" />
+                        </TouchableOpacity>
+                    </View>
                 ) : (
                     <View style={styles.headerBadge}>
                         <Text style={styles.headerBadgeText}>{completionRate}%</Text>
@@ -548,6 +905,7 @@ const AuditsScreen = ({ navigation, route }) => {
 
             {/* History Modal */}
             {renderHistoryModal()}
+            {renderCreateAuditModal()}
         </SafeAreaView>
     );
 };
@@ -814,10 +1172,83 @@ const styles = StyleSheet.create({
     historyItemMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     historyItemMetaText: { fontSize: 11, fontFamily: 'Poppins_400Regular', color: '#9CA3AF' },
 
-    // EMPTY STATE
     emptyState: { alignItems: 'center', paddingVertical: 60 },
     emptyText: { fontSize: 16, fontFamily: 'Poppins_600SemiBold', color: '#9CA3AF', marginTop: 16 },
     emptySubtext: { fontSize: 13, fontFamily: 'Poppins_400Regular', color: '#6B7280', marginTop: 4 },
+
+    // CREATE MODAL
+    tabRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.1)', marginBottom: 20 },
+    tabBtn: { flex: 1, paddingVertical: 16, alignItems: 'center' },
+    tabBtnActive: { borderBottomWidth: 2, borderBottomColor: '#10B981' },
+    tabText: { color: '#9CA3AF', fontFamily: 'Poppins_500Medium' },
+    tabTextActive: { color: '#10B981', fontFamily: 'Poppins_600SemiBold' },
+    label: { color: '#D1D5DB', fontSize: 14, fontFamily: 'Poppins_500Medium', marginBottom: 8 },
+    input: { backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: 12, color: '#FFF', marginBottom: 20, fontFamily: 'Poppins_400Regular' },
+    addItemRow: { flexDirection: 'row', gap: 10, alignItems: 'center', marginBottom: 20 },
+    addBtn: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#10B981', justifyContent: 'center', alignItems: 'center' },
+    checklistItemRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.03)', padding: 12, borderRadius: 8, marginBottom: 8 },
+    checklistItemTextModal: { color: '#E5E7EB', flex: 1, marginRight: 10 },
+    createBtn: { backgroundColor: '#10B981', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 20 },
+    createBtnText: { color: '#FFF', fontFamily: 'Poppins_600SemiBold' },
+    templatePill: { backgroundColor: 'rgba(255,255,255,0.05)', padding: 12, borderRadius: 20, marginRight: 10 },
+    templatePillActive: { backgroundColor: '#10B981' },
+    templatePillText: { color: '#9CA3AF' },
+    templatePillTextActive: { color: '#FFF' },
+    userOption: { padding: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
+    userOptionActive: { backgroundColor: 'rgba(16, 185, 129, 0.1)' },
+    userOptionText: { color: '#E5E7EB', fontFamily: 'Poppins_500Medium' },
+    userOptionTextActive: { color: '#10B981' },
+    userOptionSub: { color: '#6B7280', fontSize: 12 },
+
+    // Assignment Picker
+    assignmentPreviewContainer: {
+        backgroundColor: 'rgba(255,255,255,0.03)',
+        borderRadius: 12,
+        padding: 12,
+        marginBottom: 20,
+    },
+    assignPickerBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#4B5563',
+        padding: 12,
+        borderRadius: 8,
+        gap: 8,
+    },
+    assignPickerBtnText: {
+        color: '#FFF',
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 14,
+    },
+    assignmentSummary: {
+        marginTop: 12,
+        paddingTop: 12,
+        borderTopWidth: 1,
+        borderTopColor: 'rgba(255,255,255,0.1)',
+        gap: 4,
+    },
+    assignmentSummaryText: {
+        color: '#D1D5DB',
+        fontSize: 13,
+        fontFamily: 'Poppins_400Regular',
+    },
+    // Active Assignments Tab
+    sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+    emptyStateSimple: { alignItems: 'center', padding: 20 },
+    emptyTextSimple: { color: '#6B7280', fontFamily: 'Poppins_500Medium' },
+    assignmentCard: { backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 12, marginBottom: 10 },
+    assignCardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+    assignCardIcon: { width: 32, height: 32, borderRadius: 8, backgroundColor: '#374151', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+    assignCardTitle: { flex: 1, fontSize: 13, fontFamily: 'Poppins_600SemiBold', color: '#FFF' },
+    assignCardDate: { fontSize: 10, fontFamily: 'Poppins_400Regular', color: '#9CA3AF' },
+    statusBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
+    statusText: { fontSize: 10, fontFamily: 'Poppins_600SemiBold', color: '#FFF', textTransform: 'capitalize' },
+    assignCardUser: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.03)', padding: 8, borderRadius: 8 },
+    userAvatarSmall: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#4B5563', justifyContent: 'center', alignItems: 'center', marginRight: 8 },
+    userAvatarText: { fontSize: 10, fontFamily: 'Poppins_700Bold', color: '#FFF' },
+    assignUserName: { fontSize: 12, fontFamily: 'Poppins_500Medium', color: '#E5E7EB' },
+    assignUserEmail: { fontSize: 10, fontFamily: 'Poppins_400Regular', color: '#9CA3AF' },
 });
 
 export default AuditsScreen;

@@ -365,9 +365,35 @@ class AssessmentService:
     def delete_scheduled_exam(self, exam_id: str) -> bool:
         """Delete a scheduled exam."""
         exam = self.get_scheduled_exam_by_id(exam_id)
+
+        attendance_records = self.attendance_repo.get_by_exam(exam_id)
+        for rec in attendance_records:
+            self.db.delete(rec)
+
         self.db.delete(exam)
         self.db.commit()
         return True
+
+    def bulk_delete_scheduled_exams(self, exam_ids: List[str]) -> Dict[str, Any]:
+        """Bulk delete scheduled exams."""
+        unique_ids = list(dict.fromkeys([eid for eid in exam_ids if eid]))
+        deleted: List[str] = []
+        not_found: List[str] = []
+
+        for exam_id in unique_ids:
+            exam = self.exam_repo.get_by_id(exam_id)
+            if not exam:
+                not_found.append(exam_id)
+                continue
+
+            attendance_records = self.attendance_repo.get_by_exam(exam_id)
+            for rec in attendance_records:
+                self.db.delete(rec)
+            self.db.delete(exam)
+            deleted.append(exam_id)
+
+        self.db.commit()
+        return {"deleted": deleted, "not_found": not_found}
 
     def get_all_scheduled_exams(self) -> List[ScheduledExam]:
         """Get all scheduled exams."""

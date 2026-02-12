@@ -355,6 +355,7 @@ export default function UserAssignmentPicker({ visible, onClose, currentAssignme
                         placeholderTextColor="#9CA3AF"
                         value={searchQuery}
                         onChangeText={setSearchQuery}
+                        underlineColorAndroid="transparent"
                     />
                     {searchQuery.length > 0 && (
                         <TouchableOpacity onPress={() => setSearchQuery('')}>
@@ -373,7 +374,11 @@ export default function UserAssignmentPicker({ visible, onClose, currentAssignme
                             </TouchableOpacity>
                         )}
                     </View>
-                    <ScrollView style={{ maxHeight: expandedFilter ? 220 : 140 }} nestedScrollEnabled>
+                    <ScrollView
+                        style={{ maxHeight: expandedFilter ? 220 : 140 }}
+                        nestedScrollEnabled
+                        showsVerticalScrollIndicator={false}
+                    >
                         {renderFilterGroup('roles', 'Roles', 'briefcase', filters.roles, activeRoles)}
                         {renderFilterGroup('stores', 'Stores', 'home', filters.stores, activeStores)}
                         {renderFilterGroup('categories', 'Categories', 'tag', filters.categories, activeCategories)}
@@ -387,10 +392,10 @@ export default function UserAssignmentPicker({ visible, onClose, currentAssignme
 
                 {/* Active filter summary chips */}
                 {hasAnyFilter && (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.activeFiltersRow} contentContainerStyle={{ paddingHorizontal: 16, gap: 6 }}>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.activeFiltersRow} contentContainerStyle={{ paddingHorizontal: 16, gap: 6, paddingVertical: 4 }}>
                         {[['roles', activeRoles], ['stores', activeStores], ['categories', activeCategories],
-                          ['regions', activeRegions], ['cities', activeCities], ['states', activeStates],
-                          ['designations', activeDesignations], ['departments', activeDepartments]].map(([type, set]) =>
+                        ['regions', activeRegions], ['cities', activeCities], ['states', activeStates],
+                        ['designations', activeDesignations], ['departments', activeDepartments]].map(([type, set]) =>
                             Array.from(set).map(val => (
                                 <TouchableOpacity key={`${type}-${val}`} style={[styles.activeChip, { backgroundColor: FILTER_COLORS[type] }]} onPress={() => toggleFilterValue(type, val)}>
                                     <Text style={styles.activeChipText}>{val}</Text>
@@ -404,8 +409,8 @@ export default function UserAssignmentPicker({ visible, onClose, currentAssignme
                 {/* Bulk actions */}
                 <View style={styles.bulkRow}>
                     <TouchableOpacity onPress={selectAllVisible} style={styles.bulkBtn}>
-                        <Feather name="check-square" size={14} color={THEME.blue} />
-                        <Text style={[styles.bulkBtnText, { color: THEME.blue }]}>Select All Visible</Text>
+                        <Feather name="check-square" size={14} color={THEME.green} />
+                        <Text style={[styles.bulkBtnText, { color: THEME.green }]}>Select All Visible</Text>
                     </TouchableOpacity>
                     <TouchableOpacity onPress={deselectAll} style={styles.bulkBtn}>
                         <Feather name="x-square" size={14} color={THEME.red} />
@@ -458,7 +463,7 @@ const styles = StyleSheet.create({
     searchRow: {
         flexDirection: 'row', alignItems: 'center', gap: 8,
         marginHorizontal: 16, marginTop: 12, marginBottom: 8,
-        backgroundColor: '#FFF', borderRadius: 12, paddingHorizontal: 14, height: 44,
+        backgroundColor: 'transparent', borderRadius: 12, paddingHorizontal: 14, height: 44,
         borderWidth: 1, borderColor: THEME.border,
     },
     searchInput: { flex: 1, fontSize: 14, color: THEME.textMain },
@@ -496,17 +501,19 @@ const styles = StyleSheet.create({
     },
     filterChipText: { fontSize: 12, fontWeight: '500', color: THEME.textMain },
 
-    activeFiltersRow: { maxHeight: 40, marginBottom: 6 },
+    activeFiltersRow: { marginBottom: 12, minHeight: 40 },
     activeChip: {
         flexDirection: 'row', alignItems: 'center', gap: 4,
-        paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14,
+        paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14,
     },
     activeChipText: { fontSize: 11, fontWeight: '600', color: '#FFF' },
 
     bulkRow: {
         flexDirection: 'row', alignItems: 'center', gap: 12,
-        paddingHorizontal: 16, paddingVertical: 8,
+        paddingHorizontal: 16, paddingVertical: 12,
         borderBottomWidth: 1, borderBottomColor: THEME.border,
+        borderTopWidth: 0,
+        backgroundColor: '#FFF'
     },
     bulkBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     bulkBtnText: { fontSize: 12, fontWeight: '600' },

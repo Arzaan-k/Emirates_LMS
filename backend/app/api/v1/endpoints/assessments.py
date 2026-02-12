@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/assessments", tags=["Assessments"])
 
 
+class BulkDeleteScheduledExamsRequest(BaseModel):
+    exam_ids: List[str]
+
+
 # ==========================================
 # PROCTORED ASSESSMENT ENDPOINTS
 # ==========================================
@@ -798,83 +802,102 @@ async def update_scheduled_exam(
     randomize_question_order: bool = Form(False),
     randomize_option_order: bool = Form(False),
     geofencing_enabled: bool = Form(False),
-    geofencing_radius: int = Form(100),
+    geofencing_radius: int = Form(100),  # meters
     geofencing_latitude: float = Form(None),
     geofencing_longitude: float = Form(None),
+    # PIN Check-in Parameters
     pin_enabled: bool = Form(False),
     pin_generation_minutes: int = Form(5),
     pin_validity_minutes: int = Form(30),
     db: Session = Depends(get_db)
 ):
     """
-    Update an existing scheduled exam.
+    Update a scheduled exam.
     """
+    service = AssessmentService(db)
+    
+    # Check if this is a toggle request (hack for frontend sometimes sending partial data)
+    # Actually, toggle is separate? No, frontend might use PUT for everything.
+    # But let's assume standard update logic.
+    
     try:
-        service = AssessmentService(db)
-        exam = service.get_scheduled_exam_by_id(exam_id)
-
-        if not exam:
-            raise HTTPException(status_code=404, detail="Exam not found")
-
         # Parse JSON fields
-        questions_list = json.loads(questions) if isinstance(questions, str) else questions
-        assigned_users_list = json.loads(assigned_users) if isinstance(assigned_users, str) else assigned_users
-        batch_assignments_list = json.loads(batch_assignments) if isinstance(batch_assignments, str) else batch_assignments
+        try:
+            assigned_users_list = json.loads(assigned_users)
+            questions_list = json.loads(questions)
+            batch_assignments_list = json.loads(batch_assignments)
+        except:
+             # Fallback if already dict (rare in Form)
+            assigned_users_list = assigned_users if isinstance(assigned_users, list) else []
+            questions_list = questions if isinstance(questions, list) else []
+            batch_assignments_list = batch_assignments if isinstance(batch_assignments, list) else []
 
-        # Update exam fields
-        exam.title = title
-        exam.description = description
-        exam.exam_date = exam_date
-        exam.exam_time = exam_time
-        exam.location = location
-        exam.supervisor_email = supervisor_email
-        exam.supervisor_name = supervisor_name
-        exam.assigned_users = assigned_users_list
-        exam.questions = questions_list
-        exam.time_limit_minutes = time_limit_minutes
-        exam.passing_score = passing_score
-        exam.number_of_batches = number_of_batches
-        exam.batch_data = batch_assignments_list if batch_assignments_list else []
+        # Parse date
+        scheduled_publish_datetime = None
+        if scheduled_publish_at and scheduled_publish_at != 'null':
+             try:
+                 scheduled_publish_datetime = datetime.fromisoformat(scheduled_publish_at.replace('Z', '+00:00'))
+             except:
+                 pass
 
-        # Enhanced Features
-        exam.exam_status = exam_status
-        if scheduled_publish_at:
-            exam.scheduled_publish_at = datetime.fromisoformat(scheduled_publish_at.replace('Z', '+00:00'))
-        exam.allow_different_questions_per_batch = allow_different_questions_per_batch
-        exam.randomize_question_order = randomize_question_order
-        exam.randomize_option_order = randomize_option_order
-
-        # Geofencing
-        exam.geofencing_enabled = geofencing_enabled
-        exam.geofencing_radius = geofencing_radius
-        if geofencing_latitude is not None:
-            exam.geofencing_latitude = geofencing_latitude
-        if geofencing_longitude is not None:
-            exam.geofencing_longitude = geofencing_longitude
-
-        # PIN Check-in
-        exam.pin_enabled = pin_enabled
-        exam.pin_generation_minutes = pin_generation_minutes
-        exam.pin_validity_minutes = pin_validity_minutes
-
-        db.commit()
-        db.refresh(exam)
-
-        logger.info(f"Exam updated: {exam_id} - {title}")
-
-        return {
-            "status": "success",
-            "message": "Exam updated successfully",
-            "id": exam.id,
-            "title": exam.title
+        update_data = {
+            "title": title,
+            "description": description,
+            "exam_date": exam_date,
+            "exam_time": exam_time,
+            "location": location,
+            "batch_assignments": batch_assignments_list,
+            "number_of_batches": number_of_batches,
+            "shift": shift,
+            "supervisor_email": supervisor_email,
+            "supervisor_name": supervisor_name,
+            "assigned_users": assigned_users_list,
+            "questions": questions_list,
+            "time_limit_minutes": time_limit_minutes,
+            "passing_score": passing_score,
+            "created_by": created_by,
+            "exam_status": exam_status,
+            "scheduled_publish_at": scheduled_publish_datetime,
+            "allow_different_questions_per_batch": allow_different_questions_per_batch,
+            "randomize_question_order": randomize_question_order,
+            "randomize_option_order": randomize_option_order,
+            "geofencing_enabled": geofencing_enabled,
+            "geofencing_radius": geofencing_radius,
+            "geofencing_latitude": geofencing_latitude,
+            "geofencing_longitude": geofencing_longitude,
+            "pin_enabled": pin_enabled,
+            "pin_generation_minutes": pin_generation_minutes,
+            "pin_validity_minutes": pin_validity_minutes,
         }
-
-    except HTTPException:
-        raise
+        
+        exam = service.update_scheduled_exam(exam_id, update_data)
+        logger.info(f"Scheduled exam updated: {exam_id}")
+        
+        return exam.to_dict() if hasattr(exam, 'to_dict') else dict(exam)
     except Exception as e:
-        logger.error(f"Update exam error: {e}")
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to update exam: {str(e)}")
+        logger.error(f"Scheduled exam update failed: {e}")
+        raise
+
+
+@router.post("/scheduled/bulk-delete")
+async def bulk_delete_scheduled_exams(
+    payload: BulkDeleteScheduledExamsRequest,
+    db: Session = Depends(get_db),
+    user: Dict[str, Any] = Depends(require_admin),
+):
+    """Bulk delete scheduled exams (admin only)."""
+    service = AssessmentService(db)
+
+    try:
+        result = service.bulk_delete_scheduled_exams(payload.exam_ids)
+        logger.info(
+            f"Bulk deleted scheduled exams: deleted={len(result.get('deleted', []))}, not_found={len(result.get('not_found', []))}"
+        )
+        return {"status": "success", **result}
+    except Exception as e:
+        logger.error(f"Bulk scheduled exam deletion failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @router.post("/scheduled/{exam_id}/mark-present")
@@ -1006,20 +1029,33 @@ async def get_exam_report(
 @router.delete("/scheduled/{exam_id}")
 async def delete_scheduled_exam(
     exam_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     Delete a scheduled exam.
+
+    Authorization:
+    - Superadmin/admin can delete any scheduled exam
+    - Supervisor can delete exams where they are the supervisor
     """
     service = AssessmentService(db)
 
     try:
+        exam = service.get_scheduled_exam_by_id(exam_id)
+
+        is_admin = bool(user.get("is_superadmin", False) or user.get("has_admin_access", False))
+        is_supervisor_owner = bool(exam.supervisor_email and exam.supervisor_email == user.get("email"))
+
+        if not is_admin and not is_supervisor_owner:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this scheduled exam")
+
         service.delete_scheduled_exam(exam_id)
         logger.info(f"Scheduled exam deleted: {exam_id}")
-        return {"message": f"Exam {exam_id} deleted successfully"}
+        return {"status": "success", "message": f"Exam {exam_id} deleted successfully"}
     except Exception as e:
         logger.error(f"Scheduled exam deletion failed: {e}")
-        raise
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==========================================

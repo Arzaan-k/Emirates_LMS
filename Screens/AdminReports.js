@@ -126,7 +126,95 @@ const REPORT_CATEGORIES = [
     },
 ];
 
+// Detailed Report Categories with sub-reports and Excel download
+const DETAILED_REPORT_CATEGORIES = [
+    {
+        id: 'participants',
+        name: 'Participants',
+        icon: 'users',
+        color: '#3B82F6',
+        description: 'User demographics, headcount, and activity',
+        reports: [
+            { id: 'user-login', name: 'User Login Report', icon: 'log-in', endpoint: '/api/v1/reports/detailed/participants/user-login' },
+            { id: 'headcount', name: 'Headcount Report', icon: 'bar-chart', endpoint: '/api/v1/reports/detailed/participants/headcount' },
+            { id: 'new-joiners', name: 'New Joiners & Gender Ratio', icon: 'user-plus', endpoint: '/api/v1/reports/detailed/participants/new-joiners' },
+            { id: 'attrition', name: 'Attrition Report', icon: 'user-minus', endpoint: '/api/v1/reports/detailed/participants/attrition' },
+            { id: 'stakeholder-mapping', name: 'Stakeholder Mapping', icon: 'map', endpoint: '/api/v1/reports/detailed/participants/stakeholder-mapping' },
+            { id: 'export-users', name: 'Export Users', icon: 'download', endpoint: '/api/v1/reports/detailed/participants/export-users' },
+            { id: 'user-deactivation', name: 'User Deactivation Report', icon: 'user-x', endpoint: '/api/v1/reports/detailed/participants/user-deactivation' },
+        ],
+    },
+    {
+        id: 'learning',
+        name: 'Learning',
+        icon: 'book',
+        color: '#10B981',
+        description: 'Course completions, history and structure',
+        reports: [
+            { id: 'completion-overview', name: 'Completion Overview', icon: 'check-circle', endpoint: '/api/v1/reports/detailed/learning/completion-overview' },
+            { id: 'assessment-results', name: 'Assessment Results', icon: 'file-text', endpoint: '/api/v1/reports/detailed/learning/assessment-results' },
+            { id: 'learning-history', name: 'Learning History', icon: 'clock', endpoint: '/api/v1/reports/detailed/learning/learning-history' },
+            { id: 'course-status', name: 'Course Status', icon: 'activity', endpoint: '/api/v1/reports/detailed/learning/course-status' },
+            { id: 'course-completion', name: 'Course Completion', icon: 'award', endpoint: '/api/v1/reports/detailed/learning/course-completion' },
+            { id: 'course-structure', name: 'Course Structure', icon: 'layers', endpoint: '/api/v1/reports/detailed/learning/course-structure' },
+            { id: 'course-details', name: 'Course Details', icon: 'info', endpoint: '/api/v1/reports/detailed/learning/course-details' },
+        ],
+    },
+    {
+        id: 'training_detail',
+        name: 'Training',
+        icon: 'briefcase',
+        color: '#8B5CF6',
+        description: 'Training coverage, attendance and ILT',
+        reports: [
+            { id: 'training-coverage', name: 'Training Coverage', icon: 'pie-chart', endpoint: '/api/v1/reports/detailed/training/training-coverage' },
+            { id: 'attendance-tracker', name: 'Attendance Tracker', icon: 'calendar', endpoint: '/api/v1/reports/detailed/training/attendance-tracker' },
+            { id: 'training-master', name: 'Training Master Report', icon: 'database', endpoint: '/api/v1/reports/detailed/training/training-master' },
+            { id: 'ilt-report', name: 'ILT Report', icon: 'monitor', endpoint: '/api/v1/reports/detailed/training/ilt-report' },
+        ],
+    },
+    {
+        id: 'career',
+        name: 'Career Progression',
+        icon: 'trending-up',
+        color: '#F59E0B',
+        description: 'Career path progress and module analytics',
+        reports: [
+            { id: 'career-summary', name: 'Career Summary', icon: 'star', endpoint: '/api/v1/reports/detailed/career/summary' },
+            { id: 'module-report', name: 'Module Report', icon: 'folder', endpoint: '/api/v1/reports/detailed/career/module-report' },
+            { id: 'node-progress', name: 'Node Progress', icon: 'git-branch', endpoint: '/api/v1/reports/detailed/career/node-progress' },
+        ],
+    },
+    {
+        id: 'exams',
+        name: 'Assessments & Exams',
+        icon: 'edit-3',
+        color: '#EF4444',
+        description: 'Exam results, attendance and submissions',
+        reports: [
+            { id: 'exams-overview', name: 'Exams Overview', icon: 'clipboard', endpoint: '/api/v1/reports/detailed/exams/overview' },
+            { id: 'quiz-results', name: 'Quiz Results', icon: 'check-square', endpoint: '/api/v1/reports/detailed/exams/quiz-results' },
+            { id: 'exam-attendance', name: 'Exam Attendance', icon: 'user-check', endpoint: '/api/v1/reports/detailed/exams/exam-attendance' },
+            { id: 'submission-history', name: 'Submission History', icon: 'archive', endpoint: '/api/v1/reports/detailed/exams/submission-history' },
+        ],
+    },
+    {
+        id: 'rewards',
+        name: 'Rewards & Recognition',
+        icon: 'award',
+        color: '#F97316',
+        description: 'Points, leaderboard and XP distribution',
+        reports: [
+            { id: 'points-overview', name: 'Points Overview', icon: 'star', endpoint: '/api/v1/reports/detailed/rewards/points-overview' },
+            { id: 'points-earned', name: 'Points Earned', icon: 'zap', endpoint: '/api/v1/reports/detailed/rewards/points-earned' },
+            { id: 'leaderboard', name: 'Leaderboard Report', icon: 'award', endpoint: '/api/v1/reports/detailed/rewards/leaderboard' },
+            { id: 'xp-summary', name: 'XP Summary', icon: 'bar-chart-2', endpoint: '/api/v1/reports/detailed/rewards/xp-summary' },
+        ],
+    },
+];
+
 const AdminReports = ({ navigation }) => {
+
     const [selectedCategory, setSelectedCategory] = useState('users');
     const [loading, setLoading] = useState(false);
     const [downloading, setDownloading] = useState(false);
@@ -172,6 +260,13 @@ const AdminReports = ({ navigation }) => {
     const [subsLoading, setSubsLoading] = useState(false);
     const [subscriptions, setSubscriptions] = useState({});
     const [userEmail, setUserEmail] = useState('');
+
+    // Detailed Reports State
+    const [expandedDetailCategory, setExpandedDetailCategory] = useState(null);
+    const [detailedReportData, setDetailedReportData] = useState(null);
+    const [detailedLoading, setDetailedLoading] = useState(false);
+    const [selectedDetailReport, setSelectedDetailReport] = useState(null);
+    const [excelDownloading, setExcelDownloading] = useState(null);
 
     useEffect(() => {
         const init = async () => {
@@ -1404,6 +1499,196 @@ const AdminReports = ({ navigation }) => {
         return null;
     };
 
+    // ========== DETAILED REPORTS SECTION ==========
+
+    const handleExcelDownload = async (report) => {
+        setExcelDownloading(report.id);
+        try {
+            const downloadUrl = `${API_URL}${report.endpoint}/excel`;
+            if (isWeb) {
+                try {
+                    const response = await fetch(downloadUrl);
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    const contentDisposition = response.headers.get('content-disposition');
+                    let filename = `${report.id}_report.xlsx`;
+                    if (contentDisposition) {
+                        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                        if (filenameMatch && filenameMatch[1]) filename = filenameMatch[1].replace(/['"]/g, '');
+                    }
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                    Alert.alert('Success', `${report.name} Excel report downloaded!`);
+                } catch (fetchError) {
+                    console.error('Fetch error, falling back to window.open:', fetchError);
+                    window.open(downloadUrl, '_blank');
+                    Alert.alert('Success', 'Excel report opened in new tab');
+                }
+            } else {
+                await Linking.openURL(downloadUrl);
+                Alert.alert('Success', 'Excel report download initiated');
+            }
+        } catch (error) {
+            console.error('Excel Download failed:', error);
+            Alert.alert('Error', 'Failed to download Excel report');
+        } finally {
+            setExcelDownloading(null);
+        }
+    };
+
+    const fetchDetailedReport = async (report) => {
+        setDetailedLoading(true);
+        setSelectedDetailReport(report.id);
+        try {
+            const response = await fetch(`${API_URL}${report.endpoint}`);
+            const data = await response.json();
+            setDetailedReportData(data);
+        } catch (error) {
+            console.error('Error fetching detailed report:', error);
+            Alert.alert('Error', 'Failed to load report data');
+            setDetailedReportData(null);
+        } finally {
+            setDetailedLoading(false);
+        }
+    };
+
+    const renderDetailedReportsSection = () => (
+        <View style={detailedStyles.container}>
+            <View style={detailedStyles.sectionHeader}>
+                <LinearGradient
+                    colors={['#1F2937', '#111827']}
+                    style={detailedStyles.sectionHeaderGradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                >
+                    <Feather name="grid" size={20} color="#F59E0B" />
+                    <Text style={detailedStyles.sectionTitle}>Detailed Reports</Text>
+                    <Text style={detailedStyles.sectionBadge}>{DETAILED_REPORT_CATEGORIES.reduce((a, c) => a + c.reports.length, 0)} Reports</Text>
+                </LinearGradient>
+            </View>
+            <Text style={detailedStyles.sectionSubtitle}>Niche, granular reports with Excel download</Text>
+
+            {DETAILED_REPORT_CATEGORIES.map((category) => {
+                const isExpanded = expandedDetailCategory === category.id;
+                return (
+                    <Animated.View key={category.id} entering={FadeInDown.delay(100)}>
+                        <TouchableOpacity
+                            style={[
+                                detailedStyles.categoryCard,
+                                isExpanded && { borderColor: category.color, borderWidth: 1.5 }
+                            ]}
+                            onPress={() => setExpandedDetailCategory(isExpanded ? null : category.id)}
+                            activeOpacity={0.7}
+                        >
+                            <View style={detailedStyles.categoryRow}>
+                                <View style={[detailedStyles.categoryIcon, { backgroundColor: category.color + '20' }]}>
+                                    <Feather name={category.icon} size={20} color={category.color} />
+                                </View>
+                                <View style={detailedStyles.categoryInfo}>
+                                    <Text style={detailedStyles.categoryName}>{category.name}</Text>
+                                    <Text style={detailedStyles.categoryDesc}>{category.description}</Text>
+                                </View>
+                                <View style={detailedStyles.categoryMeta}>
+                                    <Text style={detailedStyles.reportCount}>{category.reports.length}</Text>
+                                    <Feather name={isExpanded ? 'chevron-up' : 'chevron-down'} size={18} color="#9CA3AF" />
+                                </View>
+                            </View>
+                        </TouchableOpacity>
+
+                        {isExpanded && (
+                            <View style={detailedStyles.reportsGrid}>
+                                {category.reports.map((report) => (
+                                    <View key={report.id} style={detailedStyles.reportItem}>
+                                        <View style={detailedStyles.reportItemLeft}>
+                                            <View style={[detailedStyles.reportDot, { backgroundColor: category.color }]} />
+                                            <Text style={detailedStyles.reportName}>{report.name}</Text>
+                                        </View>
+                                        <View style={detailedStyles.reportActions}>
+                                            {/* View Data Button */}
+                                            <TouchableOpacity
+                                                style={detailedStyles.viewBtn}
+                                                onPress={() => fetchDetailedReport(report)}
+                                            >
+                                                {detailedLoading && selectedDetailReport === report.id ? (
+                                                    <ActivityIndicator size="small" color="#6B7280" />
+                                                ) : (
+                                                    <Feather name="eye" size={14} color="#6B7280" />
+                                                )}
+                                            </TouchableOpacity>
+                                            {/* Excel Download Button */}
+                                            <TouchableOpacity
+                                                style={[detailedStyles.excelBtn, { backgroundColor: category.color }]}
+                                                onPress={() => handleExcelDownload(report)}
+                                                disabled={excelDownloading === report.id}
+                                            >
+                                                {excelDownloading === report.id ? (
+                                                    <ActivityIndicator size="small" color="#FFF" />
+                                                ) : (
+                                                    <>
+                                                        <Feather name="download" size={13} color="#FFF" />
+                                                        <Text style={detailedStyles.excelBtnText}>.xlsx</Text>
+                                                    </>
+                                                )}
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+                                ))}
+                            </View>
+                        )}
+                    </Animated.View>
+                );
+            })}
+
+            {/* Detailed Report Data Preview */}
+            {detailedReportData && detailedReportData.data && (
+                <View style={detailedStyles.previewContainer}>
+                    <View style={detailedStyles.previewHeader}>
+                        <Text style={detailedStyles.previewTitle}>{detailedReportData.report_name || 'Report Preview'}</Text>
+                        <TouchableOpacity onPress={() => { setDetailedReportData(null); setSelectedDetailReport(null); }}>
+                            <Feather name="x" size={20} color="#6B7280" />
+                        </TouchableOpacity>
+                    </View>
+                    <Text style={detailedStyles.previewMeta}>{detailedReportData.total || detailedReportData.data.length} records</Text>
+
+                    {detailedReportData.data.length > 0 && (
+                        <ScrollView horizontal showsHorizontalScrollIndicator={true} style={detailedStyles.previewTable}>
+                            <View>
+                                {/* Header */}
+                                <View style={detailedStyles.previewTableHeader}>
+                                    {Object.keys(detailedReportData.data[0]).map((key) => (
+                                        <Text key={key} style={detailedStyles.previewTableHeaderCell}>
+                                            {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                        </Text>
+                                    ))}
+                                </View>
+                                {/* Rows */}
+                                {detailedReportData.data.slice(0, 15).map((row, idx) => (
+                                    <View key={idx} style={[detailedStyles.previewTableRow, idx % 2 === 0 && detailedStyles.previewTableRowAlt]}>
+                                        {Object.values(row).map((val, ci) => (
+                                            <Text key={ci} style={detailedStyles.previewTableCell} numberOfLines={1}>
+                                                {val !== null && val !== undefined ? String(val) : '-'}
+                                            </Text>
+                                        ))}
+                                    </View>
+                                ))}
+                            </View>
+                        </ScrollView>
+                    )}
+                    {detailedReportData.data.length > 15 && (
+                        <Text style={detailedStyles.previewFooter}>Showing 15 of {detailedReportData.data.length} records. Download Excel for full data.</Text>
+                    )}
+                </View>
+            )}
+        </View>
+    );
+
     return (
         <SafeAreaView style={styles.container}>
             {/* Header */}
@@ -1472,6 +1757,9 @@ const AdminReports = ({ navigation }) => {
 
                 {/* Report Content */}
                 {renderReportContent()}
+
+                {/* Detailed Reports Section */}
+                {renderDetailedReportsSection()}
 
                 {/* Date Picker Component */}
                 {showDatePicker && (
@@ -2356,6 +2644,234 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_400Regular',
         color: '#1F2937',
         flex: 1,
+    },
+});
+
+// Detailed Reports Section Styles
+const detailedStyles = StyleSheet.create({
+    container: {
+        marginTop: 24,
+        paddingHorizontal: 16,
+    },
+    sectionHeader: {
+        marginBottom: 8,
+        borderRadius: 12,
+        overflow: 'hidden',
+    },
+    sectionHeaderGradient: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+        borderRadius: 12,
+    },
+    sectionTitle: {
+        fontSize: 18,
+        fontFamily: 'Poppins_700Bold',
+        color: '#FFF',
+        marginLeft: 10,
+        flex: 1,
+    },
+    sectionBadge: {
+        fontSize: 12,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#F59E0B',
+        backgroundColor: 'rgba(245,158,11,0.15)',
+        paddingHorizontal: 10,
+        paddingVertical: 3,
+        borderRadius: 12,
+        overflow: 'hidden',
+    },
+    sectionSubtitle: {
+        fontSize: 13,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        marginBottom: 14,
+        paddingHorizontal: 4,
+    },
+    categoryCard: {
+        backgroundColor: '#FFF',
+        borderRadius: 12,
+        marginBottom: 10,
+        padding: 14,
+        ...Platform.select({
+            ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8 },
+            android: { elevation: 2 },
+            web: { boxShadow: '0 2px 8px rgba(0,0,0,0.06)' },
+        }),
+        borderWidth: 1,
+        borderColor: '#F3F4F6',
+    },
+    categoryRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    categoryIcon: {
+        width: 42,
+        height: 42,
+        borderRadius: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    categoryInfo: {
+        flex: 1,
+        marginLeft: 12,
+    },
+    categoryName: {
+        fontSize: 15,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#1F2937',
+    },
+    categoryDesc: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#9CA3AF',
+        marginTop: 2,
+    },
+    categoryMeta: {
+        alignItems: 'center',
+    },
+    reportCount: {
+        fontSize: 16,
+        fontFamily: 'Poppins_700Bold',
+        color: '#D97706',
+        marginBottom: 2,
+    },
+    reportsGrid: {
+        backgroundColor: '#FAFAFA',
+        marginTop: -6,
+        marginBottom: 10,
+        marginHorizontal: 4,
+        borderRadius: 0,
+        borderBottomLeftRadius: 12,
+        borderBottomRightRadius: 12,
+        paddingVertical: 6,
+        paddingHorizontal: 10,
+        borderWidth: 1,
+        borderTopWidth: 0,
+        borderColor: '#F3F4F6',
+    },
+    reportItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 10,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F3F4F6',
+    },
+    reportItemLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+    },
+    reportDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        marginRight: 10,
+    },
+    reportName: {
+        fontSize: 13,
+        fontFamily: 'Poppins_500Medium',
+        color: '#374151',
+        flex: 1,
+    },
+    reportActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    viewBtn: {
+        width: 32,
+        height: 32,
+        borderRadius: 8,
+        backgroundColor: '#F3F4F6',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    excelBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 8,
+        gap: 4,
+    },
+    excelBtnText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF',
+    },
+    previewContainer: {
+        backgroundColor: '#FFF',
+        borderRadius: 12,
+        marginTop: 16,
+        padding: 16,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        ...Platform.select({
+            ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 10 },
+            android: { elevation: 3 },
+            web: { boxShadow: '0 2px 12px rgba(0,0,0,0.08)' },
+        }),
+    },
+    previewHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 4,
+    },
+    previewTitle: {
+        fontSize: 16,
+        fontFamily: 'Poppins_700Bold',
+        color: '#1F2937',
+    },
+    previewMeta: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#9CA3AF',
+        marginBottom: 12,
+    },
+    previewTable: {
+        maxHeight: 400,
+    },
+    previewTableHeader: {
+        flexDirection: 'row',
+        backgroundColor: '#F59E0B',
+        borderRadius: 6,
+        paddingVertical: 8,
+    },
+    previewTableHeaderCell: {
+        width: 120,
+        fontSize: 11,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF',
+        paddingHorizontal: 8,
+        textAlign: 'center',
+    },
+    previewTableRow: {
+        flexDirection: 'row',
+        paddingVertical: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F3F4F6',
+    },
+    previewTableRowAlt: {
+        backgroundColor: '#F9FAFB',
+    },
+    previewTableCell: {
+        width: 120,
+        fontSize: 11,
+        fontFamily: 'Poppins_400Regular',
+        color: '#374151',
+        paddingHorizontal: 8,
+    },
+    previewFooter: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#9CA3AF',
+        textAlign: 'center',
+        marginTop: 10,
+        fontStyle: 'italic',
     },
 });
 

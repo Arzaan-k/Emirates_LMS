@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 import secrets
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, String
 
 from app.core.security import hash_password, verify_password, is_password_hashed
 from app.core.auth import (
@@ -49,15 +49,83 @@ ROLE_HIERARCHY = [
     'Store Manager'
 ]
 
-# All available privileges
-ALL_PRIVILEGES = [
-    "team_list", "reports", "assign_quiz", "audits", "upload_training",
-    "bulk_upload", "post_news", "post_quiz", "create_user", "live_tracking",
-    "proctored_assessment", "proctored_create_manage", "proctored_view_results",
-    "view_analytics", "send_notification", "access_control", "manage_buckets",
-    "schedule_meeting", "crm_tickets", "manage_simulations", "manage_learning_path",
-    "scheduled_exams", "exam_reports", "support_library", "view_audit_logs",
+# All available privileges — grouped as (id, label, description, group, access_level)
+# access_level: "view" = read-only, "manage" = full create/edit/delete
+PRIVILEGE_GROUPS = [
+    {
+        "group": "Team Management",
+        "icon": "users",
+        "items": [
+            {"id": "team_list_view",  "label": "Team Directory",  "access": "view",   "feature": "team_dir",    "description": "View team directory"},
+            {"id": "team_list",       "label": "Team Directory",  "access": "manage", "feature": "team_dir",    "description": "Create, edit & delete users"},
+            {"id": "bulk_upload",     "label": "Bulk Upload",     "access": "manage",                           "description": "Bulk upload users via CSV"},
+            {"id": "create_user",     "label": "Create Users",    "access": "manage",                           "description": "Create individual users"},
+        ]
+    },
+    {
+        "group": "Content & Training",
+        "icon": "video",
+        "items": [
+            {"id": "upload_training_view",  "label": "Training Content", "access": "view",   "feature": "training",  "description": "Browse training content"},
+            {"id": "upload_training",       "label": "Training Content", "access": "manage", "feature": "training",  "description": "Upload & manage training materials"},
+            {"id": "manage_buckets",        "label": "Manage Buckets",   "access": "manage",                         "description": "Manage content buckets"},
+            {"id": "manage_learning_path",  "label": "Learning Paths",   "access": "manage",                         "description": "Create & manage learning paths"},
+        ]
+    },
+    {
+        "group": "News & Communication",
+        "icon": "bell",
+        "items": [
+            {"id": "post_news",         "label": "Post News",          "access": "manage", "description": "Create & publish news"},
+            {"id": "send_notification", "label": "Send Notifications", "access": "manage", "description": "Send push notifications to users"},
+        ]
+    },
+    {
+        "group": "Quizzes & Exams",
+        "icon": "file-text",
+        "items": [
+            {"id": "assign_quiz",             "label": "Assign Quizzes",  "access": "manage",                         "description": "Assign quizzes to users"},
+            {"id": "post_quiz",               "label": "Create Quizzes",  "access": "manage",                         "description": "Create & manage quizzes"},
+            {"id": "scheduled_exams",         "label": "Exams",           "access": "manage",                         "description": "Schedule & manage exams"},
+            {"id": "exam_reports",            "label": "Exam Reports",    "access": "view",                           "description": "View exam results & reports"},
+            {"id": "proctored_assessment",    "label": "Proctored Exams", "access": "view",   "feature": "proctored", "description": "Access proctored assessments"},
+            {"id": "proctored_create_manage", "label": "Proctored Exams", "access": "manage", "feature": "proctored", "description": "Create & manage proctored exams"},
+            {"id": "proctored_view_results",  "label": "Proctor Results", "access": "view",                           "description": "View proctored exam results"},
+        ]
+    },
+    {
+        "group": "Analytics & Reports",
+        "icon": "bar-chart-2",
+        "items": [
+            {"id": "view_analytics", "label": "Analytics",    "access": "view",   "description": "Access analytics dashboards"},
+            {"id": "reports",        "label": "Full Reports",  "access": "manage", "description": "Generate & export all reports"},
+            {"id": "live_tracking",  "label": "Live Tracking", "access": "view",   "description": "View real-time user activity"},
+        ]
+    },
+    {
+        "group": "Audits & Compliance",
+        "icon": "clipboard",
+        "items": [
+            {"id": "audits_view",     "label": "Audits",      "access": "view",   "feature": "audits", "description": "View audit records"},
+            {"id": "audits",          "label": "Audits",      "access": "manage", "feature": "audits", "description": "Conduct & manage audits"},
+            {"id": "view_audit_logs", "label": "System Logs", "access": "view",                        "description": "Access system audit logs"},
+        ]
+    },
+    {
+        "group": "Operations",
+        "icon": "settings",
+        "items": [
+            {"id": "access_control",     "label": "Access Control", "access": "manage", "description": "Manage user access & permissions"},
+            {"id": "schedule_meeting",   "label": "Meetings",       "access": "manage", "description": "Schedule & manage meetings"},
+            {"id": "crm_tickets",        "label": "CRM Tickets",    "access": "manage", "description": "Handle CRM support tickets"},
+            {"id": "manage_simulations", "label": "Simulations",    "access": "manage", "description": "Manage roleplay simulations"},
+            {"id": "support_library",    "label": "Support Library","access": "manage", "description": "Manage support library content"},
+        ]
+    },
 ]
+
+# Flat list of all privilege IDs (used for SuperAdmin grant-all and backward compat)
+ALL_PRIVILEGES = [item["id"] for group in PRIVILEGE_GROUPS for item in group["items"]]
 
 
 class UserService:
@@ -74,6 +142,15 @@ class UserService:
     # AUTHENTICATION
     # ===========================================
 
+    # Fields in profile_data that are included in the full-text search
+    SEARCH_PROFILE_KEYS = [
+        "Employee Code", "Temporary Employee Code", "User Name",
+        "Designation", "Department", "Sub Department",
+        "Store Name", "Store Code", "Region", "City", "State",
+        "Grade", "Job Role", "Function", "Sub Function",
+        "Concept", "Franchise", "Contact Number",
+    ]
+
     def get_users_with_count(
         self,
         skip: int,
@@ -81,14 +158,9 @@ class UserService:
         store: str | None,
         role: str | None,
         search: str | None,
+        filters: Optional[Dict[str, Any]] = None,
     ):
-        query = (
-            self.db.query(
-                User,
-                func.count().over().label("total_count")
-            )
-            .order_by(User.id)
-        )
+        query = self.db.query(User).order_by(User.id)
 
         if store:
             query = query.filter(User.store == store)
@@ -96,21 +168,77 @@ class UserService:
         if role:
             query = query.filter(User.role == role)
 
+        # Apply direct-column filters in SQL; collect JSON filter keys for Python-level filtering
+        json_filters: Dict[str, Any] = {}
+
+        if filters:
+            for key, value in filters.items():
+                if not value:
+                    continue
+
+                # Direct column on User model — apply in SQL
+                if hasattr(User, key):
+                    col = getattr(User, key)
+                    if isinstance(value, list):
+                        query = query.filter(col.in_(value))
+                    else:
+                        query = query.filter(col == value)
+
+                # profile_data JSON fields — defer to Python filtering
+                else:
+                    json_filters[key] = value
+
+        # Fetch all users that pass SQL filters
+        all_users = query.all()
+
+        # Apply profile_data JSON filters in Python (avoids SQLAlchemy .astext issues)
+        if json_filters:
+            def matches_filters(user: User) -> bool:
+                pd = user.profile_data or {}
+                for key, value in json_filters.items():
+                    cell = pd.get(key)
+                    if cell is None:
+                        return False
+                    cell_str = str(cell).strip()
+                    if isinstance(value, list):
+                        if not any(cell_str.lower() == str(v).lower() for v in value):
+                            return False
+                    else:
+                        if cell_str.lower() != str(value).lower():
+                            return False
+                return True
+
+            all_users = [u for u in all_users if matches_filters(u)]
+
+        # Full-text search: name, email + all profile_data fields
+        # Token-based: each whitespace-separated word must hit at least one field (AND across tokens, OR across fields)
         if search:
-            query = query.filter(
-                or_(
-                    User.name.ilike(f"%{search}%"),
-                    User.email.ilike(f"%{search}%"),
-                )
-            )
+            tokens = [t for t in search.lower().strip().split() if t]
 
-        rows = query.offset(skip).limit(limit).all()
+            def matches_search(user: User) -> bool:
+                # Build a flat list of all searchable text values for this user
+                pd = user.profile_data or {}
+                haystack = [
+                    (user.name or '').lower(),
+                    (user.email or '').lower(),
+                    (user.store or '').lower(),
+                    (user.role or '').lower(),
+                ]
+                for k in self.SEARCH_PROFILE_KEYS:
+                    v = pd.get(k)
+                    if v:
+                        haystack.append(str(v).lower())
 
-        if not rows:
-            return [], 0
+                # Every token must match at least one haystack entry
+                for token in tokens:
+                    if not any(token in field for field in haystack):
+                        return False
+                return True
 
-        users = [row[0] for row in rows]
-        total = rows[0][1]
+            all_users = [u for u in all_users if matches_search(u)]
+
+        total = len(all_users)
+        users = all_users[skip: skip + limit]
 
         return users, total
 
@@ -325,6 +453,14 @@ class UserService:
             if hasattr(user, key) and value is not None:
                 setattr(user, key, value)
 
+        # Enforce consistency for superadmin flag based on role
+        if "role" in updates or "category" in updates:
+            if user.role == "Super Admin" or user.category == "Super Admin":
+                user.is_superadmin = True
+                user.has_admin_access = True
+            else:
+                user.is_superadmin = False
+
         self.db.commit()
         self.db.refresh(user)
 
@@ -339,10 +475,29 @@ class UserService:
         # Import models here to avoid circular imports at module level if any
         from app.models.user import UserNodeProgress, UserLearningProfile, UserInteraction
         from app.models.video_progress import VideoProgress, MidVideoQuizAttempt
-        # Assuming CourseCompletion, AssessmentSubmission, QuizSubmission are available via relationship or direct import
-        # If they are in other files, import them. 
-        # For now, we rely on cascade if configured, or manual delete where we know models.
         
+        # 1. DELETE PROFILE PICTURE FROM STORAGE
+        try:
+            from app.services.cdn_service import CDNService
+            user = self.user_repo.get_by_email(email)
+            if user and user.profile_data and user.profile_data.get('profile_pic'):
+                pic_url = user.profile_data.get('profile_pic')
+                cdn = CDNService()
+                
+                # Extract key from URL
+                key = None
+                if cdn.public_url and pic_url.startswith(cdn.public_url):
+                    key = pic_url.replace(f"{cdn.public_url}/", "")
+                elif "/uploads/" in pic_url: # Fallback/Local
+                    key = pic_url.split("/uploads/")[-1]
+                    if not key.startswith("uploads/"):
+                         key = f"uploads/{key}"
+                
+                if key:
+                    cdn.delete_file(key)
+        except Exception as e:
+            logger.error(f"Failed to delete profile pic for {email}: {e}")
+
         # Delete Video Progress
         self.db.query(VideoProgress).filter(VideoProgress.user_email == email).delete()
         self.db.query(MidVideoQuizAttempt).filter(MidVideoQuizAttempt.user_email == email).delete()

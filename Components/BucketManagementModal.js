@@ -9,7 +9,8 @@ import {
     Dimensions,
     Alert,
     ActivityIndicator,
-    ScrollView
+    ScrollView,
+    Switch
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -48,6 +49,9 @@ export default function BucketManagementModal({ visible, onClose, onBucketsChang
     // Delete confirmation modal state
     const [deleteModalVisible, setDeleteModalVisible] = useState(false);
     const [bucketToDelete, setBucketToDelete] = useState(null);
+    const [bucketContents, setBucketContents] = useState([]);
+    const [deleteContents, setDeleteContents] = useState(false);
+    const [loadingContents, setLoadingContents] = useState(false);
     const [deleting, setDeleting] = useState(false);
 
     useEffect(() => {
@@ -175,17 +179,35 @@ export default function BucketManagementModal({ visible, onClose, onBucketsChang
         }
     };
 
-    const handleDelete = (bucket) => {
+    const handleDelete = async (bucket) => {
         setBucketToDelete(bucket);
+        setDeleteContents(false); // Default to keeping files (safe default)
+        setLoadingContents(true);
         setDeleteModalVisible(true);
+
+        try {
+            const res = await fetch(`${API_URL}/api/v1/content/buckets/${bucket.id}/contents`);
+            if (res.ok) {
+                const data = await res.json();
+                setBucketContents(data);
+            } else {
+                setBucketContents([]);
+            }
+        } catch (e) {
+            console.error('Error fetching bucket contents:', e);
+            setBucketContents([]);
+        } finally {
+            setLoadingContents(false);
+        }
     };
 
     const confirmDelete = async () => {
         if (!bucketToDelete) return;
 
         setDeleting(true);
+        setDeleting(true);
         try {
-            const res = await fetch(`${API_URL}/api/v1/content/buckets/${bucketToDelete.id}`, {
+            const res = await fetch(`${API_URL}/api/v1/content/buckets/${bucketToDelete.id}?delete_contents=${deleteContents}`, {
                 method: 'DELETE'
             });
             const data = await res.json();
@@ -481,9 +503,51 @@ export default function BucketManagementModal({ visible, onClose, onBucketsChang
                         <Text style={styles.deleteMessage}>
                             Are you sure you want to delete "{bucketToDelete?.name}"?
                         </Text>
-                        <Text style={styles.deleteSubMessage}>
-                            Content in this bucket will become uncategorized. This action cannot be undone.
-                        </Text>
+
+                        {loadingContents ? (
+                            <ActivityIndicator size="small" color="#6366F1" style={{ marginVertical: 10 }} />
+                        ) : (
+                            <View style={styles.contentsPreview}>
+                                <Text style={styles.contentsCount}>
+                                    This folder contains <Text style={{ fontWeight: '700' }}>{bucketContents.length}</Text> files.
+                                </Text>
+
+                                {bucketContents.length > 0 && (
+                                    <>
+                                        <ScrollView style={styles.fileList} nestedScrollEnabled>
+                                            {bucketContents.slice(0, 5).map(item => (
+                                                <View key={item.id} style={styles.fileItem}>
+                                                    <Feather name="file-text" size={14} color="#6B7280" />
+                                                    <Text style={styles.fileName} numberOfLines={1}>{item.title}</Text>
+                                                </View>
+                                            ))}
+                                            {bucketContents.length > 5 && (
+                                                <Text style={styles.moreFiles}>+ {bucketContents.length - 5} more files</Text>
+                                            )}
+                                        </ScrollView>
+
+                                        <View style={styles.deleteOptionContainer}>
+                                            <View style={styles.switchRow}>
+                                                <Switch
+                                                    value={deleteContents}
+                                                    onValueChange={setDeleteContents}
+                                                    trackColor={{ false: '#D1D5DB', true: '#EF4444' }}
+                                                    thumbColor={deleteContents ? '#FFF' : '#F9FAFB'}
+                                                />
+                                                <Text style={[styles.deleteOptionText, deleteContents && styles.deleteOptionTextActive]}>
+                                                    Also delete these files permanently?
+                                                </Text>
+                                            </View>
+                                            <Text style={styles.deleteWarning}>
+                                                {deleteContents
+                                                    ? "⚠️ Files will be permanently deleted!"
+                                                    : "Files will be moved to 'Uncategorized'."}
+                                            </Text>
+                                        </View>
+                                    </>
+                                )}
+                            </View>
+                        )}
 
                         <View style={styles.deleteFooter}>
                             <TouchableOpacity
@@ -504,7 +568,9 @@ export default function BucketManagementModal({ visible, onClose, onBucketsChang
                                 {deleting ? (
                                     <ActivityIndicator size="small" color="#FFF" />
                                 ) : (
-                                    <Text style={styles.deleteConfirmText}>Delete</Text>
+                                    <Text style={styles.deleteConfirmText}>
+                                        {deleteContents ? "Delete All" : "Delete Folder Only"}
+                                    </Text>
                                 )}
                             </TouchableOpacity>
                         </View>
@@ -850,5 +916,74 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '600',
         color: '#FFF',
+    },
+    contentsPreview: {
+        width: '100%',
+        backgroundColor: '#F9FAFB',
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 20,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    contentsCount: {
+        fontSize: 14,
+        color: '#374151',
+        marginBottom: 12,
+        textAlign: 'center',
+    },
+    fileList: {
+        maxHeight: 150,
+        marginBottom: 16,
+    },
+    fileItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F3F4F6',
+        gap: 8,
+    },
+    fileName: {
+        fontSize: 13,
+        color: '#4B5563',
+        flex: 1,
+    },
+    moreFiles: {
+        fontSize: 12,
+        color: '#6B7280',
+        fontStyle: 'italic',
+        marginTop: 8,
+        textAlign: 'center',
+    },
+    deleteOptionContainer: {
+        marginTop: 12,
+        paddingTop: 12,
+        borderTopWidth: 1,
+        borderTopColor: '#E5E7EB',
+    },
+    switchRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        marginBottom: 8,
+    },
+    deleteOptionText: {
+        fontSize: 13,
+        color: '#4B5563',
+        flex: 1,
+    },
+    deleteOptionTextActive: {
+        color: '#EF4444',
+        fontWeight: '600',
+    },
+    deleteWarning: {
+        fontSize: 12,
+        color: '#DC2626', // Red-600
+        textAlign: 'center',
+        backgroundColor: '#FEF2F2', // Red-50
+        padding: 8,
+        borderRadius: 6,
+        overflow: 'hidden',
     },
 });

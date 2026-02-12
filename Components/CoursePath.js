@@ -1015,7 +1015,7 @@ export default function CoursePath(props) {
                     {renderMilestones()}
 
                     {/* CONNECTIONS */}
-                    <Svg height={totalHeight} width={width} style={styles.svgLayer}>
+                    <Svg height={totalHeight} width={width} style={styles.svgLayer} pointerEvents="none">
                         {renderCurvedConnections()}
                     </Svg>
 
@@ -1024,6 +1024,7 @@ export default function CoursePath(props) {
                         source={CAR_IMAGE}
                         style={[styles.playerCar, carStyle]}
                         resizeMode="contain"
+                        pointerEvents="none"
                     />
 
                     {/* NODES */}

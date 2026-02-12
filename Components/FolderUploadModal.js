@@ -31,8 +31,9 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
   const buildFileTree = (files) => {
     const tree = {};
 
-    files.forEach(file => {
-      const parts = file.webkitRelativePath ? file.webkitRelativePath.split('/') : [file.name];
+    files.forEach(entry => {
+      const file = entry.file;
+      const parts = entry.path ? entry.path.split('/') : (file.webkitRelativePath ? file.webkitRelativePath.split('/') : [file.name]);
       let current = tree;
 
       parts.forEach((part, index) => {
@@ -42,9 +43,9 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
           current._files.push({
             name: part,
             file: file,
-            path: file.webkitRelativePath || file.name,
-            selected: true,
-            type: getFileType(part)
+            path: entry.path || file.webkitRelativePath || file.name,
+            selected: entry.selected !== false,
+            type: entry.type || getFileType(part)
           });
         } else {
           // It's a folder
@@ -57,6 +58,21 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
     });
 
     return tree;
+  };
+
+  const cloneTreePreserveFiles = (node) => {
+    if (node == null || typeof node !== 'object') return node;
+    if (Array.isArray(node)) return node.map(cloneTreePreserveFiles);
+
+    const out = {};
+    Object.keys(node).forEach(k => {
+      if (k === 'file') {
+        out[k] = node[k];
+        return;
+      }
+      out[k] = cloneTreePreserveFiles(node[k]);
+    });
+    return out;
   };
 
   const getFileType = (filename) => {
@@ -98,8 +114,15 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
       const rootName = firstPath.split('/')[0];
 
       setRootFolderName(rootName);
-      setSelectedFiles(files);
-      setFileTree(buildFileTree(files));
+      const wrapped = files.map(f => ({
+        file: f,
+        name: f.name,
+        path: f.webkitRelativePath || f.name,
+        selected: true,
+        type: getFileType(f.name),
+      }));
+      setSelectedFiles(wrapped);
+      setFileTree(buildFileTree(wrapped));
       setUploadProgress(0);
       setUploadStatus('');
     }
@@ -108,8 +131,8 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
   const toggleFileSelection = (filePath) => {
     setSelectedFiles(prevFiles =>
       prevFiles.map(f => {
-        if ((f.webkitRelativePath || f.name) === filePath) {
-          return { ...f, _selected: !f._selected };
+        if (f.path === filePath) {
+          return { ...f, selected: !(f.selected !== false) };
         }
         return f;
       })
@@ -117,7 +140,7 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
 
     // Update tree
     setFileTree(prevTree => {
-      const newTree = JSON.parse(JSON.stringify(prevTree));
+      const newTree = cloneTreePreserveFiles(prevTree);
       updateFileSelectionInTree(newTree, filePath);
       return newTree;
     });
@@ -128,7 +151,7 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
       if (key === '_files') {
         tree._files = tree._files.map(f => {
           if (f.path === filePath) {
-            return { ...f, selected: !f.selected };
+            return { ...f, selected: !(f.selected !== false) };
           }
           return f;
         });
@@ -140,7 +163,7 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
 
   const toggleFolderExpansion = (folderPath) => {
     setFileTree(prevTree => {
-      const newTree = JSON.parse(JSON.stringify(prevTree));
+      const newTree = cloneTreePreserveFiles(prevTree);
       toggleFolderInTree(newTree, folderPath.split('/'));
       return newTree;
     });

@@ -138,6 +138,66 @@ class CRMTaskAssignment(Base):
         }
 
 
+class AuditTemplate(Base):
+    """
+    Template for reusable audits/checklists.
+    """
+    __tablename__ = "audit_templates"
+
+    id = Column(String(255), primary_key=True)
+    title = Column(String(255), nullable=False)
+    description = Column(Text)
+    icon = Column(String(50), default="clipboard")
+    color = Column(String(50), default="#10B981")
+    checklist_items = Column(JSON, default=[]) # List of strings or objects {text, type}
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    assignments = relationship("AuditAssignment", back_populates="template", lazy="dynamic")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "title": self.title,
+            "description": self.description,
+            "icon": self.icon,
+            "color": self.color,
+            "checklist_items": self.checklist_items or [],
+            "created_at": self.created_at.isoformat() if self.created_at else None
+        }
+
+
+class AuditAssignment(Base):
+    """
+    Assignment of an audit template to a user or store.
+    """
+    __tablename__ = "audit_assignments"
+
+    id = Column(String(255), primary_key=True)
+    template_id = Column(String(255), ForeignKey('audit_templates.id'), nullable=False)
+    assigned_to = Column(String(255)) # User email
+    store_id = Column(String(255)) # Store identifier
+    status = Column(String(50), default="pending") # pending, completed, overdue
+    due_date = Column(DateTime)
+    assigned_at = Column(DateTime, default=datetime.utcnow)
+    assigned_by = Column(String(255))
+    
+    # Relationships
+    template = relationship("AuditTemplate", back_populates="assignments")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "template_id": self.template_id,
+            "template_title": self.template.title if self.template else "Unknown Audit",
+            "assigned_to": self.assigned_to,
+            "store_id": self.store_id,
+            "status": self.status,
+            "due_date": self.due_date.isoformat() if self.due_date else None,
+            "assigned_at": self.assigned_at.isoformat() if self.assigned_at else None,
+        }
+
+
 class AuditSubmission(Base):
     """
     Store Audit Submissions.
@@ -149,12 +209,15 @@ class AuditSubmission(Base):
     user_email = Column(String(255), nullable=False)
     user_name = Column(String(255))
     store = Column(String(255))
-    category = Column(String(100)) # e.g., 'safety', 'cleanliness'
+    category = Column(String(100)) # e.g., 'safety', 'cleanliness' or template_id
     checklist_items = Column(JSON, default=[]) # Snapshot of items at time of audit
     checked_items = Column(JSON, default={}) # Key-value pairs of checked items
     completion_rate = Column(Integer, default=0)
     submitted_at = Column(DateTime, default=datetime.utcnow)
     status = Column(String(50), default="completed")
+    
+    # Link to assignment if applicable
+    # assignment_id = Column(String(255), nullable=True)
 
     __table_args__ = (
         Index('idx_audit_user', 'user_email'),
@@ -168,18 +231,17 @@ class AuditSubmission(Base):
 
     def to_dict(self):
         """Convert to dictionary for API responses."""
-        # Derive category name for convenience if needed, or frontend handles it
-        # Simple mapping for common IDs if frontend expects it, or just return raw
         return {
             "id": self.id,
             "user_email": self.user_email,
             "user_name": self.user_name,
             "store": self.store,
             "category": self.category,
-            "category_name": self.category.title() if self.category else "", # Simple fallback
+            "category_name": self.category.title() if self.category else "", 
             "checklist_items": self.checklist_items or [],
             "checked_items": self.checked_items or {},
             "completion_rate": self.completion_rate,
             "submitted_at": (self.submitted_at.isoformat() + "Z") if self.submitted_at else None,
             "status": self.status,
+            # "assignment_id": self.assignment_id
         }

@@ -11,6 +11,8 @@ import {
     ActivityIndicator,
     Alert,
     Platform,
+    FlatList,
+    KeyboardAvoidingView,
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -31,6 +33,17 @@ const THEME = {
     border: '#FDE68A',     // Amber 200
 };
 
+// Shared style constants for privilege segmented controls
+const privRowStyle = { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingVertical: 2 };
+const privLabelStyle = { fontSize: 12, color: '#1F2937', fontWeight: '500', flex: 1, marginRight: 8 };
+const segStyle = { flexDirection: 'row', borderRadius: 8, borderWidth: 1, borderColor: '#FDE68A', overflow: 'hidden' };
+const segBtnStyle = { paddingHorizontal: 9, paddingVertical: 6, backgroundColor: '#FFFFFF' };
+const segTxtStyle = { fontSize: 10, fontWeight: '500', color: '#9CA3AF' };
+const segDivider = { width: 1, backgroundColor: '#FDE68A' };
+const segOffActive = { backgroundColor: '#F3F4F6' };
+const segViewActive = { backgroundColor: '#EFF6FF' };
+const segManageActive = { backgroundColor: '#FEF3C7' };
+
 const CreateUser = ({
     visible = false,
     onClose = () => { },
@@ -39,7 +52,8 @@ const CreateUser = ({
     isEditing = false,
     initialData = null,
     onUpdate = () => { },
-    onBulkUploadStart = null // New prop for background upload
+    onBulkUploadStart = null, // New prop for background upload
+    filterOptions = {}, // Options for dropdowns
 }) => {
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
@@ -70,10 +84,52 @@ const CreateUser = ({
     const [isExternal, setIsExternal] = useState(false);
     const [joinedAtLevel, setJoinedAtLevel] = useState('');
 
+    // Profile data state (all extended fields from bulk upload)
+    const [profileData, setProfileData] = useState({});
+    const [showProfileSection, setShowProfileSection] = useState(false);
+
+    // Grouped privileges for UI
+    const [privilegeGroups, setPrivilegeGroups] = useState([]);
+
     // Store management state
     const [showNewStore, setShowNewStore] = useState(false);
     const [newStoreName, setNewStoreName] = useState('');
     const [newStoreCity, setNewStoreCity] = useState('');
+
+    // Selection Modal State
+    const [selectModalVisible, setSelectModalVisible] = useState(false);
+    const [selectTitle, setSelectTitle] = useState('');
+    const [selectData, setSelectData] = useState([]);
+    const [selectSearch, setSelectSearch] = useState('');
+    const [targetFieldKey, setTargetFieldKey] = useState(null);
+
+    // Field Mapping for Dropdowns
+    const FIELD_MAP = useMemo(() => ({
+        'Designation': { key: 'designations', icon: 'award' },
+        'Department': { key: 'departments', icon: 'briefcase' },
+        'Sub Department': { key: 'sub_departments', icon: 'layers' },
+        'Function': { key: 'functions', icon: 'git-branch' },
+        'Sub Function': { key: 'sub_functions', icon: 'git-merge' },
+        'Job Role': { key: 'job_roles', icon: 'user-check' },
+        'Concept': { key: 'concepts', icon: 'tag' },
+        'Franchise': { key: 'franchises', icon: 'home' },
+        'Region': { key: 'regions', icon: 'map' },
+        'City': { key: 'cities', icon: 'map-pin' },
+        'State': { key: 'states', icon: 'flag' },
+        'Grade': { key: 'grades', icon: 'star' },
+        'Qualification': { key: 'qualifications', icon: 'book' },
+        'Gender': { options: ['Male', 'Female', 'Other'], icon: 'users' },
+        'Blood Group': { options: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'], icon: 'heart' },
+        'Marital Status': { options: ['Single', 'Married', 'Divorced', 'Widowed'], icon: 'user' },
+        'User Status': { options: ['Active', 'Inactive', 'On Leave', 'Resigned', 'Terminated'], icon: 'activity' },
+        // Static Options
+        'Proof Type': { options: ['Aadhar', 'PAN', 'Passport', 'Driving License', 'Voter ID'], icon: 'credit-card' },
+        'Qualification Status': { options: ['Completed', 'Pursuing', 'Dropped'], icon: 'book-open' },
+        'Shirt Size': { options: ['XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL'], icon: 'maximize' },
+        'Denim Size': { options: ['28', '30', '32', '34', '36', '38', '40', '42'], icon: 'maximize-2' },
+        'Account Verified': { options: ['Yes', 'No'], icon: 'check-circle' },
+        'Account Approved': { options: ['Yes', 'No'], icon: 'check-square' },
+    }), []);
 
     // Comprehensive list of supported columns from EXPORT_USERS format
     const allColumns = [
@@ -89,6 +145,7 @@ const CreateUser = ({
     ];
 
     const isSuperAdmin = userProfile?.is_superadmin || userProfile?.role === 'Super Admin';
+    const canManagePrivileges = isSuperAdmin || (userProfile?.privileges && userProfile.privileges.includes('create_user'));
 
     // Filter stores based on search
     const filteredStores = useMemo(() => {
@@ -105,9 +162,10 @@ const CreateUser = ({
             fetchCategories();
             fetchPrivileges();
             fetchStores();
-            fetchDisplayRoles(); // Fetch dynamic progression levels
+            fetchDisplayRoles();
             setBulkResult(null);
             setStoreSearch('');
+            setShowProfileSection(false);
 
             if (isEditing && initialData) {
                 setName(initialData.name || '');
@@ -118,6 +176,13 @@ const CreateUser = ({
                 setSelectedStore(initialData.store || '');
                 setIsExternal(initialData.is_external || false);
                 setJoinedAtLevel(initialData.joined_at_level || '');
+                // Normalize profile_data keys: trim whitespace to handle Excel column header inconsistencies
+                const rawPD = initialData.profile_data || {};
+                const normalizedPD = {};
+                Object.entries(rawPD).forEach(([k, v]) => {
+                    normalizedPD[k.trim()] = v;
+                });
+                setProfileData(normalizedPD);
                 setPassword('');
             } else {
                 setName('');
@@ -129,6 +194,7 @@ const CreateUser = ({
                 setSelectedStore('');
                 setIsExternal(false);
                 setJoinedAtLevel('');
+                setProfileData({});
             }
         }
     }, [visible, isEditing, initialData]);
@@ -225,6 +291,14 @@ const CreateUser = ({
             const data = await response.json();
             if (Array.isArray(data)) {
                 setPrivileges(data);
+                // Build grouped structure from flat list
+                const groups = {};
+                data.forEach(p => {
+                    const g = p.group || 'Other';
+                    if (!groups[g]) groups[g] = { label: g, icon: p.group_icon || 'check', items: [] };
+                    groups[g].items.push(p);
+                });
+                setPrivilegeGroups(Object.values(groups));
             }
         } catch (error) {
             console.error('Error fetching privileges:', error);
@@ -456,6 +530,7 @@ const CreateUser = ({
             store: selectedStore,
             is_external: isExternal,
             joined_at_level: isExternal ? (joinedAtLevel || role) : null,
+            profile_data: profileData,
         };
 
         if (password) {
@@ -541,9 +616,11 @@ const CreateUser = ({
             setBulkResult(data);
 
             if (data.status === 'success') {
+                const updatedMsg = data.updated > 0 ? `\n${data.updated} existing users updated.` : '';
+                const skippedMsg = data.skipped > 0 ? `\n${data.skipped} rows skipped (invalid/missing email).` : '';
                 Alert.alert(
                     'Upload Complete',
-                    `Successfully created ${data.created} users.\n${data.skipped} were skipped.`,
+                    `Successfully created ${data.created} new users.${updatedMsg}${skippedMsg}`,
                     [{ text: 'OK' }]
                 );
             } else {
@@ -714,8 +791,13 @@ const CreateUser = ({
                                         </Text>
                                         {bulkResult.status === 'success' && (
                                             <>
-                                                <Text style={styles.resultText}>Created: {bulkResult.created} users</Text>
-                                                <Text style={styles.resultText}>Skipped: {bulkResult.skipped} users</Text>
+                                                <Text style={styles.resultText}>Created: {bulkResult.created} new users</Text>
+                                                {bulkResult.updated > 0 && (
+                                                    <Text style={styles.resultText}>Updated: {bulkResult.updated} existing users</Text>
+                                                )}
+                                                {bulkResult.skipped > 0 && (
+                                                    <Text style={styles.resultText}>Skipped: {bulkResult.skipped} rows (invalid/missing email)</Text>
+                                                )}
                                             </>
                                         )}
                                     </View>
@@ -1136,8 +1218,8 @@ const CreateUser = ({
                                     )}
                                 </View>
 
-                                {/* Privileges Section */}
-                                {isSuperAdmin && (
+                                {/* Privileges Section — grouped view/manage */}
+                                {canManagePrivileges && (
                                     <View style={styles.section}>
                                         <View style={styles.privilegeHeader}>
                                             <Text style={styles.sectionTitle}>
@@ -1156,45 +1238,311 @@ const CreateUser = ({
                                             Selected: {selectedPrivileges.length} / {privileges.length}
                                         </Text>
 
-                                        <View style={styles.privilegeGrid}>
-                                            {privileges.map((priv) => (
-                                                <TouchableOpacity
-                                                    key={priv.id}
-                                                    style={[
-                                                        styles.privilegeItem,
-                                                        selectedPrivileges.includes(priv.id) && styles.privilegeItemActive
-                                                    ]}
-                                                    onPress={() => togglePrivilege(priv.id)}
-                                                >
-                                                    <View style={[
-                                                        styles.privilegeCheck,
-                                                        selectedPrivileges.includes(priv.id) && styles.privilegeCheckActive
-                                                    ]}>
-                                                        {selectedPrivileges.includes(priv.id) && (
-                                                            <Feather name="check" size={10} color="#FFF" />
-                                                        )}
+                                        {privilegeGroups.length > 0 ? (() => {
+                                            // Helper: select/deselect specific IDs
+                                            const grantIds = (ids) => setSelectedPrivileges(prev => {
+                                                const s = new Set(prev);
+                                                ids.forEach(id => s.add(id));
+                                                return Array.from(s);
+                                            });
+                                            const revokeIds = (ids) => setSelectedPrivileges(prev =>
+                                                prev.filter(p => !ids.includes(p))
+                                            );
+
+                                            return privilegeGroups.map((group) => {
+                                                // Separate paired (feature-keyed) from standalone items
+                                                const featureMap = {};
+                                                const standalone = [];
+                                                group.items.forEach(item => {
+                                                    if (item.feature) {
+                                                        if (!featureMap[item.feature]) featureMap[item.feature] = { label: item.label };
+                                                        featureMap[item.feature][item.access] = item;
+                                                    } else {
+                                                        standalone.push(item);
+                                                    }
+                                                });
+
+                                                const rows = [
+                                                    ...Object.entries(featureMap).map(([feat, pair]) => ({ type: 'paired', key: feat, ...pair })),
+                                                    ...standalone.map(item => ({ type: 'standalone', key: item.id, item })),
+                                                ];
+
+                                                return (
+                                                    <View key={group.label} style={{ marginBottom: 14 }}>
+                                                        {/* Group header */}
+                                                        <View style={{
+                                                            flexDirection: 'row', alignItems: 'center', gap: 6,
+                                                            marginBottom: 8, paddingBottom: 5,
+                                                            borderBottomWidth: 1, borderBottomColor: THEME.border,
+                                                        }}>
+                                                            <Feather name={group.icon || 'box'} size={13} color={THEME.primaryDark} />
+                                                            <Text style={{ fontSize: 12, fontWeight: '700', color: THEME.textMain }}>
+                                                                {group.label}
+                                                            </Text>
+                                                        </View>
+
+                                                        {rows.map(row => {
+                                                            if (row.type === 'paired') {
+                                                                // 3-state: OFF | VIEW | MANAGE
+                                                                const viewId = row.view?.id;
+                                                                const manageId = row.manage?.id;
+                                                                const hasManage = manageId && selectedPrivileges.includes(manageId);
+                                                                const hasView = viewId && selectedPrivileges.includes(viewId);
+                                                                const level = hasManage ? 'manage' : hasView ? 'view' : 'none';
+
+                                                                const allIds = [viewId, manageId].filter(Boolean);
+                                                                const setLevel = (newLevel) => {
+                                                                    revokeIds(allIds);
+                                                                    if (newLevel === 'view' && viewId) grantIds([viewId]);
+                                                                    if (newLevel === 'manage') grantIds(allIds);
+                                                                };
+
+                                                                return (
+                                                                    <View key={row.key} style={privRowStyle}>
+                                                                        <Text style={privLabelStyle} numberOfLines={1}>{row.label}</Text>
+                                                                        <View style={segStyle}>
+                                                                            <TouchableOpacity onPress={() => setLevel('none')} style={[segBtnStyle, level === 'none' && segOffActive]}>
+                                                                                <Text style={[segTxtStyle, level === 'none' && { color: '#374151', fontWeight: '700' }]}>OFF</Text>
+                                                                            </TouchableOpacity>
+                                                                            <View style={segDivider} />
+                                                                            {viewId && (<>
+                                                                                <TouchableOpacity onPress={() => setLevel('view')} style={[segBtnStyle, level === 'view' && segViewActive]}>
+                                                                                    <Text style={[segTxtStyle, level === 'view' && { color: '#1D4ED8', fontWeight: '700' }]}>VIEW</Text>
+                                                                                </TouchableOpacity>
+                                                                                <View style={segDivider} />
+                                                                            </>)}
+                                                                            {manageId && (
+                                                                                <TouchableOpacity onPress={() => setLevel('manage')} style={[segBtnStyle, level === 'manage' && segManageActive]}>
+                                                                                    <Text style={[segTxtStyle, level === 'manage' && { color: '#92400E', fontWeight: '700' }]}>MANAGE</Text>
+                                                                                </TouchableOpacity>
+                                                                            )}
+                                                                        </View>
+                                                                    </View>
+                                                                );
+                                                            } else {
+                                                                // Standalone: OFF | VIEW or OFF | MANAGE
+                                                                const priv = row.item;
+                                                                const active = selectedPrivileges.includes(priv.id);
+                                                                const isView = priv.access === 'view';
+                                                                return (
+                                                                    <View key={row.key} style={privRowStyle}>
+                                                                        <Text style={privLabelStyle} numberOfLines={1}>{priv.label}</Text>
+                                                                        <View style={segStyle}>
+                                                                            <TouchableOpacity
+                                                                                onPress={() => active && revokeIds([priv.id])}
+                                                                                style={[segBtnStyle, !active && segOffActive]}
+                                                                            >
+                                                                                <Text style={[segTxtStyle, !active && { color: '#374151', fontWeight: '700' }]}>OFF</Text>
+                                                                            </TouchableOpacity>
+                                                                            <View style={segDivider} />
+                                                                            <TouchableOpacity
+                                                                                onPress={() => !active && grantIds([priv.id])}
+                                                                                style={[segBtnStyle, active && (isView ? segViewActive : segManageActive)]}
+                                                                            >
+                                                                                <Text style={[segTxtStyle, active && { color: isView ? '#1D4ED8' : '#92400E', fontWeight: '700' }]}>
+                                                                                    {isView ? 'VIEW' : 'MANAGE'}
+                                                                                </Text>
+                                                                            </TouchableOpacity>
+                                                                        </View>
+                                                                    </View>
+                                                                );
+                                                            }
+                                                        })}
                                                     </View>
-                                                    <View style={styles.privilegeInfo}>
-                                                        <Feather
-                                                            name={priv.icon || 'box'}
-                                                            size={12}
-                                                            color={selectedPrivileges.includes(priv.id) ? THEME.textMain : THEME.textSub}
-                                                        />
-                                                        <Text
-                                                            style={[
-                                                                styles.privilegeName,
-                                                                selectedPrivileges.includes(priv.id) && styles.privilegeNameActive
-                                                            ]}
-                                                            numberOfLines={1}
-                                                        >
-                                                            {priv.name}
-                                                        </Text>
-                                                    </View>
-                                                </TouchableOpacity>
-                                            ))}
-                                        </View>
+                                                );
+                                            });
+                                        })() : (
+                                            <View style={styles.privilegeGrid}>
+                                                {privileges.map((priv) => (
+                                                    <TouchableOpacity
+                                                        key={priv.id}
+                                                        style={[styles.privilegeItem, selectedPrivileges.includes(priv.id) && styles.privilegeItemActive]}
+                                                        onPress={() => togglePrivilege(priv.id)}
+                                                    >
+                                                        <View style={[styles.privilegeCheck, selectedPrivileges.includes(priv.id) && styles.privilegeCheckActive]}>
+                                                            {selectedPrivileges.includes(priv.id) && <Feather name="check" size={10} color="#FFF" />}
+                                                        </View>
+                                                        <View style={styles.privilegeInfo}>
+                                                            <Feather name={priv.icon || 'box'} size={12} color={selectedPrivileges.includes(priv.id) ? THEME.textMain : THEME.textSub} />
+                                                            <Text style={[styles.privilegeName, selectedPrivileges.includes(priv.id) && styles.privilegeNameActive]} numberOfLines={1}>
+                                                                {priv.name}
+                                                            </Text>
+                                                        </View>
+                                                    </TouchableOpacity>
+                                                ))}
+                                            </View>
+                                        )}
                                     </View>
                                 )}
+
+                                {/* Full Profile Data Section (Available for Create & Edit) */}
+                                <View style={styles.section}>
+                                    <TouchableOpacity
+                                        style={{
+                                            flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                                            paddingVertical: 12,
+                                            backgroundColor: '#FFF',
+                                            paddingHorizontal: 12,
+                                            borderRadius: 12,
+                                            borderWidth: 1,
+                                            borderColor: '#FDE68A'
+                                        }}
+                                        onPress={() => setShowProfileSection(!showProfileSection)}
+                                    >
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                            <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: '#FEF3C7', alignItems: 'center', justifyContent: 'center' }}>
+                                                <Feather name="file-text" size={16} color={THEME.primaryDark} />
+                                            </View>
+                                            <View>
+                                                <Text style={{ fontSize: 14, fontWeight: '700', color: '#451A03' }}>Detailed Profile Information</Text>
+                                                <Text style={{ fontSize: 11, color: '#92400E' }}>
+                                                    {isEditing ? 'Edit all employee record fields' : 'Fill extended details (optional)'}
+                                                </Text>
+                                            </View>
+                                        </View>
+                                        <Feather name={showProfileSection ? 'chevron-up' : 'chevron-down'} size={20} color={THEME.primaryDark} />
+                                    </TouchableOpacity>
+
+                                    {showProfileSection && (() => {
+                                        const profileFields = [
+                                            {
+                                                section: 'Personal', fields: [
+                                                    { key: 'Employee Code', label: 'Employee Code' },
+                                                    { key: 'Temporary Employee Code', label: 'Temp Employee Code' },
+                                                    { key: 'User Name', label: 'Username' },
+                                                    { key: 'Date of Birth', label: 'Date of Birth (DD-MM-YYYY)' },
+                                                    { key: 'Gender', label: 'Gender' },
+                                                    { key: 'Contact Number', label: 'Contact Number' },
+                                                    { key: 'Address', label: 'Address' },
+                                                    { key: 'Marital Status', label: 'Marital Status' },
+                                                    { key: 'Blood Group', label: 'Blood Group' },
+                                                    { key: 'Shirt Size', label: 'Shirt Size' },
+                                                    { key: 'Denim Size', label: 'Denim Size' },
+                                                ]
+                                            },
+                                            {
+                                                section: 'Identity', fields: [
+                                                    { key: 'Proof Type', label: 'Proof Type' },
+                                                    { key: 'Proof ID', label: 'Proof ID' },
+                                                ]
+                                            },
+                                            {
+                                                section: 'Qualification', fields: [
+                                                    { key: 'Qualification', label: 'Qualification' },
+                                                    { key: 'Specialization', label: 'Specialization' },
+                                                    { key: 'Qualification Status', label: 'Qualification Status' },
+                                                    { key: 'Previous Experience Designation', label: 'Prev. Designation' },
+                                                    { key: 'Previous Experience', label: 'Previous Experience' },
+                                                ]
+                                            },
+                                            {
+                                                section: 'Employment', fields: [
+                                                    { key: 'Joining Date', label: 'Joining Date' },
+                                                    { key: 'Date of Resign', label: 'Date of Resign' },
+                                                    { key: 'Date of Leaving', label: 'Date of Leaving' },
+                                                    { key: 'Reason for Leaving', label: 'Reason for Leaving' },
+                                                    { key: 'User Status', label: 'User Status (ACTIVE/In-Active)' },
+                                                    { key: 'Account Verified', label: 'Account Verified (YES/NO)' },
+                                                    { key: 'Account Approved', label: 'Account Approved (YES/NO)' },
+                                                    { key: 'Approved By', label: 'Approved By' },
+                                                    { key: 'Grade', label: 'Grade' },
+                                                    { key: 'User Created On', label: 'User Created On' },
+                                                ]
+                                            },
+                                            {
+                                                section: 'Organisation', fields: [
+                                                    { key: 'Designation', label: 'Designation' },
+                                                    { key: 'Department', label: 'Department' },
+                                                    { key: 'Sub Department', label: 'Sub Department' },
+                                                    { key: 'Function', label: 'Function' },
+                                                    { key: 'Sub Function', label: 'Sub Function' },
+                                                    { key: 'Job Role', label: 'Job Role' },
+                                                    { key: 'Career Job Roles', label: 'Career Job Roles' },
+                                                    { key: 'Concept', label: 'Concept' },
+                                                    { key: 'Franchise', label: 'Franchise' },
+                                                ]
+                                            },
+                                            {
+                                                section: 'Location', fields: [
+                                                    { key: 'Store Name', label: 'Store Name' },
+                                                    { key: 'Store Code', label: 'Store Code' },
+                                                    { key: 'Region', label: 'Region' },
+                                                    { key: 'City', label: 'City' },
+                                                    { key: 'State', label: 'State' },
+                                                ]
+                                            },
+                                        ];
+
+                                        const handleOpenSelect = (key, label) => {
+                                            const mapEntry = FIELD_MAP[key];
+                                            let options = [];
+                                            if (mapEntry.options) {
+                                                options = mapEntry.options;
+                                            } else if (mapEntry.key && filterOptions[mapEntry.key]) {
+                                                options = filterOptions[mapEntry.key];
+                                            }
+
+                                            setSelectTitle(label);
+                                            setTargetFieldKey(key);
+                                            setSelectData(options);
+                                            setSelectSearch('');
+                                            setSelectModalVisible(true);
+                                        };
+
+                                        return (
+                                            <View style={{ marginTop: 20 }}>
+                                                {profileFields.map(({ section, fields }) => (
+                                                    <View key={section} style={{ marginBottom: 24 }}>
+                                                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                                                            <View style={{ height: 1, flex: 1, backgroundColor: '#FDE68A' }} />
+                                                            <Text style={{
+                                                                fontSize: 12, fontWeight: '700', color: THEME.primaryDark,
+                                                                textTransform: 'uppercase', letterSpacing: 0.5,
+                                                                marginHorizontal: 12
+                                                            }}>{section}</Text>
+                                                            <View style={{ height: 1, flex: 1, backgroundColor: '#FDE68A' }} />
+                                                        </View>
+
+                                                        {fields.map(({ key, label }) => {
+                                                            const hasOptions = !!FIELD_MAP[key];
+                                                            const currentValue = profileData[key] != null ? String(profileData[key]) : '';
+
+                                                            return (
+                                                                <View key={key} style={{ marginBottom: 16 }}>
+                                                                    <Text style={styles.label}>{label}</Text>
+                                                                    {hasOptions ? (
+                                                                        <TouchableOpacity
+                                                                            style={[styles.inputBox, { justifyContent: 'space-between' }]}
+                                                                            onPress={() => handleOpenSelect(key, label)}
+                                                                        >
+                                                                            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                                                                                <Feather name={FIELD_MAP[key].icon || 'edit-2'} size={16} color={THEME.primaryDark} style={{ marginRight: 10 }} />
+                                                                                <Text style={[styles.input, { marginLeft: 0, color: currentValue ? '#451A03' : '#9CA3AF' }]}>
+                                                                                    {currentValue || `Select ${label}`}
+                                                                                </Text>
+                                                                            </View>
+                                                                            <Feather name="chevron-down" size={18} color="#92400E" />
+                                                                        </TouchableOpacity>
+                                                                    ) : (
+                                                                        <View style={styles.inputBox}>
+                                                                            <TextInput
+                                                                                placeholder={label}
+                                                                                placeholderTextColor="#92400E"
+                                                                                style={styles.input}
+                                                                                value={currentValue}
+                                                                                onChangeText={(val) => setProfileData(prev => ({ ...prev, [key]: val }))}
+                                                                            />
+                                                                        </View>
+                                                                    )}
+                                                                </View>
+                                                            );
+                                                        })}
+                                                    </View>
+                                                ))}
+                                            </View>
+                                        );
+                                    })()}
+                                </View>
 
                                 {/* Submit Button */}
                                 <TouchableOpacity
@@ -1221,6 +1569,123 @@ const CreateUser = ({
                     </ScrollView>
                 </Pressable>
             </Pressable>
+
+            {/* SELECTION MODAL */}
+            <Modal
+                visible={selectModalVisible}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => setSelectModalVisible(false)}
+            >
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === "ios" ? "padding" : "height"}
+                    style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' }}
+                >
+                    <View style={{
+                        backgroundColor: '#FFF',
+                        borderTopLeftRadius: 24,
+                        borderTopRightRadius: 24,
+                        maxHeight: '80%',
+                        paddingTop: 16,
+                        shadowColor: "#000",
+                        shadowOffset: { width: 0, height: -2 },
+                        shadowOpacity: 0.1,
+                        shadowRadius: 10,
+                        elevation: 5
+                    }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 16 }}>
+                            <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827' }}>Select {selectTitle}</Text>
+                            <TouchableOpacity onPress={() => setSelectModalVisible(false)} style={{ padding: 4 }}>
+                                <Feather name="x" size={24} color="#6B7280" />
+                            </TouchableOpacity>
+                        </View>
+
+                        <View style={{ paddingHorizontal: 20, marginBottom: 10 }}>
+                            <View style={{
+                                flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6',
+                                borderRadius: 12, paddingHorizontal: 12, height: 46
+                            }}>
+                                <Feather name="search" size={18} color="#9CA3AF" />
+                                <TextInput
+                                    placeholder={`Search or type new ${selectTitle}...`}
+                                    style={{ flex: 1, marginLeft: 10, fontSize: 15, color: '#1F2937' }}
+                                    value={selectSearch}
+                                    onChangeText={setSelectSearch}
+                                    autoFocus
+                                />
+                                {selectSearch.length > 0 && (
+                                    <TouchableOpacity onPress={() => setSelectSearch('')}>
+                                        <Feather name="x-circle" size={16} color="#9CA3AF" />
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                        </View>
+
+                        <FlatList
+                            data={selectData}
+                            keyExtractor={(item, index) => String(item) + index}
+                            contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
+                            keyboardShouldPersistTaps="always"
+                            renderItem={({ item }) => {
+                                const match = item.toLowerCase().includes(selectSearch.toLowerCase());
+                                if (!match && selectSearch) return null; // Simple client-side filter
+                                return (
+                                    <TouchableOpacity
+                                        style={{
+                                            paddingVertical: 14,
+                                            borderBottomWidth: 1,
+                                            borderBottomColor: '#F3F4F6',
+                                            flexDirection: 'row',
+                                            alignItems: 'center'
+                                        }}
+                                        onPress={() => {
+                                            setProfileData(prev => ({ ...prev, [targetFieldKey]: item }));
+                                            setSelectModalVisible(false);
+                                        }}
+                                    >
+                                        <Feather name="arrow-right" size={16} color="#D1D5DB" style={{ marginRight: 12 }} />
+                                        <Text style={{ fontSize: 16, color: '#374151' }}>{item}</Text>
+                                    </TouchableOpacity>
+                                );
+                            }}
+                            ListFooterComponent={() => (
+                                selectSearch.length > 0 && !selectData.some(d => d.toLowerCase() === selectSearch.toLowerCase()) ? (
+                                    <TouchableOpacity
+                                        style={{
+                                            marginTop: 10,
+                                            paddingVertical: 14,
+                                            backgroundColor: '#FFFBEB',
+                                            borderRadius: 12,
+                                            flexDirection: 'row',
+                                            justifyContent: 'center',
+                                            alignItems: 'center',
+                                            borderWidth: 1,
+                                            borderColor: '#FDE68A'
+                                        }}
+                                        onPress={() => {
+                                            setProfileData(prev => ({ ...prev, [targetFieldKey]: selectSearch }));
+                                            setSelectModalVisible(false);
+                                        }}
+                                    >
+                                        <Feather name="plus-circle" size={18} color="#D97706" style={{ marginRight: 8 }} />
+                                        <Text style={{ color: '#D97706', fontWeight: '600', fontSize: 15 }}>
+                                            Use "{selectSearch}"
+                                        </Text>
+                                    </TouchableOpacity>
+                                ) : null
+                            )}
+                            ListEmptyComponent={() => (
+                                !selectSearch && (
+                                    <View style={{ padding: 20, alignItems: 'center' }}>
+                                        <Text style={{ color: '#9CA3AF' }}>No options available.</Text>
+                                        <Text style={{ color: '#9CA3AF', fontSize: 12 }}>Type to add a new one.</Text>
+                                    </View>
+                                )
+                            )}
+                        />
+                    </View>
+                </KeyboardAvoidingView>
+            </Modal>
         </Modal>
     );
 };

@@ -716,7 +716,7 @@ export default function Profile({ navigation, route }) {
                     <View style={styles.identityRow}>
                         <View style={styles.avatarWrapper}>
                             <Image
-                                source={{ uri: `https://ui-avatars.com/api/?name=${userProfile.name}&background=F59E0B&color=fff&size=200` }}
+                                source={{ uri: userProfile.profile_data?.profile_pic || `https://ui-avatars.com/api/?name=${userProfile.name}&background=F59E0B&color=fff&size=200` }}
                                 style={styles.avatar}
                             />
                             <View style={styles.onlineIndicator} />
@@ -729,7 +729,7 @@ export default function Profile({ navigation, route }) {
                                 <Text style={styles.joinDateText}>{t('joined')} Nov 2024</Text>
                             </View>
                         </View>
-                        <TouchableOpacity style={styles.settingsBtn} onPress={() => navigation.navigate('Settings')}>
+                        <TouchableOpacity style={styles.settingsBtn} onPress={() => navigation.navigate('Settings', { userProfile })}>
                             <Feather name="settings" size={20} color="#374151" />
                         </TouchableOpacity>
                     </View>

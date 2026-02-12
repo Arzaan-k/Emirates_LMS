@@ -19,7 +19,7 @@ import CertificateModal from './CertificateModal';
 import API_URL from '../config';
 
 const { width } = Dimensions.get('window');
-const GRID_CARD_WIDTH = (width - 56) / 2;
+const GRID_CARD_WIDTH = (width - 48) / 2; // Adjusted for better spacing (12px padding * 2 + 12px gap)
 
 const THEME = {
     bg: '#F8FAFC',
@@ -69,13 +69,13 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [viewMode, setViewMode] = useState('grid');
-    
+
     // Navigation state - Windows style
     const [currentPath, setCurrentPath] = useState([]); // Array of {id, name, type: 'folder'|'bucket'}
     const [displayItems, setDisplayItems] = useState([]); // Currently visible items
     const [courses, setCourses] = useState([]); // Courses when in leaf bucket
     const [loadingContent, setLoadingContent] = useState(false);
-    
+
     const [certModalVisible, setCertModalVisible] = useState(false);
     const [certCourseId, setCertCourseId] = useState(null);
 
@@ -92,9 +92,15 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
         try {
             const response = await fetch(`${API_URL}/api/v1/self-learning/buckets/hierarchy?user_email=${userEmail}`);
             const data = await response.json();
-            const hierarchyData = data.hierarchy || [];
+            let hierarchyData = data.hierarchy || [];
+
+            // UX IMPROVEMENT: If only one root folder exists (e.g. "Self Learning"), flatten it to remove redundancy
+            if (hierarchyData.length === 1 && hierarchyData[0].children?.length > 0) {
+                hierarchyData = hierarchyData[0].children;
+            }
+
             setHierarchy(hierarchyData);
-            
+
             // Flatten all buckets for easy lookup
             const flattenBuckets = (items, result = []) => {
                 items.forEach(item => {
@@ -106,7 +112,7 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
                 return result;
             };
             setAllBuckets(flattenBuckets(hierarchyData));
-            
+
             // Show root level items
             setDisplayItems(hierarchyData);
         } catch (error) {
@@ -138,12 +144,12 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
     // ==========================================
     // WINDOWS-STYLE NAVIGATION
     // ==========================================
-    
+
     const openFolder = (folder) => {
         // Add to path
         const newPath = [...currentPath, { id: folder.id, name: folder.name }];
         setCurrentPath(newPath);
-        
+
         // Check if this folder has children (sub-folders)
         if (folder.children && folder.children.length > 0) {
             // Show sub-folders
@@ -158,11 +164,11 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
 
     const goBack = () => {
         if (currentPath.length === 0) return;
-        
+
         const newPath = currentPath.slice(0, -1);
         setCurrentPath(newPath);
         setCourses([]);
-        
+
         if (newPath.length === 0) {
             // Back to root
             setDisplayItems(hierarchy);
@@ -187,15 +193,15 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
             goToRoot();
             return;
         }
-        
+
         const newPath = currentPath.slice(0, index + 1);
         setCurrentPath(newPath);
         setCourses([]);
-        
+
         // Find the folder at this index and show its contents
         const folderId = newPath[newPath.length - 1].id;
         const folder = allBuckets.find(b => b.id === folderId);
-        
+
         if (folder) {
             if (folder.children && folder.children.length > 0) {
                 setDisplayItems(folder.children);
@@ -241,7 +247,7 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
                         <MaterialCommunityIcons name="folder-home" size={16} color={THEME.primary} />
                         <Text style={styles.pathText}>Self Learning</Text>
                     </TouchableOpacity>
-                    
+
                     {currentPath.map((segment, idx) => (
                         <React.Fragment key={`${segment.id}_${idx}`}>
                             <Feather name="chevron-right" size={14} color="#94A3B8" />

@@ -406,7 +406,16 @@ from fastapi.exceptions import RequestValidationError
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """Handle validation errors with detailed logging."""
-    error_details = exc.errors()
+    def _jsonable(value):
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, (list, tuple)):
+            return [_jsonable(v) for v in value]
+        if isinstance(value, dict):
+            return {str(k): _jsonable(v) for k, v in value.items()}
+        return str(value)
+
+    error_details = _jsonable(exc.errors())
     logger.error(f"Validation error for {request.url}: {error_details}")
     return JSONResponse(
         status_code=422,

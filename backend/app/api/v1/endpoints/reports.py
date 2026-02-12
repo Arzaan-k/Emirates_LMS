@@ -62,6 +62,76 @@ def generate_csv_response(data: List[Dict], filename: str) -> StreamingResponse:
     )
 
 
+def generate_excel_response(data: List[Dict], filename: str, sheet_name: str = "Report") -> StreamingResponse:
+    """Generate a styled Excel (XLSX) file response for download."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet_name
+    
+    if not data:
+        ws.append(["No data available"])
+    else:
+        # Header styling
+        header_font = Font(name='Calibri', bold=True, color='FFFFFF', size=11)
+        header_fill = PatternFill(start_color='F59E0B', end_color='D97706', fill_type='solid')
+        header_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        thin_border = Border(
+            left=Side(style='thin', color='E5E7EB'),
+            right=Side(style='thin', color='E5E7EB'),
+            top=Side(style='thin', color='E5E7EB'),
+            bottom=Side(style='thin', color='E5E7EB'),
+        )
+        
+        # Write headers
+        headers = list(data[0].keys())
+        for col_idx, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_idx, value=header.replace('_', ' ').title())
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            cell.border = thin_border
+        
+        # Write data rows
+        alt_fill = PatternFill(start_color='F9FAFB', end_color='F9FAFB', fill_type='solid')
+        data_font = Font(name='Calibri', size=10)
+        data_align = Alignment(vertical='center', wrap_text=True)
+        
+        for row_idx, row_data in enumerate(data, 2):
+            for col_idx, header in enumerate(headers, 1):
+                val = row_data.get(header, '')
+                cell = ws.cell(row=row_idx, column=col_idx, value=val)
+                cell.font = data_font
+                cell.alignment = data_align
+                cell.border = thin_border
+                if row_idx % 2 == 0:
+                    cell.fill = alt_fill
+        
+        # Auto-adjust column widths
+        for col_idx, header in enumerate(headers, 1):
+            max_len = len(header.replace('_', ' ').title())
+            for row in ws.iter_rows(min_row=2, min_col=col_idx, max_col=col_idx):
+                for cell in row:
+                    if cell.value:
+                        max_len = max(max_len, len(str(cell.value)))
+            ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = min(max_len + 4, 50)
+        
+        # Freeze top row
+        ws.freeze_panes = 'A2'
+    
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
 def generate_pdf_report(
     report_type: str,
     title: str,

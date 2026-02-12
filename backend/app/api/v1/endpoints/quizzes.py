@@ -96,6 +96,16 @@ async def get_quiz(
     Get a specific quiz by ID.
     """
     service = QuizService(db)
+    
+    # Check for live quiz
+    if quiz_id.startswith("live_"):
+        try:
+            quiz = service.get_live_quiz_by_id(quiz_id)
+            return quiz.to_dict() if hasattr(quiz, 'to_dict') else dict(quiz)
+        except Exception:
+            # Fallback to standard lookup if not found (though structure implies live)
+            pass
+
     quiz = service.get_quiz_by_id(quiz_id)
     
     if not quiz:
@@ -224,6 +234,20 @@ async def submit_quiz(
     Submit a quiz and calculate the score.
     """
     service = QuizService(db)
+
+    # Redirect live quizzes to live submission handler
+    if quiz_id.startswith("live_"):
+        try:
+            answers_list = json.loads(answers)
+            user_email = current_user.email if current_user else None
+            return service.submit_live_quiz(quiz_id, user_name, answers_list, user_email)
+        except Exception as e:
+            logger.error(f"Redirect to live quiz failed: {e}")
+            # Fall through to try standard, or raise
+            if "not found" in str(e).lower():
+                raise HTTPException(status_code=404, detail=f"Quiz with id '{quiz_id}' not found")
+            raise
+
     
     try:
         answers_list = json.loads(answers)
