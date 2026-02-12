@@ -11,6 +11,8 @@ import {
     ActivityIndicator,
     Alert,
     Platform,
+    FlatList,
+    KeyboardAvoidingView,
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -50,7 +52,8 @@ const CreateUser = ({
     isEditing = false,
     initialData = null,
     onUpdate = () => { },
-    onBulkUploadStart = null // New prop for background upload
+    onBulkUploadStart = null, // New prop for background upload
+    filterOptions = {}, // Options for dropdowns
 }) => {
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
@@ -93,6 +96,41 @@ const CreateUser = ({
     const [newStoreName, setNewStoreName] = useState('');
     const [newStoreCity, setNewStoreCity] = useState('');
 
+    // Selection Modal State
+    const [selectModalVisible, setSelectModalVisible] = useState(false);
+    const [selectTitle, setSelectTitle] = useState('');
+    const [selectData, setSelectData] = useState([]);
+    const [selectSearch, setSelectSearch] = useState('');
+    const [targetFieldKey, setTargetFieldKey] = useState(null);
+
+    // Field Mapping for Dropdowns
+    const FIELD_MAP = useMemo(() => ({
+        'Designation': { key: 'designations', icon: 'award' },
+        'Department': { key: 'departments', icon: 'briefcase' },
+        'Sub Department': { key: 'sub_departments', icon: 'layers' },
+        'Function': { key: 'functions', icon: 'git-branch' },
+        'Sub Function': { key: 'sub_functions', icon: 'git-merge' },
+        'Job Role': { key: 'job_roles', icon: 'user-check' },
+        'Concept': { key: 'concepts', icon: 'tag' },
+        'Franchise': { key: 'franchises', icon: 'home' },
+        'Region': { key: 'regions', icon: 'map' },
+        'City': { key: 'cities', icon: 'map-pin' },
+        'State': { key: 'states', icon: 'flag' },
+        'Grade': { key: 'grades', icon: 'star' },
+        'Qualification': { key: 'qualifications', icon: 'book' },
+        'Gender': { options: ['Male', 'Female', 'Other'], icon: 'users' },
+        'Blood Group': { options: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'], icon: 'heart' },
+        'Marital Status': { options: ['Single', 'Married', 'Divorced', 'Widowed'], icon: 'user' },
+        'User Status': { options: ['Active', 'Inactive', 'On Leave', 'Resigned', 'Terminated'], icon: 'activity' },
+        // Static Options
+        'Proof Type': { options: ['Aadhar', 'PAN', 'Passport', 'Driving License', 'Voter ID'], icon: 'credit-card' },
+        'Qualification Status': { options: ['Completed', 'Pursuing', 'Dropped'], icon: 'book-open' },
+        'Shirt Size': { options: ['XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL'], icon: 'maximize' },
+        'Denim Size': { options: ['28', '30', '32', '34', '36', '38', '40', '42'], icon: 'maximize-2' },
+        'Account Verified': { options: ['Yes', 'No'], icon: 'check-circle' },
+        'Account Approved': { options: ['Yes', 'No'], icon: 'check-square' },
+    }), []);
+
     // Comprehensive list of supported columns from EXPORT_USERS format
     const allColumns = [
         "Employee Code", "Full Name", "Temporary Employee Code", "User Name", "Date of Birth",
@@ -107,6 +145,7 @@ const CreateUser = ({
     ];
 
     const isSuperAdmin = userProfile?.is_superadmin || userProfile?.role === 'Super Admin';
+    const canManagePrivileges = isSuperAdmin || (userProfile?.privileges && userProfile.privileges.includes('create_user'));
 
     // Filter stores based on search
     const filteredStores = useMemo(() => {
@@ -1180,7 +1219,7 @@ const CreateUser = ({
                                 </View>
 
                                 {/* Privileges Section — grouped view/manage */}
-                                {isSuperAdmin && (
+                                {canManagePrivileges && (
                                     <View style={styles.section}>
                                         <View style={styles.privilegeHeader}>
                                             <Text style={styles.sectionTitle}>
@@ -1336,26 +1375,38 @@ const CreateUser = ({
                                     </View>
                                 )}
 
-                                {/* Full Profile Data Section (edit mode only) */}
-                                {isEditing && (
-                                    <View style={styles.section}>
-                                        <TouchableOpacity
-                                            style={{
-                                                flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                                                paddingVertical: 8,
-                                            }}
-                                            onPress={() => setShowProfileSection(!showProfileSection)}
-                                        >
-                                            <Text style={styles.sectionTitle}>
-                                                <Feather name="file-text" size={16} color={THEME.primaryDark} /> Full Profile Details
-                                            </Text>
-                                            <Feather name={showProfileSection ? 'chevron-up' : 'chevron-down'} size={20} color={THEME.primaryDark} />
-                                        </TouchableOpacity>
-                                        <Text style={styles.sectionDesc}>Edit all employee record fields</Text>
+                                {/* Full Profile Data Section (Available for Create & Edit) */}
+                                <View style={styles.section}>
+                                    <TouchableOpacity
+                                        style={{
+                                            flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                                            paddingVertical: 12,
+                                            backgroundColor: '#FFF',
+                                            paddingHorizontal: 12,
+                                            borderRadius: 12,
+                                            borderWidth: 1,
+                                            borderColor: '#FDE68A'
+                                        }}
+                                        onPress={() => setShowProfileSection(!showProfileSection)}
+                                    >
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                            <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: '#FEF3C7', alignItems: 'center', justifyContent: 'center' }}>
+                                                <Feather name="file-text" size={16} color={THEME.primaryDark} />
+                                            </View>
+                                            <View>
+                                                <Text style={{ fontSize: 14, fontWeight: '700', color: '#451A03' }}>Detailed Profile Information</Text>
+                                                <Text style={{ fontSize: 11, color: '#92400E' }}>
+                                                    {isEditing ? 'Edit all employee record fields' : 'Fill extended details (optional)'}
+                                                </Text>
+                                            </View>
+                                        </View>
+                                        <Feather name={showProfileSection ? 'chevron-up' : 'chevron-down'} size={20} color={THEME.primaryDark} />
+                                    </TouchableOpacity>
 
-                                        {showProfileSection && (() => {
-                                            const profileFields = [
-                                                { section: 'Personal', fields: [
+                                    {showProfileSection && (() => {
+                                        const profileFields = [
+                                            {
+                                                section: 'Personal', fields: [
                                                     { key: 'Employee Code', label: 'Employee Code' },
                                                     { key: 'Temporary Employee Code', label: 'Temp Employee Code' },
                                                     { key: 'User Name', label: 'Username' },
@@ -1367,19 +1418,25 @@ const CreateUser = ({
                                                     { key: 'Blood Group', label: 'Blood Group' },
                                                     { key: 'Shirt Size', label: 'Shirt Size' },
                                                     { key: 'Denim Size', label: 'Denim Size' },
-                                                ]},
-                                                { section: 'Identity', fields: [
+                                                ]
+                                            },
+                                            {
+                                                section: 'Identity', fields: [
                                                     { key: 'Proof Type', label: 'Proof Type' },
                                                     { key: 'Proof ID', label: 'Proof ID' },
-                                                ]},
-                                                { section: 'Qualification', fields: [
+                                                ]
+                                            },
+                                            {
+                                                section: 'Qualification', fields: [
                                                     { key: 'Qualification', label: 'Qualification' },
                                                     { key: 'Specialization', label: 'Specialization' },
                                                     { key: 'Qualification Status', label: 'Qualification Status' },
                                                     { key: 'Previous Experience Designation', label: 'Prev. Designation' },
                                                     { key: 'Previous Experience', label: 'Previous Experience' },
-                                                ]},
-                                                { section: 'Employment', fields: [
+                                                ]
+                                            },
+                                            {
+                                                section: 'Employment', fields: [
                                                     { key: 'Joining Date', label: 'Joining Date' },
                                                     { key: 'Date of Resign', label: 'Date of Resign' },
                                                     { key: 'Date of Leaving', label: 'Date of Leaving' },
@@ -1390,8 +1447,10 @@ const CreateUser = ({
                                                     { key: 'Approved By', label: 'Approved By' },
                                                     { key: 'Grade', label: 'Grade' },
                                                     { key: 'User Created On', label: 'User Created On' },
-                                                ]},
-                                                { section: 'Organisation', fields: [
+                                                ]
+                                            },
+                                            {
+                                                section: 'Organisation', fields: [
                                                     { key: 'Designation', label: 'Designation' },
                                                     { key: 'Department', label: 'Department' },
                                                     { key: 'Sub Department', label: 'Sub Department' },
@@ -1401,42 +1460,89 @@ const CreateUser = ({
                                                     { key: 'Career Job Roles', label: 'Career Job Roles' },
                                                     { key: 'Concept', label: 'Concept' },
                                                     { key: 'Franchise', label: 'Franchise' },
-                                                ]},
-                                                { section: 'Location', fields: [
+                                                ]
+                                            },
+                                            {
+                                                section: 'Location', fields: [
                                                     { key: 'Store Name', label: 'Store Name' },
                                                     { key: 'Store Code', label: 'Store Code' },
                                                     { key: 'Region', label: 'Region' },
                                                     { key: 'City', label: 'City' },
                                                     { key: 'State', label: 'State' },
-                                                ]},
-                                            ];
+                                                ]
+                                            },
+                                        ];
 
-                                            return profileFields.map(({ section, fields }) => (
-                                                <View key={section} style={{ marginBottom: 16 }}>
-                                                    <Text style={{
-                                                        fontSize: 12, fontWeight: '700', color: THEME.textSub,
-                                                        textTransform: 'uppercase', letterSpacing: 0.5,
-                                                        marginBottom: 8, marginTop: 4,
-                                                    }}>{section}</Text>
-                                                    {fields.map(({ key, label }) => (
-                                                        <View key={key} style={{ marginBottom: 10 }}>
-                                                            <Text style={styles.label}>{label}</Text>
-                                                            <View style={styles.inputBox}>
-                                                                <TextInput
-                                                                    placeholder={label}
-                                                                    placeholderTextColor="#92400E"
-                                                                    style={styles.input}
-                                                                    value={profileData[key] != null ? String(profileData[key]) : ''}
-                                                                    onChangeText={(val) => setProfileData(prev => ({ ...prev, [key]: val }))}
-                                                                />
-                                                            </View>
+                                        const handleOpenSelect = (key, label) => {
+                                            const mapEntry = FIELD_MAP[key];
+                                            let options = [];
+                                            if (mapEntry.options) {
+                                                options = mapEntry.options;
+                                            } else if (mapEntry.key && filterOptions[mapEntry.key]) {
+                                                options = filterOptions[mapEntry.key];
+                                            }
+
+                                            setSelectTitle(label);
+                                            setTargetFieldKey(key);
+                                            setSelectData(options);
+                                            setSelectSearch('');
+                                            setSelectModalVisible(true);
+                                        };
+
+                                        return (
+                                            <View style={{ marginTop: 20 }}>
+                                                {profileFields.map(({ section, fields }) => (
+                                                    <View key={section} style={{ marginBottom: 24 }}>
+                                                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                                                            <View style={{ height: 1, flex: 1, backgroundColor: '#FDE68A' }} />
+                                                            <Text style={{
+                                                                fontSize: 12, fontWeight: '700', color: THEME.primaryDark,
+                                                                textTransform: 'uppercase', letterSpacing: 0.5,
+                                                                marginHorizontal: 12
+                                                            }}>{section}</Text>
+                                                            <View style={{ height: 1, flex: 1, backgroundColor: '#FDE68A' }} />
                                                         </View>
-                                                    ))}
-                                                </View>
-                                            ));
-                                        })()}
-                                    </View>
-                                )}
+
+                                                        {fields.map(({ key, label }) => {
+                                                            const hasOptions = !!FIELD_MAP[key];
+                                                            const currentValue = profileData[key] != null ? String(profileData[key]) : '';
+
+                                                            return (
+                                                                <View key={key} style={{ marginBottom: 16 }}>
+                                                                    <Text style={styles.label}>{label}</Text>
+                                                                    {hasOptions ? (
+                                                                        <TouchableOpacity
+                                                                            style={[styles.inputBox, { justifyContent: 'space-between' }]}
+                                                                            onPress={() => handleOpenSelect(key, label)}
+                                                                        >
+                                                                            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                                                                                <Feather name={FIELD_MAP[key].icon || 'edit-2'} size={16} color={THEME.primaryDark} style={{ marginRight: 10 }} />
+                                                                                <Text style={[styles.input, { marginLeft: 0, color: currentValue ? '#451A03' : '#9CA3AF' }]}>
+                                                                                    {currentValue || `Select ${label}`}
+                                                                                </Text>
+                                                                            </View>
+                                                                            <Feather name="chevron-down" size={18} color="#92400E" />
+                                                                        </TouchableOpacity>
+                                                                    ) : (
+                                                                        <View style={styles.inputBox}>
+                                                                            <TextInput
+                                                                                placeholder={label}
+                                                                                placeholderTextColor="#92400E"
+                                                                                style={styles.input}
+                                                                                value={currentValue}
+                                                                                onChangeText={(val) => setProfileData(prev => ({ ...prev, [key]: val }))}
+                                                                            />
+                                                                        </View>
+                                                                    )}
+                                                                </View>
+                                                            );
+                                                        })}
+                                                    </View>
+                                                ))}
+                                            </View>
+                                        );
+                                    })()}
+                                </View>
 
                                 {/* Submit Button */}
                                 <TouchableOpacity
@@ -1463,6 +1569,123 @@ const CreateUser = ({
                     </ScrollView>
                 </Pressable>
             </Pressable>
+
+            {/* SELECTION MODAL */}
+            <Modal
+                visible={selectModalVisible}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => setSelectModalVisible(false)}
+            >
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === "ios" ? "padding" : "height"}
+                    style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' }}
+                >
+                    <View style={{
+                        backgroundColor: '#FFF',
+                        borderTopLeftRadius: 24,
+                        borderTopRightRadius: 24,
+                        maxHeight: '80%',
+                        paddingTop: 16,
+                        shadowColor: "#000",
+                        shadowOffset: { width: 0, height: -2 },
+                        shadowOpacity: 0.1,
+                        shadowRadius: 10,
+                        elevation: 5
+                    }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 16 }}>
+                            <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827' }}>Select {selectTitle}</Text>
+                            <TouchableOpacity onPress={() => setSelectModalVisible(false)} style={{ padding: 4 }}>
+                                <Feather name="x" size={24} color="#6B7280" />
+                            </TouchableOpacity>
+                        </View>
+
+                        <View style={{ paddingHorizontal: 20, marginBottom: 10 }}>
+                            <View style={{
+                                flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6',
+                                borderRadius: 12, paddingHorizontal: 12, height: 46
+                            }}>
+                                <Feather name="search" size={18} color="#9CA3AF" />
+                                <TextInput
+                                    placeholder={`Search or type new ${selectTitle}...`}
+                                    style={{ flex: 1, marginLeft: 10, fontSize: 15, color: '#1F2937' }}
+                                    value={selectSearch}
+                                    onChangeText={setSelectSearch}
+                                    autoFocus
+                                />
+                                {selectSearch.length > 0 && (
+                                    <TouchableOpacity onPress={() => setSelectSearch('')}>
+                                        <Feather name="x-circle" size={16} color="#9CA3AF" />
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                        </View>
+
+                        <FlatList
+                            data={selectData}
+                            keyExtractor={(item, index) => String(item) + index}
+                            contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
+                            keyboardShouldPersistTaps="always"
+                            renderItem={({ item }) => {
+                                const match = item.toLowerCase().includes(selectSearch.toLowerCase());
+                                if (!match && selectSearch) return null; // Simple client-side filter
+                                return (
+                                    <TouchableOpacity
+                                        style={{
+                                            paddingVertical: 14,
+                                            borderBottomWidth: 1,
+                                            borderBottomColor: '#F3F4F6',
+                                            flexDirection: 'row',
+                                            alignItems: 'center'
+                                        }}
+                                        onPress={() => {
+                                            setProfileData(prev => ({ ...prev, [targetFieldKey]: item }));
+                                            setSelectModalVisible(false);
+                                        }}
+                                    >
+                                        <Feather name="arrow-right" size={16} color="#D1D5DB" style={{ marginRight: 12 }} />
+                                        <Text style={{ fontSize: 16, color: '#374151' }}>{item}</Text>
+                                    </TouchableOpacity>
+                                );
+                            }}
+                            ListFooterComponent={() => (
+                                selectSearch.length > 0 && !selectData.some(d => d.toLowerCase() === selectSearch.toLowerCase()) ? (
+                                    <TouchableOpacity
+                                        style={{
+                                            marginTop: 10,
+                                            paddingVertical: 14,
+                                            backgroundColor: '#FFFBEB',
+                                            borderRadius: 12,
+                                            flexDirection: 'row',
+                                            justifyContent: 'center',
+                                            alignItems: 'center',
+                                            borderWidth: 1,
+                                            borderColor: '#FDE68A'
+                                        }}
+                                        onPress={() => {
+                                            setProfileData(prev => ({ ...prev, [targetFieldKey]: selectSearch }));
+                                            setSelectModalVisible(false);
+                                        }}
+                                    >
+                                        <Feather name="plus-circle" size={18} color="#D97706" style={{ marginRight: 8 }} />
+                                        <Text style={{ color: '#D97706', fontWeight: '600', fontSize: 15 }}>
+                                            Use "{selectSearch}"
+                                        </Text>
+                                    </TouchableOpacity>
+                                ) : null
+                            )}
+                            ListEmptyComponent={() => (
+                                !selectSearch && (
+                                    <View style={{ padding: 20, alignItems: 'center' }}>
+                                        <Text style={{ color: '#9CA3AF' }}>No options available.</Text>
+                                        <Text style={{ color: '#9CA3AF', fontSize: 12 }}>Type to add a new one.</Text>
+                                    </View>
+                                )
+                            )}
+                        />
+                    </View>
+                </KeyboardAvoidingView>
+            </Modal>
         </Modal>
     );
 };

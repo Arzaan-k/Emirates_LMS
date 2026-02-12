@@ -574,6 +574,7 @@ const TeamListScreen = ({ navigation, route }) => {
             if (response.ok) {
                 setEditModalVisible(false);
                 fetchUsers(1, true, false);
+                fetchFilterOptions(); // Refresh filters with new data
                 Alert.alert("Success", "User created successfully");
             } else {
                 Alert.alert("Error", result.detail || "Failed to create user");
@@ -615,6 +616,7 @@ const TeamListScreen = ({ navigation, route }) => {
                 setUsers(prev => prev.map(u =>
                     u.email === userData.email ? { ...u, ...updatedUserData } : u
                 ));
+                fetchFilterOptions(); // Refresh filters with new data
 
                 Alert.alert("Success", "User updated successfully");
             } else {
@@ -1216,6 +1218,7 @@ const TeamListScreen = ({ navigation, route }) => {
                 userProfile={userProfile}
                 onCreate={handleCreateUser}
                 onUpdate={processUserUpdate}
+                filterOptions={filterOptions}
                 onBulkUploadStart={(taskId) => {
                     setEditModalVisible(false);
                     // Can show a toast or alert here

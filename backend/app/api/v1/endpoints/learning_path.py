@@ -125,7 +125,8 @@ async def get_recently_viewed(
             db.query(VideoProgress)
             .filter(
                 VideoProgress.user_email == user_email,
-                VideoProgress.video_watched_percent > 0  # Only show started items
+                VideoProgress.video_watched_percent > 0,  # Only show started items
+                VideoProgress.completed == False          # Exclude completed items
             )
             .order_by(desc(VideoProgress.updated_at))
             .limit(limit)

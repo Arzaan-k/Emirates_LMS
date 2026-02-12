@@ -1132,18 +1132,84 @@ async def update_course_bucket(
 
 
 
-@router.delete("/buckets/{bucket_id}")
-async def delete_course_bucket(
+@router.get("/buckets/{bucket_id}/contents")
+async def get_bucket_contents(
     bucket_id: str,
     db: Session = Depends(get_db)
 ):
     """
-    Delete a course bucket.
+    Get all content items in a specific bucket.
     """
-    service = ContentService(db)
+    from app.models.content import Content
     
     try:
+        # Query by bucket_id or bucket name (legacy)
+        service = ContentService(db)
+        bucket = service.get_bucket_by_id(bucket_id)
+        
+        contents = db.query(Content).filter(
+            (Content.bucket_id == bucket_id) | (Content.bucket == bucket.name)
+        ).all()
+        
+        return [c.to_dict() if hasattr(c, 'to_dict') else dict(c) for c in contents]
+    except Exception as e:
+        logger.error(f"Failed to fetch bucket contents: {e}")
+        return []
+
+@router.delete("/buckets/{bucket_id}")
+async def delete_course_bucket(
+    bucket_id: str,
+    delete_contents: bool = False,
+    background_tasks: BackgroundTasks = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a course bucket.
+    If delete_contents is True, also deletes all content within the bucket.
+    Otherwise, moves content to 'Uncategorized'.
+    """
+    service = ContentService(db)
+    cdn_service = CDNService()
+    
+    try:
+        if delete_contents:
+            logger.info(f"Deleting bucket {bucket_id} AND its contents...")
+            # 1. Get all content in the bucket
+            from app.models.content import Content
+            bucket = service.get_bucket_by_id(bucket_id)
+            
+            contents = db.query(Content).filter(
+                (Content.bucket_id == bucket_id) | (Content.bucket == bucket.name)
+            ).all()
+            
+            # 2. Delete each content item (Files + DB)
+            for content in contents:
+                try:
+                    # Delete from CDN in background
+                    if cdn_service.enabled and content.video_url:
+                        if background_tasks:
+                            background_tasks.add_task(cdn_service.delete_file, content.video_url)
+                    
+                    # Delete local file
+                    local_patterns = [
+                        os.path.join(settings.UPLOAD_DIR, f"{content.id}*"),
+                    ]
+                    for pattern in local_patterns:
+                        import glob
+                        for filepath in glob.glob(pattern):
+                            try:
+                                os.remove(filepath)
+                            except:
+                                pass
+                    
+                    # Delete from DB
+                    service.delete_content(content.id)
+                except Exception as e:
+                    logger.error(f"Failed to delete content {content.id} during bucket deletion: {e}")
+        
+        # 3. Delete the bucket (any remaining content will be moved to Uncategorized by service logic)
         service.delete_bucket(bucket_id)
+        
         logger.info(f"Bucket deleted: {bucket_id}")
         return {"status": "success", "message": f"Bucket {bucket_id} deleted successfully"}
     except Exception as e:

@@ -453,6 +453,14 @@ class UserService:
             if hasattr(user, key) and value is not None:
                 setattr(user, key, value)
 
+        # Enforce consistency for superadmin flag based on role
+        if "role" in updates or "category" in updates:
+            if user.role == "Super Admin" or user.category == "Super Admin":
+                user.is_superadmin = True
+                user.has_admin_access = True
+            else:
+                user.is_superadmin = False
+
         self.db.commit()
         self.db.refresh(user)
 

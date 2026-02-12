@@ -359,6 +359,7 @@ async def create_user(
         "has_admin_access": data.get("has_admin_access", False),
         "is_external": data.get("is_external", False),
         "joined_at_level": data.get("joined_at_level", None),
+        "profile_data": data.get("profile_data", {}),
     }
     
     try:
@@ -1426,6 +1427,8 @@ async def update_user(
         updates["joined_at_level"] = data["joined_at_level"]
     if "password" in data and data["password"]:
         updates["password"] = data["password"]
+    if "profile_data" in data:
+        updates["profile_data"] = data["profile_data"]
 
     try:
         user = service.update_user(email, updates)
