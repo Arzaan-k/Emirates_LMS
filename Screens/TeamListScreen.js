@@ -24,6 +24,9 @@ import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import CreateUser from './CreateUser';
 import API_URL from '../config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import * as XLSX from 'xlsx';
 
 const { width, height } = Dimensions.get('window');
 const ITEMS_PER_PAGE = 30;
@@ -88,6 +91,8 @@ const TeamListScreen = ({ navigation, route }) => {
 
     // Role Colors
     const [levelColorMap, setLevelColorMap] = useState({});
+
+    const [isExporting, setIsExporting] = useState(false);
 
     useEffect(() => {
         fetchLevels();
@@ -188,6 +193,207 @@ const TeamListScreen = ({ navigation, route }) => {
             setListLoading(false);
             setRefreshing(false);
             setLoadingMore(false);
+        }
+    };
+
+    const buildUsersListParams = (pageNum, limit) => {
+        const params = new URLSearchParams({
+            page: pageNum.toString(),
+            limit: limit.toString(),
+            search: searchQuery,
+        });
+
+        // Append active filters
+        Object.keys(activeFilters).forEach(key => {
+            const val = activeFilters[key];
+            if (Array.isArray(val) && val.length > 0) {
+                val.forEach(v => params.append(key, v));
+            } else if (val && !Array.isArray(val)) {
+                params.append(key, val);
+            }
+        });
+
+        return params;
+    };
+
+    const safeCell = (val) => {
+        if (val === null || val === undefined) return '';
+        if (typeof val === 'object') {
+            try {
+                return JSON.stringify(val);
+            } catch (_) {
+                return String(val);
+            }
+        }
+        return String(val);
+    };
+
+    const toYesNo = (val) => {
+        if (val === true) return 'Yes';
+        if (val === false) return 'No';
+        const s = String(val || '').trim().toLowerCase();
+        if (!s) return '';
+        if (['yes', 'y', 'true', '1'].includes(s)) return 'Yes';
+        if (['no', 'n', 'false', '0'].includes(s)) return 'No';
+        return safeCell(val);
+    };
+
+    const exportUsersToExcel = async () => {
+        if (isExporting) return;
+        setIsExporting(true);
+
+        try {
+            const limit = 500;
+            let pageNum = 1;
+            let totalPagesLocal = 1;
+            let allUsers = [];
+
+            while (pageNum <= totalPagesLocal) {
+                const params = buildUsersListParams(pageNum, limit);
+                const response = await fetch(`${API_URL}/api/v1/users/list?${params.toString()}`);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data?.detail || data?.message || 'Failed to export users');
+                }
+
+                const batch = Array.isArray(data?.users) ? data.users : [];
+                allUsers = allUsers.concat(batch);
+                totalPagesLocal = Number(data?.total_pages || 1);
+                pageNum += 1;
+
+                if (batch.length === 0) break;
+                if (allUsers.length >= 50000) break;
+            }
+
+            const headers = [
+                'Employee Code',
+                'Full Name',
+                'Temporary Employee Code',
+                'User Name',
+                'Date of Birth',
+                'Gender',
+                'Email',
+                'Contact Number',
+                'Address',
+                'Proof Type',
+                'Proof ID',
+                'Qualification',
+                'Specialization',
+                'Qualification Status',
+                'Previous Experience Designation',
+                'Previous Experience',
+                'Marital Status',
+                'Shirt Size',
+                'Denim Size',
+                'Blood Group',
+                'Account Verified',
+                'Account Approved',
+                'Approved By',
+                'Joining Date',
+                'Date of Resign',
+                'Date of Leaving',
+                'Reason for Leaving',
+                'Franchise',
+                'Store Name',
+                'Store Code',
+                'Region',
+                'City',
+                'State',
+                'Designation',
+                'User Status',
+                'Grade',
+                'Concept',
+                'Department',
+                'Sub Department',
+                'Function',
+                'Sub Function',
+                'Job Role',
+                'Career Job Roles',
+                'User Created On',
+            ];
+
+            const rows = [headers];
+
+            allUsers.forEach(u => {
+                const pd = u?.profile_data || {};
+                rows.push([
+                    safeCell(pd['Employee Code']),
+                    safeCell(u?.name),
+                    safeCell(pd['Temporary Employee Code']),
+                    safeCell(pd['User Name']),
+                    safeCell(pd['Date of Birth']),
+                    safeCell(pd['Gender']),
+                    safeCell(u?.email),
+                    safeCell(pd['Contact Number']),
+                    safeCell(pd['Address']),
+                    safeCell(pd['Proof Type']),
+                    safeCell(pd['Proof ID']),
+                    safeCell(pd['Qualification']),
+                    safeCell(pd['Specialization']),
+                    safeCell(pd['Qualification Status']),
+                    safeCell(pd['Previous Experience Designation']),
+                    safeCell(pd['Previous Experience']),
+                    safeCell(pd['Marital Status']),
+                    safeCell(pd['Shirt Size']),
+                    safeCell(pd['Denim Size']),
+                    safeCell(pd['Blood Group']),
+                    toYesNo(pd['Account Verified']),
+                    toYesNo(pd['Account Approved']),
+                    safeCell(pd['Approved By']),
+                    safeCell(pd['Joining Date']),
+                    safeCell(pd['Date of Resign']),
+                    safeCell(pd['Date of Leaving']),
+                    safeCell(pd['Reason for Leaving']),
+                    safeCell(pd['Franchise']),
+                    safeCell(pd['Store Name'] || u?.store),
+                    safeCell(pd['Store Code']),
+                    safeCell(pd['Region']),
+                    safeCell(pd['City']),
+                    safeCell(pd['State']),
+                    safeCell(pd['Designation'] || u?.role),
+                    safeCell(pd['User Status']),
+                    safeCell(pd['Grade']),
+                    safeCell(pd['Concept']),
+                    safeCell(pd['Department']),
+                    safeCell(pd['Sub Department']),
+                    safeCell(pd['Function']),
+                    safeCell(pd['Sub Function']),
+                    safeCell(pd['Job Role']),
+                    safeCell(pd['Career Job Roles']),
+                    safeCell(u?.created_at),
+                ]);
+            });
+
+            const ws = XLSX.utils.aoa_to_sheet(rows);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Employees');
+
+            const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+            const filename = `employees-export-${timestamp}.xlsx`;
+
+            if (Platform.OS === 'web') {
+                XLSX.writeFile(wb, filename);
+            } else {
+                const base64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+                const fileUri = `${FileSystem.documentDirectory}${filename}`;
+                await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+
+                if (await Sharing.isAvailableAsync()) {
+                    await Sharing.shareAsync(fileUri, {
+                        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        dialogTitle: 'Export Employees',
+                        UTI: 'com.microsoft.excel.xlsx',
+                    });
+                } else {
+                    Alert.alert('Export Saved', `File saved to: ${fileUri}`);
+                }
+            }
+        } catch (error) {
+            console.error('Export error:', error);
+            Alert.alert('Export Failed', error?.message || 'Failed to export employees');
+        } finally {
+            setIsExporting(false);
         }
     };
 
@@ -929,6 +1135,18 @@ const TeamListScreen = ({ navigation, route }) => {
                         <View style={styles.badge}>
                             <Text style={styles.badgeText}>{getActiveFilterCount()}</Text>
                         </View>
+                    )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={[styles.filterBtn, isExporting && { opacity: 0.7 }]}
+                    onPress={exportUsersToExcel}
+                    disabled={isExporting}
+                >
+                    {isExporting ? (
+                        <ActivityIndicator size="small" color="#B45309" />
+                    ) : (
+                        <Feather name="download" size={20} color="#B45309" />
                     )}
                 </TouchableOpacity>
 

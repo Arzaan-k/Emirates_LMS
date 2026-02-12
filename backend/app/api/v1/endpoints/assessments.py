@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/assessments", tags=["Assessments"])
 
 
+class BulkDeleteScheduledExamsRequest(BaseModel):
+    exam_ids: List[str]
+
+
 # ==========================================
 # PROCTORED ASSESSMENT ENDPOINTS
 # ==========================================
@@ -875,25 +879,23 @@ async def update_scheduled_exam(
         raise
 
 
-@router.delete("/scheduled/{exam_id}")
-async def delete_scheduled_exam(
-    exam_id: str,
-    db: Session = Depends(get_db)
+@router.post("/scheduled/bulk-delete")
+async def bulk_delete_scheduled_exams(
+    payload: BulkDeleteScheduledExamsRequest,
+    db: Session = Depends(get_db),
+    user: Dict[str, Any] = Depends(require_admin),
 ):
-    """
-    Delete a scheduled exam.
-    """
+    """Bulk delete scheduled exams (admin only)."""
     service = AssessmentService(db)
-    
+
     try:
-        service.delete_scheduled_exam(exam_id)
-        logger.info(f"Scheduled exam deleted: {exam_id}")
-        return {
-            "status": "success", 
-            "message": f"Exam {exam_id} deleted successfully"
-        }
+        result = service.bulk_delete_scheduled_exams(payload.exam_ids)
+        logger.info(
+            f"Bulk deleted scheduled exams: deleted={len(result.get('deleted', []))}, not_found={len(result.get('not_found', []))}"
+        )
+        return {"status": "success", **result}
     except Exception as e:
-        logger.error(f"Scheduled exam deletion failed: {e}")
+        logger.error(f"Bulk scheduled exam deletion failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1027,20 +1029,33 @@ async def get_exam_report(
 @router.delete("/scheduled/{exam_id}")
 async def delete_scheduled_exam(
     exam_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     Delete a scheduled exam.
+
+    Authorization:
+    - Superadmin/admin can delete any scheduled exam
+    - Supervisor can delete exams where they are the supervisor
     """
     service = AssessmentService(db)
 
     try:
+        exam = service.get_scheduled_exam_by_id(exam_id)
+
+        is_admin = bool(user.get("is_superadmin", False) or user.get("has_admin_access", False))
+        is_supervisor_owner = bool(exam.supervisor_email and exam.supervisor_email == user.get("email"))
+
+        if not is_admin and not is_supervisor_owner:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this scheduled exam")
+
         service.delete_scheduled_exam(exam_id)
         logger.info(f"Scheduled exam deleted: {exam_id}")
-        return {"message": f"Exam {exam_id} deleted successfully"}
+        return {"status": "success", "message": f"Exam {exam_id} deleted successfully"}
     except Exception as e:
         logger.error(f"Scheduled exam deletion failed: {e}")
-        raise
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==========================================

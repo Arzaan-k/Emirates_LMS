@@ -16,6 +16,8 @@ import {
 import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import API_URL from '../config';
 
 const { width, height } = Dimensions.get('window');
@@ -27,12 +29,32 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
     const [editingExam, setEditingExam] = useState(null);
     const [showEditModal, setShowEditModal] = useState(false);
     const [generatingPin, setGeneratingPin] = useState(false);
+    const [bulkMode, setBulkMode] = useState(false);
+    const [selectedExamIds, setSelectedExamIds] = useState({});
 
     useEffect(() => {
         if (visible) {
             fetchExams();
         }
     }, [visible]);
+
+    const getToken = async () => {
+        try {
+            if (Platform.OS === 'web') return await AsyncStorage.getItem('userToken');
+
+            const secure = await SecureStore.getItemAsync('userToken');
+            if (secure) return secure;
+
+            return await AsyncStorage.getItem('userToken');
+        } catch {
+            return null;
+        }
+    };
+
+    const resetBulkMode = () => {
+        setBulkMode(false);
+        setSelectedExamIds({});
+    };
 
     const fetchExams = async () => {
         setLoading(true);
@@ -61,6 +83,75 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
             console.error("Error fetching exams:", e);
         }
         setLoading(false);
+    };
+
+    const toggleExamSelection = (examId) => {
+        setSelectedExamIds(prev => {
+            const next = { ...prev };
+            if (next[examId]) {
+                delete next[examId];
+            } else {
+                next[examId] = true;
+            }
+            return next;
+        });
+    };
+
+    const handleBulkDelete = async () => {
+        const ids = Object.keys(selectedExamIds);
+        if (ids.length === 0) {
+            Alert.alert('Select exams', 'Please select at least one scheduled exam to delete.');
+            return;
+        }
+
+        const confirmDelete = async () => {
+            try {
+                setLoading(true);
+                const token = await getToken();
+                const headers = { 'Content-Type': 'application/json' };
+                if (token) headers.Authorization = `Bearer ${token}`;
+
+                const res = await fetch(`${API_URL}/api/v1/assessments/scheduled/bulk-delete`, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ exam_ids: ids }),
+                });
+
+                const data = await res.json().catch(() => ({}));
+                if (res.ok && data.status === 'success') {
+                    const deletedCount = (data.deleted || []).length;
+                    const notFoundCount = (data.not_found || []).length;
+                    let msg = `${deletedCount} exam(s) deleted.`;
+                    if (notFoundCount > 0) msg += `\n${notFoundCount} not found.`;
+                    Alert.alert('Success', msg);
+                    resetBulkMode();
+                    fetchExams();
+                } else {
+                    Alert.alert('Error', data.detail || data.message || 'Failed to bulk delete exams');
+                }
+            } catch (e) {
+                console.error('Bulk delete error:', e);
+                Alert.alert('Error', 'Network error while deleting exams');
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        if (Platform.OS === 'web') {
+            if (window.confirm(`Delete ${ids.length} scheduled exam(s)? This action cannot be undone.`)) {
+                await confirmDelete();
+            }
+            return;
+        }
+
+        Alert.alert(
+            'Bulk Delete',
+            `Delete ${ids.length} scheduled exam(s)? This action cannot be undone.`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Delete', style: 'destructive', onPress: confirmDelete },
+            ]
+        );
     };
 
     const getStatusColor = (status) => {
@@ -203,16 +294,27 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
                     onPress: async () => {
                         try {
                             setLoading(true);
+                            const token = await getToken();
+                            const headers = {};
+                            if (token) headers.Authorization = `Bearer ${token}`;
                             const res = await fetch(`${API_URL}/api/v1/assessments/scheduled/${exam.id}`, {
                                 method: 'DELETE',
+                                headers,
                             });
 
                             if (res.ok) {
                                 Alert.alert("Success", "Exam deleted successfully");
                                 fetchExams();
                             } else {
-                                const data = await res.json();
-                                Alert.alert("Error", data.detail || "Failed to delete exam");
+                                const raw = await res.text().catch(() => '');
+                                let detail = 'Failed to delete exam';
+                                try {
+                                    const parsed = raw ? JSON.parse(raw) : null;
+                                    detail = parsed?.detail || parsed?.message || detail;
+                                } catch {
+                                    if (raw) detail = raw;
+                                }
+                                Alert.alert("Error", detail);
                             }
                         } catch (error) {
                             console.error("Delete error:", error);
@@ -269,6 +371,20 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
                                 <TouchableOpacity onPress={fetchExams} style={styles.closeBtn}>
                                     <Feather name="refresh-cw" size={20} color="#FFF" />
                                 </TouchableOpacity>
+                                {(userProfile?.is_superadmin || userProfile?.has_admin_access || userProfile?.category === 'Super Admin' || userProfile?.category === 'Manager') && (
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            if (bulkMode) {
+                                                resetBulkMode();
+                                            } else {
+                                                setBulkMode(true);
+                                            }
+                                        }}
+                                        style={[styles.closeBtn, bulkMode && { backgroundColor: '#FFF' }]}
+                                    >
+                                        <Feather name={bulkMode ? 'x' : 'check-square'} size={20} color={bulkMode ? '#6366F1' : '#FFF'} />
+                                    </TouchableOpacity>
+                                )}
                                 {(userProfile?.is_superadmin || userProfile?.category === 'Manager' || userProfile?.category === 'Super Admin') && onCreateNew && (
                                     <TouchableOpacity onPress={onCreateNew} style={[styles.closeBtn, { backgroundColor: '#FFF' }]}>
                                         <Feather name="plus" size={24} color="#6366F1" />
@@ -296,8 +412,25 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
                                         <View style={{ flexDirection: 'row', gap: 16 }}>
                                             {/* Left Column: Exam Details */}
                                             <View style={{ flex: 1 }}>
-                                                <TouchableOpacity onPress={() => onSelectExam(item)}>
+                                                <TouchableOpacity
+                                                    onPress={() => {
+                                                        if (bulkMode) {
+                                                            toggleExamSelection(item.id);
+                                                            return;
+                                                        }
+                                                        onSelectExam(item);
+                                                    }}
+                                                >
                                                     <View style={styles.cardHeader}>
+                                                        {bulkMode && (
+                                                            <View style={{ paddingRight: 10, paddingTop: 2 }}>
+                                                                <Feather
+                                                                    name={selectedExamIds[item.id] ? 'check-circle' : 'circle'}
+                                                                    size={18}
+                                                                    color={selectedExamIds[item.id] ? '#10B981' : '#9CA3AF'}
+                                                                />
+                                                            </View>
+                                                        )}
                                                         <View style={{ flex: 1 }}>
                                                             <Text style={styles.examTitle}>{item.title}</Text>
                                                             <Text style={styles.examDate}>
@@ -331,7 +464,7 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
                                                     </Text>
                                                 </TouchableOpacity>
 
-                                                {(userProfile?.is_superadmin || item.supervisor_email === userProfile?.email) && (
+                                                {(userProfile?.is_superadmin || item.supervisor_email === userProfile?.email) && !bulkMode && (
                                                     <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
                                                         <TouchableOpacity
                                                             style={[styles.editButton, { marginTop: 0 }]}
@@ -341,13 +474,7 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
                                                             <Text style={styles.editButtonText}>Edit</Text>
                                                         </TouchableOpacity>
 
-                                                        <TouchableOpacity
-                                                            style={[styles.editButton, { marginTop: 0, backgroundColor: '#FEE2E2' }]}
-                                                            onPress={() => handleDeleteExam(item)}
-                                                        >
-                                                            <Feather name="trash-2" size={16} color="#EF4444" />
-                                                            <Text style={[styles.editButtonText, { color: '#EF4444' }]}>Delete</Text>
-                                                        </TouchableOpacity>
+
                                                     </View>
                                                 )}
                                             </View>
@@ -429,6 +556,54 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
                     </View>
                 </View>
             </View>
+
+            {bulkMode && (
+                <View style={{
+                    position: 'absolute',
+                    left: 20,
+                    right: 20,
+                    bottom: 20,
+                    backgroundColor: '#FFFFFF',
+                    borderRadius: 14,
+                    padding: 12,
+                    flexDirection: 'row',
+                    gap: 10,
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 6 },
+                    shadowOpacity: 0.15,
+                    shadowRadius: 10,
+                    elevation: 8,
+                }}>
+                    <TouchableOpacity
+                        onPress={resetBulkMode}
+                        style={{
+                            flex: 1,
+                            backgroundColor: '#EEF2FF',
+                            borderRadius: 12,
+                            paddingVertical: 12,
+                            alignItems: 'center',
+                        }}
+                        disabled={loading}
+                    >
+                        <Text style={{ color: '#4F46E5', fontFamily: 'Poppins_600SemiBold' }}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        onPress={handleBulkDelete}
+                        style={{
+                            flex: 1,
+                            backgroundColor: '#FEE2E2',
+                            borderRadius: 12,
+                            paddingVertical: 12,
+                            alignItems: 'center',
+                        }}
+                        disabled={loading}
+                    >
+                        <Text style={{ color: '#DC2626', fontFamily: 'Poppins_600SemiBold' }}>
+                            Delete Selected ({Object.keys(selectedExamIds).length})
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+            )}
 
             {/* Edit Exam Modal */}
             <Modal visible={showEditModal} animationType="slide" transparent>
