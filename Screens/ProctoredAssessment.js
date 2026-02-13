@@ -21,6 +21,8 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown, FadeInRight, FadeIn, useSharedValue, useAnimatedStyle, withRepeat, withTiming } from 'react-native-reanimated';
 import * as DocumentPicker from 'expo-document-picker';
+import UserAssignmentPicker from '../Components/UserAssignmentPicker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import API_URL from '../config';
 
@@ -104,6 +106,11 @@ export default function ProctoredAssessment({ route, navigation }) {
     const [aiDocumentFile, setAiDocumentFile] = useState(null);
     const [generating, setGenerating] = useState(false);
 
+    // ASSIGNMENT STATE
+    const [assignModalVisible, setAssignModalVisible] = useState(false);
+    const [assignedUsers, setAssignedUsers] = useState([]);
+    const [assignmentFilters, setAssignmentFilters] = useState({});
+
     // BULK UPLOAD STATE
     const [bulkFile, setBulkFile] = useState(null);
     const [uploadingBulk, setUploadingBulk] = useState(false);
@@ -150,8 +157,11 @@ export default function ProctoredAssessment({ route, navigation }) {
     const fetchAssessments = async () => {
         setLoadingAssessments(true);
         try {
+            const token = await AsyncStorage.getItem('userToken');
+            const headers = { 'Authorization': `Bearer ${token}` };
+
             const url = isAdmin ? `${API_URL}/api/v1/assessments/proctored/all` : `${API_URL}/api/v1/assessments/proctored`;
-            const response = await fetch(url);
+            const response = await fetch(url, { headers });
             const data = await response.json();
             setAssessments(data);
         } catch (error) {
@@ -345,8 +355,13 @@ export default function ProctoredAssessment({ route, navigation }) {
         }
 
         setCreating(true);
-        setCreating(true);
         try {
+            const token = await AsyncStorage.getItem('userToken');
+            const headers = {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            };
+
             // BACKEND EXPECTS JSON, NOT FORMDATA FOR THIS ENDPOINT
             const payload = {
                 title,
@@ -354,7 +369,9 @@ export default function ProctoredAssessment({ route, navigation }) {
                 time_limit_minutes: parseInt(timeLimit) || 30,
                 passing_score: parseInt(passingScore) || 70,
                 questions: questions,
-                created_by: userProfile?.name || 'Admin'
+                created_by: userProfile?.name || 'Admin',
+                assigned_users: assignedUsers,
+                assignment_filters: assignmentFilters
             };
 
             let response;
@@ -362,14 +379,14 @@ export default function ProctoredAssessment({ route, navigation }) {
                 // UPDATE EXISTING
                 response = await fetch(`${API_URL}/api/v1/assessments/proctored/${editingId}`, {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers,
                     body: JSON.stringify(payload)
                 });
             } else {
                 // CREATE NEW
                 response = await fetch(`${API_URL}/api/v1/assessments/proctored`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers,
                     body: JSON.stringify(payload)
                 });
             }
@@ -441,8 +458,10 @@ export default function ProctoredAssessment({ route, navigation }) {
                 });
             }
 
+            const token = await AsyncStorage.getItem('userToken');
             const response = await fetch(`${API_URL}/api/v1/assessments/proctored/bulk-upload`, {
                 method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
                 body: formData
             });
 
@@ -526,8 +545,10 @@ export default function ProctoredAssessment({ route, navigation }) {
                 formData.append('difficulty', aiDifficulty);
                 formData.append('preview_only', 'true'); // We just want questions, not to save the quiz
 
+                const token = await AsyncStorage.getItem('userToken');
                 response = await fetch(`${API_URL}/api/v1/quizzes/generate/from-content`, {
                     method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
                     body: formData
                 });
 
@@ -554,7 +575,10 @@ export default function ProctoredAssessment({ route, navigation }) {
 
                     const createResponse = await fetch(`${API_URL}/api/v1/assessments/proctored`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
                         body: JSON.stringify(assessmentPayload)
                     });
 
@@ -582,8 +606,10 @@ export default function ProctoredAssessment({ route, navigation }) {
                 formData.append('content', aiContent);
                 formData.append('created_by', userProfile?.name || 'Admin');
 
+                const token = await AsyncStorage.getItem('userToken');
                 response = await fetch(`${API_URL}/api/v1/assessments/proctored/ai-generate`, {
                     method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
                     body: formData
                 });
 
@@ -700,8 +726,10 @@ export default function ProctoredAssessment({ route, navigation }) {
                 ? `${API_URL}/api/v1/assessments/scheduled/${selectedAssessment.id}/submit`
                 : `${API_URL}/api/v1/assessments/proctored/${selectedAssessment.id}/submit`;
 
+            const token = await AsyncStorage.getItem('userToken');
             const response = await fetch(submitUrl, {
                 method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
                 body: formData
             });
 
@@ -786,7 +814,11 @@ export default function ProctoredAssessment({ route, navigation }) {
                 {
                     text: "Delete", style: "destructive", onPress: async () => {
                         try {
-                            const res = await fetch(`${API_URL}/api/v1/assessments/proctored/${id}`, { method: 'DELETE' });
+                            const token = await AsyncStorage.getItem('userToken');
+                            const res = await fetch(`${API_URL}/api/v1/assessments/proctored/${id}`, {
+                                method: 'DELETE',
+                                headers: { 'Authorization': `Bearer ${token}` }
+                            });
                             const data = await res.json();
                             if (data.status === 'success') {
                                 Alert.alert("Deleted", "Assessment removed.");
@@ -810,6 +842,9 @@ export default function ProctoredAssessment({ route, navigation }) {
         setPassingScore((assessment.passing_score || 70).toString());
         setQuestions(assessment.questions || []);
 
+        setAssignedUsers(assessment.assigned_users || []);
+        setAssignmentFilters(assessment.assignment_filters || {});
+
         setEditingId(assessment.id);
         setViewMode('admin'); // 'admin' mode renders the creator form
     };
@@ -820,6 +855,8 @@ export default function ProctoredAssessment({ route, navigation }) {
         setTimeLimit('30');
         setPassingScore('70');
         setQuestions([]);
+        setAssignedUsers([]);
+        setAssignmentFilters({});
         setEditingId(null);
         setEditingQIndex(-1);
         setViewMode('admin');
@@ -830,7 +867,10 @@ export default function ProctoredAssessment({ route, navigation }) {
         setViewMode('results');
         setLoadingSubmissions(true);
         try {
-            const res = await fetch(`${API_URL}/api/v1/assessments/proctored/${assessment.id}/submissions`);
+            const token = await AsyncStorage.getItem('userToken');
+            const res = await fetch(`${API_URL}/api/v1/assessments/proctored/${assessment.id}/submissions`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
             const data = await res.json();
             setViewSubmissions(data);
         } catch (e) {
@@ -1103,6 +1143,13 @@ export default function ProctoredAssessment({ route, navigation }) {
                 <TouchableOpacity style={styles.quickActionBtn} onPress={() => setAiModalVisible(true)}>
                     <MaterialCommunityIcons name="robot" size={24} color="#7C3AED" />
                     <Text style={styles.quickActionText}>AI Generate</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.quickActionBtn} onPress={() => setAssignModalVisible(true)}>
+                    <MaterialCommunityIcons name="account-plus" size={24} color="#3B82F6" />
+                    <Text style={styles.quickActionText}>
+                        {assignedUsers.length > 0 ? `${assignedUsers.length} Users` : 'Assign Users'}
+                    </Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity style={styles.quickActionBtn} onPress={pickBulkFile}>
@@ -1689,6 +1736,23 @@ export default function ProctoredAssessment({ route, navigation }) {
             {viewMode === 'admin' && renderCreator()}
             {viewMode === 'results' && renderResults()}
             {viewMode === 'taker' && renderTaker()}
+
+            {assignModalVisible && (
+                <UserAssignmentPicker
+                    visible={assignModalVisible}
+                    onClose={() => setAssignModalVisible(false)}
+                    currentAssignment={{
+                        emails: assignedUsers || [],
+                        ...(assignmentFilters || {})
+                    }}
+                    onSave={(data) => {
+                        setAssignedUsers(data.emails);
+                        const { emails, ...filters } = data;
+                        setAssignmentFilters(filters);
+                    }}
+                />
+            )}
+
             {renderAiModal()}
         </SafeAreaView>
     );

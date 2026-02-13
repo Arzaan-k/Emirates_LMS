@@ -35,6 +35,8 @@ class ProcturedAssessment(Base):
     max_attempts = Column(Integer, default=3)
     shuffle_questions = Column(Boolean, default=False)
     show_results = Column(Boolean, default=True)
+    assigned_users = Column(JSON, default=[])
+    assignment_filters = Column(JSON, default={})
 
     # Relationships
     submissions = relationship(
@@ -75,7 +77,10 @@ class ProcturedAssessment(Base):
             "max_attempts": self.max_attempts,
             "created_by": self.created_by,
             "created_at": safe_iso(self.created_at),
+            "created_at": safe_iso(self.created_at),
             "updated_at": safe_iso(self.updated_at),
+            "assigned_users": self.assigned_users or [],
+            "assignment_filters": self.assignment_filters or {},
         }
 
 

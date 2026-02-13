@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
     View,
     Text,
@@ -159,8 +159,17 @@ export default function InteractiveSimulationHub({ onClose, userProfile }) {
     const [isLoading, setIsLoading] = useState(true);
     const [filter, setFilter] = useState('all'); // all, waffle, hygiene, service
 
+    const simulationsFetchControllerRef = useRef(null);
+
     useEffect(() => {
         fetchSimulations();
+
+        return () => {
+            if (simulationsFetchControllerRef.current) {
+                simulationsFetchControllerRef.current.abort();
+                simulationsFetchControllerRef.current = null;
+            }
+        };
     }, []);
 
     useEffect(() => {
@@ -171,11 +180,15 @@ export default function InteractiveSimulationHub({ onClose, userProfile }) {
 
     const fetchSimulations = async () => {
         setIsLoading(true);
-        try {
-            // Add timeout for faster loading experience
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000);
 
+        if (simulationsFetchControllerRef.current) {
+            simulationsFetchControllerRef.current.abort();
+        }
+
+        try {
+            const controller = new AbortController();
+            simulationsFetchControllerRef.current = controller;
+            const timeoutId = setTimeout(() => controller.abort(), 30000);
             const res = await fetch(`${API_URL}/api/v1/simulations/`, {
                 signal: controller.signal
             });
@@ -184,10 +197,16 @@ export default function InteractiveSimulationHub({ onClose, userProfile }) {
             const data = await res.json();
             setSimulations(Array.isArray(data) ? data : []);
         } catch (e) {
+            if (e?.name === 'AbortError') {
+                return;
+            }
             console.error('Failed to fetch simulations:', e);
             // Show empty list on error - no mock data
             setSimulations([]);
         } finally {
+            if (simulationsFetchControllerRef.current) {
+                simulationsFetchControllerRef.current = null;
+            }
             setIsLoading(false);
         }
     };

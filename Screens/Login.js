@@ -209,9 +209,7 @@ export default function Login({ navigation }) {
             console.error('Login error:', error);
             showAlert('Connection Error', 'Unable to connect to server. Please try again.', 'error');
         } finally {
-            if (!showRoleModal) {
-                setLoading(false);
-            }
+            setLoading(false);
         }
     };
 
@@ -236,6 +234,8 @@ export default function Login({ navigation }) {
         } catch (error) {
             console.error('Error saving mode:', error);
             Alert.alert('Error', 'Failed to save login mode');
+        } finally {
+            setLoading(false);
         }
     };
 

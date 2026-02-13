@@ -12,6 +12,7 @@ import {
     StatusBar,
     TouchableWithoutFeedback,
     Animated as RNAnimated,
+    Platform,
 } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -225,6 +226,8 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
     const [isVideoPlaying, setIsVideoPlaying] = useState(false);
     const [showOptions, setShowOptions] = useState(false); // Start hidden until video loads
     const [isLoading, setIsLoading] = useState(true);
+    const [isVideoLoading, setIsVideoLoading] = useState(false);
+    const [videoError, setVideoError] = useState(null);
     const [isPaused, setIsPaused] = useState(false);
     const [showWrongModal, setShowWrongModal] = useState(false);
     const [wrongConsequence, setWrongConsequence] = useState('');
@@ -254,6 +257,11 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
         }
     }, [simulation]);
 
+    useEffect(() => {
+        setVideoError(null);
+        setIsVideoLoading(false);
+    }, [currentNodeId]);
+
     // Auto-hide controls after 3 seconds when video is playing
     useEffect(() => {
         if (isVideoPlaying) {
@@ -266,11 +274,15 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
     // Unlock orientation for fullscreen video experience
     useEffect(() => {
         // Unlock orientation to allow landscape when simulation is active
-        ScreenOrientation.unlockAsync();
+        if (Platform.OS !== 'web') {
+            ScreenOrientation.unlockAsync().catch(err => console.log('Orientation unlock failed:', err));
+        }
 
         return () => {
             // Lock back to portrait when component unmounts
-            ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+            if (Platform.OS !== 'web') {
+                ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(err => console.log('Orientation lock failed:', err));
+            }
         };
     }, []);
 
@@ -306,11 +318,14 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
             // Play video explicitly using ref
             if (currentNode.videoUrl && videoRef.current) {
                 try {
+                    setVideoError(null);
                     await videoRef.current.setPositionAsync(0);
                     await videoRef.current.playAsync();
                     console.log('[Simulation] Video playback started');
                 } catch (e) {
                     console.error('[Simulation] Error playing video:', e);
+                    setVideoError(e?.message || 'Video failed to play');
+                    setIsVideoPlaying(false);
                     // If video fails to play, proceed to next step
                     setTimeout(() => {
                         handleVideoEnd({ didJustFinish: true });
@@ -528,6 +543,19 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
                             shouldPlay={isVideoPlaying}
                             isLooping={false}
                             onPlaybackStatusUpdate={handleVideoEnd}
+                            onLoadStart={() => {
+                                setIsVideoLoading(true);
+                                setVideoError(null);
+                            }}
+                            onReadyForDisplay={() => {
+                                setIsVideoLoading(false);
+                            }}
+                            onError={(e) => {
+                                const msg = e?.error || e?.message || 'Failed to load video';
+                                setIsVideoLoading(false);
+                                setVideoError(msg);
+                                setIsVideoPlaying(false);
+                            }}
                         />
                     ) : (
                         // Placeholder gradient when no video
@@ -539,6 +567,40 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
                                 <MaterialCommunityIcons name="chef-hat" size={80} color="rgba(255,255,255,0.2)" />
                             </View>
                         </LinearGradient>
+                    )}
+
+                    {isVideoLoading && (
+                        <View style={styles.videoOverlayCenter} pointerEvents="none">
+                            <ActivityIndicator size="large" color="#F59E0B" />
+                        </View>
+                    )}
+
+                    {!!videoError && (
+                        <View style={styles.videoErrorOverlay}>
+                            <View style={styles.videoErrorCard}>
+                                <MaterialCommunityIcons name="video-off" size={36} color="#EF4444" />
+                                <Text style={styles.videoErrorTitle}>Video failed to load</Text>
+                                <Text style={styles.videoErrorText} numberOfLines={3}>{String(videoError)}</Text>
+                                <View style={styles.videoErrorActions}>
+                                    <TouchableOpacity
+                                        style={styles.videoErrorBtnSecondary}
+                                        onPress={() => {
+                                            setVideoError(null);
+                                            setIsVideoLoading(false);
+                                            setVideoKey(prev => prev + 1);
+                                        }}
+                                    >
+                                        <Text style={styles.videoErrorBtnSecondaryText}>Retry</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={styles.videoErrorBtnPrimary}
+                                        onPress={() => handleVideoEnd({ didJustFinish: true })}
+                                    >
+                                        <Text style={styles.videoErrorBtnPrimaryText}>Skip</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        </View>
                     )}
 
                     {/* Dark Overlay when options are visible */}
@@ -720,6 +782,81 @@ const styles = StyleSheet.create({
     darkOverlay: {
         ...StyleSheet.absoluteFillObject,
         backgroundColor: 'rgba(0,0,0,0.3)',
+    },
+
+    videoOverlayCenter: {
+        ...StyleSheet.absoluteFillObject,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: 'rgba(0,0,0,0.25)',
+        zIndex: 9,
+    },
+    videoErrorOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 18,
+        backgroundColor: 'rgba(0,0,0,0.55)',
+        zIndex: 20,
+    },
+    videoErrorCard: {
+        width: '100%',
+        maxWidth: 360,
+        borderRadius: 18,
+        padding: 18,
+        backgroundColor: 'rgba(15, 23, 42, 0.95)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
+        alignItems: 'center',
+    },
+    videoErrorTitle: {
+        marginTop: 10,
+        color: '#FFF',
+        fontSize: 16,
+        fontFamily: 'Poppins_600SemiBold',
+        textAlign: 'center',
+    },
+    videoErrorText: {
+        marginTop: 8,
+        color: 'rgba(255,255,255,0.75)',
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        textAlign: 'center',
+        lineHeight: 18,
+    },
+    videoErrorActions: {
+        marginTop: 14,
+        flexDirection: 'row',
+        width: '100%',
+        gap: 10,
+    },
+    videoErrorBtnSecondary: {
+        flex: 1,
+        height: 44,
+        borderRadius: 12,
+        backgroundColor: 'rgba(255,255,255,0.10)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.14)',
+    },
+    videoErrorBtnSecondaryText: {
+        color: '#FFF',
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    videoErrorBtnPrimary: {
+        flex: 1,
+        height: 44,
+        borderRadius: 12,
+        backgroundColor: '#F59E0B',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    videoErrorBtnPrimaryText: {
+        color: '#111827',
+        fontSize: 14,
+        fontFamily: 'Poppins_700Bold',
     },
 
     // Top Controls

@@ -25,6 +25,9 @@ from app.models.assessment import (
     ExamAttendance,
 )
 
+
+from app.models.user import User  # Added for type hinting
+
 logger = logging.getLogger(__name__)
 
 
@@ -174,6 +177,69 @@ class AssessmentService:
     def get_active_assessments(self) -> List[ProcturedAssessment]:
         """Get all active assessments."""
         return self.get_all_assessments(active_only=True)
+
+    def _matches_filters(self, user: Dict[str, Any], filters: Dict[str, List[str]]) -> bool:
+        """Check if user matches assignment filters."""
+        if not filters:
+            return False
+            
+        has_criteria = False
+        
+        # Get user attributes safely (user might be dict from token or ORM object)
+        u_role = user.get('role') if isinstance(user, dict) else getattr(user, 'role', None)
+        u_store = user.get('store') if isinstance(user, dict) else getattr(user, 'store', None)
+        u_category = user.get('category') if isinstance(user, dict) else getattr(user, 'category', None)
+        
+        # Role Filter
+        if filters.get('roles'):
+            has_criteria = True
+            if u_role not in filters['roles']:
+                return False
+                
+        # Store Filter
+        if filters.get('stores'):
+            has_criteria = True
+            if u_store not in filters['stores']:
+                return False
+                
+        # Category Filter
+        if filters.get('categories'):
+            has_criteria = True
+            if u_category not in filters['categories']:
+                return False
+                
+        return has_criteria
+
+    def get_available_assessments_for_user(self, user: Dict[str, Any]) -> List[ProcturedAssessment]:
+        """Get assessments available to a specific user based on assignment."""
+        active_assessments = self.get_active_assessments()
+        available = []
+        
+        user_email = user.get('email') if isinstance(user, dict) else getattr(user, 'email', None)
+        
+        for assessment in active_assessments:
+            assigned_users = assessment.assigned_users or []
+            filters = assessment.assignment_filters or {}
+            
+            # Check if has any assignment constraints
+            has_constraints = (assigned_users) or (filters and any(filters.values()))
+            
+            # 1. Public (No constraints)
+            if not has_constraints:
+                available.append(assessment)
+                continue
+                
+            # 2. Explicit Assignment
+            if user_email and user_email in assigned_users:
+                available.append(assessment)
+                continue
+                
+            # 3. Dynamic Filter Match
+            if self._matches_filters(user, filters):
+                available.append(assessment)
+                continue
+                
+        return available
 
     # ===========================================
     # ASSESSMENT SUBMISSION

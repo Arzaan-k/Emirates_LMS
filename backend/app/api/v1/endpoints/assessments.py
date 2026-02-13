@@ -33,12 +33,15 @@ class BulkDeleteScheduledExamsRequest(BaseModel):
 # ==========================================
 
 @router.get("/proctored")
-def get_proctored_assessments(db: Session = Depends(get_db)):
+def get_proctored_assessments(
+    db: Session = Depends(get_db),
+    current_user: Any = Depends(get_current_user)
+):
     """
-    Get all active proctored assessments.
+    Get all active proctored assessments available to the current user.
     """
     service = AssessmentService(db)
-    assessments = service.get_active_assessments()
+    assessments = service.get_available_assessments_for_user(current_user)
     
     result = []
     for assessment in assessments:
@@ -89,6 +92,8 @@ class ProctoredAssessmentCreate(BaseModel):
     passing_score: Optional[int] = 70
     created_by: Optional[str] = "Admin"
     ai_generated: Optional[bool] = False
+    assigned_users: Optional[List[str]] = []
+    assignment_filters: Optional[Dict[str, Any]] = {}
 
 @router.post("/proctored")
 async def create_proctored_assessment(
@@ -110,6 +115,8 @@ async def create_proctored_assessment(
         "time_limit_minutes": assessment_in.time_limit_minutes,
         "passing_score": assessment_in.passing_score,
         "created_by": assessment_in.created_by,
+        "assigned_users": assessment_in.assigned_users or [],
+        "assignment_filters": assessment_in.assignment_filters or {},
         "total_questions": len(assessment_in.questions),
     }
     
@@ -312,6 +319,8 @@ async def update_proctored_assessment(
         "time_limit_minutes": assessment_in.time_limit_minutes,
         "passing_score": assessment_in.passing_score,
         "created_by": assessment_in.created_by,
+        "assigned_users": assessment_in.assigned_users or [],
+        "assignment_filters": assessment_in.assignment_filters or {},
     }
     
     try:
