@@ -688,11 +688,11 @@ async def bulk_folder_upload(
                     filename,
                     file.content_type,
                     cdn_service,
-                    converter
                 )
                 
                 logger.info(f"Queued background processing for {filename}")
 
+                results["successful"] += 1
                 results["uploaded"] += 1
                 results["items"].append({
                     "filename": filename,
@@ -713,14 +713,7 @@ async def bulk_folder_upload(
                         ext
                     )
 
-                results["successful"] += 1
-                results["items"].append({
-                    "id": content_id,
-                    "filename": filename,
-                    "path": relative_path,
-                    "bucket": target_bucket_info["name"],
-                    "status": "success"
-                })
+
 
             except Exception as file_error:
                 logger.error(f"Failed to upload {relative_path}: {file_error}")
