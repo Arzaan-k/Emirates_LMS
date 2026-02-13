@@ -107,6 +107,8 @@ class Content(Base):
             "is_published": self.is_published if self.is_published is not None else True,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "extra_data": self.extra_data or {},
+            "processing_status": self.extra_data.get("status", "ready") if self.extra_data else "ready",
         }
 
 

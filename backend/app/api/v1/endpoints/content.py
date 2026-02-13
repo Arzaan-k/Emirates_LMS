@@ -672,7 +672,8 @@ async def bulk_folder_upload(
                         "is_path_node": True,
                         "learning_path_type": learning_path_type,
                         "xp": 50,
-                        "timestamp": datetime.utcnow()
+                        "timestamp": datetime.utcnow(),
+                        "extra_data": {"status": "queued"}
                     }
                     
                     service.create_content(content_data)
@@ -806,9 +807,21 @@ async def process_bulk_upload_item(
     async with processing_semaphore:
         logger.info(f"Background processing started for {content_id} ({filename})")
         
+        # 0. UPDATE STATUS -> PROCESSING
+        try:
+            with get_db_context() as db:
+                service = ContentService(db)
+                service.update_content_status(content_id, "processing")
+        except Exception as e:
+            logger.warning(f"Could not update status to processing for {content_id}: {e}")
+        
         # Verify file still exists (could be lost if server restarted)
         if not os.path.exists(local_path):
-            logger.error(f"File missing for {content_id}: {local_path}. Likely lost due to ephemeral usage.")
+            error_msg = f"File missing: {local_path}"
+            logger.error(f"{error_msg}. Likely lost due to ephemeral usage.")
+            with get_db_context() as db:
+                service = ContentService(db)
+                service.update_content_status(content_id, "failed", error_msg)
             return
 
         try:
@@ -818,7 +831,7 @@ async def process_bulk_upload_item(
             optimized_url = None
             
             # --- STEP 1: SECURE THE ASSET (Upload Original) ---
-            # We do this FIRST so we don't lose the file if optimization crashes usage
+            # ... (omitted similar logic, but easier to just rewrite complete function to avoid diff errors) ...
             if cdn_service.enabled:
                 logger.info(f"Step 1: Securing original file to CDN for {content_id}...")
                 cdn_key = f"content/{content_id}{ext}"
@@ -851,8 +864,6 @@ async def process_bulk_upload_item(
             if converter.needs_conversion(filename):
                 logger.info(f"Step 2: optimizing {filename}...")
                 
-                # Check file size - if too massive, maybe skip optimization on free tier?
-                # For now, we try our best.
                 success, output_path, message = await converter.convert_to_pdf(local_path)
                 
                 if success and output_path:
@@ -885,27 +896,26 @@ async def process_bulk_upload_item(
                     if is_pdf:
                         pdf_url = optimized_url
                     
-                    # Update DB with optimized version
-                    with get_db_context() as db:
-                        service = ContentService(db)
-                        # We prefer the Optimized URL for viewing, but keep original as backup
-                        service.update_content_urls(
-                            content_id, 
-                            video_url=optimized_url or original_cdn_url, 
-                            pdf_url=pdf_url,
-                            file_url=original_cdn_url
-                        )
-                    
                     # Cleanup temp output
                     if output_path != local_path and os.path.exists(output_path):
                          try:
                              os.remove(output_path)
                          except:
                              pass
-            
+
+            # Update DB with final optimized version AND status=ready
+            with get_db_context() as db:
+                service = ContentService(db)
+                # We prefer the Optimized URL for viewing, but keep original as backup
+                service.update_content_urls(
+                    content_id, 
+                    video_url=optimized_url or original_cdn_url, 
+                    pdf_url=pdf_url,
+                    file_url=original_cdn_url
+                )
+                service.update_content_status(content_id, "ready")
+
             # --- STEP 3: FINAL CLEANUP ---
-            # On Free Tier, we should aggressively clean up local files to save space
-            # IF we successfully uploaded to CDN.
             if original_cdn_url and os.path.exists(local_path):
                 try:
                     os.remove(local_path)
@@ -918,7 +928,15 @@ async def process_bulk_upload_item(
         except Exception as e:
             logger.error(f"Background processing failed for {content_id}: {e}")
             import traceback
-            logger.error(traceback.format_exc())
+            tb = traceback.format_exc()
+            logger.error(tb)
+            # Mark as failed
+            try:
+                with get_db_context() as db:
+                    service = ContentService(db)
+                    service.update_content_status(content_id, "failed", str(e))
+            except:
+                pass
 
 
 @router.get("/{item_id}")
