@@ -280,10 +280,7 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
     try {
       const formData = new FormData();
 
-      filesToUpload.forEach(fileObj => {
-        formData.append('files', fileObj.file);
-      });
-
+      // Only send paths, NOT file data (saves memory on server)
       const filePaths = filesToUpload.map(f => f.path);
       formData.append('file_paths', JSON.stringify(filePaths));
       formData.append('root_bucket_name', rootFolderName);
@@ -305,74 +302,79 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
     }
   };
 
-  const performUpload = async (skipDuplicates = false, duplicateAction = 'skip') => {
+  const performUpload = async (skipDuplicates = false, dupAction = 'skip') => {
     const filesToUpload = getSelectedFiles();
+    const total = filesToUpload.length;
 
     setUploading(true);
     setUploadProgress(0);
-    setUploadStatus(`Preparing to upload ${filesToUpload.length} files...`);
+    setUploadStatus(`Preparing to upload ${total} files (one at a time)...`);
 
-    // Simulate progress updates
-    const progressInterval = setInterval(() => {
-      setUploadProgress(prev => {
-        if (prev >= 90) return prev;
-        return prev + Math.random() * 10;
-      });
-    }, 500);
+    let successful = 0;
+    let skipped = 0;
+    let failed = 0;
+    const failedItems = [];
 
     try {
-      const formData = new FormData();
+      for (let i = 0; i < total; i++) {
+        const fileObj = filesToUpload[i];
+        const pct = Math.round(((i) / total) * 100);
+        setUploadProgress(pct);
+        setUploadStatus(`Uploading ${i + 1}/${total}: ${fileObj.name}`);
 
-      // Add files
-      filesToUpload.forEach(fileObj => {
-        formData.append('files', fileObj.file);
-      });
+        try {
+          const formData = new FormData();
+          formData.append('file', fileObj.file);
+          formData.append('file_path', fileObj.path);
+          formData.append('root_bucket_name', rootFolderName);
+          formData.append('learning_path_type', learningPathType);
+          formData.append('skip_duplicates', skipDuplicates ? 'true' : 'false');
+          formData.append('duplicate_action', dupAction);
 
-      // Add file paths
-      const filePaths = filesToUpload.map(f => f.path);
-      formData.append('file_paths', JSON.stringify(filePaths));
+          const response = await fetch(`${API_URL}/api/v1/content/bulk-folder-upload/single`, {
+            method: 'POST',
+            body: formData,
+          });
 
-      // Add metadata
-      formData.append('root_bucket_name', rootFolderName);
-      formData.append('learning_path_type', learningPathType);
-      formData.append('skip_duplicates', skipDuplicates ? 'true' : 'false');
-      formData.append('duplicate_action', duplicateAction);
+          const result = await response.json();
 
-      setUploadStatus(`Uploading ${filesToUpload.length} files to server...`);
+          if (!response.ok) {
+            throw new Error(result.detail || `Server error ${response.status}`);
+          }
 
-      const response = await fetch(`${API_URL}/api/v1/content/bulk-folder-upload`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      clearInterval(progressInterval);
-      const result = await response.json();
-
-      if (response.ok) {
-        setUploadProgress(100);
-        const { successful, skipped, replaced, failed } = result.results;
-        const parts = [];
-        if (successful > 0) parts.push(`${successful} uploaded`);
-        if (skipped > 0) parts.push(`${skipped} skipped`);
-        if (replaced > 0) parts.push(`${replaced} replaced`);
-        if (failed > 0) parts.push(`${failed} failed`);
-
-        setUploadStatus(`✅ Upload complete! ${parts.join(', ')}`);
-
-        setTimeout(() => {
-          onUploadComplete && onUploadComplete(result);
-          handleClose();
-        }, 2000);
-      } else {
-        throw new Error(result.detail || 'Upload failed');
+          if (result.status === 'skipped') {
+            skipped++;
+          } else {
+            successful++;
+          }
+        } catch (fileError) {
+          console.error(`Failed to upload ${fileObj.name}:`, fileError);
+          failed++;
+          failedItems.push(fileObj.name);
+        }
       }
+
+      setUploadProgress(100);
+      const parts = [];
+      if (successful > 0) parts.push(`${successful} uploaded`);
+      if (skipped > 0) parts.push(`${skipped} skipped`);
+      if (failed > 0) parts.push(`${failed} failed`);
+
+      const statusIcon = failed === total ? '❌' : '✅';
+      setUploadStatus(`${statusIcon} Upload complete! ${parts.join(', ')}`);
+
+      setTimeout(() => {
+        onUploadComplete && onUploadComplete({
+          status: 'completed',
+          results: { total, successful, skipped, failed, items: [] },
+        });
+        handleClose();
+      }, 2000);
     } catch (error) {
-      clearInterval(progressInterval);
       console.error('Upload error:', error);
       setUploadProgress(0);
       setUploadStatus(`❌ Upload failed: ${error.message}`);
 
-      // Reset uploading state after showing error for 3 seconds
       setTimeout(() => {
         setUploading(false);
         setUploadStatus('');
