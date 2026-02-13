@@ -62,8 +62,8 @@ class Settings(BaseSettings):
     # FILE UPLOADS
     # ===========================================
     UPLOAD_DIR: str = Field(default="uploads", env="UPLOAD_DIR")
-    MAX_FILE_SIZE_MB: int = Field(default=100, env="MAX_FILE_SIZE_MB")
-    MAX_VIDEO_SIZE_MB: int = Field(default=500, env="MAX_VIDEO_SIZE_MB")
+    MAX_FILE_SIZE_MB: int = Field(default=500, env="MAX_FILE_SIZE_MB")
+    MAX_VIDEO_SIZE_MB: int = Field(default=5120, env="MAX_VIDEO_SIZE_MB")
     ALLOWED_EXTENSIONS: List[str] = [
         ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
         ".mp4", ".mp3", ".wav", ".webm", ".mov", ".avi",
