@@ -783,6 +783,9 @@ async def bulk_folder_upload(
         raise HTTPException(status_code=500, detail=f"Bulk upload failed: {str(e)}")
 
 
+# Semaphore to limit concurrent background processing to 1 (Critical for Free Tier 512MB RAM)
+processing_semaphore = asyncio.Semaphore(1)
+
 async def process_bulk_upload_item(
     content_id: str,
     local_path: str,
@@ -792,101 +795,130 @@ async def process_bulk_upload_item(
     converter: Any
 ):
     """
-    Background task to process uploaded file:
-    1. Optimize (convert to PDF if needed)
-    2. Upload to CDN (optimized and/or original)
-    3. Update database with real URLs
+    Background task to process uploaded file (Free Tier Optimized).
+    
+    Strategy for Reliability:
+    1. STRICT SEQUENTIAL PROCESSING (via Semaphore) to prevent OOM.
+    2. UPLOAD ORIGINAL FIRST to R2/CDN. Since Render disk is ephemeral, 
+       we must secure the file in cloud storage ASAP.
+    3. OPTIMIZE (Convert to PDF) afterwards.
     """
-    logger.info(f"Background processing started for {content_id} ({filename})")
-    try:
-        ext = os.path.splitext(filename)[1].lower()
-        pdf_url = None
-        optimized_url = None
-        video_url = None
+    async with processing_semaphore:
+        logger.info(f"Background processing started for {content_id} ({filename})")
         
-        # 1. OPTIMIZE
-        if converter.needs_conversion(filename):
-            logger.info(f"Processing {content_id}: Optimizing {filename}...")
-            success, output_path, message = await converter.convert_to_pdf(local_path)
+        # Verify file still exists (could be lost if server restarted)
+        if not os.path.exists(local_path):
+            logger.error(f"File missing for {content_id}: {local_path}. Likely lost due to ephemeral usage.")
+            return
+
+        try:
+            ext = os.path.splitext(filename)[1].lower()
+            original_cdn_url = None
+            pdf_url = None
+            optimized_url = None
             
-            if success and output_path:
-                # Upload optimized file
-                is_pdf = output_path.lower().endswith('.pdf')
-                opt_ext = '.pdf' if is_pdf else ext
+            # --- STEP 1: SECURE THE ASSET (Upload Original) ---
+            # We do this FIRST so we don't lose the file if optimization crashes usage
+            if cdn_service.enabled:
+                logger.info(f"Step 1: Securing original file to CDN for {content_id}...")
+                cdn_key = f"content/{content_id}{ext}"
                 
-                if cdn_service.enabled:
-                    opt_cdn_key = f"content/{content_id}_optimized{opt_ext}"
-                    with open(output_path, "rb") as opt_file:
-                        opt_cdn_result = cdn_service.upload_file(
-                            opt_file,
-                            opt_cdn_key,
-                            "application/pdf" if is_pdf else content_type
+                try:
+                    # Stream upload
+                    with open(local_path, "rb") as f:
+                        cdn_result = cdn_service.upload_file(f, cdn_key, content_type)
+                    
+                    if cdn_result:
+                        if isinstance(cdn_result, dict):
+                            original_cdn_url = cdn_result.get("url")
+                        else:
+                            original_cdn_url = str(cdn_result)
+                            
+                        # Update DB immediately with this secure URL
+                        with get_db_context() as db:
+                            service = ContentService(db)
+                            service.update_content_urls(
+                                content_id, 
+                                video_url=original_cdn_url,
+                                file_url=original_cdn_url
+                            )
+                        logger.info(f"Original file secured at: {original_cdn_url}")
+                except Exception as e:
+                    logger.error(f"Failed to upload original file: {e}")
+                    # Continue to optimization? Yes, maybe that works.
+
+            # --- STEP 2: OPTIMIZE (Heavy CPU/RAM usage) ---
+            if converter.needs_conversion(filename):
+                logger.info(f"Step 2: optimizing {filename}...")
+                
+                # Check file size - if too massive, maybe skip optimization on free tier?
+                # For now, we try our best.
+                success, output_path, message = await converter.convert_to_pdf(local_path)
+                
+                if success and output_path:
+                    # Upload optimized file
+                    is_pdf = output_path.lower().endswith('.pdf')
+                    opt_ext = '.pdf' if is_pdf else ext
+                    
+                    if cdn_service.enabled:
+                        opt_cdn_key = f"content/{content_id}_optimized{opt_ext}"
+                        with open(output_path, "rb") as opt_file:
+                            opt_cdn_result = cdn_service.upload_file(
+                                opt_file,
+                                opt_cdn_key,
+                                "application/pdf" if is_pdf else content_type
+                            )
+                        
+                        if opt_cdn_result:
+                            if isinstance(opt_cdn_result, dict):
+                                optimized_url = opt_cdn_result.get("url")
+                            else:
+                                optimized_url = str(opt_cdn_result)
+                    
+                    if not optimized_url:
+                        # Fallback for CDN failure
+                        optimized_url = f"{settings.BASE_URL}/uploads/{content_id}_optimized{opt_ext}"
+                        opt_local_path = os.path.join(settings.UPLOAD_DIR, f"{content_id}_optimized{opt_ext}")
+                        if output_path != opt_local_path and os.path.exists(output_path):
+                            shutil.copy(output_path, opt_local_path)
+
+                    if is_pdf:
+                        pdf_url = optimized_url
+                    
+                    # Update DB with optimized version
+                    with get_db_context() as db:
+                        service = ContentService(db)
+                        # We prefer the Optimized URL for viewing, but keep original as backup
+                        service.update_content_urls(
+                            content_id, 
+                            video_url=optimized_url or original_cdn_url, 
+                            pdf_url=pdf_url,
+                            file_url=original_cdn_url
                         )
                     
-                    if opt_cdn_result:
-                        if isinstance(opt_cdn_result, dict):
-                            optimized_url = opt_cdn_result.get("url")
-                        else:
-                            optimized_url = str(opt_cdn_result)
-                
-                if not optimized_url:
-                    # If CDN disabled or failed, it's already local, just get URL
-                    optimized_url = f"{settings.BASE_URL}/uploads/{content_id}_optimized{opt_ext}"
-                    # Ensure it's in the right place
-                    opt_local_path = os.path.join(settings.UPLOAD_DIR, f"{content_id}_optimized{opt_ext}")
-                    if output_path != opt_local_path and os.path.exists(output_path):
-                        shutil.copy(output_path, opt_local_path)
-
-                if is_pdf:
-                    pdf_url = optimized_url
-                
-                # Cleanup temp output
-                if output_path != local_path and os.path.exists(output_path):
-                     try:
-                         os.remove(output_path)
-                     except:
-                         pass
-
-        # 2. UPLOAD ORIGINAL (if needed)
-        try:
-             file_size_mb = os.path.getsize(local_path) / (1024 * 1024)
-        except:
-             file_size_mb = 0
-
-        should_upload_original = not pdf_url or file_size_mb < 25
-        
-        if cdn_service.enabled and should_upload_original:
-            logger.info(f"Processing {content_id}: Uploading original to CDN...")
-            cdn_key = f"content/{content_id}{ext}"
+                    # Cleanup temp output
+                    if output_path != local_path and os.path.exists(output_path):
+                         try:
+                             os.remove(output_path)
+                         except:
+                             pass
             
-            with open(local_path, "rb") as f:
-                cdn_result = cdn_service.upload_file(f, cdn_key, content_type)
-            
-            if cdn_result:
-                if isinstance(cdn_result, dict):
-                    video_url = cdn_result.get("url")
-                else:
-                    video_url = str(cdn_result)
-        elif pdf_url and not should_upload_original:
-             # If we have optimized PDF and original is huge, use PDF as primary
-             video_url = pdf_url
-        
-        # 3. UPDATE DATABASE
-        if video_url or pdf_url:
-            with get_db_context() as db:
-                service = ContentService(db)
-                service.update_content_urls(
-                    content_id, 
-                    video_url=video_url or optimized_url, # Prefer CDN/Optimized URL
-                    pdf_url=pdf_url,
-                    file_url=video_url # Keep original link if available
-                )
+            # --- STEP 3: FINAL CLEANUP ---
+            # On Free Tier, we should aggressively clean up local files to save space
+            # IF we successfully uploaded to CDN.
+            if original_cdn_url and os.path.exists(local_path):
+                try:
+                    os.remove(local_path)
+                    logger.info(f"Removed local file {local_path} (secured in CDN)")
+                except:
+                    pass
+                
             logger.info(f"Background processing completed for {content_id}")
             
-    except Exception as e:
-        logger.error(f"Background processing failed for {content_id}: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
+        except Exception as e:
+            logger.error(f"Background processing failed for {content_id}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
 
 @router.get("/{item_id}")
