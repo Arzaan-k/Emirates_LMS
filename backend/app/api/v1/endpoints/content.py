@@ -8,11 +8,11 @@ import os
 import shutil
 import json
 import logging
-import shutil
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Form, File, UploadFile, HTTPException, Header, BackgroundTasks, Body
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -451,6 +451,179 @@ async def check_folder_duplicates(
         raise HTTPException(status_code=500, detail=f"Duplicate check failed: {str(e)}")
 
 
+@router.post("/bulk-folder-upload/single")
+async def bulk_folder_upload_single(
+    background_tasks: BackgroundTasks,
+    learning_path_type: str = Form("career_progression"),
+    root_bucket_name: str = Form(...),
+    file: UploadFile = File(...),
+    file_path: str = Form(...),
+    skip_duplicates: str = Form("false"),
+    duplicate_action: str = Form("skip"),
+):
+    """
+    Upload a SINGLE file as part of a bulk folder upload.
+    Frontend calls this once per file, sequentially.
+    This keeps server memory usage minimal (~1 file at a time).
+    """
+    cdn_service = CDNService()
+
+    try:
+        relative_path = file_path
+        path_parts = relative_path.split('/')
+        filename = path_parts[-1]
+        folder_parts = path_parts[:-1] if len(path_parts) > 1 else []
+
+        # --- Ensure bucket hierarchy exists ---
+        root_bucket_info = None
+        with get_db_context() as db:
+            service = ContentService(db)
+            try:
+                root_bucket = service.get_bucket_by_name(root_bucket_name)
+                root_bucket_info = {"id": root_bucket.id, "name": root_bucket.name}
+            except:
+                root_bucket_id = f"bucket_{uuid.uuid4().hex[:8]}"
+                root_bucket_data = {
+                    "id": root_bucket_id,
+                    "name": root_bucket_name,
+                    "description": "Auto-created from folder upload",
+                    "parent_bucket_id": None,
+                    "folder_path": root_bucket_name,
+                    "learning_path_type": learning_path_type,
+                    "color": "#3B82F6",
+                    "icon": "folder-outline",
+                    "keywords": [],
+                    "is_active": True,
+                }
+                root_bucket = service.create_bucket(root_bucket_data)
+                root_bucket_info = {"id": root_bucket.id, "name": root_bucket.name}
+
+        # Nested buckets
+        current_parent_info = root_bucket_info
+        current_path = root_bucket_name
+
+        for folder_name in folder_parts:
+            current_path = f"{current_path}/{folder_name}"
+            with get_db_context() as db:
+                service = ContentService(db)
+                try:
+                    existing_bucket = service.get_bucket_by_path(current_path)
+                    current_parent_info = {"id": existing_bucket.id, "name": existing_bucket.name}
+                except:
+                    nested_bucket_id = f"bucket_{uuid.uuid4().hex[:8]}"
+                    nested_bucket_data = {
+                        "id": nested_bucket_id,
+                        "name": folder_name,
+                        "description": "Auto-created subfolder",
+                        "parent_bucket_id": current_parent_info["id"],
+                        "folder_path": current_path,
+                        "color": "#3B82F6",
+                        "icon": "folder-outline",
+                        "keywords": [],
+                        "is_active": True,
+                        "learning_path_type": learning_path_type,
+                    }
+                    new_bucket = service.create_bucket(nested_bucket_data)
+                    current_parent_info = {"id": new_bucket.id, "name": new_bucket.name}
+
+        target_bucket_info = current_parent_info
+
+        # --- Duplicate check ---
+        ext = os.path.splitext(filename)[1].lower()
+        title = os.path.splitext(filename)[0]
+        should_skip = skip_duplicates.lower() == "true" or duplicate_action == "skip"
+
+        if should_skip:
+            with get_db_context() as db:
+                service = ContentService(db)
+                existing_content = service.get_content_by_title_and_bucket(title, target_bucket_info["id"])
+                if existing_content:
+                    if duplicate_action == "skip":
+                        return {
+                            "status": "skipped",
+                            "filename": filename,
+                            "path": relative_path,
+                            "reason": "duplicate",
+                        }
+                    elif duplicate_action == "replace":
+                        service.delete_content(existing_content.id)
+
+        # --- Resource type ---
+        resource_types = {
+            '.mp4': 'Video', '.webm': 'Video', '.mov': 'Video', '.avi': 'Video',
+            '.mp3': 'Audio', '.wav': 'Audio',
+            '.pdf': 'PDF', '.doc': 'Document', '.docx': 'Document',
+            '.ppt': 'Presentation', '.pptx': 'Presentation',
+            '.jpg': 'Image', '.jpeg': 'Image', '.png': 'Image', '.gif': 'Image',
+            '.xls': 'Spreadsheet', '.xlsx': 'Spreadsheet',
+        }
+        resource_type = resource_types.get(ext, 'Other')
+
+        # --- Save file locally (streaming, low memory) ---
+        content_id = f"content_{uuid.uuid4().hex[:8]}"
+        os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+        local_path = os.path.join(settings.UPLOAD_DIR, f"{content_id}{ext}")
+
+        CHUNK_SIZE = 1024 * 1024  # 1MB chunks
+        with open(local_path, "wb") as f:
+            while True:
+                chunk = await file.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                f.write(chunk)
+
+        # --- Create DB entry ---
+        local_url = f"{settings.BASE_URL}/uploads/{content_id}{ext}"
+        with get_db_context() as db:
+            service = ContentService(db)
+            content_data = {
+                "id": content_id,
+                "title": title,
+                "description": f"Uploaded from {relative_path}",
+                "bucket": target_bucket_info["name"],
+                "bucket_id": target_bucket_info["id"],
+                "resource_type": resource_type,
+                "video_url": local_url,
+                "file_url": local_url,
+                "is_path_node": True,
+                "learning_path_type": learning_path_type,
+                "xp": 50,
+                "timestamp": datetime.utcnow(),
+                "extra_data": {"status": "queued"},
+            }
+            service.create_content(content_data)
+
+        # --- Background processing (CDN upload + optimization) ---
+        converter = get_converter()
+        background_tasks.add_task(
+            process_bulk_upload_item,
+            content_id,
+            local_path,
+            filename,
+            file.content_type or "application/octet-stream",
+            resource_type,
+            cdn_service,
+            converter,
+        )
+
+        logger.info(f"[single] Queued background processing for {filename}")
+
+        return {
+            "status": "uploaded",
+            "id": content_id,
+            "filename": filename,
+            "path": relative_path,
+            "bucket": target_bucket_info["name"],
+            "url": local_url,
+        }
+
+    except Exception as e:
+        logger.error(f"Single file upload failed for {file_path}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
 @router.post("/bulk-folder-upload")
 async def bulk_folder_upload(
     background_tasks: BackgroundTasks,
@@ -687,8 +860,10 @@ async def bulk_folder_upload(
                     content_id,
                     local_path,
                     filename,
-                    file.content_type,
+                    file.content_type or "application/octet-stream",
+                    resource_type,
                     cdn_service,
+                    converter,
                 )
                 
                 logger.info(f"Queued background processing for {filename}")
@@ -696,23 +871,13 @@ async def bulk_folder_upload(
                 results["successful"] += 1
                 results["uploaded"] += 1
                 results["items"].append({
+                    "id": content_id,
                     "filename": filename,
                     "path": relative_path,
                     "bucket": target_bucket_info["name"],
                     "status": "processing", # Frontend should handle this
                     "url": local_url
                 })
-
-
-                # Trigger background processing for supported types
-                if resource_type in ["Video", "Audio", "Document", "Presentation", "PDF"]:
-                    background_tasks.add_task(
-                        generate_transcript_task,
-                        content_id,
-                        local_path,
-                        resource_type,
-                        ext
-                    )
 
 
 
@@ -767,6 +932,7 @@ async def process_bulk_upload_item(
     local_path: str,
     filename: str,
     content_type: str,
+    resource_type: str,
     cdn_service: CDNService,
     converter: Any
 ):
@@ -778,6 +944,7 @@ async def process_bulk_upload_item(
     2. UPLOAD ORIGINAL FIRST to R2/CDN. Since Render disk is ephemeral, 
        we must secure the file in cloud storage ASAP.
     3. OPTIMIZE (Convert to PDF) afterwards.
+    4. GENERATE TRANSCRIPT (if applicable) before cleanup.
     """
     async with processing_semaphore:
         logger.info(f"Background processing started for {content_id} ({filename})")
@@ -806,7 +973,7 @@ async def process_bulk_upload_item(
             optimized_url = None
             
             # --- STEP 1: SECURE THE ASSET (Upload Original) ---
-            # ... (omitted similar logic, but easier to just rewrite complete function to avoid diff errors) ...
+            # We do this FIRST so we don't lose the file if optimization crashes usage
             if cdn_service.enabled:
                 logger.info(f"Step 1: Securing original file to CDN for {content_id}...")
                 cdn_key = f"content/{content_id}{ext}"
@@ -878,7 +1045,7 @@ async def process_bulk_upload_item(
                          except:
                              pass
 
-            # Update DB with final optimized version AND status=ready
+            # Update DB with final optimized version
             with get_db_context() as db:
                 service = ContentService(db)
                 # We prefer the Optimized URL for viewing, but keep original as backup
@@ -888,9 +1055,32 @@ async def process_bulk_upload_item(
                     pdf_url=pdf_url,
                     file_url=original_cdn_url
                 )
+
+            # --- STEP 3: GENERATE TRANSCRIPT/QUIZ ---
+            # We do this here (inside the semaphore) to ensure the file still exists
+            # and to prevent too many parallel transcriptions from killing CPU.
+            if resource_type in ["Video", "Audio", "Document", "Presentation", "PDF"]:
+                 try:
+                     logger.info(f"Generating transcript for {content_id}...")
+                     # Run sync function in threadpool
+                     await run_in_threadpool(
+                         generate_transcript_task,
+                         content_id, 
+                         local_path, 
+                         resource_type, 
+                         ext
+                     )
+                     logger.info(f"Transcript generation completed for {content_id}")
+                 except Exception as te:
+                     logger.error(f"Transcript generation failed for {content_id}: {te}")
+                     # Don't fail the whole upload, just log it.
+
+            # Mark as READY
+            with get_db_context() as db:
+                service = ContentService(db)
                 service.update_content_status(content_id, "ready")
 
-            # --- STEP 3: FINAL CLEANUP ---
+            # --- STEP 4: FINAL CLEANUP ---
             if original_cdn_url and os.path.exists(local_path):
                 try:
                     os.remove(local_path)
