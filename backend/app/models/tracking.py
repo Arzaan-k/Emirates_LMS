@@ -75,11 +75,11 @@ class AttendanceRecord(Base):
     location_lng = Column(Float)
     store = Column(String(255))
     # The following columns are defined but MISSING in production DB
-    # status = Column(String(50), default="active")  # active, completed, absent - MISSING IN DB
-    # punch_in_notes = Column(Text)  # MISSING IN DB
-    # punch_out_notes = Column(Text)  # MISSING IN DB
-    # overtime_minutes = Column(Integer, default=0)  # MISSING IN DB
-    # break_duration_minutes = Column(Integer, default=0)  # MISSING IN DB
+    status = Column(String(50), default="active")
+    punch_in_notes = Column(Text)
+    punch_out_notes = Column(Text)
+    overtime_minutes = Column(Integer, default=0)
+    break_duration_minutes = Column(Integer, default=0)
 
     __table_args__ = (
         Index('idx_attendance_user', 'user_email'),

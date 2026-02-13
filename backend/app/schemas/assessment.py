@@ -37,6 +37,8 @@ class AssessmentCreate(AssessmentBase):
     max_attempts: int = 3
     shuffle_questions: bool = False
     show_results: bool = True
+    assigned_users: List[str] = []
+    assignment_filters: Dict[str, Any] = {}
 
 
 class AssessmentUpdate(BaseSchema):
@@ -50,6 +52,8 @@ class AssessmentUpdate(BaseSchema):
     active: Optional[bool] = None
     allow_retake: Optional[bool] = None
     max_attempts: Optional[int] = None
+    assigned_users: Optional[List[str]] = None
+    assignment_filters: Optional[Dict[str, Any]] = None
 
 
 class AssessmentResponse(AssessmentBase):
@@ -61,6 +65,9 @@ class AssessmentResponse(AssessmentBase):
     instructions: Optional[str] = None
     allow_retake: bool = True
     max_attempts: int = 3
+    max_attempts: int = 3
+    assigned_users: List[str] = []
+    assignment_filters: Dict[str, Any] = {}
     created_by: Optional[str] = None
     created_at: Optional[datetime] = None
 
