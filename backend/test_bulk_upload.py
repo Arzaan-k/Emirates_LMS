@@ -1,128 +1,73 @@
-"""
-Test script for bulk upload employee code validation endpoint
-Run: python test_bulk_upload.py
-"""
-
 import requests
 import json
+import time
 
-# Configuration
-API_URL = "http://localhost:8000"
-ENDPOINT = f"{API_URL}/api/v1/users/validate-employee-codes"
+URL = "http://localhost:8001/api/v1/content"
 
-def test_endpoint():
-    print("=" * 60)
-    print("🧪 TESTING BULK UPLOAD ENDPOINT")
-    print("=" * 60)
+# 1. Create a dummy file
+with open("test_upload_file.txt", "w") as f:
+    f.write("Test content for bulk upload verification")
 
-    # Test Case 1: Valid employee codes (these should exist in your DB)
-    print("\n📋 Test 1: Validating sample employee codes...")
-    test_codes_1 = ["BWCO-0028", "BWCO-0029", "BWCO-0030"]
+print("Created test_upload_file.txt")
 
-    try:
-        response = requests.post(
-            ENDPOINT,
-            json={"employee_codes": test_codes_1},
-            headers={"Content-Type": "application/json"}
-        )
+# 2. Upload file (Bypass auth used in dependencies.py)
+print("\n--- Starting Bulk Upload ---")
+bulk_url = f"{URL}/bulk-upload-folder/"
 
-        print(f"Status Code: {response.status_code}")
+files = {
+    'files': ('test_upload_file.txt', open('test_upload_file.txt', 'rb'), 'text/plain')
+}
+data = {
+    "file_paths": json.dumps(["RootBucket/test_upload_file.txt"]),
+    "root_bucket_name": "TestBucketResult",
+    "learning_path_type": "career_progression",
+    "skip_duplicates": "false"
+}
 
-        if response.status_code == 200:
-            data = response.json()
-            print(f"✅ Success!")
-            print(f"   Matched: {data['matched_count']} users")
-            print(f"   Not Found: {data['not_found_count']} codes")
-            print(f"   Matched Emails: {data['matched'][:3]}...")  # Show first 3
-            if data['not_found']:
-                print(f"   Not Found Codes: {data['not_found']}")
+try:
+    response = requests.post(bulk_url, files=files, data=data) # No auth header needed due to bypass
+    print(f"Status Code: {response.status_code}")
+    print(f"Response: {response.text}")
+
+    if response.status_code == 200:
+        res_json = response.json()
+        print("Upload success.")
+        items = res_json.get("items", [])
+        
+        if items:
+            item = items[0]
+            content_id = item.get("id")
+            print(f"Uploaded Content ID: {content_id}")
+            print(f"Initial Status from response: {item.get('status')}")
+
+            # 3. Poll for status
+            if content_id:
+                print("\n--- Polling Status ---")
+                for i in range(10):
+                    time.sleep(2)
+                    status_url = f"{URL}/{content_id}"
+                    status_res = requests.get(status_url)
+                    if status_res.status_code == 200:
+                        content_data = status_res.json()
+                        current_status = content_data.get("processing_status")
+                        extra_data = content_data.get("extra_data", {})
+                        
+                        print(f"Attempt {i+1}: Status={current_status}, ExtraData={extra_data}")
+                        
+                        if current_status == "ready":
+                            print("SUCCESS: Content is ready!")
+                            break
+                        elif current_status == "failed":
+                            print("FAILURE: Content processing failed.")
+                            break
+                    else:
+                        print(f"Error fetching content: {status_res.status_code}")
+            else:
+                print("No content ID returned in items.")
         else:
-            print(f"❌ Error: {response.text}")
+            print("No items returned in response.")
+    else:
+        print("Upload failed.")
 
-    except requests.exceptions.ConnectionError:
-        print("❌ ERROR: Cannot connect to backend.")
-        print("   Make sure backend server is running on http://localhost:8000")
-        return False
-    except Exception as e:
-        print(f"❌ ERROR: {e}")
-        return False
-
-    # Test Case 2: Mix of valid and invalid codes
-    print("\n📋 Test 2: Mix of valid and invalid codes...")
-    test_codes_2 = ["BWCO-0028", "INVALID-9999", "BWCO-0029"]
-
-    try:
-        response = requests.post(
-            ENDPOINT,
-            json={"employee_codes": test_codes_2},
-            headers={"Content-Type": "application/json"}
-        )
-
-        if response.status_code == 200:
-            data = response.json()
-            print(f"✅ Partial match handled correctly!")
-            print(f"   Matched: {data['matched_count']}/{data['total_codes']}")
-            print(f"   Not Found: {data['not_found']}")
-
-    except Exception as e:
-        print(f"❌ ERROR: {e}")
-
-    # Test Case 3: Empty array
-    print("\n📋 Test 3: Empty employee codes array...")
-
-    try:
-        response = requests.post(
-            ENDPOINT,
-            json={"employee_codes": []},
-            headers={"Content-Type": "application/json"}
-        )
-
-        if response.status_code == 400:
-            print(f"✅ Correctly rejected empty array (400 Bad Request)")
-        else:
-            print(f"⚠️  Unexpected status: {response.status_code}")
-
-    except Exception as e:
-        print(f"❌ ERROR: {e}")
-
-    # Test Case 4: Get actual user emails to test with
-    print("\n📋 Test 4: Fetching actual users from database...")
-
-    try:
-        users_response = requests.get(f"{API_URL}/api/v1/users/list")
-        if users_response.status_code == 200:
-            users = users_response.json().get('users', [])
-            print(f"✅ Found {len(users)} users in database")
-
-            # Check if users have employee codes in profile_data
-            users_with_codes = [
-                u for u in users
-                if u.get('profile_data') and
-                (u['profile_data'].get('employee_code') or u['profile_data'].get('Employee Code'))
-            ]
-
-            print(f"   Users with employee codes: {len(users_with_codes)}")
-
-            if users_with_codes:
-                sample_user = users_with_codes[0]
-                emp_code = (sample_user['profile_data'].get('employee_code') or
-                           sample_user['profile_data'].get('Employee Code'))
-                print(f"   Sample: {emp_code} → {sample_user['email']}")
-
-    except Exception as e:
-        print(f"⚠️  Could not fetch users: {e}")
-
-    print("\n" + "=" * 60)
-    print("✅ ALL TESTS COMPLETED")
-    print("=" * 60)
-    print("\n💡 Next Steps:")
-    print("   1. Start your backend server if not running")
-    print("   2. Test the feature in the mobile app")
-    print("   3. Upload a sample Excel/CSV file")
-    print("   4. Verify users are auto-selected")
-    print("\n📖 See BULK_UPLOAD_FEATURE.md for full documentation")
-
-    return True
-
-if __name__ == "__main__":
-    test_endpoint()
+except Exception as e:
+    print(f"Request failed: {e}")
