@@ -688,11 +688,11 @@ async def bulk_folder_upload(
                     filename,
                     file.content_type,
                     cdn_service,
-                    converter
                 )
                 
                 logger.info(f"Queued background processing for {filename}")
 
+                results["successful"] += 1
                 results["uploaded"] += 1
                 results["items"].append({
                     "filename": filename,
@@ -702,25 +702,6 @@ async def bulk_folder_upload(
                     "url": local_url
                 })
 
-                    "id": content_id,
-                    "title": title,
-                    "description": f"Uploaded from folder: {root_bucket_name}",
-                    "bucket": target_bucket_info["name"],
-                    "bucket_id": target_bucket_info["id"],
-                    "resource_type": resource_type,
-                    "video_url": viewing_url,  # URL for viewing (optimized if available)
-                    "file_url": video_url,  # Keep original file URL
-                    "pdf_url": pdf_url,  # Store PDF URL if converted
-                    "is_path_node": True,
-                    "learning_path_type": learning_path_type,
-                    "order_index": idx,
-                    "timestamp": datetime.utcnow(),
-                }
-
-                with get_db_context() as db:
-                    service = ContentService(db)
-                    content = service.create_content(content_data)
-                    logger.info(f"Content created: {content_id} in bucket {target_bucket_info['name']}")
 
                 # Trigger background processing for supported types
                 if resource_type in ["Video", "Audio", "Document", "Presentation", "PDF"]:
@@ -732,14 +713,7 @@ async def bulk_folder_upload(
                         ext
                     )
 
-                results["successful"] += 1
-                results["items"].append({
-                    "id": content_id,
-                    "filename": filename,
-                    "path": relative_path,
-                    "bucket": target_bucket_info["name"],
-                    "status": "success"
-                })
+
 
             except Exception as file_error:
                 logger.error(f"Failed to upload {relative_path}: {file_error}")
