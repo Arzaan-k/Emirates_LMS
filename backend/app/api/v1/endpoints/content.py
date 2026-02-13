@@ -183,7 +183,7 @@ async def upload_content(
     }
     resource_type = resource_types.get(ext, 'Other')
 
-    # Save file locally first
+    # Save file locally first (stream to avoids memory issues)
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     local_path = os.path.join(settings.UPLOAD_DIR, f"{content_id}{ext}")
 
@@ -205,9 +205,13 @@ async def upload_content(
             bucket_id_val = bucket
 
     try:
-        content_bytes = await file.read()
+        # Stream file to disk instead of reading into memory
         with open(local_path, "wb") as f:
-            f.write(content_bytes)
+            await file.seek(0)
+            shutil.copyfileobj(file.file, f)
+        
+        file_size_mb = os.path.getsize(local_path) / (1024 * 1024)
+        logger.info(f"File saved locally: {local_path} ({file_size_mb:.2f} MB)")
 
         # Optimize documents for preview (convert to PDF if too large)
         pdf_url = None
@@ -221,16 +225,20 @@ async def upload_content(
 
             if success and output_path:
                 # We got a converted PDF file - upload it
-                with open(output_path, "rb") as opt_file:
-                    opt_bytes = opt_file.read()
-
+                is_pdf = output_path.lower().endswith('.pdf')
+                # For optimized files (PDFs), we can read into memory as they are usually smaller
+                # But safer to stream too
+                
                 if cdn_service.enabled:
                     opt_cdn_key = f"content/{content_id}_optimized.pdf"
-                    opt_cdn_result = cdn_service.upload_file(
-                        opt_bytes,
-                        opt_cdn_key,
-                        "application/pdf"
-                    )
+                    
+                    with open(output_path, "rb") as opt_file:
+                        opt_cdn_result = cdn_service.upload_file(
+                            opt_file,
+                            opt_cdn_key,
+                            "application/pdf"
+                        )
+                    
                     if opt_cdn_result:
                         if isinstance(opt_cdn_result, dict):
                             optimized_url = opt_cdn_result.get("url")
@@ -240,7 +248,8 @@ async def upload_content(
                 if not optimized_url:
                     # Save locally
                     opt_local_path = os.path.join(settings.UPLOAD_DIR, f"{content_id}_optimized.pdf")
-                    shutil.copy(output_path, opt_local_path)
+                    if output_path != opt_local_path:
+                         shutil.copy(output_path, opt_local_path)
                     optimized_url = f"{settings.BASE_URL}/uploads/{content_id}_optimized.pdf"
 
                 pdf_url = optimized_url
@@ -258,17 +267,19 @@ async def upload_content(
 
         # Upload original file to CDN
         # OPTIMIZATION: Skip uploading large original files if we have a PDF conversion
-        # This saves significant upload time (e.g., 197MB takes ~2 mins to upload)
         video_url = None
-        file_size_mb = len(content_bytes) / (1024 * 1024)
-
+        
         # Only upload original if: no PDF conversion OR file is small (< 25MB)
         should_upload_original = not pdf_url or file_size_mb < 25
 
         if cdn_service.enabled and should_upload_original:
             logger.info(f"Uploading original file ({file_size_mb:.2f} MB) to CDN...")
             cdn_key = f"content/{content_id}{ext}"
-            cdn_result = cdn_service.upload_file(content_bytes, cdn_key, file.content_type)
+            
+            # Stream upload
+            with open(local_path, "rb") as f:
+                cdn_result = cdn_service.upload_file(f, cdn_key, file.content_type)
+            
             if cdn_result:
                 if isinstance(cdn_result, dict):
                     video_url = cdn_result.get("url")
@@ -593,9 +604,19 @@ async def bulk_folder_upload(
                 }
                 resource_type = resource_types.get(ext, 'Other')
 
-                # Read file content
-                content_bytes = await file.read()
-                file_size = len(content_bytes)
+                # Generate unique content ID
+                content_id = f"content_{uuid.uuid4().hex[:8]}"
+
+                # Save file locally (stream)
+                os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+                local_path = os.path.join(settings.UPLOAD_DIR, f"{content_id}{ext}")
+
+                with open(local_path, "wb") as f:
+                    await file.seek(0)
+                    shutil.copyfileobj(file.file, f)
+                
+                file_size = os.path.getsize(local_path)
+                file_size_mb = file_size / (1024 * 1024)
 
                 # Check for duplicate if skip_duplicates is enabled
                 title = os.path.splitext(filename)[0]
@@ -611,6 +632,12 @@ async def bulk_folder_upload(
                     if duplicate_action == "skip":
                         # Skip this file
                         logger.info(f"Skipping duplicate file: {filename} in bucket {target_bucket_info['name']}")
+                        # Cleanup local file
+                        try:
+                            os.remove(local_path)
+                        except:
+                            pass
+                        
                         results["skipped"] += 1
                         results["items"].append({
                             "filename": filename,
@@ -629,16 +656,6 @@ async def bulk_folder_upload(
                         results["replaced"] += 1
                         # Continue to upload new version
 
-                # Generate unique content ID
-                content_id = f"content_{uuid.uuid4().hex[:8]}"
-
-                # Save file locally
-                os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-                local_path = os.path.join(settings.UPLOAD_DIR, f"{content_id}{ext}")
-
-                with open(local_path, "wb") as f:
-                    f.write(content_bytes)
-
                 # Optimize documents for preview (compress or convert if too large)
                 pdf_url = None
                 optimized_url = None
@@ -650,19 +667,18 @@ async def bulk_folder_upload(
                     logger.info(f"Optimization: {message}")
 
                     if success and output_path:
-                        with open(output_path, "rb") as opt_file:
-                            opt_bytes = opt_file.read()
-
                         is_pdf = output_path.lower().endswith('.pdf')
                         opt_ext = '.pdf' if is_pdf else ext
 
                         if cdn_service.enabled:
                             opt_cdn_key = f"content/{content_id}_optimized{opt_ext}"
-                            opt_cdn_result = cdn_service.upload_file(
-                                opt_bytes,
-                                opt_cdn_key,
-                                "application/pdf" if is_pdf else file.content_type
-                            )
+                            with open(output_path, "rb") as opt_file:
+                                opt_cdn_result = cdn_service.upload_file(
+                                    opt_file,
+                                    opt_cdn_key,
+                                    "application/pdf" if is_pdf else file.content_type
+                                )
+                            
                             if opt_cdn_result:
                                 if isinstance(opt_cdn_result, dict):
                                     optimized_url = opt_cdn_result.get("url")
@@ -671,7 +687,8 @@ async def bulk_folder_upload(
 
                         if not optimized_url:
                             opt_local_path = os.path.join(settings.UPLOAD_DIR, f"{content_id}_optimized{opt_ext}")
-                            shutil.copy(output_path, opt_local_path)
+                            if output_path != opt_local_path:
+                                shutil.copy(output_path, opt_local_path)
                             optimized_url = f"{settings.BASE_URL}/uploads/{content_id}_optimized{opt_ext}"
 
                         if is_pdf:
@@ -686,12 +703,13 @@ async def bulk_folder_upload(
                 # Upload original file to CDN
                 # OPTIMIZATION: Skip uploading large original files if we have a PDF conversion
                 video_url = None
-                file_size_mb = len(content_bytes) / (1024 * 1024)
                 should_upload_original = not pdf_url or file_size_mb < 25
 
                 if cdn_service.enabled and should_upload_original:
                     cdn_key = f"content/{content_id}{ext}"
-                    cdn_result = cdn_service.upload_file(content_bytes, cdn_key, file.content_type)
+                    with open(local_path, "rb") as f:
+                        cdn_result = cdn_service.upload_file(f, cdn_key, file.content_type)
+                    
                     if cdn_result:
                         if isinstance(cdn_result, dict):
                             video_url = cdn_result.get("url")

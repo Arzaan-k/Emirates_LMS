@@ -45,25 +45,15 @@ class CDNService:
 
     def upload_file(
         self,
-        file_content: bytes,
+        file_content: Any,  # bytes or file-like object
         filename: str,
         content_type: Optional[str] = None,
         folder: str = "uploads"
     ) -> Dict[str, Any]:
         """
-        Upload file to CDN.
-
-        Args:
-            file_content: File content as bytes
-            filename: Original filename
-            content_type: MIME type
-            folder: Folder path in bucket
-
-        Returns:
-            Dictionary with URL and metadata
+        Upload file to CDN (supports bytes or file-like objects).
         """
         if not self.enabled:
-            # Fall back to local storage
             return self._save_locally(file_content, filename, folder)
 
         try:
@@ -76,7 +66,17 @@ class CDNService:
             if not content_type:
                 content_type = get_mime_type(filename)
 
-            # Upload to R2
+            # Upload to R2 (boto3 handles streams automatically)
+            # If it's a file iterator (like from UploadFile), we might need to read it or adapt it
+            # But here we expect bytes or open file object
+            
+            # Reset file pointer if possible
+            if hasattr(file_content, 'seek'):
+                try:
+                    file_content.seek(0)
+                except:
+                    pass
+
             self.client.put_object(
                 Bucket=self.bucket_name,
                 Key=key,
@@ -86,6 +86,18 @@ class CDNService:
 
             # Generate public URL
             url = f"{self.public_url}/{key}" if self.public_url else key
+            
+            # Calculate size
+            size = 0
+            if isinstance(file_content, bytes):
+                size = len(file_content)
+            elif hasattr(file_content, 'tell'):
+                 try:
+                     file_content.seek(0, 2) # Seek to end
+                     size = file_content.tell()
+                     file_content.seek(0) # Reset
+                 except:
+                     pass
 
             logger.info(f"Uploaded to CDN: {key}")
 
@@ -95,7 +107,7 @@ class CDNService:
                 "key": key,
                 "filename": safe_filename,
                 "content_type": content_type,
-                "size": len(file_content),
+                "size": size,
                 "storage": "cdn",
             }
 
@@ -256,11 +268,11 @@ class CDNService:
 
     def _save_locally(
         self,
-        file_content: bytes,
+        file_content: Any,
         filename: str,
         folder: str
     ) -> Dict[str, Any]:
-        """Save file locally as fallback."""
+        """Save file locally as fallback (supports bytes or streams)."""
         try:
             safe_filename = sanitize_filename(filename)
             unique_filename = f"{uuid.uuid4()}_{safe_filename}"
@@ -271,8 +283,23 @@ class CDNService:
 
             # Save file
             file_path = os.path.join(folder_path, unique_filename)
-            with open(file_path, 'wb') as f:
-                f.write(file_content)
+            
+            size = 0
+            
+            if isinstance(file_content, bytes):
+                with open(file_path, 'wb') as f:
+                    f.write(file_content)
+                size = len(file_content)
+            else:
+                # Stream copy
+                if hasattr(file_content, 'seek'):
+                    file_content.seek(0)
+                
+                with open(file_path, 'wb') as f:
+                    import shutil
+                    shutil.copyfileobj(file_content, f)
+                
+                size = os.path.getsize(file_path)
 
             # Generate URL (relative path for local)
             url = f"/uploads/{folder}/{unique_filename}"
@@ -285,7 +312,7 @@ class CDNService:
                 "key": f"{folder}/{unique_filename}",
                 "filename": safe_filename,
                 "content_type": get_mime_type(filename),
-                "size": len(file_content),
+                "size": size,
                 "storage": "local",
             }
 
