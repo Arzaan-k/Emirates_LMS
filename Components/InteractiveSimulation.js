@@ -243,6 +243,7 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
 
     const videoRef = useRef(null);
     const controlsTimeout = useRef(null);
+    const isProcessingStep = useRef(false); // Ref to track if step is being processed to prevent duplicates
     const [videoKey, setVideoKey] = useState(0); // Key to force video re-mount on step change
 
     // Initialize simulation
@@ -260,6 +261,7 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
     useEffect(() => {
         setVideoError(null);
         setIsVideoLoading(false);
+        isProcessingStep.current = false; // Reset processing flag for new node
     }, [currentNodeId]);
 
     // Auto-hide controls after 3 seconds when video is playing
@@ -379,11 +381,21 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
     // Handle video completion - called on every playback status update
     const handleVideoEnd = useCallback(async (status) => {
         // Only process when video has actually finished playing
-        // Check both didJustFinish AND ensure we're in a playing state
-        if (!status.didJustFinish) return;
-        if (!isVideoPlaying) return;
+        if (!status.isLoaded) return;
+
+        // Check for finish or near-finish (robustness)
+        const isFinished = status.didJustFinish;
+
+        if (!isFinished) return;
+
+        // Prevent double processing for the same step
+        if (isProcessingStep.current) return;
 
         console.log('[Simulation] Video finished, processing next step');
+
+        // Mark as processing immediately
+        isProcessingStep.current = true;
+
         setIsVideoPlaying(false);
 
         // Find next node based on correct option
