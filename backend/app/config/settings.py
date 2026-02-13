@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     # ===========================================
     # SECURITY
     # ===========================================
-    ALLOWED_ORIGINS: str = Field(default="http://localhost:8081,http://localhost:8000,http://192.168.1.143:8000,http://192.168.1.143:8081,https://bwc-lms-demo.netlify.app,https://bwc-lms-demo.netlify.app/,*", env="ALLOWED_ORIGINS")
+    ALLOWED_ORIGINS: str = Field(default="https://bwc-lms-demo.netlify.app,https://bwc-lms.onrender.com,http://192.168.1.143:8000,http://192.168.29.119:8000,http://10.233.54.1:8000,http://10.107.174.1:8000,http://localhost:8081,http://localhost:8080,http://localhost:19006,*", env="ALLOWED_ORIGINS")
     RATE_LIMIT_DEFAULT: str = Field(default="100/minute", env="RATE_LIMIT_DEFAULT")
     RATE_LIMIT_LOGIN: str = Field(default="5/minute", env="RATE_LIMIT_LOGIN")
     RATE_LIMIT_REGISTER: str = Field(default="10/hour", env="RATE_LIMIT_REGISTER")
@@ -62,8 +62,8 @@ class Settings(BaseSettings):
     # FILE UPLOADS
     # ===========================================
     UPLOAD_DIR: str = Field(default="uploads", env="UPLOAD_DIR")
-    MAX_FILE_SIZE_MB: int = Field(default=100, env="MAX_FILE_SIZE_MB")
-    MAX_VIDEO_SIZE_MB: int = Field(default=500, env="MAX_VIDEO_SIZE_MB")
+    MAX_FILE_SIZE_MB: int = Field(default=500, env="MAX_FILE_SIZE_MB")
+    MAX_VIDEO_SIZE_MB: int = Field(default=5120, env="MAX_VIDEO_SIZE_MB")
     ALLOWED_EXTENSIONS: List[str] = [
         ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
         ".mp4", ".mp3", ".wav", ".webm", ".mov", ".avi",
