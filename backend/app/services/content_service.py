@@ -513,8 +513,20 @@ class ContentService:
             logger.info(f"Reassigned content '{content.title}' to Uncategorized (matched by ID)")
 
         # Now delete the bucket
-        self.db.delete(bucket)
+        # Use direct deletion query for robustness
+        from app.models.content import CourseBucket
+        rows_deleted = self.db.query(CourseBucket).filter(CourseBucket.id == bucket_id).delete()
         self.db.commit()
+        
+        # Verification
+        if rows_deleted == 0:
+            logger.warning(f"Bucket {bucket_id} was not found during delete operation (rows_deleted=0)")
+        
+        # Double check existence
+        if self.db.query(CourseBucket).filter(CourseBucket.id == bucket_id).first():
+            logger.error(f"CRITICAL: Bucket {bucket_id} still exists in DB after deletion/commit!")
+        else:
+            logger.info(f"Verified: Bucket {bucket_id} is fully removed from DB.")
         
         # Invalidate skill categories cache since buckets are used as skill categories
         invalidate_skill_categories_cache()

@@ -1,0 +1,30 @@
+Total buckets in DB: 13
+--------------------------------------------------
+ID: bucket_f92f7d6b, Name: 'Career Progression', Active: True, InternalOrder: 0
+ID: bucket_c8634a2b, Name: 'PDF', Active: True, InternalOrder: 0
+ID: bucket_c34b2e43, Name: 'Doc', Active: True, InternalOrder: 0
+ID: bucket_1785c3f0, Name: 'Self Learning', Active: True, InternalOrder: 0
+ID: uncategorized, Name: 'Uncategorized', Active: True, InternalOrder: 9999
+ID: bucket_8db3474e, Name: 'Product Manual', Active: True, InternalOrder: 0
+ID: bucket_e8d354f1, Name: 'Waffler', Active: True, InternalOrder: 0
+ID: bucket_9fe4153f, Name: 'Store Manager', Active: True, InternalOrder: 0
+ID: bucket_7089b94e, Name: 'Process Manual', Active: True, InternalOrder: 0
+ID: bucket_601758b0, Name: 'Silver Waffler', Active: True, InternalOrder: 0
+ID: bucket_864a47c4, Name: 'Shift Manager', Active: True, InternalOrder: 0
+ID: bucket_74ae69e3, Name: 'Gold Waffler', Active: True, InternalOrder: 0
+ID: bucket_ed799025, Name: 'Assistant Manager', Active: True, InternalOrder: 0
+--------------------------------------------------
+Frequency of Bucket Names:
+ - 'Career Progression': 1
+ - 'PDF': 1
+ - 'Doc': 1
+ - 'Self Learning': 1
+ - 'Uncategorized': 1
+ - 'Product Manual': 1
+ - 'Waffler': 1
+ - 'Store Manager': 1
+ - 'Process Manual': 1
+ - 'Silver Waffler': 1
+ - 'Shift Manager': 1
+ - 'Gold Waffler': 1
+ - 'Assistant Manager': 1
