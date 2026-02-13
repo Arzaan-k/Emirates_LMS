@@ -615,9 +615,6 @@ async def bulk_folder_upload(
                     await file.seek(0)
                     shutil.copyfileobj(file.file, f)
                 
-                file_size = os.path.getsize(local_path)
-                file_size_mb = file_size / (1024 * 1024)
-
                 # Check for duplicate if skip_duplicates is enabled
                 title = os.path.splitext(filename)[0]
                 existing_content = None
@@ -656,75 +653,55 @@ async def bulk_folder_upload(
                         results["replaced"] += 1
                         # Continue to upload new version
 
-                # Optimize documents for preview (compress or convert if too large)
-                pdf_url = None
-                optimized_url = None
-                converter = get_converter()
-
-                if converter.needs_conversion(filename):
-                    logger.info(f"Optimizing {filename} for preview...")
-                    success, output_path, message = await converter.convert_to_pdf(local_path)
-                    logger.info(f"Optimization: {message}")
-
-                    if success and output_path:
-                        is_pdf = output_path.lower().endswith('.pdf')
-                        opt_ext = '.pdf' if is_pdf else ext
-
-                        if cdn_service.enabled:
-                            opt_cdn_key = f"content/{content_id}_optimized{opt_ext}"
-                            with open(output_path, "rb") as opt_file:
-                                opt_cdn_result = cdn_service.upload_file(
-                                    opt_file,
-                                    opt_cdn_key,
-                                    "application/pdf" if is_pdf else file.content_type
-                                )
-                            
-                            if opt_cdn_result:
-                                if isinstance(opt_cdn_result, dict):
-                                    optimized_url = opt_cdn_result.get("url")
-                                else:
-                                    optimized_url = str(opt_cdn_result)
-
-                        if not optimized_url:
-                            opt_local_path = os.path.join(settings.UPLOAD_DIR, f"{content_id}_optimized{opt_ext}")
-                            if output_path != opt_local_path:
-                                shutil.copy(output_path, opt_local_path)
-                            optimized_url = f"{settings.BASE_URL}/uploads/{content_id}_optimized{opt_ext}"
-
-                        if is_pdf:
-                            pdf_url = optimized_url
-
-                        if output_path != local_path:
-                            try:
-                                os.remove(output_path)
-                            except:
-                                pass
-
-                # Upload original file to CDN
-                # OPTIMIZATION: Skip uploading large original files if we have a PDF conversion
-                video_url = None
-                should_upload_original = not pdf_url or file_size_mb < 25
-
-                if cdn_service.enabled and should_upload_original:
-                    cdn_key = f"content/{content_id}{ext}"
-                    with open(local_path, "rb") as f:
-                        cdn_result = cdn_service.upload_file(f, cdn_key, file.content_type)
+                # Use local URL initially (instant response)
+                local_url = f"{settings.BASE_URL}/uploads/{content_id}{ext}"
+                
+                # Create DB entry immediately
+                with get_db_context() as db:
+                    service = ContentService(db)
                     
-                    if cdn_result:
-                        if isinstance(cdn_result, dict):
-                            video_url = cdn_result.get("url")
-                        else:
-                            video_url = str(cdn_result)
-                elif pdf_url and not should_upload_original:
-                    video_url = pdf_url
+                    content_data = {
+                        "id": content_id,
+                        "title": title,
+                        "description": f"Uploaded from {relative_path}",
+                        "bucket": target_bucket_info["name"],
+                        "bucket_id": target_bucket_info["id"],
+                        "resource_type": resource_type,
+                        "video_url": local_url,  # Temporary local URL
+                        "file_url": local_url,   # Temporary local URL
+                        "is_path_node": True,
+                        "learning_path_type": learning_path_type,
+                        "xp": 50,
+                        "timestamp": datetime.utcnow(),
+                        "extra_data": {"status": "queued"}
+                    }
+                    
+                    service.create_content(content_data)
 
-                if not video_url:
-                    video_url = f"{settings.BASE_URL}/uploads/{content_id}{ext}"
+                # Offload heavy lifting (Optimization + CDN Upload) to background task
+                converter = get_converter()
+                
+                background_tasks.add_task(
+                    process_bulk_upload_item,
+                    content_id,
+                    local_path,
+                    filename,
+                    file.content_type,
+                    cdn_service,
+                    converter
+                )
+                
+                logger.info(f"Queued background processing for {filename}")
 
-                # Create content record with fresh db connection
-                # Priority for viewing: PDF > optimized/compressed > original
-                viewing_url = pdf_url or optimized_url or video_url
-                content_data = {
+                results["uploaded"] += 1
+                results["items"].append({
+                    "filename": filename,
+                    "path": relative_path,
+                    "bucket": target_bucket_info["name"],
+                    "status": "processing", # Frontend should handle this
+                    "url": local_url
+                })
+
                     "id": content_id,
                     "title": title,
                     "description": f"Uploaded from folder: {root_bucket_name}",
@@ -805,6 +782,161 @@ async def bulk_folder_upload(
     except Exception as e:
         logger.error(f"Bulk folder upload failed: {e}")
         raise HTTPException(status_code=500, detail=f"Bulk upload failed: {str(e)}")
+
+
+# Semaphore to limit concurrent background processing to 1 (Critical for Free Tier 512MB RAM)
+processing_semaphore = asyncio.Semaphore(1)
+
+async def process_bulk_upload_item(
+    content_id: str,
+    local_path: str,
+    filename: str,
+    content_type: str,
+    cdn_service: CDNService,
+    converter: Any
+):
+    """
+    Background task to process uploaded file (Free Tier Optimized).
+    
+    Strategy for Reliability:
+    1. STRICT SEQUENTIAL PROCESSING (via Semaphore) to prevent OOM.
+    2. UPLOAD ORIGINAL FIRST to R2/CDN. Since Render disk is ephemeral, 
+       we must secure the file in cloud storage ASAP.
+    3. OPTIMIZE (Convert to PDF) afterwards.
+    """
+    async with processing_semaphore:
+        logger.info(f"Background processing started for {content_id} ({filename})")
+        
+        # 0. UPDATE STATUS -> PROCESSING
+        try:
+            with get_db_context() as db:
+                service = ContentService(db)
+                service.update_content_status(content_id, "processing")
+        except Exception as e:
+            logger.warning(f"Could not update status to processing for {content_id}: {e}")
+        
+        # Verify file still exists (could be lost if server restarted)
+        if not os.path.exists(local_path):
+            error_msg = f"File missing: {local_path}"
+            logger.error(f"{error_msg}. Likely lost due to ephemeral usage.")
+            with get_db_context() as db:
+                service = ContentService(db)
+                service.update_content_status(content_id, "failed", error_msg)
+            return
+
+        try:
+            ext = os.path.splitext(filename)[1].lower()
+            original_cdn_url = None
+            pdf_url = None
+            optimized_url = None
+            
+            # --- STEP 1: SECURE THE ASSET (Upload Original) ---
+            # ... (omitted similar logic, but easier to just rewrite complete function to avoid diff errors) ...
+            if cdn_service.enabled:
+                logger.info(f"Step 1: Securing original file to CDN for {content_id}...")
+                cdn_key = f"content/{content_id}{ext}"
+                
+                try:
+                    # Stream upload
+                    with open(local_path, "rb") as f:
+                        cdn_result = cdn_service.upload_file(f, cdn_key, content_type)
+                    
+                    if cdn_result:
+                        if isinstance(cdn_result, dict):
+                            original_cdn_url = cdn_result.get("url")
+                        else:
+                            original_cdn_url = str(cdn_result)
+                            
+                        # Update DB immediately with this secure URL
+                        with get_db_context() as db:
+                            service = ContentService(db)
+                            service.update_content_urls(
+                                content_id, 
+                                video_url=original_cdn_url,
+                                file_url=original_cdn_url
+                            )
+                        logger.info(f"Original file secured at: {original_cdn_url}")
+                except Exception as e:
+                    logger.error(f"Failed to upload original file: {e}")
+                    # Continue to optimization? Yes, maybe that works.
+
+            # --- STEP 2: OPTIMIZE (Heavy CPU/RAM usage) ---
+            if converter.needs_conversion(filename):
+                logger.info(f"Step 2: optimizing {filename}...")
+                
+                success, output_path, message = await converter.convert_to_pdf(local_path)
+                
+                if success and output_path:
+                    # Upload optimized file
+                    is_pdf = output_path.lower().endswith('.pdf')
+                    opt_ext = '.pdf' if is_pdf else ext
+                    
+                    if cdn_service.enabled:
+                        opt_cdn_key = f"content/{content_id}_optimized{opt_ext}"
+                        with open(output_path, "rb") as opt_file:
+                            opt_cdn_result = cdn_service.upload_file(
+                                opt_file,
+                                opt_cdn_key,
+                                "application/pdf" if is_pdf else content_type
+                            )
+                        
+                        if opt_cdn_result:
+                            if isinstance(opt_cdn_result, dict):
+                                optimized_url = opt_cdn_result.get("url")
+                            else:
+                                optimized_url = str(opt_cdn_result)
+                    
+                    if not optimized_url:
+                        # Fallback for CDN failure
+                        optimized_url = f"{settings.BASE_URL}/uploads/{content_id}_optimized{opt_ext}"
+                        opt_local_path = os.path.join(settings.UPLOAD_DIR, f"{content_id}_optimized{opt_ext}")
+                        if output_path != opt_local_path and os.path.exists(output_path):
+                            shutil.copy(output_path, opt_local_path)
+
+                    if is_pdf:
+                        pdf_url = optimized_url
+                    
+                    # Cleanup temp output
+                    if output_path != local_path and os.path.exists(output_path):
+                         try:
+                             os.remove(output_path)
+                         except:
+                             pass
+
+            # Update DB with final optimized version AND status=ready
+            with get_db_context() as db:
+                service = ContentService(db)
+                # We prefer the Optimized URL for viewing, but keep original as backup
+                service.update_content_urls(
+                    content_id, 
+                    video_url=optimized_url or original_cdn_url, 
+                    pdf_url=pdf_url,
+                    file_url=original_cdn_url
+                )
+                service.update_content_status(content_id, "ready")
+
+            # --- STEP 3: FINAL CLEANUP ---
+            if original_cdn_url and os.path.exists(local_path):
+                try:
+                    os.remove(local_path)
+                    logger.info(f"Removed local file {local_path} (secured in CDN)")
+                except:
+                    pass
+                
+            logger.info(f"Background processing completed for {content_id}")
+            
+        except Exception as e:
+            logger.error(f"Background processing failed for {content_id}: {e}")
+            import traceback
+            tb = traceback.format_exc()
+            logger.error(tb)
+            # Mark as failed
+            try:
+                with get_db_context() as db:
+                    service = ContentService(db)
+                    service.update_content_status(content_id, "failed", str(e))
+            except:
+                pass
 
 
 @router.get("/{item_id}")

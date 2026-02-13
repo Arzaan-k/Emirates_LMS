@@ -99,6 +99,48 @@ class ContentService:
         logger.info(f"Updated content: {content_id}")
         return content
 
+    def update_content_urls(
+        self, 
+        content_id: str, 
+        video_url: Optional[str] = None, 
+        pdf_url: Optional[str] = None, 
+        file_url: Optional[str] = None
+    ):
+        """Update content URLs (used by background tasks)."""
+        updates = {}
+        if video_url: updates["video_url"] = video_url
+        if pdf_url: updates["pdf_url"] = pdf_url
+        if file_url: updates["file_url"] = file_url
+        
+        if updates:
+            return self.update_content(content_id, updates)
+        return None
+
+    def update_content_status(self, content_id: str, status: str, error_message: Optional[str] = None):
+        """Update processing status in extra_data safely."""
+        content = self.get_content_by_id(content_id)
+        
+        # Initialize extra_data if None
+        if content.extra_data is None:
+            content.extra_data = {}
+            
+        # Update status
+        # Create a copy to ensure SQLAlchemy detects change
+        new_extra = dict(content.extra_data)
+        new_extra["status"] = status
+        
+        if error_message:
+            new_extra["error_message"] = error_message
+        elif status == "ready" and "error_message" in new_extra:
+             # Clear error on success
+             del new_extra["error_message"]
+             
+        content.extra_data = new_extra
+        content.updated_at = datetime.utcnow()
+        
+        self.db.commit()
+        return content
+
     def delete_content(self, content_id: str) -> bool:
         """Delete content."""
         content = self.get_content_by_id(content_id)
