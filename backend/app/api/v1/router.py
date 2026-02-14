@@ -347,24 +347,36 @@ async def get_audit_logs(
     """
     Get audit logs, optionally filtered by action type.
     Returns user-friendly descriptions instead of technical details.
+
+    NOTE: Filtering happens AFTER transformation because:
+    - Database stores raw actions like "POST /api/v1/simulations"
+    - We transform to friendly names like "CREATE_SIMULATION"
+    - Filter pills show transformed names, so we filter on transformed values
     """
     from app.repositories.analytics_repository import AnalyticsRepository
 
     try:
         repo = AnalyticsRepository(db)
-        logs = repo.get_audit_logs(action_type)
+        # Always fetch all logs first (no filter at DB level)
+        # because we need to filter on TRANSFORMED action names
+        logs = repo.get_audit_logs(action_type=None)
 
         result = []
         action_types_set = set()
         for log in logs:
             log_dict = log.to_dict() if hasattr(log, 'to_dict') else dict(log)
-            # Transform to friendly format
+            # Transform to friendly format FIRST
             log_dict = _make_audit_log_friendly(log_dict)
             # Frontend expects admin_email
             log_dict["admin_email"] = log_dict.get("user_email", "System")
-            result.append(log_dict)
+
+            # Collect all action types for filter pills
             if log_dict.get("action"):
                 action_types_set.add(log_dict["action"])
+
+            # Filter AFTER transformation if action_type is specified
+            if action_type is None or log_dict.get("action") == action_type:
+                result.append(log_dict)
 
         # Return in format expected by frontend
         return {
@@ -548,24 +560,36 @@ async def get_audit_logs_root_alias(
     BACKWARD COMPATIBILITY: Alias for /api/v1/audit-logs
     Frontend calls /audit-logs directly.
     Returns user-friendly descriptions instead of technical details.
+
+    NOTE: Filtering happens AFTER transformation because:
+    - Database stores raw actions like "POST /api/v1/simulations"
+    - We transform to friendly names like "CREATE_SIMULATION"
+    - Filter pills show transformed names, so we filter on transformed values
     """
     from app.repositories.analytics_repository import AnalyticsRepository
 
     try:
         repo = AnalyticsRepository(db)
-        logs = repo.get_audit_logs(action_type)
+        # Always fetch all logs first (no filter at DB level)
+        # because we need to filter on TRANSFORMED action names
+        logs = repo.get_audit_logs(action_type=None)
 
         result = []
         action_types_set = set()
         for log in logs:
             log_dict = log.to_dict() if hasattr(log, 'to_dict') else dict(log)
-            # Transform to friendly format
+            # Transform to friendly format FIRST
             log_dict = _make_audit_log_friendly(log_dict)
             # Frontend expects admin_email
             log_dict["admin_email"] = log_dict.get("user_email", "System")
-            result.append(log_dict)
+
+            # Collect all action types for filter pills
             if log_dict.get("action"):
                 action_types_set.add(log_dict["action"])
+
+            # Filter AFTER transformation if action_type is specified
+            if action_type is None or log_dict.get("action") == action_type:
+                result.append(log_dict)
 
         # Return in format expected by frontend
         return {
