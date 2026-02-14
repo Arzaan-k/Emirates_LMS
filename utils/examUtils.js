@@ -17,6 +17,7 @@ function seededRandom(seed) {
 
     return function() {
         hash = (hash * 9301 + 49297) % 233280;
+        if (hash < 0) hash += 233280; // Ensure positive
         return hash / 233280.0;
     };
 }

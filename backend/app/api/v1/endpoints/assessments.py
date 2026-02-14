@@ -1297,21 +1297,39 @@ async def get_exam_pin_status(
         time_remaining_seconds = 0
         
         if exam.generated_pin and exam.pin_generated_at:
-            validity_minutes = exam.pin_validity_minutes or 30
-            valid_until = exam.pin_generated_at + timedelta(minutes=validity_minutes)
-            now = datetime.utcnow()
-            
-            if now < valid_until:
-                is_active = True
-                time_remaining_seconds = int((valid_until - now).total_seconds())
-        
+            # Handle potential string type from DB
+            pin_gen_at = exam.pin_generated_at
+            if isinstance(pin_gen_at, str):
+                try:
+                    pin_gen_at = datetime.fromisoformat(pin_gen_at)
+                except:
+                    logger.error(f"Invalid pin_generated_at format: {pin_gen_at}")
+                    pin_gen_at = None
+
+            if pin_gen_at:
+                validity_minutes = exam.pin_validity_minutes or 30
+                try:
+                    valid_until = pin_gen_at + timedelta(minutes=validity_minutes)
+                    now = datetime.utcnow()
+                    
+                    if now < valid_until:
+                        is_active = True
+                        time_remaining_seconds = int((valid_until - now).total_seconds())
+                except Exception as e:
+                    logger.error(f"Error calculating PIN validity: {e}")
+
+        def safe_iso(val):
+            if hasattr(val, 'isoformat'):
+                return val.isoformat()
+            return val
+
         return {
             "pin_enabled": True,
             "pin": exam.generated_pin,
             "active_pins": exam.active_pins or [],
             "is_active": is_active,
-            "generated_at": exam.pin_generated_at.isoformat() if exam.pin_generated_at else None,
-            "valid_until": valid_until.isoformat() if valid_until else None,
+            "generated_at": safe_iso(exam.pin_generated_at) if exam.pin_generated_at else None,
+            "valid_until": safe_iso(valid_until) if valid_until else None,
             "time_remaining_seconds": time_remaining_seconds,
             "validity_minutes": exam.pin_validity_minutes or 30,
             "can_generate": can_generate,

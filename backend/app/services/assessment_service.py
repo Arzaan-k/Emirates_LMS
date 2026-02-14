@@ -632,7 +632,6 @@ class AssessmentService:
             "completion_rate": round((completed / present * 100) if present > 0 else 0, 1),
             "pass_rate": round((passed / completed * 100) if completed > 0 else 0, 1),
             "average_score": round(avg_score, 1),
-            "avg_score": round(avg_score, 1),
         }
 
     def get_exam_report(self, exam_id: str) -> Dict[str, Any]:
