@@ -1248,7 +1248,10 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
   // FETCH PROCTORED ASSESSMENTS
   const fetchProctoredAssessments = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/v1/assessments/proctored`);
+      const token = await AsyncStorage.getItem('userToken');
+      const response = await fetch(`${API_URL}/api/v1/assessments/proctored`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       const data = await response.json();
       if (Array.isArray(data)) {
         setAssignedProctoring(data);
@@ -1444,7 +1447,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
     } else if (notif.type === 'proctored' && notif.data) {
       navigation.navigate('ProctoredAssessment', {
         assessmentData: notif.data,
-        userProfile: { role: 'User' }
+        userProfile: userProfile
       });
     } else {
       setSelectedNotification(notif);
@@ -1464,7 +1467,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
           userEmail={userEmail}
           onStartExam={(examData) => navigation.navigate('ProctoredAssessment', {
             assessmentData: examData,
-            userProfile: { role: 'User', email: userEmail },
+            userProfile: userProfile,
             isScheduledExam: true
           })}
         />
@@ -1478,7 +1481,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
           data={assignedProctoring}
           onStart={(assessment) => navigation.navigate('ProctoredAssessment', {
             assessmentData: assessment,
-            userProfile: { role: 'User' }
+            userProfile: userProfile
           })}
         />
 
@@ -1549,7 +1552,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
             } else if (notification?.type === 'proctored' && notification?.data) {
               navigation.navigate('ProctoredAssessment', {
                 assessmentData: notification.data,
-                userProfile: { role: 'User' }
+                userProfile: userProfile
               });
             } else {
               setSelectedNotification(notification);

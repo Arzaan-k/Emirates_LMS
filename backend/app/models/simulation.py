@@ -125,3 +125,50 @@ class SimulationProgress(Base):
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
         }
+
+
+class SimulationAnalyticsSnapshot(Base):
+    """
+    Pre-computed analytics snapshot per simulation.
+    Refreshed after every completion to provide instant historical reads.
+    Only stores aggregates — individual attempts remain in simulation_progress.
+    """
+    __tablename__ = "simulation_analytics_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    simulation_id = Column(String(255), ForeignKey('simulations.id'), unique=True, nullable=False, index=True)
+
+    # Attempt counts
+    total_attempts = Column(Integer, default=0)
+    total_completed = Column(Integer, default=0)
+    total_passed = Column(Integer, default=0)
+    total_failed = Column(Integer, default=0)
+
+    # Score aggregates
+    avg_score = Column(Float, default=0.0)
+    highest_score = Column(Float, default=0.0)
+    lowest_score = Column(Float, default=0.0)
+    pass_rate = Column(Float, default=0.0)          # percentage 0-100
+
+    # Time
+    avg_time_seconds = Column(Float, default=0.0)
+
+    # Metadata
+    last_attempt_at = Column(DateTime)
+    last_updated = Column(DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "simulation_id": self.simulation_id,
+            "total_attempts": self.total_attempts,
+            "total_completed": self.total_completed,
+            "total_passed": self.total_passed,
+            "total_failed": self.total_failed,
+            "avg_score": self.avg_score,
+            "highest_score": self.highest_score,
+            "lowest_score": self.lowest_score,
+            "pass_rate": self.pass_rate,
+            "avg_time_seconds": self.avg_time_seconds,
+            "last_attempt_at": self.last_attempt_at.isoformat() if self.last_attempt_at else None,
+            "last_updated": self.last_updated.isoformat() if self.last_updated else None,
+        }

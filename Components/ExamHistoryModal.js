@@ -51,11 +51,19 @@ export default function ExamHistoryModal({ visible, onClose }) {
     const fetchExamReport = async (examId) => {
         setLoadingReport(true);
         try {
+            console.log(`[ExamHistory] Fetching report for ${examId} from ${API_URL}/api/v1/assessments/scheduled/${examId}/report`);
             const res = await fetch(`${API_URL}/api/v1/assessments/scheduled/${examId}/report`);
+            
+            if (!res.ok) {
+                const text = await res.text();
+                throw new Error(`Server returned ${res.status}: ${text.substring(0, 100)}`);
+            }
+            
             const data = await res.json();
             setExamReport(data);
         } catch (e) {
             console.error('Error fetching exam report:', e);
+            // Optionally set error state to show in UI
         }
         setLoadingReport(false);
     };
@@ -64,14 +72,20 @@ export default function ExamHistoryModal({ visible, onClose }) {
     const fetchPinStatus = async (examId) => {
         try {
             const res = await fetch(`${API_URL}/api/v1/assessments/scheduled/${examId}/pin-status`);
+            
+            if (!res.ok) {
+               // Silently fail for PIN status usually, but good to log
+               console.warn(`PIN Status fetch failed: ${res.status}`);
+               return;
+            }
+
             const data = await res.json();
             setPinStatus(prev => ({ ...prev, [examId]: data }));
-            return data;
         } catch (e) {
             console.error('Error fetching PIN status:', e);
-            return null;
         }
     };
+
 
     // Generate a new PIN for the exam
     const handleGeneratePin = async (examId, examTitle) => {
@@ -177,7 +191,7 @@ export default function ExamHistoryModal({ visible, onClose }) {
                 </View>
 
                 {/* Content */}
-                {selectedExam && examReport ? (
+                {selectedExam ? (
                     // Detailed Report View
                     <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
                         <TouchableOpacity
@@ -190,7 +204,7 @@ export default function ExamHistoryModal({ visible, onClose }) {
 
                         {loadingReport ? (
                             <ActivityIndicator color="#6366F1" style={{ marginTop: 40 }} />
-                        ) : (
+                        ) : examReport ? (
                             <Animated.View entering={FadeIn}>
                                 {/* Exam Header */}
                                 <View style={styles.examHeader}>
@@ -198,12 +212,12 @@ export default function ExamHistoryModal({ visible, onClose }) {
                                     <View style={[
                                         styles.statusBadge,
                                         {
-                                            backgroundColor: getStatusColor(examReport.status).bg,
-                                            borderColor: getStatusColor(examReport.status).border
+                                            backgroundColor: getStatusColor(examReport.exam.status).bg,
+                                            borderColor: getStatusColor(examReport.exam.status).border
                                         }
                                     ]}>
-                                        <Text style={[styles.statusText, { color: getStatusColor(examReport.status).text }]}>
-                                            {getStatusLabel(examReport.status)}
+                                        <Text style={[styles.statusText, { color: getStatusColor(examReport.exam.status).text }]}>
+                                            {getStatusLabel(examReport.exam.status)}
                                         </Text>
                                     </View>
                                 </View>
@@ -431,6 +445,14 @@ export default function ExamHistoryModal({ visible, onClose }) {
 
                                 <View style={{ height: 40 }} />
                             </Animated.View>
+                        ) : (
+                            <View style={styles.emptyState}>
+                                <Feather name="alert-circle" size={40} color="#EF4444" />
+                                <Text style={styles.emptyText}>Failed to load report</Text>
+                                <TouchableOpacity style={styles.generatePinBtn} onPress={() => fetchExamReport(selectedExam.id)}>
+                                    <Text style={styles.generatePinBtnText}>Retry</Text>
+                                </TouchableOpacity>
+                            </View>
                         )}
                     </ScrollView>
                 ) : (

@@ -365,46 +365,33 @@ async def delete_proctored_assessment(
 @router.post("/proctored/{assessment_id}/submit")
 async def submit_assessment(
     assessment_id: str,
-    user_email: str = Form(...),
-    user_name: str = Form(...),
     answers: str = Form(...),  # JSON array
-    time_taken_seconds: int = Form(0),
-    violations: int = Form(0),
     breach_log: str = Form("[]"),
-    critical_breaches: int = Form(0),
-    warning_breaches: int = Form(0),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     Submit a proctored assessment attempt with detailed breach tracking.
+    User identity is taken from the JWT token — not from form fields.
     """
     service = AssessmentService(db)
-    
+
     try:
         answers_list = json.loads(answers)
         breach_log_list = json.loads(breach_log)
-    except:
-        raise HTTPException(status_code=400, detail="Invalid JSON format")
-    
-    submission_data = {
-        "user_email": user_email,
-        "user_name": user_name,
-        "answers": answers_list,
-        "time_taken_seconds": time_taken_seconds,
-        "violations": violations,
-        "breach_log": breach_log_list,
-        "critical_breaches": critical_breaches,
-        "warning_breaches": warning_breaches,
-    }
-    
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON format for answers or breach_log")
+
+    user_email = current_user["email"]
+    user_name = current_user.get("name") or current_user.get("email")
+
     try:
         result = service.submit_assessment(
             assessment_id=assessment_id,
             user_email=user_email,
             user_name=user_name,
             answers=answers_list,
-            time_taken_seconds=time_taken_seconds,
-            breach_log=breach_log_list
+            breach_log=breach_log_list,
         )
         logger.info(f"Assessment submitted: {user_email} - {assessment_id}")
         
@@ -452,7 +439,7 @@ async def get_assessment_submissions(
     Get submissions for a specific assessment.
     """
     service = AssessmentService(db)
-    submissions = service.get_submissions_by_assessment(assessment_id)
+    submissions = service.get_assessment_submissions(assessment_id)
     
     result = []
     for submission in submissions:
@@ -974,41 +961,30 @@ async def start_scheduled_exam(
 @router.post("/scheduled/{exam_id}/submit")
 async def submit_scheduled_exam(
     exam_id: str,
-    user_email: str = Form(...),
-    user_name: str = Form(...),
     answers: str = Form(...),
-    time_taken_seconds: int = Form(...),
-    violations: int = Form(0),
-    breach_log: str = Form("[]"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     Submit a scheduled exam.
+    User identity is taken from the JWT token — not from form fields.
     """
     service = AssessmentService(db)
-    
+
     try:
         answers_list = json.loads(answers)
-        breach_log_list = json.loads(breach_log)
-    except:
-        raise HTTPException(status_code=400, detail="Invalid JSON format")
-    
-    submission_data = {
-        "user_email": user_email,
-        "user_name": user_name,
-        "answers": answers_list,
-        "time_taken_seconds": time_taken_seconds,
-        "violations": violations,
-        "breach_log": breach_log_list,
-    }
-    
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON format for answers")
+
+    user_email = current_user["email"]
+    user_name = current_user.get("name") or current_user.get("email")
+
     try:
         result = service.submit_scheduled_exam(
             exam_id=exam_id,
-            user_email=submission_data["user_email"],
-            user_name=submission_data["user_name"],
-            answers=submission_data["answers"],
-            time_taken_seconds=submission_data["time_taken_seconds"]
+            user_email=user_email,
+            user_name=user_name,
+            answers=answers_list,
         )
         logger.info(f"Scheduled exam submitted: {user_email} - {exam_id}")
         return result
@@ -1321,21 +1297,39 @@ async def get_exam_pin_status(
         time_remaining_seconds = 0
         
         if exam.generated_pin and exam.pin_generated_at:
-            validity_minutes = exam.pin_validity_minutes or 30
-            valid_until = exam.pin_generated_at + timedelta(minutes=validity_minutes)
-            now = datetime.utcnow()
-            
-            if now < valid_until:
-                is_active = True
-                time_remaining_seconds = int((valid_until - now).total_seconds())
-        
+            # Handle potential string type from DB
+            pin_gen_at = exam.pin_generated_at
+            if isinstance(pin_gen_at, str):
+                try:
+                    pin_gen_at = datetime.fromisoformat(pin_gen_at)
+                except:
+                    logger.error(f"Invalid pin_generated_at format: {pin_gen_at}")
+                    pin_gen_at = None
+
+            if pin_gen_at:
+                validity_minutes = exam.pin_validity_minutes or 30
+                try:
+                    valid_until = pin_gen_at + timedelta(minutes=validity_minutes)
+                    now = datetime.utcnow()
+                    
+                    if now < valid_until:
+                        is_active = True
+                        time_remaining_seconds = int((valid_until - now).total_seconds())
+                except Exception as e:
+                    logger.error(f"Error calculating PIN validity: {e}")
+
+        def safe_iso(val):
+            if hasattr(val, 'isoformat'):
+                return val.isoformat()
+            return val
+
         return {
             "pin_enabled": True,
             "pin": exam.generated_pin,
             "active_pins": exam.active_pins or [],
             "is_active": is_active,
-            "generated_at": exam.pin_generated_at.isoformat() if exam.pin_generated_at else None,
-            "valid_until": valid_until.isoformat() if valid_until else None,
+            "generated_at": safe_iso(exam.pin_generated_at) if exam.pin_generated_at else None,
+            "valid_until": safe_iso(valid_until) if valid_until else None,
             "time_remaining_seconds": time_remaining_seconds,
             "validity_minutes": exam.pin_validity_minutes or 30,
             "can_generate": can_generate,
