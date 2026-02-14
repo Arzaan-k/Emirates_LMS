@@ -9,7 +9,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.repositories.base import BaseRepository
-from app.models.simulation import Simulation, SimulationProgress
+from app.models.simulation import Simulation, SimulationProgress, SimulationAnalyticsSnapshot
 
 
 class SimulationRepository(BaseRepository[Simulation]):
@@ -147,3 +147,80 @@ class SimulationProgressRepository(BaseRepository[SimulationProgress]):
                 "choices_made": choices_made or [],
                 "time_spent_seconds": time_spent_seconds,
             })
+
+
+class SimulationAnalyticsRepository:
+    """
+    Repository for SimulationAnalyticsSnapshot — pre-computed per-simulation aggregates.
+    Call upsert_snapshot() after every completion to keep the snapshot current.
+    """
+
+    def __init__(self, db: Session):
+        self.db = db
+
+    def get_snapshot(self, simulation_id: str) -> Optional[SimulationAnalyticsSnapshot]:
+        """Return the latest snapshot for a simulation, or None if none exists yet."""
+        return self.db.query(SimulationAnalyticsSnapshot).filter(
+            SimulationAnalyticsSnapshot.simulation_id == simulation_id
+        ).first()
+
+    def upsert_snapshot(
+        self,
+        simulation_id: str,
+        progress_list: List[SimulationProgress]
+    ) -> SimulationAnalyticsSnapshot:
+        """
+        Recompute and persist aggregate analytics for a simulation.
+        Called after every completion — safe to call repeatedly.
+        """
+        total_attempts = len(progress_list)
+        completed_list = [p for p in progress_list if p.completed]
+        total_completed = len(completed_list)
+        total_passed = sum(1 for p in completed_list if p.passed)
+        total_failed = total_completed - total_passed
+
+        scores = [p.score for p in completed_list if p.score is not None]
+        avg_score = round(sum(scores) / len(scores), 1) if scores else 0.0
+        highest_score = round(max(scores), 1) if scores else 0.0
+        lowest_score = round(min(scores), 1) if scores else 0.0
+        pass_rate = round((total_passed / total_completed) * 100, 1) if total_completed > 0 else 0.0
+
+        times = [p.time_spent_seconds for p in completed_list if p.time_spent_seconds]
+        avg_time = round(sum(times) / len(times), 1) if times else 0.0
+
+        attempt_dates = [p.started_at for p in progress_list if p.started_at]
+        last_attempt_at = max(attempt_dates) if attempt_dates else None
+
+        snapshot = self.get_snapshot(simulation_id)
+        if snapshot:
+            snapshot.total_attempts = total_attempts
+            snapshot.total_completed = total_completed
+            snapshot.total_passed = total_passed
+            snapshot.total_failed = total_failed
+            snapshot.avg_score = avg_score
+            snapshot.highest_score = highest_score
+            snapshot.lowest_score = lowest_score
+            snapshot.pass_rate = pass_rate
+            snapshot.avg_time_seconds = avg_time
+            snapshot.last_attempt_at = last_attempt_at
+            snapshot.last_updated = datetime.utcnow()
+        else:
+            snapshot = SimulationAnalyticsSnapshot(
+                simulation_id=simulation_id,
+                total_attempts=total_attempts,
+                total_completed=total_completed,
+                total_passed=total_passed,
+                total_failed=total_failed,
+                avg_score=avg_score,
+                highest_score=highest_score,
+                lowest_score=lowest_score,
+                pass_rate=pass_rate,
+                avg_time_seconds=avg_time,
+                last_attempt_at=last_attempt_at,
+                last_updated=datetime.utcnow(),
+            )
+            self.db.add(snapshot)
+
+        self.db.commit()
+        self.db.refresh(snapshot)
+        return snapshot

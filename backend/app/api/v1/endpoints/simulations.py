@@ -14,10 +14,28 @@ from fastapi import APIRouter, Depends, Form, File, UploadFile, HTTPException, H
 from sqlalchemy.orm import Session
 
 from app.config.database import get_db
-from app.repositories.simulation_repository import SimulationRepository, SimulationProgressRepository
+from app.repositories.simulation_repository import (
+    SimulationRepository,
+    SimulationProgressRepository,
+    SimulationAnalyticsRepository,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/simulations", tags=["Simulations"])
+
+
+def _refresh_analytics_snapshot(simulation_id: str, db: Session) -> None:
+    """
+    Recompute and persist the analytics snapshot for a simulation.
+    Called after every completion — non-blocking best-effort (errors are logged, not raised).
+    """
+    try:
+        progress_repo = SimulationProgressRepository(db)
+        snap_repo = SimulationAnalyticsRepository(db)
+        all_progress = progress_repo.get_by_simulation(simulation_id)
+        snap_repo.upsert_snapshot(simulation_id, all_progress)
+    except Exception as e:
+        logger.warning(f"Analytics snapshot refresh failed for {simulation_id}: {e}")
 
 
 # ==========================================
@@ -327,6 +345,9 @@ async def complete_simulation(
         choices_made=choices_list,
     )
 
+    # Persist analytics snapshot so admin reads are instant
+    _refresh_analytics_snapshot(simulation_id, db)
+
     logger.info(f"Simulation completed: {user_email} - {simulation_id}")
 
     return {
@@ -563,6 +584,65 @@ Explain what could go wrong. Be specific and educational. Keep it short."""
 
     return {"consequence": consequence}
 
+@router.get("/analytics/{simulation_id}/detailed")
+async def get_simulation_analytics_detailed(
+    simulation_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Detailed analytics for a simulation — reads from pre-computed snapshot table
+    plus the last 50 individual attempts for the admin history view.
+    Falls back to on-the-fly computation if no snapshot exists yet.
+    """
+    snap_repo = SimulationAnalyticsRepository(db)
+    progress_repo = SimulationProgressRepository(db)
+
+    snapshot = snap_repo.get_snapshot(simulation_id)
+
+    # If no snapshot yet (simulation never completed), compute on-the-fly and persist
+    if not snapshot:
+        all_progress = progress_repo.get_by_simulation(simulation_id)
+        if all_progress:
+            snapshot = snap_repo.upsert_snapshot(simulation_id, all_progress)
+
+    aggregate = snapshot.to_dict() if snapshot else {
+        "simulation_id": simulation_id,
+        "total_attempts": 0,
+        "total_completed": 0,
+        "total_passed": 0,
+        "total_failed": 0,
+        "avg_score": 0.0,
+        "highest_score": 0.0,
+        "lowest_score": 0.0,
+        "pass_rate": 0.0,
+        "avg_time_seconds": 0.0,
+        "last_attempt_at": None,
+        "last_updated": None,
+    }
+
+    # Return the 50 most recent completed attempts for the attempt history table
+    recent = progress_repo.get_by_simulation(simulation_id)[:50]
+    attempt_history = [
+        {
+            "id": p.id,
+            "user_email": p.user_email,
+            "score": p.score,
+            "passed": p.passed,
+            "time_spent_seconds": p.time_spent_seconds or 0,
+            "attempt_number": p.attempt_number or 1,
+            "started_at": p.started_at.isoformat() if p.started_at else None,
+            "completed_at": p.completed_at.isoformat() if p.completed_at else None,
+            "completed": p.completed,
+        }
+        for p in recent
+    ]
+
+    return {
+        "aggregate": aggregate,
+        "recentAttempts": attempt_history,
+    }
+
+
 @router.get("/analytics/{simulation_id}")
 async def get_simulation_analytics(
     simulation_id: str,
@@ -573,7 +653,7 @@ async def get_simulation_analytics(
     """
     repo = SimulationProgressRepository(db)
     submissions = repo.get_by_simulation(simulation_id)
-    
+
     total_attempts = len(submissions)
     if total_attempts == 0:
         return {
@@ -581,11 +661,11 @@ async def get_simulation_analytics(
             "averageScore": 0,
             "passRate": 0
         }
-    
+
     avg_score = sum(s.score for s in submissions) / total_attempts
     passed_count = sum(1 for s in submissions if s.passed)
     pass_rate = (passed_count / total_attempts) * 100 if total_attempts > 0 else 0
-    
+
     return {
         "totalAttempts": total_attempts,
         "averageScore": round(avg_score, 1),
@@ -657,6 +737,9 @@ async def complete_simulation_json(
         "passed": passed,
         "choices_made": data.attemptHistory
     })
+
+    # Persist analytics snapshot so admin reads are instant
+    _refresh_analytics_snapshot(data.simulationId, db)
 
     logger.info(f"Simulation completed (JSON): {data.userId} - {data.simulationId}")
 

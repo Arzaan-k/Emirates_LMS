@@ -14,6 +14,7 @@ import {
     Modal,
     FlatList,
     AppState,
+    BackHandler,
     Vibration,
     Platform
 } from 'react-native';
@@ -141,6 +142,7 @@ export default function ProctoredAssessment({ route, navigation }) {
     const [aiAnalysisActive, setAiAnalysisActive] = useState(false);
     const [showBreachModal, setShowBreachModal] = useState(false);
     const [currentBreachWarning, setCurrentBreachWarning] = useState(null);
+    const [showExitConfirm, setShowExitConfirm] = useState(false);
     const lastBreachTimeRef = useRef({});
     const pulseAnim = useSharedValue(1);
 
@@ -148,6 +150,9 @@ export default function ProctoredAssessment({ route, navigation }) {
     const [viewSubmissions, setViewSubmissions] = useState([]);
     const [loadingSubmissions, setLoadingSubmissions] = useState(false);
     const [selectedSubmissionDetail, setSelectedSubmissionDetail] = useState(null);
+    const [resultsSortBy, setResultsSortBy] = useState('date'); // 'date', 'score', 'name'
+    const [resultsSortOrder, setResultsSortOrder] = useState('desc'); // 'asc', 'desc'
+    const [resultsFilter, setResultsFilter] = useState('all'); // 'all', 'passed', 'failed', 'flagged', 'warning', 'clean'
 
     // FETCH AVAILABLE ASSESSMENTS
     useEffect(() => {
@@ -711,15 +716,10 @@ export default function ProctoredAssessment({ route, navigation }) {
         setProctorStatus('submitting');
 
         try {
+            // User identity comes from the JWT token server-side
             const formData = new FormData();
-            formData.append('user_email', userProfile?.email || 'user@example.com');
-            formData.append('user_name', userProfile?.name || 'User');
             formData.append('answers', JSON.stringify(userAnswers));
-            formData.append('time_taken_seconds', recordingTime.toString());
-            formData.append('violations', totalBreaches.toString());
             formData.append('breach_log', JSON.stringify(breachLog));
-            formData.append('critical_breaches', criticalBreaches.toString());
-            formData.append('warning_breaches', warningBreaches.toString());
 
             // Use correct /api/v1/ endpoints for both scheduled and proctored exams
             const submitUrl = isScheduledExam
@@ -734,17 +734,18 @@ export default function ProctoredAssessment({ route, navigation }) {
             });
 
             const result = await response.json();
-            if (result.status === 'success') {
+            if (response.ok && result.submission_id) {
+                // Backend returned successful submission with calculated score
                 setScore({
-                    total: result.result.total,
-                    correct: result.result.correct,
-                    percent: result.result.score,
-                    passed: result.result.passed,
-                    passingScore: result.result.passing_score,
+                    total: result.total_questions,
+                    correct: result.correct_count,
+                    percent: result.score_percent,
+                    passed: result.passed,
+                    passingScore: selectedAssessment?.passing_score || 70,
                     breachLog: breachLog,
-                    totalBreaches: totalBreaches,
-                    criticalBreaches: criticalBreaches,
-                    warningBreaches: warningBreaches
+                    totalBreaches: result.violations || totalBreaches,
+                    criticalBreaches: result.critical_breaches || criticalBreaches,
+                    warningBreaches: result.warning_breaches || warningBreaches
                 });
             } else {
                 // Fallback to local calculation
@@ -788,6 +789,52 @@ export default function ProctoredAssessment({ route, navigation }) {
             setTestSubmitted(true);
         }
     };
+
+    // BACK PRESS HANDLER - show confirmation when test is active
+    // Defined AFTER submitTest to avoid "Cannot access before initialization" error
+    const handleBackPress = useCallback(() => {
+        if (viewMode === 'taker' && testStarted && !testSubmitted) {
+            if (Platform.OS === 'web') {
+                // React Native Web's Alert doesn't reliably handle multi-button dialogs.
+                // Use showExitConfirm modal instead.
+                setShowExitConfirm(true);
+            } else {
+                Alert.alert(
+                    'End Assessment?',
+                    'Are you sure you want to end the assessment? Your current answers will be submitted.',
+                    [
+                        { text: 'Cancel', style: 'cancel' },
+                        { text: 'Submit & Exit', style: 'destructive', onPress: () => submitTest() }
+                    ]
+                );
+            }
+            return true; // Prevent default back action on Android
+        }
+        return false; // Allow default back
+    }, [viewMode, testStarted, testSubmitted, submitTest]);
+
+    // Android hardware back button
+    useEffect(() => {
+        const backHandler = BackHandler.addEventListener('hardwareBackPress', handleBackPress);
+        return () => backHandler.remove();
+    }, [handleBackPress]);
+
+    // Web browser back button (browser history API)
+    useEffect(() => {
+        if (Platform.OS !== 'web') return;
+        if (viewMode === 'taker' && testStarted && !testSubmitted) {
+            // Push a dummy state so the browser's back button triggers popstate
+            // instead of immediately leaving the page
+            window.history.pushState({ examActive: true }, '', window.location.href);
+            const handlePopState = () => {
+                // Re-push to keep blocking navigation
+                window.history.pushState({ examActive: true }, '', window.location.href);
+                setShowExitConfirm(true);
+            };
+            window.addEventListener('popstate', handlePopState);
+            return () => window.removeEventListener('popstate', handlePopState);
+        }
+    }, [viewMode, testStarted, testSubmitted]);
 
     const selectAssessment = (assessment) => {
         setSelectedAssessment(assessment);
@@ -866,6 +913,10 @@ export default function ProctoredAssessment({ route, navigation }) {
         setSelectedAssessment(assessment);
         setViewMode('results');
         setLoadingSubmissions(true);
+        setResultsSortBy('date');
+        setResultsSortOrder('desc');
+        setResultsFilter('all');
+        setSelectedSubmissionDetail(null);
         try {
             const token = await AsyncStorage.getItem('userToken');
             const res = await fetch(`${API_URL}/api/v1/assessments/proctored/${assessment.id}/submissions`, {
@@ -881,17 +932,125 @@ export default function ProctoredAssessment({ route, navigation }) {
         }
     };
 
-    const renderResults = () => (
+    const getFilteredSortedSubmissions = () => {
+        let subs = [...viewSubmissions];
+        // Filter
+        if (resultsFilter === 'passed') subs = subs.filter(s => s.passed);
+        else if (resultsFilter === 'failed') subs = subs.filter(s => !s.passed);
+        else if (resultsFilter === 'flagged') subs = subs.filter(s => s.integrity_status === 'flagged');
+        else if (resultsFilter === 'warning') subs = subs.filter(s => s.integrity_status === 'warning');
+        else if (resultsFilter === 'clean') subs = subs.filter(s => s.integrity_status === 'clean');
+        // Sort
+        subs.sort((a, b) => {
+            let valA, valB;
+            if (resultsSortBy === 'score') { valA = a.score_percent || 0; valB = b.score_percent || 0; }
+            else if (resultsSortBy === 'name') { valA = (a.user_name || '').toLowerCase(); valB = (b.user_name || '').toLowerCase(); }
+            else { valA = new Date(a.submitted_at || 0); valB = new Date(b.submitted_at || 0); }
+            if (valA < valB) return resultsSortOrder === 'asc' ? -1 : 1;
+            if (valA > valB) return resultsSortOrder === 'asc' ? 1 : -1;
+            return 0;
+        });
+        return subs;
+    };
+
+    const renderResults = () => {
+        const displayedSubs = getFilteredSortedSubmissions();
+        const passedCount = viewSubmissions.filter(s => s.passed).length;
+        const avgScore = viewSubmissions.length > 0
+            ? Math.round(viewSubmissions.reduce((sum, s) => sum + (s.score_percent || 0), 0) / viewSubmissions.length)
+            : 0;
+        return (
         <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
             <View style={styles.sectionHeaderBox}>
                 <Text style={styles.sectionHeader}>{selectedAssessment?.title} - Results</Text>
             </View>
+
+            {/* Summary Stats */}
+            {!loadingSubmissions && viewSubmissions.length > 0 && (
+                <View style={styles.resultsSummaryRow}>
+                    <View style={styles.resultsSummaryStat}>
+                        <Text style={styles.resultsSummaryNum}>{viewSubmissions.length}</Text>
+                        <Text style={styles.resultsSummaryLabel}>Total</Text>
+                    </View>
+                    <View style={styles.resultsSummaryStat}>
+                        <Text style={[styles.resultsSummaryNum, { color: '#10B981' }]}>{passedCount}</Text>
+                        <Text style={styles.resultsSummaryLabel}>Passed</Text>
+                    </View>
+                    <View style={styles.resultsSummaryStat}>
+                        <Text style={[styles.resultsSummaryNum, { color: '#EF4444' }]}>{viewSubmissions.length - passedCount}</Text>
+                        <Text style={styles.resultsSummaryLabel}>Failed</Text>
+                    </View>
+                    <View style={styles.resultsSummaryStat}>
+                        <Text style={[styles.resultsSummaryNum, { color: '#F59E0B' }]}>{avgScore}%</Text>
+                        <Text style={styles.resultsSummaryLabel}>Avg Score</Text>
+                    </View>
+                </View>
+            )}
+
+            {/* Sort Controls */}
+            {!loadingSubmissions && viewSubmissions.length > 0 && (
+                <View style={styles.resultsControlsBox}>
+                    <View style={styles.resultsSortRow}>
+                        <Text style={styles.resultsControlLabel}>Sort by:</Text>
+                        {['date', 'score', 'name'].map(opt => (
+                            <TouchableOpacity
+                                key={opt}
+                                style={[styles.resultsSortBtn, resultsSortBy === opt && styles.resultsSortBtnActive]}
+                                onPress={() => {
+                                    if (resultsSortBy === opt) setResultsSortOrder(o => o === 'asc' ? 'desc' : 'asc');
+                                    else { setResultsSortBy(opt); setResultsSortOrder('desc'); }
+                                }}
+                            >
+                                <Text style={[styles.resultsSortBtnText, resultsSortBy === opt && styles.resultsSortBtnTextActive]}>
+                                    {opt.charAt(0).toUpperCase() + opt.slice(1)}
+                                    {resultsSortBy === opt ? (resultsSortOrder === 'asc' ? ' ↑' : ' ↓') : ''}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+
+                    {/* Filter Controls */}
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
+                        <View style={styles.resultsFilterRow}>
+                            {[
+                                { key: 'all', label: 'All', color: '#6B7280' },
+                                { key: 'passed', label: 'Passed', color: '#10B981' },
+                                { key: 'failed', label: 'Failed', color: '#EF4444' },
+                                { key: 'flagged', label: 'Flagged', color: '#DC2626' },
+                                { key: 'warning', label: 'Warning', color: '#D97706' },
+                                { key: 'clean', label: 'Clean', color: '#059669' },
+                            ].map(f => (
+                                <TouchableOpacity
+                                    key={f.key}
+                                    style={[
+                                        styles.resultsFilterBtn,
+                                        resultsFilter === f.key && { backgroundColor: f.color, borderColor: f.color }
+                                    ]}
+                                    onPress={() => setResultsFilter(f.key)}
+                                >
+                                    <Text style={[
+                                        styles.resultsFilterBtnText,
+                                        resultsFilter === f.key && { color: '#fff' }
+                                    ]}>{f.label}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    </ScrollView>
+
+                    <Text style={styles.resultsCountText}>
+                        Showing {displayedSubs.length} of {viewSubmissions.length} submissions
+                    </Text>
+                </View>
+            )}
+
             {loadingSubmissions ? (
                 <ActivityIndicator size="large" color="#F59E0B" />
             ) : viewSubmissions.length === 0 ? (
                 <Text style={styles.emptyText}>No submissions yet.</Text>
+            ) : displayedSubs.length === 0 ? (
+                <Text style={styles.emptyText}>No submissions match the selected filter.</Text>
             ) : (
-                viewSubmissions.map((sub, i) => (
+                displayedSubs.map((sub, i) => (
                     <TouchableOpacity
                         key={i}
                         style={styles.resultCardEnhanced}
@@ -1003,7 +1162,8 @@ export default function ProctoredAssessment({ route, navigation }) {
             )}
             <View style={{ height: 100 }} />
         </ScrollView>
-    );
+        );
+    };
 
     // --- RENDER HELPERS ---
     const renderAssessmentsList = () => (
@@ -1707,8 +1867,11 @@ export default function ProctoredAssessment({ route, navigation }) {
         <SafeAreaView style={styles.container}>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => {
-                    if (viewMode === 'taker' && !testStarted) {
-                        setViewMode(isAdmin ? 'list' : 'list');
+                    if (viewMode === 'taker' && testStarted && !testSubmitted) {
+                        // Test is active - show confirmation before going back
+                        handleBackPress();
+                    } else if (viewMode === 'taker' && !testStarted) {
+                        setViewMode('list');
                         setSelectedAssessment(null);
                     } else if (viewMode === 'admin') {
                         setViewMode('list');
@@ -1754,6 +1917,33 @@ export default function ProctoredAssessment({ route, navigation }) {
             )}
 
             {renderAiModal()}
+
+            {/* Exit Confirmation Modal - used on web where Alert.alert is unreliable */}
+            <Modal visible={showExitConfirm} transparent animationType="fade">
+                <View style={styles.exitOverlay}>
+                    <View style={styles.exitDialog}>
+                        <MaterialCommunityIcons name="alert-circle-outline" size={40} color="#EF4444" style={{ marginBottom: 12 }} />
+                        <Text style={styles.exitDialogTitle}>End Assessment?</Text>
+                        <Text style={styles.exitDialogMsg}>
+                            Are you sure you want to end the assessment?{'\n'}Your current answers will be submitted.
+                        </Text>
+                        <View style={styles.exitDialogBtns}>
+                            <TouchableOpacity
+                                style={styles.exitCancelBtn}
+                                onPress={() => setShowExitConfirm(false)}
+                            >
+                                <Text style={styles.exitCancelText}>Cancel</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.exitSubmitBtn}
+                                onPress={() => { setShowExitConfirm(false); submitTest(); }}
+                            >
+                                <Text style={styles.exitSubmitText}>Submit & Exit</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </SafeAreaView>
     );
 }
@@ -1967,6 +2157,25 @@ const styles = StyleSheet.create({
     legacyBreachInfo: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#FFFBEB', borderRadius: 10, padding: 12, gap: 10 },
     legacyBreachText: { flex: 1, fontSize: 12, fontFamily: 'Poppins_400Regular', color: '#92400E', lineHeight: 18 },
 
+    // Results Summary Stats
+    resultsSummaryRow: { flexDirection: 'row', justifyContent: 'space-around', backgroundColor: '#FFF', borderRadius: 14, marginBottom: 12, padding: 14, borderWidth: 1, borderColor: '#E5E7EB' },
+    resultsSummaryStat: { alignItems: 'center' },
+    resultsSummaryNum: { fontSize: 22, fontFamily: 'Poppins_700Bold', color: '#1F2937' },
+    resultsSummaryLabel: { fontSize: 11, fontFamily: 'Poppins_400Regular', color: '#6B7280', marginTop: 2 },
+
+    // Results Sort/Filter Controls
+    resultsControlsBox: { backgroundColor: '#FFF', borderRadius: 14, marginBottom: 12, padding: 14, borderWidth: 1, borderColor: '#E5E7EB' },
+    resultsSortRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+    resultsControlLabel: { fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: '#374151', marginRight: 4 },
+    resultsSortBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: '#D1D5DB', backgroundColor: '#F9FAFB' },
+    resultsSortBtnActive: { borderColor: '#F59E0B', backgroundColor: '#FEF3C7' },
+    resultsSortBtnText: { fontSize: 12, fontFamily: 'Poppins_500Medium', color: '#6B7280' },
+    resultsSortBtnTextActive: { color: '#D97706', fontFamily: 'Poppins_600SemiBold' },
+    resultsFilterRow: { flexDirection: 'row', gap: 8, paddingBottom: 4 },
+    resultsFilterBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: '#D1D5DB', backgroundColor: '#F9FAFB' },
+    resultsFilterBtnText: { fontSize: 12, fontFamily: 'Poppins_500Medium', color: '#6B7280' },
+    resultsCountText: { fontSize: 11, fontFamily: 'Poppins_400Regular', color: '#9CA3AF', marginTop: 8 },
+
     // Proctor Status Bar Styles
     proctorStatusBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 8, zIndex: 100 },
     proctorStatusActive: { backgroundColor: '#10B981' },
@@ -2001,4 +2210,15 @@ const styles = StyleSheet.create({
     // Clean Integrity
     cleanIntegrityBox: { alignItems: 'center', padding: 20, backgroundColor: '#ECFDF5', borderRadius: 12 },
     cleanIntegrityText: { fontSize: 13, fontFamily: 'Poppins_500Medium', color: '#065F46', textAlign: 'center', marginTop: 10 },
+
+    // Exit Confirmation Modal
+    exitOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+    exitDialog: { backgroundColor: '#FFF', borderRadius: 20, padding: 28, width: '100%', maxWidth: 380, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 10 },
+    exitDialogTitle: { fontSize: 20, fontFamily: 'Poppins_700Bold', color: '#1F2937', marginBottom: 10, textAlign: 'center' },
+    exitDialogMsg: { fontSize: 14, fontFamily: 'Poppins_400Regular', color: '#6B7280', textAlign: 'center', lineHeight: 22, marginBottom: 24 },
+    exitDialogBtns: { flexDirection: 'row', gap: 12, width: '100%' },
+    exitCancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, borderWidth: 2, borderColor: '#E5E7EB', alignItems: 'center' },
+    exitCancelText: { fontSize: 15, fontFamily: 'Poppins_600SemiBold', color: '#6B7280' },
+    exitSubmitBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: '#EF4444', alignItems: 'center' },
+    exitSubmitText: { fontSize: 15, fontFamily: 'Poppins_600SemiBold', color: '#FFF' },
 });
