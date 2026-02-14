@@ -15,7 +15,7 @@ import {
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as XLSX from 'xlsx';
 import API_URL from '../config';
@@ -156,7 +156,11 @@ export default function AccessControlModal({ visible, onClose }) {
             if (!response.ok) throw new Error('Failed to save level order');
 
             const data = await response.json();
-            setLevelData(data.levels);
+            if (data?.levels && Array.isArray(data.levels)) {
+                setLevelData(data.levels);
+            } else {
+                console.warn('saveLevelOrder: Invalid levels data returned', data);
+            }
             setHasLevelChanges(false);
             showToast('Level order saved successfully!', 'success');
         } catch (error) {
@@ -475,50 +479,86 @@ export default function AccessControlModal({ visible, onClose }) {
             });
 
             if (result.canceled || !result.assets || !result.assets[0]) return;
+
+            // Start Loading Feedback
+            setQuizSaving(bulkUploadLevelName);
+
             const file = result.assets[0];
             const name = file.name || '';
             const ext = name.split('.').pop()?.toLowerCase();
 
             let rows = [];
-            if (ext === 'csv') {
-                const csvText = await FileSystem.readAsStringAsync(file.uri);
-                rows = parseCsvTextToRows(csvText);
-            } else if (ext === 'xlsx' || ext === 'xls') {
-                // Read file as base64, then parse via XLSX
-                const base64 = await FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.Base64 });
-                const workbook = XLSX.read(base64, { type: 'base64' });
-                const sheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[sheetName];
-                rows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
-            } else {
-                Alert.alert('Unsupported File', 'Please upload a .csv or .xlsx file.');
-                return;
+
+            // Handle Web Platform: Use fetch/Blob APIs
+            if (Platform.OS === 'web') {
+                const response = await fetch(file.uri);
+                const blob = await response.blob();
+
+                if (ext === 'csv') {
+                    const text = await blob.text();
+                    rows = parseCsvTextToRows(text);
+                } else if (ext === 'xlsx' || ext === 'xls') {
+                    const arrayBuffer = await blob.arrayBuffer();
+                    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+                    const sheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[sheetName];
+                    rows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+                } else {
+                    Alert.alert('Unsupported File', 'Please upload a .csv or .xlsx file.');
+                    return;
+                }
+            }
+            // Handle Native Platform: Use FileSystem
+            else {
+                if (ext === 'csv') {
+                    const csvText = await FileSystem.readAsStringAsync(file.uri);
+                    rows = parseCsvTextToRows(csvText);
+                } else if (ext === 'xlsx' || ext === 'xls') {
+                    // Read file as base64, then parse via XLSX
+                    const base64 = await FileSystem.readAsStringAsync(file.uri, { encoding: 'base64' });
+                    const workbook = XLSX.read(base64, { type: 'base64' });
+                    const sheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[sheetName];
+                    rows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+                } else {
+                    Alert.alert('Unsupported File', 'Please upload a .csv or .xlsx file.');
+                    return;
+                }
             }
 
-            const questions = parseQuizRows(rows);
+            const newQuestions = parseQuizRows(rows);
+
+            // APPEND existing questions instead of overwriting
+            const currentQuestions = levelQuizzes[bulkUploadLevelName]?.questions || [];
+            const mergedQuestions = [...currentQuestions, ...newQuestions];
+
             setLevelQuizzes(prev => ({
                 ...prev,
                 [bulkUploadLevelName]: {
                     ...(prev[bulkUploadLevelName] || {}),
-                    questions,
+                    questions: mergedQuestions,
                     source: 'manual',
                     loading: false,
                 }
             }));
             setEditingQuestionKey(null);
 
-            // Auto-publish to backend so app can read it immediately
-            setQuizSaving(bulkUploadLevelName);
+            // Auto-publish to backend
             try {
-                const data = await saveQuizPayload(bulkUploadLevelName, questions);
+                const data = await saveQuizPayload(bulkUploadLevelName, mergedQuestions);
                 if (data?.status === 'success') {
                     setLevelQuizzes(prev => ({
                         ...prev,
                         [bulkUploadLevelName]: { ...prev[bulkUploadLevelName], source: data.data?.source || 'manual' }
                     }));
-                    Alert.alert('Imported & Published', `Imported ${questions.length} questions and published to app.`);
+
+                    // Close Modal on Success
+                    setBulkUploadLevelName(null);
+                    setBulkUploadText('');
+
+                    Alert.alert('Success', `Appended ${newQuestions.length} questions. Total: ${mergedQuestions.length}.`);
                 } else {
-                    Alert.alert('Imported', `Imported ${questions.length} questions. Please click "Save Quiz" to publish.`);
+                    Alert.alert('Imported', `Appended ${newQuestions.length} questions. Please click "Save Quiz" to publish.`);
                 }
             } finally {
                 setQuizSaving(null);
@@ -526,6 +566,8 @@ export default function AccessControlModal({ visible, onClose }) {
         } catch (e) {
             console.error('Bulk import failed', e);
             Alert.alert('Import Failed', e?.message || 'Failed to import file');
+        } finally {
+            setQuizSaving(null);
         }
     };
 
@@ -566,7 +608,7 @@ export default function AccessControlModal({ visible, onClose }) {
 
     const downloadUtf8FileNative = async (filename, text, mimeType) => {
         const targetUri = `${FileSystem.cacheDirectory}${filename}`;
-        await FileSystem.writeAsStringAsync(targetUri, text, { encoding: FileSystem.EncodingType.UTF8 });
+        await FileSystem.writeAsStringAsync(targetUri, text, { encoding: 'utf8' });
         if (await Sharing.isAvailableAsync()) {
             await Sharing.shareAsync(targetUri, { mimeType });
         } else {
@@ -576,7 +618,7 @@ export default function AccessControlModal({ visible, onClose }) {
 
     const downloadBase64FileNative = async (filename, base64, mimeType) => {
         const targetUri = `${FileSystem.cacheDirectory}${filename}`;
-        await FileSystem.writeAsStringAsync(targetUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+        await FileSystem.writeAsStringAsync(targetUri, base64, { encoding: 'base64' });
         if (await Sharing.isAvailableAsync()) {
             await Sharing.shareAsync(targetUri, { mimeType });
         } else {
@@ -723,11 +765,10 @@ export default function AccessControlModal({ visible, onClose }) {
         const newQ = { question: 'New Question', options: ['Option A', 'Option B', 'Option C', 'Option D'], correctIndex: 0 };
         setLevelQuizzes(prev => {
             const current = prev[levelName] || { questions: [] };
-            return { ...prev, [levelName]: { ...current, questions: [...current.questions, newQ] } };
+            return { ...prev, [levelName]: { ...current, questions: [newQ, ...current.questions] } };
         });
-        const newIdx = (levelQuizzes[levelName]?.questions || []).length;
         setEditForm({ question: 'New Question', options: ['Option A', 'Option B', 'Option C', 'Option D'], correctIndex: 0 });
-        setEditingQuestionKey(`${levelName}:${newIdx}`);
+        setEditingQuestionKey(`${levelName}:0`);
     };
 
     const deleteQuizQuestion = (levelName, index) => {
@@ -1266,7 +1307,7 @@ export default function AccessControlModal({ visible, onClose }) {
                     ) : Platform.OS === 'web' ? (
                         /* WEB: Simplified UI with Buttons for Reordering */
                         <View style={styles.webContainer}>
-                            {levelData.map((level, index) => {
+                            {(levelData || []).map((level, index) => {
                                 const isExpanded = expandedRole === level.id;
                                 const selectedCount = countSelectedCourses(level.id);
                                 const assignedCourses = getAssignedCourses(level.id);
@@ -1635,7 +1676,7 @@ export default function AccessControlModal({ visible, onClose }) {
                         </View>
                     ) : (
                         <DraggableFlatList
-                            data={levelData}
+                            data={levelData || []}
                             onDragEnd={handleLevelDragEnd}
                             keyExtractor={(item) => item.id}
                             renderItem={renderLevelItem}
@@ -1671,9 +1712,19 @@ export default function AccessControlModal({ visible, onClose }) {
                                 </Text>
 
                                 <View style={qStyles.bulkTopActions}>
-                                    <TouchableOpacity style={qStyles.bulkActionBtn} onPress={pickAndImportQuizFile}>
-                                        <MaterialCommunityIcons name="file-upload-outline" size={16} color="#111827" />
-                                        <Text style={qStyles.bulkActionBtnText}>Upload CSV/Excel</Text>
+                                    <TouchableOpacity
+                                        style={[qStyles.bulkActionBtn, quizSaving === bulkUploadLevelName && { opacity: 0.5 }]}
+                                        onPress={pickAndImportQuizFile}
+                                        disabled={quizSaving === bulkUploadLevelName}
+                                    >
+                                        {quizSaving === bulkUploadLevelName ? (
+                                            <ActivityIndicator size="small" color="#111827" />
+                                        ) : (
+                                            <>
+                                                <MaterialCommunityIcons name="file-upload-outline" size={16} color="#111827" />
+                                                <Text style={qStyles.bulkActionBtnText}>Upload CSV/Excel</Text>
+                                            </>
+                                        )}
                                     </TouchableOpacity>
                                     <TouchableOpacity style={qStyles.bulkActionBtn} onPress={() => exportQuizAsCsv('template')}>
                                         <MaterialCommunityIcons name="file-download-outline" size={16} color="#111827" />
@@ -2105,6 +2156,7 @@ const qStyles = StyleSheet.create({
         flexDirection: 'row',
         gap: 6,
         flexWrap: 'wrap',
+        maxWidth: '100%',
     },
     addQBtn: {
         flexDirection: 'row',

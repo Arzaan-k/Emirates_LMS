@@ -401,7 +401,7 @@ async def get_bucket_courses(
 @router.get("/admin/users-for-assignment")
 async def get_users_for_assignment(
     db: Session = Depends(get_db),
-    current_user: Dict[str, Any] = Depends(require_admin)
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Get all users with their details for the assignment picker.

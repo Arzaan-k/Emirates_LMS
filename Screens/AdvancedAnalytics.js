@@ -277,7 +277,7 @@ const EmployeeDetailReport = ({ email, onBack }) => {
                 Alert.alert('Success', 'Downloaded');
             } else {
                 const fileUri = FileSystem.documentDirectory + fileName;
-                await FileSystem.writeAsStringAsync(fileUri, csv, { encoding: FileSystem.EncodingType.UTF8 });
+                await FileSystem.writeAsStringAsync(fileUri, csv, { encoding: 'utf8' });
 
                 if (await Sharing.isAvailableAsync()) {
                     await Sharing.shareAsync(fileUri);
@@ -620,7 +620,7 @@ const ReportsExport = () => {
                 const fileUri = FileSystem.documentDirectory + `${type}.csv`;
                 try {
                     // Try writing with encoding option first
-                    await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: FileSystem.EncodingType.UTF8 });
+                    await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: 'utf8' });
                 } catch (writeError) {
                     console.warn('Encoding option error, trying without:', writeError);
                     await FileSystem.writeAsStringAsync(fileUri, csvContent);

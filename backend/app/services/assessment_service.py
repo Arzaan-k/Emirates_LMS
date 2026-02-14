@@ -251,7 +251,6 @@ class AssessmentService:
         user_email: str,
         user_name: str,
         answers: List[int],
-        time_taken_seconds: int,
         breach_log: List[Dict] = None
     ) -> AssessmentSubmission:
         """Submit an assessment and calculate score."""
@@ -331,7 +330,7 @@ class AssessmentService:
             "total_questions": total_questions,
             "score_percent": round(score_percent, 1),
             "passed": passed,
-            "time_taken_seconds": time_taken_seconds,
+            # time_taken_seconds is commented out in model (missing from prod DB)
             "time_limit_seconds": assessment.time_limit_minutes * 60,
             "violations": violations,
             "breach_log": breach_log or [],
@@ -340,7 +339,7 @@ class AssessmentService:
             "integrity_status": integrity_status,
             "integrity_score": integrity_score,
             "submitted_at": datetime.utcnow(),
-            "attempt_number": attempt_count + 1,
+            # attempt_number is commented out in model (missing from prod DB)
         }
 
         submission = self.submission_repo.create(submission_data)
@@ -357,6 +356,11 @@ class AssessmentService:
     ) -> List[AssessmentSubmission]:
         """Get all submissions for an assessment."""
         return self.submission_repo.get_by_assessment(assessment_id)
+
+    def get_all_submissions(self) -> List[AssessmentSubmission]:
+        """Get all submissions across all assessments."""
+        from app.models.assessment import AssessmentSubmission as AS
+        return self.db.query(AS).order_by(AS.submitted_at.desc()).all()
 
     def get_user_submissions(self, user_email: str) -> List[AssessmentSubmission]:
         """Get all submissions by a user."""
@@ -548,7 +552,6 @@ class AssessmentService:
         user_email: str,
         user_name: str,
         answers: List[Any],
-        time_taken_seconds: int
     ) -> Dict[str, Any]:
         """Submit a scheduled exam."""
         exam = self.get_scheduled_exam_by_id(exam_id)
@@ -587,7 +590,6 @@ class AssessmentService:
             "total_questions": total_questions,
             "score_percent": round(score_percent, 1),
             "passed": passed,
-            "time_taken_seconds": time_taken_seconds,
         }
 
 
@@ -630,7 +632,6 @@ class AssessmentService:
             "completion_rate": round((completed / present * 100) if present > 0 else 0, 1),
             "pass_rate": round((passed / completed * 100) if completed > 0 else 0, 1),
             "average_score": round(avg_score, 1),
-            "avg_score": round(avg_score, 1),
         }
 
     def get_exam_report(self, exam_id: str) -> Dict[str, Any]:

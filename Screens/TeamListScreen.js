@@ -24,7 +24,7 @@ import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import CreateUser from './CreateUser';
 import API_URL from '../config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as XLSX from 'xlsx';
 
@@ -377,7 +377,7 @@ const TeamListScreen = ({ navigation, route }) => {
             } else {
                 const base64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
                 const fileUri = `${FileSystem.documentDirectory}${filename}`;
-                await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+                await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: 'base64' });
 
                 if (await Sharing.isAvailableAsync()) {
                     await Sharing.shareAsync(fileUri, {

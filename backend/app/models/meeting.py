@@ -53,13 +53,22 @@ class Meeting(Base):
 
     def to_dict(self):
         """Convert to dictionary for API responses."""
+        # Helper to ensure UTC
+        def format_dt(dt):
+            if not dt:
+                return None
+            iso = dt.isoformat()
+            if dt.tzinfo is None and not iso.endswith("Z") and "+" not in iso:
+                return f"{iso}Z"
+            return iso
+
         return {
             "id": self.id,
             "title": self.title,
             "description": self.description,
-            "scheduled_at": self.scheduled_at.isoformat() if self.scheduled_at else None,
+            "scheduled_at": format_dt(self.scheduled_at),
             "duration_minutes": self.duration_minutes,
-            "end_time": self.end_time.isoformat() if self.end_time else None,
+            "end_time": format_dt(self.end_time),
             "host_name": self.host_name,
             "host_email": self.host_email,
             "room_id": self.room_id,
@@ -71,5 +80,5 @@ class Meeting(Base):
             "recurrence_pattern": self.recurrence_pattern,
             "recording_url": self.recording_url,
             "agenda": self.agenda or [],
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": format_dt(self.created_at),
         }

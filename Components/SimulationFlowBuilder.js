@@ -600,44 +600,48 @@ export default function SimulationFlowBuilder({ existingSimulation, onSave, onCl
         }
     };
 
+    const showValidationError = (msg) => {
+        if (Platform.OS === 'web') {
+            window.alert(msg);
+        } else {
+            Alert.alert('Validation Error', msg);
+        }
+    };
+
     const validateSimulation = () => {
         if (!title.trim()) {
-            Alert.alert('Validation Error', 'Please enter a simulation title');
+            showValidationError('Please enter a simulation title');
             return false;
         }
         if (nodes.length === 0) {
-            Alert.alert('Validation Error', 'Please add at least one step');
+            showValidationError('Please add at least one step');
             return false;
         }
         const startNode = nodes.find(n => n.isStart);
         if (!startNode) {
-            Alert.alert('Validation Error', 'Please set a starting step');
+            showValidationError('Please set a starting step');
             return false;
         }
 
-        // Check each node
         for (let i = 0; i < nodes.length; i++) {
             const node = nodes[i];
             if (!node.title.trim()) {
-                Alert.alert('Validation Error', `Step ${i + 1} needs a title`);
+                showValidationError(`Step ${i + 1} needs a title`);
                 return false;
             }
-            // Require at least 2 options
             if (node.options.length < 2) {
-                Alert.alert('Validation Error', `Step "${node.title}" needs at least 2 options`);
+                showValidationError(`Step "${node.title}" needs at least 2 options`);
                 return false;
             }
-            // Check all options have text
             for (let j = 0; j < node.options.length; j++) {
                 if (!node.options[j].text.trim()) {
-                    Alert.alert('Validation Error', `Step "${node.title}" has an empty option`);
+                    showValidationError(`Step "${node.title}" has an empty option`);
                     return false;
                 }
             }
-            // Need exactly one correct option
             const correctOptions = node.options.filter(o => o.isCorrect);
             if (correctOptions.length === 0) {
-                Alert.alert('Validation Error', `Step "${node.title}" needs one correct option`);
+                showValidationError(`Step "${node.title}" needs one correct option`);
                 return false;
             }
         }
@@ -691,19 +695,19 @@ export default function SimulationFlowBuilder({ existingSimulation, onSave, onCl
             });
 
             const result = await response.json();
-            if (result.success) {
-                Alert.alert('Success', 'Simulation saved successfully!', [
-                    { text: 'OK', onPress: () => onSave && onSave(simulationData) }
-                ]);
-            } else {
-                throw new Error(result.message || 'Failed to save');
+            if (!response.ok || !result.success) {
+                throw new Error(result.message || result.detail || 'Failed to save simulation');
             }
+
+            // Success — close builder and refresh list immediately
+            onSave && onSave(simulationData);
         } catch (e) {
             console.error('Save error:', e);
-            // Still call onSave for local state update
-            Alert.alert('Saved Locally', 'Simulation saved. (Server sync may be unavailable)', [
-                { text: 'OK', onPress: () => onSave && onSave(simulationData) }
-            ]);
+            if (Platform.OS === 'web') {
+                window.alert(`Save failed: ${e.message}`);
+            } else {
+                Alert.alert('Save Failed', e.message);
+            }
         } finally {
             setIsSaving(false);
         }
