@@ -1299,7 +1299,7 @@ export default function ManagerDashboard({ route, navigation }) {
                         )}
 
                         {/* SCHEDULE MEETING - requires schedule_meeting privilege */}
-                        {hasPrivilege('schedule_meeting') && (
+                        {false && hasPrivilege('schedule_meeting') && (
                             <TouchableOpacity
                                 style={styles.actionBtn}
                                 onPress={() => setMeetingModalVisible(true)}

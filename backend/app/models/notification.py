@@ -50,6 +50,15 @@ class Notification(Base):
 
     def to_dict(self):
         """Convert to dictionary for API responses."""
+        # Helper to ensure UTC timezone in ISO string
+        def format_dt(dt):
+            if not dt:
+                return None
+            iso = dt.isoformat()
+            if dt.tzinfo is None and not iso.endswith("Z") and "+" not in iso:
+                return f"{iso}Z"
+            return iso
+
         return {
             "id": self.id,
             "title": self.title,
@@ -67,8 +76,10 @@ class Notification(Base):
             "source_course_id": self.source_course_id,
             "read_by": self.read_by or [],
             "created_by": self.created_by,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "created_at": format_dt(self.created_at),
+            "expires_at": format_dt(self.expires_at),
+            "extra_data": self.extra_data or {},
+            "media_url": (self.extra_data or {}).get("media_url") if self.extra_data else None,
         }
 
 
@@ -109,6 +120,15 @@ class NewsFeed(Base):
 
     def to_dict(self):
         """Convert to dictionary for API responses."""
+        # Helper to ensure UTC
+        def format_dt(dt):
+            if not dt:
+                return None
+            iso = dt.isoformat()
+            if dt.tzinfo is None and not iso.endswith("Z") and "+" not in iso:
+                return f"{iso}Z"
+            return iso
+
         return {
             "id": self.id,
             "title": self.title,
@@ -127,7 +147,7 @@ class NewsFeed(Base):
             "likes_count": len(self.likes or []),
             "comments_count": len(self.comments or []),
             "view_count": self.view_count,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": format_dt(self.created_at),
             
             # CamelCase
             "isPinned": self.is_pinned,
@@ -135,7 +155,7 @@ class NewsFeed(Base):
             "likesCount": len(self.likes or []),
             "commentsCount": len(self.comments or []),
             "viewCount": self.view_count,
-            "createdAt": self.created_at.isoformat() if self.created_at else None,
+            "createdAt": format_dt(self.created_at),
         }
 
 
@@ -166,6 +186,15 @@ class CourseFeedback(Base):
         return f"<CourseFeedback {self.user_email} - {self.course_id} ({self.rating}★)>"
 
     def to_dict(self):
+        # Helper to ensure UTC
+        def format_dt(dt):
+            if not dt:
+                return None
+            iso = dt.isoformat()
+            if dt.tzinfo is None and not iso.endswith("Z") and "+" not in iso:
+                return f"{iso}Z"
+            return iso
+
         return {
             "id": self.id,
             "user_email": self.user_email,
@@ -174,5 +203,5 @@ class CourseFeedback(Base):
             "bucket": self.bucket,
             "rating": self.rating,
             "comment": self.comment,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": format_dt(self.created_at),
         }

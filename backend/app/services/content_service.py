@@ -316,6 +316,10 @@ class ContentService:
                 # If no transcript exists, quiz was never generated → user can complete via video progress alone
                 "has_transcript": bool(course.transcript and len(course.transcript.strip()) > 0),
                 "has_quiz": bool(course.quiz and (isinstance(course.quiz, list) and len(course.quiz) > 0)),
+                
+                # Playback Controls
+                "allow_fast_forward": course.allow_fast_forward if course.allow_fast_forward is not None else True,
+                "allowFastForward": course.allow_fast_forward if course.allow_fast_forward is not None else True,
             }
 
             # Determine status: completed, active, or locked

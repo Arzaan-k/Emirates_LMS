@@ -671,7 +671,7 @@ const CreateUser = ({
             }
 
             const fileUri = FileSystem.documentDirectory + 'employee_upload_template.csv';
-            await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: FileSystem.EncodingType.UTF8 });
+            await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: 'utf8' });
 
             const isAvailable = await Sharing.isAvailableAsync();
             if (isAvailable) {

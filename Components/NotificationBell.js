@@ -9,6 +9,7 @@ import {
     Dimensions,
     Platform,
     RefreshControl,
+    Image,
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -117,6 +118,15 @@ export default function NotificationBell({ userEmail }) {
                             <Text style={styles.notifTitle} numberOfLines={1}>{item.title}</Text>
                             {!item.is_read && <View style={styles.unreadDot} />}
                         </View>
+
+                        {item.media_url && (
+                            <Image
+                                source={{ uri: item.media_url }}
+                                style={{ width: '100%', height: 120, borderRadius: 8, marginVertical: 8 }}
+                                resizeMode="cover"
+                            />
+                        )}
+
                         <Text style={styles.notifMessage} numberOfLines={2}>{item.message}</Text>
                         <View style={styles.notifMeta}>
                             <Text style={styles.notifTime}>{timeAgo(item.created_at)}</Text>

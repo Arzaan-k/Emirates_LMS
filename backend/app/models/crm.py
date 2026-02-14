@@ -63,6 +63,15 @@ class CRMTicket(Base):
 
     def to_dict(self):
         """Convert to dictionary for API responses."""
+        # Helper to ensure UTC
+        def format_dt(dt):
+            if not dt:
+                return None
+            iso = dt.isoformat()
+            if dt.tzinfo is None and not iso.endswith("Z") and "+" not in iso:
+                return f"{iso}Z"
+            return iso
+
         return {
             "id": self.id,
             "type": self.type,
@@ -78,10 +87,10 @@ class CRMTicket(Base):
             "assigned_to": self.assigned_to,
             "assigned_name": self.assigned_name,
             "resolution": self.resolution,
-            "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
+            "resolved_at": format_dt(self.resolved_at),
             "tags": self.tags or [],
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": format_dt(self.created_at),
+            "updated_at": format_dt(self.updated_at),
         }
 
 
@@ -122,6 +131,15 @@ class CRMTaskAssignment(Base):
 
     def to_dict(self):
         """Convert to dictionary for API responses."""
+        # Helper to ensure UTC
+        def format_dt(dt):
+            if not dt:
+                return None
+            iso = dt.isoformat()
+            if dt.tzinfo is None and not iso.endswith("Z") and "+" not in iso:
+                return f"{iso}Z"
+            return iso
+
         return {
             "id": self.id,
             "ticket_id": self.ticket_id,
@@ -132,9 +150,9 @@ class CRMTaskAssignment(Base):
             "status": self.status,
             "resolution": self.resolution,
             "xp_earned": self.xp_earned,
-            "due_date": self.due_date.isoformat() if self.due_date else None,
-            "assigned_at": self.assigned_at.isoformat() if self.assigned_at else None,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "due_date": format_dt(self.due_date),
+            "assigned_at": format_dt(self.assigned_at),
+            "completed_at": format_dt(self.completed_at),
         }
 
 

@@ -1056,6 +1056,7 @@ export default function CoursePath(props) {
                     lesson={activeLesson}
                     onClose={handleLessonClose}
                     userEmail={userEmail}
+                    allowFastForward={activeLesson.allowFastForward !== false}
                 />
             )}
 

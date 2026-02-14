@@ -122,7 +122,7 @@ function NotificationsModal({ visible, notifications, onClose, onAction }) {
                 >
                   <View style={[styles.notifIconBox, { backgroundColor: notif.type === 'quiz' ? '#F59E0B' : (notif.type === 'crucial' ? '#EF4444' : '#3B82F6') }]}>
                     <MaterialCommunityIcons
-                      name={notif.type === 'quiz' ? 'school' : (notif.type === 'proctored' ? 'shield-lock' : (notif.mediaUrl ? 'paperclip' : 'bell'))}
+                      name={notif.type === 'quiz' ? 'school' : (notif.type === 'proctored' ? 'shield-lock' : ((notif.mediaUrl || notif.media_url) ? 'paperclip' : 'bell'))}
                       size={20}
                       color="#FFF"
                     />
@@ -130,7 +130,7 @@ function NotificationsModal({ visible, notifications, onClose, onAction }) {
                   <View style={{ flex: 1 }}>
                     <Text style={styles.notifItemTitle}>{notif.title}</Text>
                     <Text style={styles.notifItemMsg} numberOfLines={2}>
-                      {notif.mediaUrl && "📎 "}{notif.message}
+                      {(notif.mediaUrl || notif.media_url) && "📎 "}{notif.message}
                     </Text>
                     <Text style={styles.notifTime}>{new Date(notif.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
                   </View>
@@ -161,11 +161,11 @@ function NotificationDetailModal({ visible, notification, onClose }) {
 
         <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 50 }}>
           {/* MEDIA */}
-          {notification.mediaUrl && (
+          {(notification.mediaUrl || notification.media_url) && (
             <View style={styles.mediaContainer}>
               {isVideo ? (
                 <Video
-                  source={{ uri: notification.mediaUrl }}
+                  source={{ uri: notification.mediaUrl || notification.media_url }}
                   style={{ width: '100%', height: 250, borderRadius: 16 }}
                   useNativeControls
                   resizeMode={ResizeMode.CONTAIN}
@@ -174,7 +174,7 @@ function NotificationDetailModal({ visible, notification, onClose }) {
                 />
               ) : (
                 <Image
-                  source={{ uri: notification.mediaUrl }}
+                  source={{ uri: notification.mediaUrl || notification.media_url }}
                   style={{ width: '100%', height: 300, borderRadius: 16 }}
                   resizeMode="contain"
                 />
@@ -792,13 +792,13 @@ function CrucialNotificationModal({ notification, onAcknowledge }) {
               </View>
 
               {/* Content - Media Display (Image/Video) */}
-              {notification.mediaUrl && (
+              {(notification.mediaUrl || notification.media_url) && (
                 <View style={{ marginBottom: 12, borderRadius: 12, overflow: 'hidden', width: '100%' }}>
-                  {notification.mediaUrl.toLowerCase().includes('.mp4') ||
-                    notification.mediaUrl.toLowerCase().includes('.mov') ||
-                    notification.mediaUrl.toLowerCase().includes('.webm') ? (
+                  {(notification.mediaUrl || notification.media_url).toLowerCase().includes('.mp4') ||
+                    (notification.mediaUrl || notification.media_url).toLowerCase().includes('.mov') ||
+                    (notification.mediaUrl || notification.media_url).toLowerCase().includes('.webm') ? (
                     <Video
-                      source={{ uri: notification.mediaUrl }}
+                      source={{ uri: notification.mediaUrl || notification.media_url }}
                       style={{ width: '100%', height: 220, borderRadius: 12 }}
                       resizeMode={ResizeMode.COVER}
                       useNativeControls
@@ -807,11 +807,11 @@ function CrucialNotificationModal({ notification, onAcknowledge }) {
                     />
                   ) : (
                     <Image
-                      source={{ uri: notification.mediaUrl }}
+                      source={{ uri: notification.mediaUrl || notification.media_url }}
                       style={{ width: '100%', height: 220, borderRadius: 12 }}
                       resizeMode="cover"
                       onError={(e) => console.log('[CrucialNotification] Image load error:', e.nativeEvent.error)}
-                      onLoad={() => console.log('[CrucialNotification] Image loaded successfully:', notification.mediaUrl)}
+                      onLoad={() => console.log('[CrucialNotification] Image loaded successfully:', notification.mediaUrl || notification.media_url)}
                     />
                   )}
                 </View>
@@ -1490,14 +1490,15 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
 
 
         {/* [NEW] MEETINGS FEED */}
-        <MeetingsFeedSection
+        {/* [NEW] MEETINGS FEED */}
+        {/* <MeetingsFeedSection
           data={upcomingMeetings}
           onJoin={(meeting) => navigation.navigate('MeetingRoom', {
             meeting,
             userEmail: userEmail,
             userName: 'User'
           })}
-        />
+        /> */}
 
         {/* [NEW] CRM TASKS FEED - Live Assessments */}
         {/* <CRMTasksFeedSection
