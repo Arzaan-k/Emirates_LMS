@@ -157,6 +157,14 @@ const CreateUser = ({
         );
     }, [stores, storeSearch]);
 
+    const getAuthHeaders = async () => {
+        const token = await AsyncStorage.getItem('userToken');
+        return {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+        };
+    };
+
     useEffect(() => {
         if (visible) {
             fetchCategories();
@@ -201,7 +209,8 @@ const CreateUser = ({
 
     const fetchCategories = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/v1/users/categories`);
+            const headers = await getAuthHeaders();
+            const response = await fetch(`${API_URL}/api/v1/users/categories`, { headers });
             const data = await response.json();
             if (Array.isArray(data)) {
                 setCategories(data);
@@ -233,7 +242,8 @@ const CreateUser = ({
     // Fetch dynamic progression levels for Display Role
     const fetchDisplayRoles = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/v1/levels/`);
+            const headers = await getAuthHeaders();
+            const response = await fetch(`${API_URL}/api/v1/levels/`, { headers });
             const data = await response.json();
             if (data.levels && Array.isArray(data.levels)) {
                 // Sort by order and keep full objects
@@ -254,9 +264,10 @@ const CreateUser = ({
             // Get current max order
             const maxOrder = displayRoles.length;
 
+            const headers = await getAuthHeaders();
             const response = await fetch(`${API_URL}/api/v1/levels/`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify({
                     name: newRoleName.trim(),
                     order: maxOrder,
@@ -287,7 +298,8 @@ const CreateUser = ({
 
     const fetchPrivileges = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/v1/users/privileges`);
+            const headers = await getAuthHeaders();
+            const response = await fetch(`${API_URL}/api/v1/users/privileges`, { headers });
             const data = await response.json();
             if (Array.isArray(data)) {
                 setPrivileges(data);
@@ -307,7 +319,8 @@ const CreateUser = ({
 
     const fetchStores = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/v1/users/stores/all`);
+            const headers = await getAuthHeaders();
+            const response = await fetch(`${API_URL}/api/v1/users/stores/all`, { headers });
             const data = await response.json();
             if (Array.isArray(data)) {
                 setStores(data);
@@ -360,9 +373,10 @@ const CreateUser = ({
     const handleCreateCategory = async () => {
         if (!newCategoryName.trim()) return;
         try {
+            const headers = await getAuthHeaders();
             const response = await fetch(`${API_URL}/api/v1/users/categories`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify({ name: newCategoryName, description: '', color: '#F59E0B' })
             });
             const result = await response.json();
@@ -380,9 +394,10 @@ const CreateUser = ({
     const handleCreateStore = async () => {
         if (!newStoreName.trim()) return;
         try {
+            const headers = await getAuthHeaders();
             const response = await fetch(`${API_URL}/api/v1/users/stores`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify({
                     name: newStoreName.trim(),
                     city: newStoreCity.trim() || 'Mumbai', // Default to Mumbai if empty
@@ -421,8 +436,10 @@ const CreateUser = ({
                     style: 'destructive',
                     onPress: async () => {
                         try {
+                            const headers = await getAuthHeaders();
                             const response = await fetch(`${API_URL}/api/v1/users/stores/${store.id}`, {
-                                method: 'DELETE'
+                                method: 'DELETE',
+                                headers,
                             });
                             const result = await response.json();
                             if (result.status === 'success') {
@@ -460,8 +477,10 @@ const CreateUser = ({
                     style: 'destructive',
                     onPress: async () => {
                         try {
+                            const headers = await getAuthHeaders();
                             const response = await fetch(`${API_URL}/api/v1/users/categories/${cat.id}`, {
-                                method: 'DELETE'
+                                method: 'DELETE',
+                                headers,
                             });
                             const result = await response.json();
                             if (result.status === 'success') {
@@ -494,8 +513,10 @@ const CreateUser = ({
                     style: 'destructive',
                     onPress: async () => {
                         try {
+                            const headers = await getAuthHeaders();
                             const response = await fetch(`${API_URL}/api/v1/levels/${roleObj.id}`, {
-                                method: 'DELETE'
+                                method: 'DELETE',
+                                headers,
                             });
                             if (response.ok) {
                                 // If current role deleted, reset to default

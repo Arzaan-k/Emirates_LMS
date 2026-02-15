@@ -49,7 +49,7 @@ import AIChatBot from "../Components/AIChatBot";
 import AIDigitalTwin from "../Components/AIDigitalTwin";
 import QuizTakingModal from "../Components/QuizTakingModal";
 import UpcomingExamsCard from "../Components/UpcomingExamsCard"; // [NEW] Scheduled Exams
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import { useLanguage } from "../context/language.context";
 import API_URL from "../config";
 
@@ -2290,6 +2290,7 @@ function NotificationToast({ message, type, visible, navigation, targetScreen, o
 // MAIN LAYOUT
 export default function Home() {
   const navigation = useNavigation();
+  const route = useRoute();
   const insets = useSafeAreaInsets();
   const [activeTool, setActiveTool] = useState(null);
   const [showTwin, setShowTwin] = useState(false); // New Twin State
@@ -2303,6 +2304,17 @@ export default function Home() {
     React.useCallback(() => {
       const getUserEmail = async () => {
         try {
+          // 0. Try Route Params (Immediate Context from Login/Switch)
+          if (route.params?.userProfile) {
+            const profile = route.params.userProfile;
+            console.log('[Home] User profile from Route Params:', profile.email);
+            setUserEmail(profile.email);
+            setUserProfile(profile);
+            // Ensure it is saved for next time
+            await AsyncStorage.setItem('userProfile', JSON.stringify(profile));
+            return;
+          }
+
           // 1. Try AsyncStorage (Source of Truth for updates)
           const stored = await AsyncStorage.getItem('userProfile');
           if (stored) {

@@ -73,7 +73,6 @@ async def create_level(
     
     level_data = {
         "id": f"level_{uuid.uuid4().hex[:8]}",
-        "role": data.get("role", "").lower().replace(" ", "_"),
         "name": data.get("name"),
         "icon": data.get("icon", "account"),
         "color": data.get("color", "#6B7280"),

@@ -196,6 +196,25 @@ export default function ManagerDashboard({ route, navigation }) {
 
     console.log("ManagerDashboard rendered - isSuperAdmin:", isSuperAdmin, "Privileges:", userPrivileges.length);
 
+    // [NEW] Persist/Fetch profile from Storage if params missing (Logic match with Home.js)
+    useEffect(() => {
+        const checkProfile = async () => {
+            if (userProfile) {
+                await AsyncStorage.setItem('userProfile', JSON.stringify(userProfile));
+            } else {
+                const stored = await AsyncStorage.getItem('userProfile');
+                if (stored) {
+                    const profile = JSON.parse(stored);
+                    if (profile.role && profile.role !== 'User') { // Only restore if it looks like admin
+                        // In a real app we might force reload or set state, but here we just log
+                        console.log("Restored Admin Profile from Storage:", profile.email);
+                    }
+                }
+            }
+        };
+        checkProfile();
+    }, [userProfile]);
+
     // --- RESOURCE UPLOAD STATE ---
     const [uploadVisible, setUploadVisible] = useState(false);
     const [resTitle, setResTitle] = useState('');
