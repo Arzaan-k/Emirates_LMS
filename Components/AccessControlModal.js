@@ -46,6 +46,7 @@ export default function AccessControlModal({ visible, onClose }) {
     const [stagedAssignments, setStagedAssignments] = useState({});
 
     const [expandedRole, setExpandedRole] = useState(null);
+    const [expandedBuckets, setExpandedBuckets] = useState({}); // Folder expansion state
 
     // Quiz management state (per-level)
     const [levelQuizzes, setLevelQuizzes] = useState({}); // { levelName: { questions: [], source: '', loading: false } }
@@ -828,9 +829,10 @@ export default function AccessControlModal({ visible, onClose }) {
         setEditingQuestionKey(null);
     };
 
-    // Auto-fetch quiz when a level is expanded
+    // Auto-fetch quiz and reset folders when a level is expanded
     useEffect(() => {
         if (expandedRole) {
+            setExpandedBuckets({}); // Collapse folders when switching levels
             const level = levelData.find(l => l.id === expandedRole);
             if (level && !levelQuizzes[level.name]) {
                 fetchQuizForLevel(level.name);
@@ -914,6 +916,133 @@ export default function AccessControlModal({ visible, onClose }) {
         if (Platform.OS !== 'web') return;
         setDraggedLevelIndex(null);
         setDragOverLevelIndex(null);
+    };
+
+    const toggleBucket = (bucketId) => {
+        setExpandedBuckets(prev => ({
+            ...prev,
+            [bucketId]: !prev[bucketId]
+        }));
+    };
+
+    // Helper to render available courses in a hierarchy (Folder View)
+    const renderAvailableHierarchy = (levelId, coursesToRender) => {
+        // 1. Group courses by bucket
+        const bucketGroups = {};
+        const rootCourses = [];
+        const validBucketIds = new Set(buckets.map(b => b.id));
+
+        coursesToRender.forEach(c => {
+            if (c.bucket_id && validBucketIds.has(c.bucket_id)) {
+                if (!bucketGroups[c.bucket_id]) bucketGroups[c.bucket_id] = [];
+                bucketGroups[c.bucket_id].push(c);
+            } else {
+                rootCourses.push(c);
+            }
+        });
+
+        // 2. Build bucket tree
+        const nodes = {};
+        buckets.forEach(b => {
+            // Create a deep copy to avoid mutating original bucket state if needed, 
+            // but lightweight object creation is safer
+            nodes[b.id] = { ...b, children: [], courses: bucketGroups[b.id] || [] };
+        });
+
+        const rootBuckets = [];
+        Object.values(nodes).forEach(b => {
+            if (b.parent_bucket_id && nodes[b.parent_bucket_id]) {
+                nodes[b.parent_bucket_id].children.push(b);
+            } else {
+                rootBuckets.push(b);
+            }
+        });
+
+        // Sort roots
+        rootBuckets.sort((a, b) => (a.order_index || 0) - (b.order_index || 0) || a.name.localeCompare(b.name));
+
+        // 3. Filter empty folders (recursive)
+        const filterEmpty = (nodeList) => {
+            return nodeList.filter(node => {
+                const validChildren = filterEmpty(node.children || []);
+                node.children = validChildren.sort((a, b) => (a.order_index || 0) - (b.order_index || 0) || a.name.localeCompare(b.name));
+                return node.courses.length > 0 || validChildren.length > 0;
+            });
+        };
+        const visibleBuckets = filterEmpty(rootBuckets);
+
+        // 4. Recursive Render
+        const renderNode = (node, depth = 0) => {
+            const isExpanded = expandedBuckets[node.id];
+
+            return (
+                <View key={node.id} style={{ marginLeft: depth * 10, marginTop: 4 }}>
+                    <TouchableOpacity
+                        style={[styles.courseItem, { borderBottomWidth: 0, paddingVertical: 8, backgroundColor: 'transparent' }]}
+                        onPress={() => toggleBucket(node.id)}
+                    >
+                        <MaterialCommunityIcons
+                            name={isExpanded ? "folder-open" : "folder"}
+                            size={20}
+                            color="#F59E0B"
+                            style={{ marginRight: 8 }}
+                        />
+                        <Text style={[styles.courseTitle, { fontWeight: '600' }]}>{node.name}</Text>
+                        <Feather name={isExpanded ? "chevron-down" : "chevron-right"} size={16} color="#9CA3AF" />
+                    </TouchableOpacity>
+
+                    {isExpanded && (
+                        <View>
+                            {node.children.map(child => renderNode(child, depth + 1))}
+                            {node.courses.map(course => (
+                                <TouchableOpacity
+                                    key={course.id}
+                                    style={[styles.courseItem, { marginLeft: 16, borderBottomWidth: 0 }]}
+                                    onPress={() => toggleCourse(levelId, course.id)}
+                                >
+                                    <View style={styles.checkbox} />
+                                    <Text style={styles.courseTitle} numberOfLines={1}>{course.title}</Text>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                        <Text style={styles.courseBucket}>{course.resource_type || 'File'}</Text>
+                                    </View>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    )}
+                </View>
+            );
+        };
+
+        return (
+            <View style={{ marginTop: 8 }}>
+                {visibleBuckets.map(b => renderNode(b))}
+
+                {rootCourses.length > 0 && (
+                    <View style={{ marginTop: 8 }}>
+                        {visibleBuckets.length > 0 && (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, opacity: 0.7 }}>
+                                <MaterialCommunityIcons name="file-multiple" size={16} color="#6B7280" />
+                                <Text style={{ fontSize: 12, fontWeight: '600', color: '#6B7280', marginLeft: 6 }}>Uncategorized Files</Text>
+                            </View>
+                        )}
+                        {rootCourses.map(course => (
+                            <TouchableOpacity
+                                key={course.id}
+                                style={styles.courseItem}
+                                onPress={() => toggleCourse(levelId, course.id)}
+                            >
+                                <View style={styles.checkbox} />
+                                <Text style={styles.courseTitle} numberOfLines={1}>{course.title}</Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                )}
+
+                {visibleBuckets.length === 0 && rootCourses.length === 0 && (
+                    <Text style={styles.noCourses}>No other courses available</Text>
+                )}
+            </View>
+        );
     };
 
     // =========================================================================
@@ -1010,25 +1139,10 @@ export default function AccessControlModal({ visible, onClose }) {
                                 <Text style={styles.sectionTitle}>
                                     Available Courses ({availableCourses.length - assignedCourses.length})
                                 </Text>
-                                {availableCourses
-                                    .filter(c => !(stagedAssignments[level.id] || []).includes(c.id))
-                                    .slice(0, 10) // Show max 10 at a time for performance
-                                    .map(course => (
-                                        <TouchableOpacity
-                                            key={course.id}
-                                            style={styles.courseItem}
-                                            onPress={() => toggleCourse(level.id, course.id)}
-                                        >
-                                            <View style={styles.checkbox} />
-                                            <Text style={styles.courseTitle} numberOfLines={1}>
-                                                {course.title}
-                                            </Text>
-                                            <Text style={styles.courseBucket}>
-                                                {course.bucket || 'General'}
-                                            </Text>
-                                        </TouchableOpacity>
-                                    ))
-                                }
+                                {renderAvailableHierarchy(
+                                    level.id,
+                                    availableCourses.filter(c => !(stagedAssignments[level.id] || []).includes(c.id))
+                                )}
                             </View>
 
                             {/* ============================================ */}
@@ -1252,7 +1366,9 @@ export default function AccessControlModal({ visible, onClose }) {
         quizSaving,
         editingQuestionKey,
         editForm,
-        savingCurriculum
+        savingCurriculum,
+        buckets,
+        expandedBuckets
     ]);
 
     // =========================================================================
@@ -1451,25 +1567,10 @@ export default function AccessControlModal({ visible, onClose }) {
                                                     <Text style={styles.sectionTitle}>
                                                         Available Courses ({availableCourses.length - assignedCourses.length})
                                                     </Text>
-                                                    {availableCourses
-                                                        .filter(c => !(stagedAssignments[level.id] || []).includes(c.id))
-                                                        .slice(0, 10)
-                                                        .map(course => (
-                                                            <TouchableOpacity
-                                                                key={course.id}
-                                                                style={styles.courseItem}
-                                                                onPress={() => toggleCourse(level.id, course.id)}
-                                                            >
-                                                                <View style={styles.checkbox} />
-                                                                <Text style={styles.courseTitle} numberOfLines={1}>
-                                                                    {course.title}
-                                                                </Text>
-                                                                <Text style={styles.courseBucket}>
-                                                                    {course.bucket || 'General'}
-                                                                </Text>
-                                                            </TouchableOpacity>
-                                                        ))
-                                                    }
+                                                    {renderAvailableHierarchy(
+                                                        level.id,
+                                                        availableCourses.filter(c => !(stagedAssignments[level.id] || []).includes(c.id))
+                                                    )}
                                                 </View>
 
                                                 {/* ============================================ */}
@@ -1690,7 +1791,9 @@ export default function AccessControlModal({ visible, onClose }) {
                                 savingCurriculum,
                                 editingQuestionKey,
                                 editForm,
-                                toast
+                                toast,
+                                expandedBuckets,
+                                buckets
                             }}
                         />
                     )}

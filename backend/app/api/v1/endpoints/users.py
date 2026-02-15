@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
 import io
 import csv
+import uuid
 from app.config.database import get_db
 from app.core.dependencies import get_current_user, require_admin, require_privilege
 from app.core.middleware import limiter
