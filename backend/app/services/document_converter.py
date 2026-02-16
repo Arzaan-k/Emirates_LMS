@@ -33,17 +33,21 @@ class DocumentConverterService:
     """
 
     def __init__(self):
-        # CloudConvert should ONLY be used for PPT and DOC files
-        self.supported_formats = ['ppt', 'pptx', 'doc', 'docx']
+        # Supports all formats via CloudConvert
+        self.supported_formats = [
+            'ppt', 'pptx', 'doc', 'docx', 'xls', 'xlsx', 
+            'txt', 'rtf', 'odt', 'ods', 'odp',
+            'jpg', 'jpeg', 'png', 'bmp', 'tiff'
+        ]
 
         # Reload env to get latest API key
         load_dotenv(override=True)
         self.api_key = os.getenv("CLOUDCONVERT_API_KEY", "")
 
         if self.api_key:
-            logger.info(f"CloudConvert API configured for PPT/DOC files (key length: {len(self.api_key)})")
+            logger.info(f"CloudConvert API configured (key length: {len(self.api_key)})")
         else:
-            logger.warning("CloudConvert not configured - large PPT/DOC files will use Google Viewer (may fail)")
+            logger.warning("CloudConvert not configured.")
 
     def needs_conversion(self, filename: str) -> bool:
         """Check if file might need optimization"""
@@ -92,8 +96,7 @@ class DocumentConverterService:
                             "convert-to-pdf": {
                                 "operation": "convert",
                                 "input": ["upload-file"],
-                                "output_format": "pdf",
-                                "engine": "office"
+                                "output_format": "pdf"
                             },
                             "export-result": {
                                 "operation": "export/url",
@@ -207,6 +210,90 @@ class DocumentConverterService:
             traceback.print_exc()
             return False, None, str(e)
 
+    async def convert_with_convertio(self, input_path: str, output_dir: str) -> Tuple[bool, Optional[str], Optional[str]]:
+        """
+        Convert document to PDF using ConvertIO API.
+        """
+        api_key = self.convertio_key
+        if not api_key:
+            return False, None, "ConvertIO API key not configured"
+
+        import httpx
+        import asyncio
+        import json
+
+        filename = os.path.basename(input_path)
+        base_name = os.path.splitext(filename)[0]
+        pdf_path = os.path.join(output_dir, f"{base_name}.pdf")
+
+        try:
+            file_size_mb = self._get_file_size_mb(input_path)
+            logger.info(f"ConvertIO: Converting {filename} ({file_size_mb:.2f} MB) to PDF...")
+
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                # 1. Start Conversion
+                start_res = await client.post(
+                    "https://api.convertio.co/convert",
+                    json={
+                        "apikey": api_key,
+                        "input": "upload",
+                        "file": filename,
+                        "outputformat": "pdf"
+                    }
+                )
+
+                if start_res.status_code != 200:
+                    return False, None, f"ConvertIO init failed: {start_res.text}"
+
+                start_data = start_res.json()
+                if start_data.get("code") != 200:
+                    return False, None, f"ConvertIO error: {start_data.get('status')}"
+
+                upload_url = start_data["data"]["id"] # Actually ID is needed for status, upload URL is likely provided? 
+                # Wait, docs say data.url is for PUT. data.id is for status.
+                
+                conversion_id = start_data["data"]["id"]
+                put_url = start_data["data"]["url"]
+
+                logger.info(f"ConvertIO Job ID: {conversion_id}")
+
+                # 2. Upload File
+                with open(input_path, "rb") as f:
+                    file_content = f.read()
+                
+                upload_res = await client.put(put_url, content=file_content)
+                if upload_res.status_code != 200:
+                     return False, None, "ConvertIO upload failed"
+
+                # 3. Poll Status
+                for i in range(120): # Wait up to 4 mins
+                    await asyncio.sleep(2)
+                    status_res = await client.get(f"https://api.convertio.co/convert/{conversion_id}/status")
+                    if status_res.status_code != 200: continue
+                    
+                    status_data = status_res.json()
+                    step = status_data["data"]["step"]
+                    
+                    if i % 10 == 0:
+                        logger.info(f"ConvertIO Status: {step} ({status_data['data'].get('percent', 0)}%)")
+
+                    if step == "finish":
+                        result_url = status_data["data"]["output"]["url"]
+                        download_res = await client.get(result_url)
+                        with open(pdf_path, "wb") as f:
+                            f.write(download_res.content)
+                        
+                        return True, pdf_path, None
+                    
+                    if step == "error":
+                         return False, None, f"ConvertIO Failed: {status_data['data'].get('message')}"
+                
+                return False, None, "ConvertIO timed out"
+
+        except Exception as e:
+            logger.error(f"ConvertIO Exception: {e}")
+            return False, None, str(e)
+
     async def convert_to_pdf(
         self,
         input_path: str,
@@ -239,13 +326,12 @@ class DocumentConverterService:
         original_size = self._get_file_size_mb(input_path)
         logger.info(f"Processing {filename} ({original_size:.2f} MB)")
 
-        # If file is small enough, use Google Viewer directly
-        if original_size < 24:
-            logger.info(f"File is under 24MB - Google Viewer will work directly")
-            return True, None, "File small enough for direct preview"
+        if original_size < 25:
+            logger.info(f"File is under 25MB - skipping conversion")
+            return True, None, "File small enough"
 
-        # Large file - convert to PDF using CloudConvert
-        logger.info(f"File is {original_size:.2f}MB (>24MB) - converting with CloudConvert...")
+        # Large file - convert
+        logger.info(f"File is {original_size:.2f}MB (>25MB) - converting with CloudConvert...")
 
         if output_dir is None:
             output_dir = tempfile.mkdtemp()
@@ -254,17 +340,15 @@ class DocumentConverterService:
         api_key = os.getenv("CLOUDCONVERT_API_KEY", "") or self.api_key
 
         if not api_key:
-            logger.warning("CloudConvert not configured - file may fail to preview in Google Viewer")
-            return True, None, "File too large but CloudConvert not configured"
+            return True, None, "No conversion API configured"
 
         success, pdf_path, error = await self.convert_with_cloudconvert(input_path, output_dir)
 
         if success:
             return True, pdf_path, "Converted to PDF"
         else:
-            logger.error(f"CloudConvert failed: {error}")
-            # Return success=True but no path - let it try Google Viewer anyway
-            return True, None, f"CloudConvert failed: {error}"
+            logger.error(f"Conversion failed: {error}")
+            return True, None, f"Conversion failed: {error}"
 
     async def convert_file(
         self,

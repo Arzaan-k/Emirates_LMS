@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 import API_URL from '../config';
 
 const { width, height } = Dimensions.get('window');
@@ -52,33 +54,66 @@ export default function CertificateModal({ visible, onClose, courseId, userEmail
         }
     };
 
-    const handleDownload = () => {
+    const handleDownload = async () => {
         if (!certificate) return;
 
-        if (Platform.OS === 'web') {
-            // Generate HTML certificate and trigger download
-            const certHTML = generateCertificateHTML(certificate);
-            const blob = new Blob([certHTML], { type: 'text/html' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `Certificate_${certificate.certificate_id}.html`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+        const certHTML = generateCertificateHTML(certificate);
+
+        try {
+            if (Platform.OS === 'web') {
+                // For web, open a new window to ensure isolation and trigger print (Save as PDF)
+                const printWindow = window.open('', '_blank');
+                if (printWindow) {
+                    printWindow.document.write(certHTML);
+                    printWindow.document.close();
+                    printWindow.focus();
+                    setTimeout(() => {
+                        printWindow.print();
+                    }, 500);
+                } else {
+                    alert('Pop-up blocked. Please allow pop-ups for this site.');
+                }
+            } else {
+                // For native, generate PDF and share/save
+                // Use Landscape dimensions (A4 Landscape: ~842pt x 595pt)
+                const { uri } = await Print.printToFileAsync({
+                    html: certHTML,
+                    width: 842,
+                    height: 595,
+                    base64: false
+                });
+                await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+            }
+        } catch (error) {
+            console.error('Download error:', error);
+            setError('Failed to download certificate');
         }
     };
 
-    const handlePrint = () => {
-        if (!certificate || Platform.OS !== 'web') return;
+    const handlePrint = async () => {
+        if (!certificate) return;
 
         const certHTML = generateCertificateHTML(certificate);
-        const printWindow = window.open('', '_blank');
-        printWindow.document.write(certHTML);
-        printWindow.document.close();
-        printWindow.focus();
-        setTimeout(() => printWindow.print(), 500);
+
+        try {
+            if (Platform.OS === 'web') {
+                const printWindow = window.open('', '_blank');
+                if (printWindow) {
+                    printWindow.document.write(certHTML);
+                    printWindow.document.close();
+                    printWindow.focus();
+                    setTimeout(() => printWindow.print(), 500);
+                }
+            } else {
+                // Native Printing (AirPrint / Android Print)
+                await Print.printAsync({
+                    html: certHTML,
+                    orientation: Print.Orientation.landscape
+                });
+            }
+        } catch (error) {
+            console.error('Print error:', error);
+        }
     };
 
     const generateCertificateHTML = (cert) => {
@@ -100,6 +135,24 @@ export default function CertificateModal({ visible, onClose, courseId, userEmail
             min-height: 100vh;
             background: #f0f0f0;
             font-family: 'Inter', sans-serif;
+            -webkit-print-color-adjust: exact;
+        }
+        
+        @page {
+            size: landscape;
+            margin: 0;
+        }
+
+        @media print {
+            body { 
+                background: white; 
+                -webkit-print-color-adjust: exact;
+            }
+            .certificate { 
+                box-shadow: none;
+                margin: 0; 
+                page-break-after: always;
+            }
         }
         
         .certificate {
@@ -371,18 +424,14 @@ export default function CertificateModal({ visible, onClose, courseId, userEmail
 
                                 {/* Action Buttons */}
                                 <View style={styles.actionsRow}>
-                                    {Platform.OS === 'web' && (
-                                        <>
-                                            <TouchableOpacity onPress={handleDownload} style={styles.actionBtn}>
-                                                <Feather name="download" size={20} color="#FFF" />
-                                                <Text style={styles.actionText}>Download</Text>
-                                            </TouchableOpacity>
-                                            <TouchableOpacity onPress={handlePrint} style={[styles.actionBtn, styles.printBtn]}>
-                                                <Feather name="printer" size={20} color="#C9A84C" />
-                                                <Text style={[styles.actionText, { color: '#C9A84C' }]}>Print</Text>
-                                            </TouchableOpacity>
-                                        </>
-                                    )}
+                                    <TouchableOpacity onPress={handleDownload} style={styles.actionBtn}>
+                                        <Feather name="download" size={20} color="#FFF" />
+                                        <Text style={styles.actionText}>Download PDF</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity onPress={handlePrint} style={[styles.actionBtn, styles.printBtn]}>
+                                        <Feather name="printer" size={20} color="#C9A84C" />
+                                        <Text style={[styles.actionText, { color: '#C9A84C' }]}>Print</Text>
+                                    </TouchableOpacity>
                                 </View>
 
                                 {/* Certificate Details */}

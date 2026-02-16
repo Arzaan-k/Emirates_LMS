@@ -1164,22 +1164,65 @@ async def get_stores():
 
 @router.get("/audit-logs")
 async def get_audit_logs(
-    limit: int = 100,
+    limit: int = 1000,
     action: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """
-    Get system audit logs.
+    Get system audit logs with filtering.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
     from app.schemas.analytics import AuditLogResponse
+    from datetime import datetime
 
     repo = AnalyticsRepository(db)
     
+    dt_start = None
+    dt_end = None
+    
+    if start_date:
+        try:
+            # Handle ISO format
+            dt_start = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+        except Exception:
+            pass
+            
+    if end_date:
+        try:
+            dt_end = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+        except Exception:
+            pass
+    
     try:
-        logs = repo.get_audit_logs(action_type=action, limit=limit)
-        # Convert to list of dicts, ensuring compatibility with schema
-        return [log.to_dict() for log in logs]
+        result = repo.get_audit_logs(
+            action_type=action, 
+            limit=limit,
+            start_date=dt_start,
+            end_date=dt_end
+        )
+        
+        logs_list = []
+        total_count = 0
+        
+        if isinstance(result, list):
+            # Fallback for old repository behavior or reload failure
+            logs_list = result
+            total_count = len(result)
+            logger.warning("get_audit_logs returned list format - repository update may not be active.")
+        elif isinstance(result, dict):
+            logs_list = result.get("logs", [])
+            total_count = result.get("total", 0)
+        
+        # Calculate unique action types
+        unique_actions = list(set([l.action for l in logs_list]))
+        
+        return {
+            "logs": [l.to_dict() for l in logs_list],
+            "total": total_count,
+            "action_types": unique_actions
+        }
     except Exception as e:
         logger.error(f"Audit logs fetch failed: {e}")
         return []

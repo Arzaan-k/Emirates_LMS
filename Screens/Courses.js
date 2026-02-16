@@ -644,10 +644,12 @@ export default function Courses({ userEmail = "user" }) {
     const [slCongratsVisible, setSlCongratsVisible] = useState(false);
     const [slCongratsInfo, setSlCongratsInfo] = useState(null);
 
-    // Fetch self-learning status on mount
+    // Fetch self-learning status on mount and when userEmail changes
     React.useEffect(() => {
-        fetchSelfLearningStatus();
-    }, []);
+        if (userEmail && userEmail !== "user") {
+            fetchSelfLearningStatus();
+        }
+    }, [userEmail]);
 
     const fetchSelfLearningStatus = async () => {
         try {

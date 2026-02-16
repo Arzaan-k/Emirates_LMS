@@ -342,10 +342,14 @@ def _make_audit_log_friendly(log_dict: dict) -> dict:
 @api_router.get("/audit-logs")
 async def get_audit_logs(
     action_type: str = None,
+    action: str = None,  # Frontend sends 'action' param
+    start_date: str = None,
+    end_date: str = None,
+    limit: int = 10000,  # High limit to fetch all, filtering done in code
     db: Session = Depends(__import__("app.config.database", fromlist=["get_db"]).get_db),
 ):
     """
-    Get audit logs, optionally filtered by action type.
+    Get audit logs, optionally filtered by action type and date range.
     Returns user-friendly descriptions instead of technical details.
 
     NOTE: Filtering happens AFTER transformation because:
@@ -354,16 +358,54 @@ async def get_audit_logs(
     - Filter pills show transformed names, so we filter on transformed values
     """
     from app.repositories.analytics_repository import AnalyticsRepository
+    from datetime import datetime
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Support both action_type and action params
+    filter_action = action_type or action
+
+    # Parse date filters
+    dt_start = None
+    dt_end = None
+    if start_date:
+        try:
+            dt_start = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+        except Exception:
+            try:
+                dt_start = datetime.strptime(start_date, '%Y-%m-%d')
+            except Exception:
+                pass
+    if end_date:
+        try:
+            dt_end = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+        except Exception:
+            try:
+                dt_end = datetime.strptime(end_date, '%Y-%m-%d')
+                # Set to end of day
+                dt_end = dt_end.replace(hour=23, minute=59, second=59)
+            except Exception:
+                pass
 
     try:
         repo = AnalyticsRepository(db)
-        # Always fetch all logs first (no filter at DB level)
-        # because we need to filter on TRANSFORMED action names
-        logs = repo.get_audit_logs(action_type=None)
+        # Fetch logs with date filters at DB level for efficiency
+        audit_result = repo.get_audit_logs(
+            action_type=None,
+            limit=limit,
+            start_date=dt_start,
+            end_date=dt_end
+        )
+
+        # Handle both dict and list return formats
+        if isinstance(audit_result, dict):
+            logs_list = audit_result.get("logs", [])
+        else:
+            logs_list = audit_result if audit_result else []
 
         result = []
         action_types_set = set()
-        for log in logs:
+        for log in logs_list:
             log_dict = log.to_dict() if hasattr(log, 'to_dict') else dict(log)
             # Transform to friendly format FIRST
             log_dict = _make_audit_log_friendly(log_dict)
@@ -374,17 +416,19 @@ async def get_audit_logs(
             if log_dict.get("action"):
                 action_types_set.add(log_dict["action"])
 
-            # Filter AFTER transformation if action_type is specified
-            if action_type is None or log_dict.get("action") == action_type:
+            # Filter AFTER transformation if filter_action is specified
+            if filter_action is None or log_dict.get("action") == filter_action:
                 result.append(log_dict)
 
         # Return in format expected by frontend
         return {
             "logs": result,
+            "total": len(result),
             "action_types": sorted(list(action_types_set))
         }
     except Exception as e:
-        return {"logs": [], "action_types": []}
+        logger.error(f"Audit logs fetch error: {e}")
+        return {"logs": [], "total": 0, "action_types": []}
 
 
 # Backward compatibility alias for old frontend endpoint
@@ -554,6 +598,10 @@ async def create_support_ticket_alias(
 @support_router.get("/audit-logs")
 async def get_audit_logs_root_alias(
     action_type: str = None,
+    action: str = None,  # Frontend sends 'action' param
+    start_date: str = None,
+    end_date: str = None,
+    limit: int = 10000,  # High limit to fetch all, filtering done in code
     db: Session = Depends(__import__("app.config.database", fromlist=["get_db"]).get_db),
 ):
     """
@@ -567,16 +615,54 @@ async def get_audit_logs_root_alias(
     - Filter pills show transformed names, so we filter on transformed values
     """
     from app.repositories.analytics_repository import AnalyticsRepository
+    from datetime import datetime
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Support both action_type and action params
+    filter_action = action_type or action
+
+    # Parse date filters
+    dt_start = None
+    dt_end = None
+    if start_date:
+        try:
+            dt_start = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+        except Exception:
+            try:
+                dt_start = datetime.strptime(start_date, '%Y-%m-%d')
+            except Exception:
+                pass
+    if end_date:
+        try:
+            dt_end = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+        except Exception:
+            try:
+                dt_end = datetime.strptime(end_date, '%Y-%m-%d')
+                # Set to end of day
+                dt_end = dt_end.replace(hour=23, minute=59, second=59)
+            except Exception:
+                pass
 
     try:
         repo = AnalyticsRepository(db)
-        # Always fetch all logs first (no filter at DB level)
-        # because we need to filter on TRANSFORMED action names
-        logs = repo.get_audit_logs(action_type=None)
+        # Fetch logs with date filters at DB level for efficiency
+        audit_result = repo.get_audit_logs(
+            action_type=None,
+            limit=limit,
+            start_date=dt_start,
+            end_date=dt_end
+        )
+
+        # Handle both dict and list return formats
+        if isinstance(audit_result, dict):
+            logs_list = audit_result.get("logs", [])
+        else:
+            logs_list = audit_result if audit_result else []
 
         result = []
         action_types_set = set()
-        for log in logs:
+        for log in logs_list:
             log_dict = log.to_dict() if hasattr(log, 'to_dict') else dict(log)
             # Transform to friendly format FIRST
             log_dict = _make_audit_log_friendly(log_dict)
@@ -587,17 +673,19 @@ async def get_audit_logs_root_alias(
             if log_dict.get("action"):
                 action_types_set.add(log_dict["action"])
 
-            # Filter AFTER transformation if action_type is specified
-            if action_type is None or log_dict.get("action") == action_type:
+            # Filter AFTER transformation if filter_action is specified
+            if filter_action is None or log_dict.get("action") == filter_action:
                 result.append(log_dict)
 
         # Return in format expected by frontend
         return {
             "logs": result,
+            "total": len(result),
             "action_types": sorted(list(action_types_set))
         }
     except Exception as e:
-        return {"logs": [], "action_types": []}
+        logger.error(f"Audit logs fetch error: {e}")
+        return {"logs": [], "total": 0, "action_types": []}
 
 
 @support_router.get("/support/all-tickets")

@@ -358,6 +358,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
     const [requirements, setRequirements] = useState({ video_watch_percent: 90, quiz_pass_percent: 70 });
     const [endQuizPassed, setEndQuizPassed] = useState(false);
     const [nodeProgress, setNodeProgress] = useState(null);
+    const [completionResult, setCompletionResult] = useState(null);
 
     // No-transcript/no-quiz detection
     const [hasQuiz, setHasQuiz] = useState(true); // Default true, updated from server response
@@ -380,6 +381,12 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
     const watchedSeconds = useRef(new Set());
     // [FIX] Track highest server percent to avoid fluctuations
     const highestServerPercent = useRef(0);
+    // [NEW] Track previous playing state for pause detection
+    const wasPlaying = useRef(false);
+    // [FIX] Track if close was already triggered to prevent double-close
+    const isClosing = useRef(false);
+    // [FIX] Track if progress has been synced to avoid unnecessary calls
+    const lastSyncedPercent = useRef(0);
 
     // [NEW] Fullscreen and Orientation state
     const [isFullscreen, setIsFullscreen] = useState(false);
@@ -470,7 +477,39 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
                 handleDocumentViewed();
             }, 2000); // Give 2 seconds for the document to load
         }
-    }, []);
+
+        // [SEAMLESS SYNC] Force sync progress when component unmounts
+        return () => {
+            // Skip if already closed via handleClose
+            if (isClosing.current) return;
+
+            // Calculate final progress using the maximum of local and server values
+            const watchedCount = watchedSeconds.current.size;
+            const localPercent = videoDuration > 0
+                ? Math.min(100, Math.floor((watchedCount / videoDuration) * 100))
+                : 0;
+            const finalPercent = Math.max(localPercent, highestServerPercent.current);
+
+            // Only sync if we have meaningful progress
+            if (finalPercent > lastSyncedPercent.current && videoDuration > 0) {
+                const formData = new FormData();
+                formData.append("user_email", userEmail);
+                formData.append("node_id", lesson.id);
+                formData.append("video_position_seconds", maxPositionReached.toString());
+                formData.append("video_duration_seconds", videoDuration.toString());
+                formData.append("explicit_progress_percent", finalPercent.toString());
+
+                console.log(`[Unmount] Syncing final progress: ${finalPercent}%`);
+
+                // Use fetch with keepalive - more reliable than sendBeacon across platforms
+                fetch(`${API_URL}/learning-path/track-video-progress`, {
+                    method: "POST",
+                    body: formData,
+                    keepalive: true // Ensures request completes even if page unloads
+                }).catch(() => { });
+            }
+        };
+    }, [videoDuration, maxPositionReached, userEmail, lesson.id]);
 
     // Lock orientation to portrait by default, allow changes during fullscreen (native only)
     useEffect(() => {
@@ -544,11 +583,26 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
                 const serverPercent = data.progress.video_watched_percent || 0;
                 setVideoProgress(serverPercent);
                 highestServerPercent.current = serverPercent;
+                lastSyncedPercent.current = serverPercent;
                 setMaxPositionReached(data.progress.max_position_reached || 0);
                 setEndQuizPassed(data.progress.end_quiz_passed || false);
                 setMidQuizzesPassed(data.progress.mid_quizzes_completed || []);
                 // Mark already passed mid-quiz times as shown
                 (data.progress.mid_quizzes_completed || []).forEach(t => shownMidQuizTimes.current.add(t));
+
+                // [FIX] Pre-populate watchedSeconds based on server progress
+                // This prevents progress from jumping back when reopening
+                const serverDuration = data.progress.video_duration_seconds || 0;
+                if (serverDuration > 0 && serverPercent > 0) {
+                    // Calculate how many seconds correspond to server percent
+                    const watchedSecondsCount = Math.floor((serverPercent / 100) * serverDuration);
+                    // Pre-fill the watchedSeconds Set with sequential seconds
+                    // This maintains consistency when calculating local progress
+                    for (let i = 0; i < watchedSecondsCount; i++) {
+                        watchedSeconds.current.add(i);
+                    }
+                    console.log(`[Progress] Pre-populated ${watchedSecondsCount} seconds from server (${serverPercent}%)`);
+                }
             }
             if (data.requirements) {
                 setRequirements(data.requirements);
@@ -584,9 +638,9 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
 
     // Track video progress to backend
     const trackVideoProgress = useCallback(async (position, duration, force = false, overridePercent = null) => {
-        // Throttle updates to every 5 seconds (unless forced)
+        // Throttle updates to every 2 seconds (unless forced) - reduced from 5s for more responsive updates
         const now = Date.now();
-        if (!force && now - lastProgressUpdate.current < 5000) return;
+        if (!force && now - lastProgressUpdate.current < 2000) return;
         lastProgressUpdate.current = now;
 
         try {
@@ -614,6 +668,8 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
                 setVideoProgress(serverPercent);
                 // Sync highest with server's value (server always returns max)
                 highestServerPercent.current = Math.max(highestServerPercent.current, serverPercent);
+                // [FIX] Update lastSyncedPercent to prevent redundant syncs
+                lastSyncedPercent.current = Math.max(lastSyncedPercent.current, serverPercent);
             }
             return result;
         } catch (err) {
@@ -693,14 +749,25 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
         // [NEW] Robust Tracking: Count unique seconds watched
         if (status.isPlaying) {
             // Add current second to set (floor to integer)
-            watchedSeconds.current.add(Math.floor(position));
+            const currentSecond = Math.floor(position);
+            watchedSeconds.current.add(currentSecond);
+
+            // [FIX] Also add nearby seconds to handle playback speed variations
+            // This ensures we don't miss seconds when playing at 1.25x or 1.5x
+            if (currentSecond > 0) {
+                watchedSeconds.current.add(currentSecond - 1);
+            }
         }
 
         // Calculate and update progress percentage
         if (duration > 0) {
             // ROBUST CALCULATION: Unique seconds / Total duration
             const watchedCount = watchedSeconds.current.size;
-            const currentSessionPercent = Math.min(100, Math.floor((watchedCount / duration) * 100));
+            const totalSeconds = Math.floor(duration);
+
+            // [FIX] Cap watchedCount at totalSeconds to prevent >100%
+            const effectiveWatchedCount = Math.min(watchedCount, totalSeconds);
+            const currentSessionPercent = Math.min(100, Math.floor((effectiveWatchedCount / totalSeconds) * 100));
 
             // [FIX] Prevent fluctuation: Use maximum of server-recorded or current session
             let effectivePercent = Math.max(currentSessionPercent, highestServerPercent.current);
@@ -712,8 +779,17 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
 
             setVideoProgress(effectivePercent);
 
-            // Let's pass the calculated percent to trackVideoProgress as an override
-            trackVideoProgress(position, duration, false, effectivePercent);
+            // [SEAMLESS SYNC] Force sync on pause for immediate progress save
+            const justPaused = wasPlaying.current && !status.isPlaying;
+            wasPlaying.current = status.isPlaying;
+
+            // [FIX] Only sync if progress increased significantly (at least 2% or on pause)
+            const shouldSync = justPaused || (effectivePercent - lastSyncedPercent.current >= 2);
+
+            if (shouldSync && effectivePercent > lastSyncedPercent.current) {
+                lastSyncedPercent.current = effectivePercent;
+                trackVideoProgress(position, duration, true, effectivePercent);
+            }
         }
 
         // Fixed checkpoints at 33% and 66% of video duration
@@ -721,10 +797,25 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
         if (!hasQuiz) {
             // No transcript → no mid-video quizzes, just track video progress
             if (status.didJustFinish) {
-                if (videoProgress >= requirements.video_watch_percent) {
-                    console.log("Video finished (no quiz). Attempting video-only completion...");
-                    attemptVideoOnlyCompletion();
-                }
+                // [FIX] Force sync before attempting completion
+                const watchedCount = watchedSeconds.current.size;
+                const totalSeconds = Math.floor(duration);
+                const finalPercent = Math.min(100, Math.floor((watchedCount / totalSeconds) * 100));
+                const effectivePercent = Math.max(finalPercent, highestServerPercent.current, 90);
+
+                console.log(`Video finished (no quiz). Progress: local=${finalPercent}%, effective=${effectivePercent}%`);
+
+                // Update local state first
+                highestServerPercent.current = effectivePercent;
+                setVideoProgress(effectivePercent);
+
+                // Force sync then attempt completion
+                trackVideoProgress(duration, duration, true, effectivePercent).then(() => {
+                    if (effectivePercent >= requirements.video_watch_percent) {
+                        console.log("Attempting video-only completion...");
+                        attemptVideoOnlyCompletion();
+                    }
+                });
             }
             return;
         }
@@ -775,7 +866,21 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
 
         // Check if video finished (only reached when hasQuiz is true)
         if (status.didJustFinish) {
-            console.log("Video finished. Video progress:", videoProgress);
+            // [FIX] Force sync progress when video finishes to ensure 100% is saved
+            const watchedCount = watchedSeconds.current.size;
+            const totalSeconds = Math.floor(duration);
+            const finalPercent = Math.min(100, Math.floor((watchedCount / totalSeconds) * 100));
+            const effectivePercent = Math.max(finalPercent, highestServerPercent.current, 90);
+
+            console.log(`Video finished. Syncing progress: local=${finalPercent}%, effective=${effectivePercent}%`);
+
+            // Force immediate sync
+            highestServerPercent.current = effectivePercent;
+            lastSyncedPercent.current = effectivePercent;
+            setVideoProgress(effectivePercent);
+
+            // Sync to server immediately
+            trackVideoProgress(duration, duration, true, effectivePercent);
         }
     };
 
@@ -849,7 +954,6 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
     };
 
     // Track end quiz completion
-    const [completionResult, setCompletionResult] = useState(null);
 
     const trackQuizCompletion = async (finalScore, totalQuestions) => {
         try {
@@ -994,9 +1098,50 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
         }
     }, [nodeProgress, requirements, moduleCompleted, hasQuiz]);
 
-    const handleClose = () => {
+    const handleClose = useCallback(() => {
+        // [FIX] Prevent double-close which could cause issues
+        if (isClosing.current) {
+            console.log("[Close] Already closing, ignoring duplicate call");
+            return;
+        }
+        isClosing.current = true;
+
+        // Calculate final progress
+        const watchedCount = watchedSeconds.current.size;
+        const robustPercent = videoDuration > 0
+            ? Math.min(100, Math.floor((watchedCount / videoDuration) * 100))
+            : highestServerPercent.current;
+
+        // Use the maximum of local calculation and server-stored value
+        const finalPercent = Math.max(robustPercent, highestServerPercent.current);
+
+        console.log(`[Close] Final progress: local=${robustPercent}%, server=${highestServerPercent.current}%, final=${finalPercent}%`);
+
+        // [FIX] Fire-and-forget sync - don't await, close immediately
+        // This ensures the back button always works even if network is slow
+        if (videoDuration > 0 && finalPercent > lastSyncedPercent.current) {
+            const formData = new FormData();
+            formData.append("user_email", userEmail);
+            formData.append("node_id", lesson.id);
+            formData.append("video_position_seconds", maxPositionReached.toString());
+            formData.append("video_duration_seconds", videoDuration.toString());
+            formData.append("explicit_progress_percent", finalPercent.toString());
+
+            // Use fetch with keepalive for reliable background sync
+            fetch(`${API_URL}/learning-path/track-video-progress`, {
+                method: "POST",
+                body: formData,
+                keepalive: true // Ensures request completes even after navigation
+            }).then(res => res.json()).then(result => {
+                console.log("[Close] Progress synced successfully:", result?.progress?.video_watched_percent);
+            }).catch(err => {
+                console.log("[Close] Progress sync error (non-blocking):", err);
+            });
+        }
+
+        // Close immediately - don't wait for network
         onClose(completionResult);
-    };
+    }, [videoDuration, maxPositionReached, userEmail, lesson.id, completionResult, onClose]);
 
     const handleOptionSelect = (idx) => {
         if (!quizData[currentQuizIdx]) return;
@@ -1244,7 +1389,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
                         )}
                     </>
                 );
-            } else{
+            } else {
                 return (
                     <LinearGradient colors={['#374151', '#1F2937']} style={styles.videoPlaceholder}>
                         <MaterialCommunityIcons name="file-word" size={64} color="rgba(255,255,255,0.5)" />
@@ -1280,12 +1425,17 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
     return (
         <RNModal visible={true} animationType="slide" onRequestClose={handleClose} presentationStyle="fullScreen">
             <View style={styles.container}>
-                <LinearGradient colors={['#1F2937', '#111827']} style={StyleSheet.absoluteFill} />
+                <LinearGradient colors={['#1F2937', '#111827']} style={StyleSheet.absoluteFill} pointerEvents="none" />
 
                 <SafeAreaView style={{ flex: 1 }}>
                     {/* HEADER */}
                     <View style={styles.header}>
-                        <TouchableOpacity onPress={handleClose} style={styles.closeBtn}>
+                        <TouchableOpacity
+                            onPress={handleClose}
+                            style={styles.closeBtn}
+                            activeOpacity={0.7}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        >
                             <Feather name="chevron-down" size={24} color="#FFF" />
                         </TouchableOpacity>
                         <View style={{ flex: 1, alignItems: 'center' }}>

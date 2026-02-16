@@ -222,30 +222,80 @@ function VideoPlayerModal({ visible, videoData, userEmail, onClose }) {
     "Spanish", "French", "German", "Chinese", "Japanese", "Arabic", "Portuguese", "Russian"
   ];
 
+  // Track state for progress calculation
+  const watchedSecondsRef = useRef(new Set());
+  const wasPlayingRef = useRef(false);
+  const maxPositionRef = useRef(0);
+  const durationRef = useRef(0);
+
   // Track progress periodically while watching from Jump Back In
   const handlePlaybackStatusUpdate = (status) => {
     if (!status.isLoaded || !videoData?.id || !userEmail) return;
-    if (!status.isPlaying) return;
 
     const position = status.positionMillis / 1000;
     const duration = status.durationMillis ? status.durationMillis / 1000 : 0;
     if (duration <= 0) return;
 
-    // Throttle: only send update every 10 seconds
+    // Update refs for cleanup sync
+    durationRef.current = duration;
+    maxPositionRef.current = Math.max(maxPositionRef.current, position);
+
+    // Track unique seconds watched
+    if (status.isPlaying) {
+      watchedSecondsRef.current.add(Math.floor(position));
+    }
+
+    // Detect pause event for immediate sync
+    const justPaused = wasPlayingRef.current && !status.isPlaying;
+    wasPlayingRef.current = status.isPlaying;
+
+    if (!status.isPlaying && !justPaused) return;
+
+    // Throttle: only send update every 2 seconds (reduced from 10s for responsiveness)
     const now = Date.now();
-    if (progressTrackTimer.current && now - progressTrackTimer.current < 10000) return;
+    if (!justPaused && progressTrackTimer.current && now - progressTrackTimer.current < 2000) return;
     progressTrackTimer.current = now;
+
+    // Calculate robust progress
+    const watchedCount = watchedSecondsRef.current.size;
+    const progressPercent = Math.min(100, Math.floor((watchedCount / duration) * 100));
 
     const formData = new FormData();
     formData.append("user_email", userEmail);
     formData.append("node_id", videoData.id);
     formData.append("video_position_seconds", position.toString());
     formData.append("video_duration_seconds", duration.toString());
+    formData.append("explicit_progress_percent", progressPercent.toString());
 
     fetch(`${API_URL}/api/v1/learning-path/track-video-progress`, {
       method: "POST",
       body: formData,
     }).catch(() => { });
+  };
+
+  // Force sync progress when modal closes
+  const handleClose = async () => {
+    if (durationRef.current > 0 && videoData?.id && userEmail) {
+      const watchedCount = watchedSecondsRef.current.size;
+      const progressPercent = Math.min(100, Math.floor((watchedCount / durationRef.current) * 100));
+
+      const formData = new FormData();
+      formData.append("user_email", userEmail);
+      formData.append("node_id", videoData.id);
+      formData.append("video_position_seconds", maxPositionRef.current.toString());
+      formData.append("video_duration_seconds", durationRef.current.toString());
+      formData.append("explicit_progress_percent", progressPercent.toString());
+
+      await fetch(`${API_URL}/api/v1/learning-path/track-video-progress`, {
+        method: "POST",
+        body: formData,
+      }).catch(() => { });
+    }
+    // Reset refs for next video
+    watchedSecondsRef.current = new Set();
+    maxPositionRef.current = 0;
+    durationRef.current = 0;
+    onClose();
   };
 
   if (!visible || !videoData) return null;
@@ -302,7 +352,7 @@ function VideoPlayerModal({ visible, videoData, userEmail, onClose }) {
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" statusBarTranslucent={true}>
       <View style={{ flex: 1, backgroundColor: '#000' }}>
         {/* CLOSE BUTTON */}
-        <TouchableOpacity style={styles.closeVideoBtn} onPress={onClose}>
+        <TouchableOpacity style={styles.closeVideoBtn} onPress={handleClose}>
           <Feather name="x" size={24} color="#FFF" />
         </TouchableOpacity>
 
@@ -1336,6 +1386,15 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
       fetchPathNodes();
     }
   }, [userEmail]);
+
+  // [SEAMLESS SYNC] Refresh recently viewed (Jump Back In) when Home tab regains focus
+  useFocusEffect(
+    React.useCallback(() => {
+      if (userEmail) {
+        fetchPathNodes();
+      }
+    }, [userEmail])
+  );
 
   useEffect(() => {
     // CONNECT TO WEBSOCKET
