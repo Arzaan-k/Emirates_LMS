@@ -154,135 +154,184 @@ async def get_self_learning_hierarchy(
     Get self-learning buckets in hierarchical tree structure.
     Returns nested folders with progress at each level.
     """
-    # Get all active self-learning buckets + career_progression buckets with show_in_both_paths
-    all_buckets = db.query(CourseBucket).filter(
-        CourseBucket.is_active == True,
-        (
-            (CourseBucket.learning_path_type == "self_learning") |
+    try:
+        # Get all active self-learning buckets + career_progression buckets with show_in_both_paths
+        all_buckets = db.query(CourseBucket).filter(
+            CourseBucket.is_active == True,
             (
-                (CourseBucket.learning_path_type == "career_progression") &
-                (CourseBucket.show_in_both_paths == True)
+                (CourseBucket.learning_path_type == "self_learning") |
+                (
+                    (CourseBucket.learning_path_type == "career_progression") &
+                    (CourseBucket.show_in_both_paths == True)
+                )
             )
-        )
-    ).order_by(CourseBucket.order_index).all()
+        ).order_by(CourseBucket.order_index).all()
 
-    # Get user info
-    user = db.query(User).filter(User.email == user_email).first()
+        # Get user info
+        user = db.query(User).filter(User.email == user_email).first()
 
-    # Get all self-learning courses + career courses from cross-displayed buckets
-    cross_bucket_ids = [b.id for b in all_buckets if b.learning_path_type == 'career_progression']
-    course_filter = Content.learning_path_type == "self_learning"
-    if cross_bucket_ids:
-        from sqlalchemy import or_
-        course_filter = or_(Content.learning_path_type == "self_learning", Content.bucket_id.in_(cross_bucket_ids))
-    all_courses = db.query(Content).filter(
-        Content.is_path_node == True,
-        Content.is_published == True,
-        course_filter
-    ).all()
-
-    now = datetime.utcnow()
-
-    visible_courses = [
-        c for c in all_courses
-        if not c.scheduled_at or c.scheduled_at <= now
-    ]
-
-    # Get user completions
-    completed_ids = set()
-    if user_email != "user":
-        completions = db.query(CourseCompletion.course_id).filter(
-            CourseCompletion.user_email == user_email
+        # Get all self-learning courses + career courses from cross-displayed buckets
+        cross_bucket_ids = [b.id for b in all_buckets if b.learning_path_type == 'career_progression']
+        course_filter = Content.learning_path_type == "self_learning"
+        if cross_bucket_ids:
+            from sqlalchemy import or_
+            course_filter = or_(Content.learning_path_type == "self_learning", Content.bucket_id.in_(cross_bucket_ids))
+        all_courses = db.query(Content).filter(
+            Content.is_path_node == True,
+            Content.is_published == True,
+            course_filter
         ).all()
-        completed_ids = {r[0] for r in completions}
 
-    # Get user watch progress
-    progress_map = {}
-    if user_email != "user":
-        progress_rows = db.query(
-            VideoProgress.node_id,
-            VideoProgress.video_watched_percent,
-            VideoProgress.completed
-        ).filter(
-            VideoProgress.user_email == user_email
-        ).all()
-        for row in progress_rows:
-            progress_map[row[0]] = {
-                "watched_percent": row[1] or 0,
-                "completed": row[2] or False
+        now = datetime.utcnow()
+
+        visible_courses = [
+            c for c in all_courses
+            if not c.scheduled_at or c.scheduled_at <= now
+        ]
+
+        # Get user completions - ALWAYS fetch if we have a valid email
+        completed_ids = set()
+        progress_map = {}
+
+        # Check if user_email looks like a real email (contains @) or is not the default
+        is_real_user = user_email and user_email != "user" and ("@" in user_email or len(user_email) > 4)
+
+        logger.info(f"[Hierarchy] user_email={user_email}, is_real_user={is_real_user}")
+
+        if is_real_user:
+            completions = db.query(CourseCompletion.course_id).filter(
+                CourseCompletion.user_email == user_email
+            ).all()
+            completed_ids = {r[0] for r in completions}
+            logger.info(f"[Hierarchy] Found {len(completed_ids)} completed courses for {user_email}")
+
+            # Get user watch progress
+            progress_rows = db.query(
+                VideoProgress.node_id,
+                VideoProgress.video_watched_percent,
+                VideoProgress.completed
+            ).filter(
+                VideoProgress.user_email == user_email
+            ).all()
+            for row in progress_rows:
+                progress_map[row[0]] = {
+                    "watched_percent": row[1] or 0,
+                    "completed": row[2] or False
+                }
+            logger.info(f"[Hierarchy] Found {len(progress_map)} progress records for {user_email}")
+            # Log first few progress entries for debugging
+            if progress_map:
+                sample_entries = list(progress_map.items())[:3]
+                for node_id, prog in sample_entries:
+                    logger.info(f"[Hierarchy] Sample progress: node_id={node_id}, data={prog}")
+
+        # Log course sample for debugging
+        if visible_courses:
+            sample_courses = visible_courses[:3]
+            for c in sample_courses:
+                logger.info(f"[Hierarchy] Sample course: id={c.id}, title={c.title}, bucket={c.bucket}, bucket_id={c.bucket_id}")
+
+        def get_bucket_progress(bucket):
+            """Calculate progress for a bucket and its content."""
+            bucket_courses = [c for c in visible_courses if c.bucket == bucket.name or c.bucket_id == bucket.id]
+            total = len(bucket_courses)
+            completed = sum(1 for c in bucket_courses if c.id in completed_ids)
+
+            total_progress = 0
+            for c in bucket_courses:
+                p = progress_map.get(c.id, {})
+                if p.get("completed") or c.id in completed_ids:
+                    total_progress += 100
+                else:
+                    watched = p.get("watched_percent", 0)
+                    total_progress += watched
+
+            # Empty folders (0 courses) are considered 100% complete
+            avg_progress = round(total_progress / total, 1) if total > 0 else 100
+
+            # Debug log for buckets with courses
+            if total > 0:
+                logger.info(f"[BucketProgress] {bucket.name} (id={bucket.id}): {completed}/{total} complete, {avg_progress}% progress")
+
+            return {
+                "total_courses": total,
+                "completed_courses": completed,
+                "progress_percent": avg_progress
             }
 
-    def get_bucket_progress(bucket):
-        """Calculate progress for a bucket and its content."""
-        bucket_courses = [c for c in visible_courses if c.bucket == bucket.name or c.bucket_id == bucket.id]
-        total = len(bucket_courses)
-        completed = sum(1 for c in bucket_courses if c.id in completed_ids)
-        
-        total_progress = 0
-        for c in bucket_courses:
-            p = progress_map.get(c.id, {})
-            if p.get("completed") or c.id in completed_ids:
-                total_progress += 100
-            else:
-                total_progress += p.get("watched_percent", 0)
-        # Empty folders (0 courses) are considered 100% complete
-        avg_progress = round(total_progress / total, 1) if total > 0 else 100
+        def build_hierarchy(parent_id=None, visited=None, depth=0):
+            """Recursively build bucket hierarchy with cycle detection."""
+            # Initialize visited set for cycle detection
+            if visited is None:
+                visited = set()
 
-        return {
-            "total_courses": total,
-            "completed_courses": completed,
-            "progress_percent": avg_progress
-        }
+            # Prevent infinite recursion - max depth of 10 levels
+            if depth > 10:
+                logger.warning(f"Max hierarchy depth reached at parent_id={parent_id}")
+                return []
 
-    def build_hierarchy(parent_id=None):
-        """Recursively build bucket hierarchy."""
-        children = []
-        for bucket in all_buckets:
-            bucket_parent = getattr(bucket, 'parent_bucket_id', None)
-            if bucket_parent == parent_id:
-                # Check access
-                if not _user_has_bucket_access(user, bucket):
-                    continue
+            # Cycle detection - prevent processing the same bucket twice in one path
+            if parent_id is not None and parent_id in visited:
+                logger.warning(f"Cycle detected in bucket hierarchy at parent_id={parent_id}")
+                return []
 
-                progress = get_bucket_progress(bucket)
-                
-                # Get child buckets recursively
-                child_buckets = build_hierarchy(bucket.id)
-                
-                # If there are child buckets, aggregate their progress
-                if child_buckets:
-                    child_total = sum(cb.get("total_courses", 0) for cb in child_buckets)
-                    child_completed = sum(cb.get("completed_courses", 0) for cb in child_buckets)
-                    child_progress_sum = sum(cb.get("progress_percent", 0) * cb.get("total_courses", 0) for cb in child_buckets if cb.get("total_courses", 0) > 0)
-                    
-                    progress["total_courses"] += child_total
-                    progress["completed_courses"] += child_completed
-                    if progress["total_courses"] > 0:
-                        total_weight = sum(cb.get("total_courses", 0) for cb in child_buckets if cb.get("total_courses", 0) > 0)
-                        if total_weight > 0:
-                            child_avg = child_progress_sum / total_weight
-                            own_count = progress["total_courses"] - child_total
-                            if own_count > 0:
-                                progress["progress_percent"] = round(
-                                    ((progress["progress_percent"] * own_count) + (child_avg * child_total)) / progress["total_courses"], 1
-                                )
-                            else:
-                                progress["progress_percent"] = round(child_avg, 1)
+            children = []
+            for bucket in all_buckets:
+                bucket_parent = getattr(bucket, 'parent_bucket_id', None)
+                if bucket_parent == parent_id:
+                    # Prevent self-referencing buckets
+                    if bucket.id == parent_id:
+                        logger.warning(f"Self-referencing bucket detected: {bucket.id}")
+                        continue
 
-                bucket_data = {
-                    **bucket.to_dict(),
-                    **progress,
-                    "children": child_buckets,
-                    "has_children": len(child_buckets) > 0
-                }
-                children.append(bucket_data)
-        
-        return children
+                    # Check access
+                    if not _user_has_bucket_access(user, bucket):
+                        continue
 
-    # Build tree from root (parent_id = None)
-    hierarchy = build_hierarchy(None)
+                    progress = get_bucket_progress(bucket)
 
-    return {"hierarchy": hierarchy}
+                    # Get child buckets recursively with updated visited set
+                    new_visited = visited | {bucket.id}
+                    child_buckets = build_hierarchy(bucket.id, new_visited, depth + 1)
+
+                    # If there are child buckets, aggregate their progress
+                    if child_buckets:
+                        child_total = sum(cb.get("total_courses", 0) for cb in child_buckets)
+                        child_completed = sum(cb.get("completed_courses", 0) for cb in child_buckets)
+                        child_progress_sum = sum(cb.get("progress_percent", 0) * cb.get("total_courses", 0) for cb in child_buckets if cb.get("total_courses", 0) > 0)
+
+                        progress["total_courses"] += child_total
+                        progress["completed_courses"] += child_completed
+                        if progress["total_courses"] > 0:
+                            total_weight = sum(cb.get("total_courses", 0) for cb in child_buckets if cb.get("total_courses", 0) > 0)
+                            if total_weight > 0:
+                                child_avg = child_progress_sum / total_weight
+                                own_count = progress["total_courses"] - child_total
+                                if own_count > 0:
+                                    progress["progress_percent"] = round(
+                                        ((progress["progress_percent"] * own_count) + (child_avg * child_total)) / progress["total_courses"], 1
+                                    )
+                                else:
+                                    progress["progress_percent"] = round(child_avg, 1)
+
+                    bucket_data = {
+                        **bucket.to_dict(),
+                        **progress,
+                        "children": child_buckets,
+                        "has_children": len(child_buckets) > 0
+                    }
+                    children.append(bucket_data)
+
+            return children
+
+        # Build tree from root (parent_id = None)
+        hierarchy = build_hierarchy(None)
+
+        return {"hierarchy": hierarchy}
+
+    except Exception as e:
+        logger.error(f"Error in get_self_learning_hierarchy: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to load hierarchy: {str(e)}")
 
 @router.get("/buckets/{bucket_id}/courses")
 async def get_bucket_courses(
@@ -1109,6 +1158,93 @@ async def get_course_user_history(
             })
 
     return {"course_id": course_id, "history": history, "total_users": len(history)}
+
+
+@router.get("/admin/buckets/check-integrity")
+async def check_bucket_integrity(
+    fix: bool = False,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """
+    Check bucket hierarchy for circular references and self-referencing buckets.
+    Set fix=true to automatically fix issues by clearing invalid parent_bucket_ids.
+    """
+    all_buckets = db.query(CourseBucket).all()
+    issues = []
+
+    # Build bucket map
+    bucket_map = {b.id: b for b in all_buckets}
+
+    for bucket in all_buckets:
+        # Check 1: Self-referencing
+        if bucket.parent_bucket_id == bucket.id:
+            issues.append({
+                "bucket_id": bucket.id,
+                "bucket_name": bucket.name,
+                "issue": "self_reference",
+                "description": f"Bucket '{bucket.name}' references itself as parent"
+            })
+            if fix:
+                bucket.parent_bucket_id = None
+                logger.info(f"Fixed self-reference for bucket {bucket.id}")
+
+        # Check 2: Circular reference - follow parent chain
+        if bucket.parent_bucket_id:
+            visited = {bucket.id}
+            current_id = bucket.parent_bucket_id
+            depth = 0
+            while current_id and depth < 20:
+                if current_id in visited:
+                    issues.append({
+                        "bucket_id": bucket.id,
+                        "bucket_name": bucket.name,
+                        "issue": "circular_reference",
+                        "description": f"Bucket '{bucket.name}' is part of a circular parent chain"
+                    })
+                    if fix:
+                        bucket.parent_bucket_id = None
+                        logger.info(f"Fixed circular reference for bucket {bucket.id}")
+                    break
+                visited.add(current_id)
+                parent = bucket_map.get(current_id)
+                current_id = parent.parent_bucket_id if parent else None
+                depth += 1
+
+            if depth >= 20:
+                issues.append({
+                    "bucket_id": bucket.id,
+                    "bucket_name": bucket.name,
+                    "issue": "excessive_depth",
+                    "description": f"Bucket '{bucket.name}' has parent chain deeper than 20 levels"
+                })
+                if fix:
+                    bucket.parent_bucket_id = None
+                    logger.info(f"Fixed excessive depth for bucket {bucket.id}")
+
+        # Check 3: Parent doesn't exist
+        if bucket.parent_bucket_id and bucket.parent_bucket_id not in bucket_map:
+            issues.append({
+                "bucket_id": bucket.id,
+                "bucket_name": bucket.name,
+                "issue": "orphan_parent",
+                "description": f"Bucket '{bucket.name}' references non-existent parent {bucket.parent_bucket_id}"
+            })
+            if fix:
+                bucket.parent_bucket_id = None
+                logger.info(f"Fixed orphan parent for bucket {bucket.id}")
+
+    if fix and issues:
+        db.commit()
+        logger.info(f"Fixed {len(issues)} bucket hierarchy issues")
+
+    return {
+        "status": "success",
+        "issues_found": len(issues),
+        "issues": issues,
+        "fixed": fix and len(issues) > 0,
+        "total_buckets": len(all_buckets)
+    }
 
 
 @router.post("/admin/courses/{course_id}/remove-user")

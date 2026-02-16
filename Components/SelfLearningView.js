@@ -18,8 +18,29 @@ import Svg, { Circle, G } from 'react-native-svg';
 import CertificateModal from './CertificateModal';
 import API_URL from '../config';
 
-const { width } = Dimensions.get('window');
-const GRID_CARD_WIDTH = (width - 48) / 2; // Adjusted for better spacing (12px padding * 2 + 12px gap)
+const { width: screenWidth } = Dimensions.get('window');
+
+// Responsive grid card width - limit max size for web/large screens
+const getGridCardWidth = (containerWidth) => {
+    // For web: limit card width to max 200px, show more columns
+    if (Platform.OS === 'web') {
+        const maxCardWidth = 200;
+        const minCardWidth = 150;
+        const padding = 24; // 12px on each side
+        const gap = 12;
+
+        // Calculate how many cards can fit
+        const availableWidth = containerWidth - padding;
+        const numColumns = Math.max(2, Math.floor(availableWidth / (minCardWidth + gap)));
+        const cardWidth = Math.min(maxCardWidth, (availableWidth - (gap * (numColumns - 1))) / numColumns);
+
+        return Math.floor(cardWidth);
+    }
+    // For mobile: 2 columns
+    return (containerWidth - 48) / 2;
+};
+
+const GRID_CARD_WIDTH = getGridCardWidth(screenWidth);
 
 const THEME = {
     bg: '#F8FAFC',
@@ -70,6 +91,13 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
     const [refreshing, setRefreshing] = useState(false);
     const [viewMode, setViewMode] = useState('grid');
 
+    // Responsive layout state for web
+    const [containerWidth, setContainerWidth] = useState(screenWidth);
+    const gridCardWidth = getGridCardWidth(containerWidth);
+    const numColumns = Platform.OS === 'web'
+        ? Math.max(2, Math.floor((containerWidth - 24) / (gridCardWidth + 12)))
+        : 2;
+
     // Navigation state - Windows style
     const [currentPath, setCurrentPath] = useState([]); // Array of {id, name, type: 'folder'|'bucket'}
     const [displayItems, setDisplayItems] = useState([]); // Currently visible items
@@ -79,16 +107,27 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
     const [certModalVisible, setCertModalVisible] = useState(false);
     const [certCourseId, setCertCourseId] = useState(null);
 
+    // Helper to check if userEmail is a valid real email (not default 'user')
+    const isValidUserEmail = (email) => email && email !== 'user' && (email.includes('@') || email.length > 4);
+
     useEffect(() => {
-        fetchData();
-    }, []);
+        // Only fetch when we have a valid user email
+        if (isValidUserEmail(userEmail)) {
+            fetchData();
+        }
+    }, [userEmail]); // Refetch when userEmail changes (initially null -> actual email)
 
     // Refresh data when a lesson is closed (refreshKey incremented by parent)
     useEffect(() => {
-        if (refreshKey > 0) fetchData();
-    }, [refreshKey]);
+        if (refreshKey > 0 && isValidUserEmail(userEmail)) fetchData();
+    }, [refreshKey, userEmail]);
 
     const fetchData = async () => {
+        // Double-check we have a valid email before fetching
+        if (!isValidUserEmail(userEmail)) {
+            console.log('[SelfLearningView] Skipping fetch, invalid userEmail:', userEmail);
+            return;
+        }
         try {
             const response = await fetch(`${API_URL}/api/v1/self-learning/buckets/hierarchy?user_email=${userEmail}`);
             const data = await response.json();
@@ -146,6 +185,18 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
     // ==========================================
 
     const openFolder = (folder) => {
+        // Prevent circular navigation - don't add if folder is already in path
+        if (currentPath.some(p => p.id === folder.id)) {
+            console.warn('Circular navigation detected, folder already in path:', folder.id);
+            return;
+        }
+
+        // Prevent excessive depth (max 10 levels)
+        if (currentPath.length >= 10) {
+            console.warn('Max navigation depth reached');
+            return;
+        }
+
         // Add to path
         const newPath = [...currentPath, { id: folder.id, name: folder.name }];
         setCurrentPath(newPath);
@@ -248,16 +299,47 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
                         <Text style={styles.pathText}>Self Learning</Text>
                     </TouchableOpacity>
 
-                    {currentPath.map((segment, idx) => (
-                        <React.Fragment key={`${segment.id}_${idx}`}>
+                    {/* Condense breadcrumb if path is too long (more than 4 items) */}
+                    {currentPath.length > 4 ? (
+                        <>
+                            {/* Show first item */}
+                            <React.Fragment key={`${currentPath[0].id}_0`}>
+                                <Feather name="chevron-right" size={14} color="#94A3B8" />
+                                <TouchableOpacity style={styles.pathSegment} onPress={() => goToPathIndex(0)}>
+                                    <Text style={styles.pathText}>{currentPath[0].name}</Text>
+                                </TouchableOpacity>
+                            </React.Fragment>
+                            {/* Show ellipsis */}
                             <Feather name="chevron-right" size={14} color="#94A3B8" />
-                            <TouchableOpacity style={styles.pathSegment} onPress={() => goToPathIndex(idx)}>
-                                <Text style={[styles.pathText, idx === currentPath.length - 1 && styles.pathTextActive]}>
-                                    {segment.name}
-                                </Text>
-                            </TouchableOpacity>
-                        </React.Fragment>
-                    ))}
+                            <Text style={[styles.pathText, { paddingHorizontal: 4 }]}>...</Text>
+                            {/* Show last 2 items */}
+                            {currentPath.slice(-2).map((segment, idx) => {
+                                const realIdx = currentPath.length - 2 + idx;
+                                return (
+                                    <React.Fragment key={`${segment.id}_${realIdx}`}>
+                                        <Feather name="chevron-right" size={14} color="#94A3B8" />
+                                        <TouchableOpacity style={styles.pathSegment} onPress={() => goToPathIndex(realIdx)}>
+                                            <Text style={[styles.pathText, realIdx === currentPath.length - 1 && styles.pathTextActive]}>
+                                                {segment.name}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    </React.Fragment>
+                                );
+                            })}
+                        </>
+                    ) : (
+                        /* Normal breadcrumb for short paths */
+                        currentPath.map((segment, idx) => (
+                            <React.Fragment key={`${segment.id}_${idx}`}>
+                                <Feather name="chevron-right" size={14} color="#94A3B8" />
+                                <TouchableOpacity style={styles.pathSegment} onPress={() => goToPathIndex(idx)}>
+                                    <Text style={[styles.pathText, idx === currentPath.length - 1 && styles.pathTextActive]}>
+                                        {segment.name}
+                                    </Text>
+                                </TouchableOpacity>
+                            </React.Fragment>
+                        ))
+                    )}
                 </ScrollView>
             </View>
 
@@ -288,9 +370,9 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
         const hasSubFolders = item.children && item.children.length > 0;
 
         return (
-            <Animated.View entering={FadeInDown.delay(index * 40).springify()}>
-                <TouchableOpacity style={styles.gridCard} activeOpacity={0.7} onPress={() => openFolder(item)}>
-                    <View style={[styles.gridIconArea, { backgroundColor: color + '10' }]}>
+            <Animated.View entering={FadeInDown.delay(index * 40).springify()} style={{ marginBottom: 12 }}>
+                <TouchableOpacity style={[styles.gridCard, { width: gridCardWidth }]} activeOpacity={0.7} onPress={() => openFolder(item)}>
+                    <View style={[styles.gridIconArea, { backgroundColor: color + '10', height: gridCardWidth * 0.6 }]}>
                         <View style={[styles.gridIconBox, { backgroundColor: color + '20' }]}>
                             <MaterialCommunityIcons
                                 name={hasSubFolders ? 'folder-multiple' : 'folder'}
@@ -352,13 +434,13 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
         const progress = isCompleted ? 100 : (course.watched_percent || 0);
 
         return (
-            <Animated.View entering={FadeInDown.delay(index * 40).springify()}>
+            <Animated.View entering={FadeInDown.delay(index * 40).springify()} style={{ marginBottom: 12 }}>
                 <TouchableOpacity
-                    style={[styles.gridCard, isLocked && { opacity: 0.5 }]}
+                    style={[styles.gridCard, { width: gridCardWidth }, isLocked && { opacity: 0.5 }]}
                     activeOpacity={isLocked ? 1 : 0.7}
                     onPress={() => !isLocked && onOpenCourse && onOpenCourse(course)}
                 >
-                    <View style={styles.courseThumbBox}>
+                    <View style={[styles.courseThumbBox, { height: gridCardWidth * 0.6 }]}>
                         {course.thumbnail ? (
                             <Image source={{ uri: course.thumbnail }} style={styles.courseThumbImg} />
                         ) : (
@@ -375,9 +457,18 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
                     </View>
                     <View style={styles.gridCardInfo}>
                         <Text style={styles.gridCardTitle} numberOfLines={2}>{course.title}</Text>
+
                         <View style={styles.progressRow}>
                             <CircularProgress size={28} strokeWidth={3} progress={progress} color={isCompleted ? THEME.green : THEME.primary} />
                             <Text style={styles.progressLabel}>{course.duration || 'N/A'}</Text>
+                            {isCompleted && course.enable_certificate && (
+                                <TouchableOpacity
+                                    style={{ marginLeft: 'auto', padding: 4 }}
+                                    onPress={() => { setCertCourseId(course.id); setCertModalVisible(true); }}
+                                >
+                                    <Feather name="award" size={20} color={THEME.green} />
+                                </TouchableOpacity>
+                            )}
                         </View>
                     </View>
                 </TouchableOpacity>
@@ -427,7 +518,7 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
                         </View>
                     </View>
                     <CircularProgress size={38} strokeWidth={3} progress={progress} color={isCompleted ? THEME.green : THEME.primary} />
-                    {isCompleted ? (
+                    {isCompleted && course.enable_certificate ? (
                         <TouchableOpacity style={styles.awardBtn} onPress={() => { setCertCourseId(course.id); setCertModalVisible(true); }}>
                             <Feather name="award" size={18} color={THEME.green} />
                         </TouchableOpacity>
@@ -445,7 +536,8 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
     // MAIN CONTENT
     // ==========================================
     const renderContent = () => {
-        if (loading) {
+        // Show loading while waiting for valid user email or data fetch
+        if (loading || !isValidUserEmail(userEmail)) {
             return (
                 <View style={styles.centerWrap}>
                     <ActivityIndicator size="large" color={THEME.primary} />
@@ -476,12 +568,12 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
 
             return (
                 <FlatList
-                    key={viewMode + '-courses'}
+                    key={viewMode + '-courses-' + numColumns}
                     data={courses}
                     keyExtractor={(item) => item.id}
                     renderItem={viewMode === 'grid' ? renderCourseGrid : renderCourseList}
-                    numColumns={viewMode === 'grid' ? 2 : 1}
-                    columnWrapperStyle={viewMode === 'grid' ? styles.gridWrap : undefined}
+                    numColumns={viewMode === 'grid' ? numColumns : 1}
+                    columnWrapperStyle={viewMode === 'grid' && numColumns > 1 ? styles.gridWrap : undefined}
                     contentContainerStyle={styles.contentPadding}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={THEME.primary} />}
                 />
@@ -501,20 +593,28 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
 
         return (
             <FlatList
-                key={viewMode + '-folders'}
+                key={viewMode + '-folders-' + numColumns}
                 data={displayItems}
                 keyExtractor={(item) => item.id}
                 renderItem={viewMode === 'grid' ? renderFolderGrid : renderFolderList}
-                numColumns={viewMode === 'grid' ? 2 : 1}
-                columnWrapperStyle={viewMode === 'grid' ? styles.gridWrap : undefined}
+                numColumns={viewMode === 'grid' ? numColumns : 1}
+                columnWrapperStyle={viewMode === 'grid' && numColumns > 1 ? styles.gridWrap : undefined}
                 contentContainerStyle={styles.contentPadding}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={THEME.primary} />}
             />
         );
     };
 
+    // Handle container layout for responsive grid
+    const handleLayout = (event) => {
+        const { width } = event.nativeEvent.layout;
+        if (width !== containerWidth) {
+            setContainerWidth(width);
+        }
+    };
+
     return (
-        <View style={styles.container}>
+        <View style={styles.container} onLayout={handleLayout}>
             {renderToolbar()}
             {renderContent()}
             <CertificateModal
@@ -577,18 +677,21 @@ const styles = StyleSheet.create({
 
     // Content
     contentPadding: { padding: 12, paddingBottom: 100 },
-    gridWrap: { justifyContent: 'space-between', marginBottom: 12 },
+    gridWrap: {
+        justifyContent: 'flex-start',
+        gap: 12,
+        ...(Platform.OS === 'web' ? { flexWrap: 'wrap' } : {})
+    },
 
-    // Grid Card
+    // Grid Card - width is set dynamically via inline style
     gridCard: {
-        width: GRID_CARD_WIDTH,
         backgroundColor: THEME.card,
         borderRadius: 12,
         overflow: 'hidden',
         borderWidth: 1,
         borderColor: THEME.border,
     },
-    gridIconArea: { height: GRID_CARD_WIDTH * 0.6, justifyContent: 'center', alignItems: 'center', position: 'relative' },
+    gridIconArea: { justifyContent: 'center', alignItems: 'center', position: 'relative' },
     gridIconBox: { width: 72, height: 72, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
     itemCountBadge: { position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
     itemCountText: { fontSize: 11, fontWeight: '700', color: '#FFF' },
@@ -615,7 +718,7 @@ const styles = StyleSheet.create({
     courseMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
 
     // Course Thumbnails
-    courseThumbBox: { height: GRID_CARD_WIDTH * 0.6, position: 'relative' },
+    courseThumbBox: { position: 'relative' },
     courseThumbImg: { width: '100%', height: '100%' },
     courseThumbPlaceholder: { width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' },
     statusBadgeGreen: { position: 'absolute', top: 8, right: 8, backgroundColor: THEME.green, width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center' },

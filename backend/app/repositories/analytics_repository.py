@@ -990,12 +990,29 @@ class AnalyticsRepository:
             "content_id": content_id,
         }
 
-    def get_audit_logs(self, action_type: Optional[str] = None, limit: int = 100) -> List[AuditLog]:
-        """Get audit logs, optionally filtered by action type."""
+    def get_audit_logs(
+        self, 
+        action_type: Optional[str] = None, 
+        limit: int = 1000,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
+    ) -> Dict[str, Any]:
+        """Get audit logs, optionally filtered by action type and date range."""
         query = self.db.query(AuditLog)
+        
         if action_type:
             query = query.filter(AuditLog.action == action_type)
-        return query.order_by(AuditLog.timestamp.desc()).limit(limit).all()
+            
+        if start_date:
+            query = query.filter(AuditLog.timestamp >= start_date)
+            
+        if end_date:
+            query = query.filter(AuditLog.timestamp <= end_date)
+            
+        total_count = query.count()
+        logs = query.order_by(AuditLog.timestamp.desc()).limit(limit).all()
+            
+        return {"logs": logs, "total": total_count}
 
     def create_audit_log(self, data: Dict[str, Any]) -> AuditLog:
         """Create a new audit log entry."""

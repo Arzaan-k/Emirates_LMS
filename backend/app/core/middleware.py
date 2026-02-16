@@ -146,6 +146,19 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         try:
             return await call_next(request)
+        except RuntimeError as e:
+            # Handle "No response returned" specifically - this happens with concurrent requests
+            if "No response returned" in str(e):
+                logger.warning(f"No response returned for {request.method} {request.url.path}")
+                return JSONResponse(
+                    status_code=500,
+                    content={
+                        "error": "REQUEST_PROCESSING_FAILED",
+                        "message": "Request processing failed",
+                        "request_id": getattr(request.state, 'request_id', None),
+                    },
+                )
+            raise
         except AppException as e:
             # Our custom exceptions
             return JSONResponse(
@@ -182,7 +195,17 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except RuntimeError as e:
+            # Handle "No response returned" error from stacked middleware
+            if "No response returned" in str(e):
+                logger.warning(f"[{getattr(request.state, 'request_id', 'unknown')}] {request.method} {request.url.path} - No response returned, returning 500 ({0:.3f}s)")
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": "INTERNAL_SERVER_ERROR", "message": "Request processing failed"},
+                )
+            raise
 
         # Security headers
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -231,17 +254,124 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
 # SETUP FUNCTION
 # ===========================================
 
+def _get_action_name(method: str, path: str) -> tuple:
+    """
+    Map API path and method to human-readable action name and target.
+    Returns (action_name, target_description)
+    """
+    path_lower = path.lower()
+
+    # User management
+    if "/users" in path_lower:
+        if method == "POST":
+            return ("CREATE_USER", "New user created")
+        elif method == "DELETE":
+            return ("DELETE_USER", "User deleted")
+        elif method in ["PUT", "PATCH"]:
+            return ("UPDATE_USER", "User updated")
+
+    # Content management
+    if "/content" in path_lower or "/upload" in path_lower:
+        if method == "POST":
+            return ("UPLOAD_CONTENT", "Content uploaded")
+        elif method == "DELETE":
+            return ("DELETE_CONTENT", "Content deleted")
+        elif method in ["PUT", "PATCH"]:
+            return ("UPDATE_CONTENT", "Content updated")
+
+    # Quiz management
+    if "/quiz" in path_lower:
+        if method == "POST":
+            if "assign" in path_lower:
+                return ("ASSIGN_QUIZ", "Quiz assigned")
+            elif "submit" in path_lower:
+                return ("SUBMIT_QUIZ", "Quiz submitted")
+            return ("CREATE_QUIZ", "Quiz created")
+        elif method == "DELETE":
+            return ("DELETE_QUIZ", "Quiz deleted")
+        elif method in ["PUT", "PATCH"]:
+            return ("UPDATE_QUIZ", "Quiz updated")
+
+    # Assessment management
+    if "/assessment" in path_lower:
+        if method == "POST":
+            if "submit" in path_lower:
+                return ("SUBMIT_ASSESSMENT", "Assessment submitted")
+            return ("CREATE_ASSESSMENT", "Assessment created")
+        elif method == "DELETE":
+            return ("DELETE_ASSESSMENT", "Assessment deleted")
+
+    # Campaign/notification management
+    if "/campaign" in path_lower or "/notification" in path_lower:
+        if method == "POST":
+            if "notification" in path_lower:
+                return ("SEND_NOTIFICATION", "Notification sent")
+            return ("CREATE_CAMPAIGN", "Campaign created")
+        elif method == "DELETE":
+            return ("DELETE_CAMPAIGN", "Campaign deleted")
+
+    # Compliance/compliance management
+    if "/compliance" in path_lower:
+        if method in ["POST", "PUT", "PATCH"]:
+            return ("UPDATE_COMPLIANCE", "Compliance updated")
+
+    # Access/permissions management
+    if "/access" in path_lower or "/permission" in path_lower or "/privilege" in path_lower:
+        if method in ["POST", "PUT", "PATCH"]:
+            return ("UPDATE_ACCESS", "Access permissions updated")
+
+    # Store management
+    if "/store" in path_lower:
+        if method == "POST":
+            return ("CREATE_STORE", "Store created")
+        elif method == "DELETE":
+            return ("DELETE_STORE", "Store deleted")
+        elif method in ["PUT", "PATCH"]:
+            return ("UPDATE_STORE", "Store updated")
+
+    # Level/bucket management
+    if "/level" in path_lower or "/bucket" in path_lower:
+        if method == "POST":
+            return ("CREATE_LEVEL", "Level/Bucket created")
+        elif method == "DELETE":
+            return ("DELETE_LEVEL", "Level/Bucket deleted")
+        elif method in ["PUT", "PATCH"]:
+            return ("UPDATE_LEVEL", "Level/Bucket updated")
+
+    # Attendance
+    if "/attendance" in path_lower or "/punch" in path_lower:
+        if method == "POST":
+            return ("RECORD_ATTENDANCE", "Attendance recorded")
+
+    # Simulation
+    if "/simulation" in path_lower:
+        if method == "POST":
+            return ("START_SIMULATION", "Simulation started")
+
+    # Audit/CRM
+    if "/audit" in path_lower and "/logs" not in path_lower:
+        if method == "POST":
+            return ("SUBMIT_AUDIT", "Audit submitted")
+
+    # Default fallback - use method and simplified path
+    return (f"{method}_ACTION", path)
+
+
 class DatabaseAuditMiddleware(BaseHTTPMiddleware):
     """
     Middleware to log modification actions (POST, PUT, DELETE, PATCH) to the database.
     Captures user info from token and saves to audit_logs table.
     """
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        # Skip Auth Login endpoints which are manually logged to capture user info
+        if "/auth/login" in request.url.path:
+            return await call_next(request)
+
         response = await call_next(request)
-        
+
         # Only log success actions that modify data
         if response.status_code < 400 and request.method in ["POST", "PUT", "DELETE", "PATCH"]:
-            # Run in background to avoid blocking response? 
+            # Run in background to avoid blocking response?
             # Ideally BackgroundTasks, but middleware restrictions apply.
             # We'll do it synchronously here for reliability as per user request ("each and every log").
             try:
@@ -249,7 +379,7 @@ class DatabaseAuditMiddleware(BaseHTTPMiddleware):
                  user_email = "system"
                  user_name = "System"
                  auth_header = request.headers.get("Authorization")
-                 
+
                  if auth_header and auth_header.startswith("Bearer "):
                      try:
                          # Dynamic imports to avoid circular dependencies
@@ -257,46 +387,48 @@ class DatabaseAuditMiddleware(BaseHTTPMiddleware):
                          token = auth_header.replace("Bearer ", "")
                          payload = verify_token(token, "access")
                          if payload:
-                             user_email = payload.get("sub", "unknown")
+                             user_email = payload.get("email") or payload.get("sub", "unknown")
                              user_name = payload.get("name", user_email)
                      except Exception:
                          pass # Invalid token, treat as system/anonymous
-                 
+
+                 # Get human-readable action name
+                 action_name, target_desc = _get_action_name(request.method, request.url.path)
+
                  # Prepare log data matching the EXISTING database schema
-                 # (avoiding missing column errors for target_type, status, request_id)
                  status_code = response.status_code
                  req_id = getattr(request.state, 'request_id', 'unknown')
-                 
+
                  log_data = {
                      "user_email": user_email,
                      "user_name": user_name,
-                     "action": f"{request.method} {request.url.path}",
-                     "target": str(request.url.path),
-                     # "target_type": "api_endpoint", # Column missing in DB
-                     "details": f"Status: {status_code} | RequestID: {req_id} | Type: api_endpoint",
+                     "action": action_name,
+                     "target": target_desc,
+                     "details": f"Path: {request.url.path} | Status: {status_code}",
                      "ip_address": request.client.host if request.client else "unknown",
                      "user_agent": request.headers.get("user-agent", "unknown"),
                      "timestamp": datetime.utcnow(),
-                     # "status": "success", # Column missing in DB
-                     # "request_id": req_id # Column missing in DB
                  }
-                 
+
                  # Save to DB
                  from app.config.database import SessionLocal
                  from app.repositories.analytics_repository import AnalyticsRepository
-                 
+
                  db = SessionLocal()
                  try:
                      repo = AnalyticsRepository(db)
                      repo.create_audit_log(log_data)
                  finally:
                      db.close()
-                     
+
             except Exception as e:
                 logger = logging.getLogger(__name__)
                 logger.error(f"Failed to write audit log: {e}")
-                
+
         return response
+
+
+
 
 
 def setup_middleware(app: FastAPI) -> None:
