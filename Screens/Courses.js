@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import CoursePath from "../Components/CoursePath";
 import SelfLearningView from "../Components/SelfLearningView";
 import LessonView from "../Components/LessonView";
+import FeedbackFormModal from "../Components/FeedbackFormModal";
 import NotificationBell from "../Components/NotificationBell";
 import QuizSection from "../Components/QuizSection";
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -643,6 +644,8 @@ export default function Courses({ userEmail = "user" }) {
     const [slRefreshKey, setSlRefreshKey] = useState(0);
     const [slCongratsVisible, setSlCongratsVisible] = useState(false);
     const [slCongratsInfo, setSlCongratsInfo] = useState(null);
+    const [feedbackVisible, setFeedbackVisible] = useState(false);
+    const [feedbackCourse, setFeedbackCourse] = useState(null);
 
     // Fetch self-learning status on mount and when userEmail changes
     React.useEffect(() => {
@@ -775,7 +778,7 @@ export default function Courses({ userEmail = "user" }) {
                         setActiveLesson(null);
                         setSlRefreshKey(k => k + 1);
                         if (justCompleted) {
-                            setSlCongratsInfo({ title: lessonTitle, completedAt: new Date() });
+                            setSlCongratsInfo({ title: lessonTitle, courseId: activeLesson.id, bucket: activeLesson.bucket, completedAt: new Date() });
                             setSlCongratsVisible(true);
                         }
                     }}
@@ -810,12 +813,29 @@ export default function Courses({ userEmail = "user" }) {
                                 </Text>
                             </View>
                         )}
-                        <TouchableOpacity style={slStyles.closeBtn} onPress={() => setSlCongratsVisible(false)}>
+                        <TouchableOpacity style={slStyles.closeBtn} onPress={() => {
+                            setSlCongratsVisible(false);
+                            // Show feedback form after congrats is dismissed
+                            if (slCongratsInfo?.courseId) {
+                                setFeedbackCourse(slCongratsInfo);
+                                setFeedbackVisible(true);
+                            }
+                        }}>
                             <Text style={slStyles.closeBtnText}>Continue Learning</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
             </Modal>
+
+            {/* FEEDBACK / SURVEY MODAL - shown after course completion */}
+            <FeedbackFormModal
+                visible={feedbackVisible}
+                onClose={() => { setFeedbackVisible(false); setFeedbackCourse(null); }}
+                courseId={feedbackCourse?.courseId}
+                courseTitle={feedbackCourse?.title}
+                bucket={feedbackCourse?.bucket}
+                userEmail={userEmail}
+            />
 
         </View>
     );

@@ -852,6 +852,196 @@ async def get_course_feedback(
     }
 
 
+
+# ==========================================
+# CUSTOMIZABLE SURVEY (ADMIN BUILDER)
+# ==========================================
+
+@router.get("/admin/survey/{course_id}")
+async def get_course_survey(
+    course_id: str,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """Get the survey template for a course (admin). Returns null if none exists."""
+    from app.models.notification import CourseSurvey
+    survey = db.query(CourseSurvey).filter(CourseSurvey.course_id == course_id).first()
+    return {"survey": survey.to_dict() if survey else None}
+
+
+@router.post("/admin/survey/{course_id}")
+async def create_or_update_survey(
+    course_id: str,
+    body: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """
+    Create or update the survey template for a course.
+    body: {
+        title: str,
+        description: str,
+        is_active: bool,
+        questions: [
+            { id: str, type: 'rating'|'mcq'|'text'|'name', label: str, options: [str], mandatory: bool }
+        ]
+    }
+    """
+    from app.models.notification import CourseSurvey
+    from sqlalchemy.orm.attributes import flag_modified
+
+    survey = db.query(CourseSurvey).filter(CourseSurvey.course_id == course_id).first()
+    if survey:
+        # Update existing
+        survey.title = body.get("title", survey.title)
+        survey.description = body.get("description", survey.description)
+        survey.is_active = body.get("is_active", survey.is_active)
+        survey.questions = body.get("questions", survey.questions)
+        survey.updated_at = datetime.utcnow()
+        flag_modified(survey, "questions")
+    else:
+        # Create new
+        survey = CourseSurvey(
+            id=str(uuid.uuid4()),
+            course_id=course_id,
+            title=body.get("title", "Course Feedback Survey"),
+            description=body.get("description", ""),
+            is_active=body.get("is_active", True),
+            questions=body.get("questions", []),
+            created_by=current_user.get("email", "admin"),
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(survey)
+
+    db.commit()
+    db.refresh(survey)
+    logger.info(f"Survey saved for course {course_id} by {current_user.get('email')}")
+    return {"status": "success", "survey": survey.to_dict()}
+
+
+@router.delete("/admin/survey/{course_id}")
+async def delete_course_survey(
+    course_id: str,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """Delete the survey template for a course."""
+    from app.models.notification import CourseSurvey
+    survey = db.query(CourseSurvey).filter(CourseSurvey.course_id == course_id).first()
+    if not survey:
+        raise HTTPException(status_code=404, detail="Survey not found")
+    db.delete(survey)
+    db.commit()
+    return {"status": "success", "message": "Survey deleted"}
+
+
+@router.get("/survey/{course_id}")
+async def get_survey_for_user(
+    course_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get the active survey for a course (user-facing). Returns null if none or inactive."""
+    from app.models.notification import CourseSurvey
+    survey = db.query(CourseSurvey).filter(
+        CourseSurvey.course_id == course_id,
+        CourseSurvey.is_active == True
+    ).first()
+    return {"survey": survey.to_dict() if survey else None}
+
+
+@router.post("/survey/{course_id}/submit")
+async def submit_survey_response(
+    course_id: str,
+    body: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Submit a user's survey response.
+    body: { survey_id, user_email, user_name, answers: {question_id: answer} }
+    """
+    from app.models.notification import CourseSurvey, SurveyResponse
+
+    survey_id = body.get("survey_id")
+    user_email = body.get("user_email", "")
+    if not survey_id or not user_email:
+        raise HTTPException(status_code=400, detail="survey_id and user_email are required")
+
+    # Check if user already responded
+    existing = db.query(SurveyResponse).filter(
+        SurveyResponse.survey_id == survey_id,
+        SurveyResponse.user_email == user_email
+    ).first()
+    if existing:
+        # Update existing response
+        existing.answers = body.get("answers", {})
+        existing.user_name = body.get("user_name", existing.user_name)
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(existing, "answers")
+        db.commit()
+        return {"status": "success", "response": existing.to_dict()}
+
+    response = SurveyResponse(
+        id=str(uuid.uuid4()),
+        survey_id=survey_id,
+        course_id=course_id,
+        user_email=user_email,
+        user_name=body.get("user_name", ""),
+        answers=body.get("answers", {}),
+        created_at=datetime.utcnow(),
+    )
+    db.add(response)
+    db.commit()
+    logger.info(f"Survey response submitted by {user_email} for course {course_id}")
+    return {"status": "success", "response": response.to_dict()}
+
+
+@router.get("/admin/survey/{course_id}/responses")
+async def get_survey_responses(
+    course_id: str,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """Get all survey responses for a course with aggregated stats."""
+    from app.models.notification import CourseSurvey, SurveyResponse
+
+    survey = db.query(CourseSurvey).filter(CourseSurvey.course_id == course_id).first()
+    if not survey:
+        return {"survey": None, "responses": [], "total": 0, "stats": {}}
+
+    responses = db.query(SurveyResponse).filter(
+        SurveyResponse.survey_id == survey.id
+    ).order_by(SurveyResponse.created_at.desc()).all()
+
+    # Aggregate stats per question
+    stats = {}
+    for q in (survey.questions or []):
+        qid = q.get("id")
+        qtype = q.get("type")
+        if qtype == "mcq":
+            counts = {}
+            for opt in (q.get("options") or []):
+                counts[opt] = 0
+            for r in responses:
+                ans = (r.answers or {}).get(qid)
+                if ans and ans in counts:
+                    counts[ans] += 1
+            stats[qid] = {"type": "mcq", "counts": counts}
+        elif qtype == "rating":
+            vals = [(r.answers or {}).get(qid) for r in responses if (r.answers or {}).get(qid)]
+            avg = round(sum(float(v) for v in vals) / len(vals), 1) if vals else 0
+            stats[qid] = {"type": "rating", "average": avg, "count": len(vals)}
+        else:
+            stats[qid] = {"type": qtype, "count": len([r for r in responses if (r.answers or {}).get(qid)])}
+
+    return {
+        "survey": survey.to_dict(),
+        "responses": [r.to_dict() for r in responses],
+        "total": len(responses),
+        "stats": stats,
+    }
+
+
 # ==========================================
 # ANALYTICS
 # ==========================================
