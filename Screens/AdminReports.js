@@ -261,6 +261,10 @@ const AdminReports = ({ navigation }) => {
     const [subscriptions, setSubscriptions] = useState({});
     const [userEmail, setUserEmail] = useState('');
 
+    // Pagination State
+    const [currentPage, setCurrentPage] = useState(1);
+    const [paginationInfo, setPaginationInfo] = useState(null);
+
     // Detailed Reports State
     const [expandedDetailCategory, setExpandedDetailCategory] = useState(null);
     const [detailedReportData, setDetailedReportData] = useState(null);
@@ -400,12 +404,12 @@ const AdminReports = ({ navigation }) => {
         fetchOverviewData();
     }, []);
 
-    // Fetch report data when category changes
+    // Fetch report data when category or page changes
     useEffect(() => {
         if (selectedCategory) {
-            fetchReportData(selectedCategory);
+            fetchReportData(selectedCategory, currentPage);
         }
-    }, [selectedCategory]);
+    }, [selectedCategory, currentPage]);
 
     const fetchOverviewData = async () => {
         try {
@@ -419,7 +423,7 @@ const AdminReports = ({ navigation }) => {
         }
     };
 
-    const fetchReportData = async (category) => {
+    const fetchReportData = async (category, page = 1) => {
         const categoryInfo = REPORT_CATEGORIES.find(c => c.id === category);
         if (!categoryInfo) return;
 
@@ -442,17 +446,29 @@ const AdminReports = ({ navigation }) => {
             if (countryFilter) params.append('country', countryFilter);
             if (categoryFilter) params.append('category', categoryFilter);
 
-            const url = `${API_URL}${categoryInfo.endpoint}${params.toString() ? '?' + params.toString() : ''}`;
+            // Pagination params
+            params.append('page', page.toString());
+            params.append('per_page', '50');
+
+            const url = `${API_URL}${categoryInfo.endpoint}?${params.toString()}`;
             const response = await fetch(url);
             if (response.ok) {
                 const data = await response.json();
                 setReportData(data);
+                // Extract pagination info from response
+                if (data.pagination) {
+                    setPaginationInfo(data.pagination);
+                } else {
+                    setPaginationInfo(null);
+                }
             } else {
                 setReportData(null);
+                setPaginationInfo(null);
             }
         } catch (error) {
             console.error('Error fetching report:', error);
             setReportData(null);
+            setPaginationInfo(null);
         } finally {
             setLoading(false);
         }
@@ -611,11 +627,28 @@ const AdminReports = ({ navigation }) => {
     const renderOverviewStats = () => {
         if (!overviewData?.summary) return null;
 
+        const s = overviewData.summary;
         const stats = [
-            { label: 'Total Users', value: overviewData.summary.total_users || 0, icon: 'users', color: '#3B82F6' },
-            { label: 'Active (30d)', value: overviewData.summary.active_users_30d || 0, icon: 'activity', color: '#10B981' },
-            { label: 'Courses Completed', value: overviewData.summary.total_completions || 0, icon: 'award', color: '#F59E0B' },
-            { label: 'Avg Score', value: `${overviewData.summary.avg_score || 0}%`, icon: 'trending-up', color: '#8B5CF6' },
+            { label: 'Total Users', value: s.total_users || 0, icon: 'users', color: '#3B82F6' },
+            { label: 'Active (30d)', value: s.active_users_30d || 0, icon: 'activity', color: '#10B981' },
+            { label: 'Active (7d)', value: s.active_users_7d || 0, icon: 'zap', color: '#F97316' },
+            { label: 'New (30d)', value: s.new_users_30d || 0, icon: 'user-plus', color: '#06B6D4' },
+            { label: 'Courses Done', value: s.total_completions || 0, icon: 'award', color: '#F59E0B' },
+            { label: 'This Week', value: s.weekly_completions || s.completions_this_week || 0, icon: 'calendar', color: '#6366F1' },
+            { label: 'Avg Score', value: `${s.avg_score || 0}%`, icon: 'trending-up', color: '#8B5CF6' },
+            { label: 'Quiz Avg', value: `${s.avg_quiz_score || 0}%`, icon: 'edit-3', color: '#EF4444' },
+            { label: 'Learning Hrs', value: s.total_learning_hours || Math.round((s.total_time_spent_seconds || 0) / 3600) || 0, icon: 'clock', color: '#EC4899' },
+            { label: 'Hrs/User', value: s.avg_learning_hours_per_user || 0, icon: 'bar-chart-2', color: '#7C3AED' },
+            { label: 'Certificates', value: s.total_certificates_issued || s.total_certificates || 0, icon: 'file-text', color: '#14B8A6' },
+            { label: 'Engage %', value: `${s.engagement_rate || 0}%`, icon: 'percent', color: '#D946EF' },
+            { label: 'Quizzes', value: s.total_quizzes || 0, icon: 'edit', color: '#84CC16' },
+            { label: 'Quiz Subs', value: s.quiz_submissions || 0, icon: 'check-circle', color: '#22D3EE' },
+            { label: 'Assessments', value: s.total_assessments || 0, icon: 'clipboard', color: '#A855F7' },
+            { label: 'Assess Pass%', value: `${s.assessment_pass_rate || 0}%`, icon: 'shield', color: '#059669' },
+            { label: 'Simulations', value: s.total_simulations_attempted || 0, icon: 'play-circle', color: '#E11D48' },
+            { label: 'Sim Done', value: s.simulations_completed || 0, icon: 'check-square', color: '#0EA5E9' },
+            { label: 'Content', value: s.total_content || 0, icon: 'layers', color: '#FB923C' },
+            { label: 'Attendance', value: s.today_attendance || 0, icon: 'map-pin', color: '#64748B' },
         ];
 
         return (
@@ -651,7 +684,8 @@ const AdminReports = ({ navigation }) => {
 
     // Apply filters
     const handleApplyFilters = () => {
-        fetchReportData(selectedCategory);
+        setCurrentPage(1);
+        fetchReportData(selectedCategory, 1);
         setShowFilters(false);
     };
 
@@ -1096,7 +1130,7 @@ const AdminReports = ({ navigation }) => {
                             { borderColor: category.color }
                         ]
                     ]}
-                    onPress={() => setSelectedCategory(category.id)}
+                    onPress={() => { setCurrentPage(1); setSelectedCategory(category.id); }}
                 >
                     <Feather
                         name={category.icon}
@@ -1240,76 +1274,157 @@ const AdminReports = ({ navigation }) => {
             case 'users':
                 data = reportData.users || [];
                 columns = [
-                    { key: 'name', label: 'Name', width: 120 },
-                    { key: 'role', label: 'Role', width: 80 },
+                    { key: 'name', label: 'Name', width: 140 },
+                    { key: 'email', label: 'Email', width: 180 },
+                    { key: 'role', label: 'Role', width: 90 },
                     { key: 'store', label: 'Store', width: 100 },
+                    { key: 'category', label: 'Type', width: 80 },
+                    { key: 'state', label: 'State', width: 90 },
+                    { key: 'city', label: 'City', width: 90 },
+                    { key: 'region', label: 'Region', width: 90 },
                     { key: 'courses_completed', label: 'Courses', width: 70 },
                     { key: 'avg_course_score', label: 'Avg Score', width: 80 },
+                    { key: 'quizzes_taken', label: 'Quizzes', width: 70 },
+                    { key: 'quizzes_passed', label: 'Q.Passed', width: 75 },
+                    { key: 'avg_quiz_score', label: 'Quiz Avg', width: 80 },
+                    { key: 'quiz_pass_rate', label: 'Q.Pass%', width: 75 },
+                    { key: 'total_learning_hours', label: 'Hours', width: 70 },
+                    { key: 'learning_streak', label: 'Streak', width: 60 },
+                    { key: 'certificates_earned', label: 'Certs', width: 60 },
                     { key: 'total_xp', label: 'XP', width: 60 },
+                    { key: 'total_xp_earned', label: 'XP Earned', width: 80 },
+                    { key: 'preferred_learning_style', label: 'Style', width: 80 },
+                    { key: 'strong_areas', label: 'Strengths', width: 120 },
+                    { key: 'weak_areas', label: 'Weak Areas', width: 120 },
+                    { key: 'is_external', label: 'External', width: 70 },
+                    { key: 'last_active', label: 'Last Active', width: 100 },
+                    { key: 'created_at', label: 'Joined', width: 100 },
                 ];
                 break;
             case 'training':
                 data = reportData.courses || [];
                 columns = [
-                    { key: 'title', label: 'Course', width: 150 },
+                    { key: 'title', label: 'Course', width: 180 },
                     { key: 'bucket', label: 'Category', width: 100 },
-                    { key: 'total_completions', label: 'Completions', width: 90 },
+                    { key: 'resource_type', label: 'Type', width: 80 },
+                    { key: 'learning_path_type', label: 'Path', width: 90 },
+                    { key: 'total_completions', label: 'Done', width: 65 },
+                    { key: 'unique_users', label: 'Learners', width: 80 },
                     { key: 'avg_score_percent', label: 'Avg Score', width: 80 },
-                    { key: 'pass_rate', label: 'Pass Rate', width: 80 },
+                    { key: 'pass_rate', label: 'Pass %', width: 70 },
+                    { key: 'avg_time_minutes', label: 'Avg Min', width: 75 },
+                    { key: 'total_time_hours', label: 'Total Hrs', width: 80 },
+                    { key: 'duration_minutes', label: 'Duration', width: 75 },
+                    { key: 'certificates_issued', label: 'Certs', width: 60 },
+                    { key: 'total_xp', label: 'XP', width: 60 },
                 ];
                 break;
             case 'quizzes':
                 data = reportData.quizzes || [];
                 columns = [
-                    { key: 'topic', label: 'Quiz Topic', width: 150 },
-                    { key: 'total_attempts', label: 'Attempts', width: 80 },
+                    { key: 'topic', label: 'Quiz Topic', width: 170 },
+                    { key: 'difficulty', label: 'Level', width: 70 },
+                    { key: 'category', label: 'Category', width: 100 },
+                    { key: 'question_count', label: 'Qs', width: 50 },
+                    { key: 'passing_score', label: 'Pass Mark', width: 80 },
+                    { key: 'time_limit', label: 'Time Limit', width: 85 },
+                    { key: 'total_attempts', label: 'Attempts', width: 75 },
+                    { key: 'unique_users', label: 'Users', width: 65 },
                     { key: 'avg_score', label: 'Avg Score', width: 80 },
-                    { key: 'pass_rate', label: 'Pass Rate', width: 80 },
+                    { key: 'highest_score', label: 'Best', width: 60 },
+                    { key: 'lowest_score', label: 'Worst', width: 60 },
+                    { key: 'pass_rate', label: 'Pass %', width: 70 },
+                    { key: 'failed_count', label: 'Failed', width: 60 },
                 ];
                 break;
             case 'assessments':
                 data = reportData.assessments || [];
                 columns = [
-                    { key: 'title', label: 'Assessment', width: 150 },
-                    { key: 'total_attempts', label: 'Attempts', width: 80 },
+                    { key: 'title', label: 'Assessment', width: 170 },
+                    { key: 'exam_date', label: 'Date', width: 90 },
+                    { key: 'status', label: 'Status', width: 80 },
+                    { key: 'location', label: 'Location', width: 100 },
+                    { key: 'supervisor', label: 'Supervisor', width: 100 },
+                    { key: 'total_attempts', label: 'Attempts', width: 75 },
+                    { key: 'unique_users', label: 'Users', width: 65 },
                     { key: 'avg_score', label: 'Avg Score', width: 80 },
-                    { key: 'pass_rate', label: 'Pass Rate', width: 80 },
+                    { key: 'highest_score', label: 'Best', width: 60 },
+                    { key: 'lowest_score', label: 'Worst', width: 60 },
+                    { key: 'pass_rate', label: 'Pass %', width: 70 },
+                    { key: 'failed_count', label: 'Failed', width: 60 },
+                    { key: 'passing_score', label: 'Pass Mark', width: 80 },
+                    { key: 'time_limit_minutes', label: 'Time Lmt', width: 75 },
+                    { key: 'integrity_score', label: 'Integrity', width: 75 },
+                    { key: 'total_violations', label: 'Violations', width: 80 },
+                    { key: 'critical_breaches', label: 'Critical', width: 70 },
+                    { key: 'warning_breaches', label: 'Warnings', width: 75 },
                 ];
                 break;
             case 'attendance':
                 data = reportData.attendance || [];
                 columns = [
-                    { key: 'user_name', label: 'User', width: 120 },
-                    { key: 'total_sessions', label: 'Sessions', width: 80 },
-                    { key: 'total_hours', label: 'Hours', width: 70 },
-                    { key: 'avg_session_minutes', label: 'Avg Session', width: 90 },
+                    { key: 'user_name', label: 'User', width: 140 },
+                    { key: 'user_email', label: 'Email', width: 180 },
+                    { key: 'role', label: 'Role', width: 90 },
+                    { key: 'store', label: 'Store', width: 100 },
+                    { key: 'total_sessions', label: 'Sessions', width: 75 },
+                    { key: 'total_hours', label: 'Total Hrs', width: 75 },
+                    { key: 'avg_session_minutes', label: 'Avg Min', width: 75 },
+                    { key: 'first_session', label: 'First Session', width: 100 },
+                    { key: 'last_session', label: 'Last Session', width: 100 },
                 ];
                 break;
             case 'stores':
                 data = reportData.stores || [];
                 columns = [
-                    { key: 'store_name', label: 'Store', width: 120 },
+                    { key: 'store_name', label: 'Store', width: 140 },
                     { key: 'total_users', label: 'Users', width: 70 },
-                    { key: 'total_completions', label: 'Completions', width: 90 },
+                    { key: 'active_learners', label: 'Active', width: 70 },
+                    { key: 'total_completions', label: 'Courses Done', width: 95 },
+                    { key: 'avg_completions_per_user', label: 'Per User', width: 75 },
                     { key: 'avg_score', label: 'Avg Score', width: 80 },
+                    { key: 'total_learning_hours', label: 'Learn Hrs', width: 80 },
+                    { key: 'certificates_earned', label: 'Certs', width: 60 },
+                    { key: 'total_quizzes', label: 'Quizzes', width: 70 },
+                    { key: 'avg_quiz_score', label: 'Quiz Avg', width: 80 },
+                    { key: 'total_xp', label: 'XP', width: 65 },
                 ];
                 break;
             case 'simulations':
                 data = reportData.simulations || [];
                 columns = [
-                    { key: 'title', label: 'Simulation', width: 150 },
-                    { key: 'total_attempts', label: 'Attempts', width: 80 },
-                    { key: 'completion_rate', label: 'Completion', width: 90 },
+                    { key: 'title', label: 'Simulation', width: 170 },
+                    { key: 'difficulty', label: 'Level', width: 70 },
+                    { key: 'category', label: 'Category', width: 100 },
+                    { key: 'total_attempts', label: 'Attempts', width: 75 },
+                    { key: 'completed', label: 'Done', width: 60 },
+                    { key: 'total_passed', label: 'Passed', width: 65 },
+                    { key: 'total_failed', label: 'Failed', width: 60 },
+                    { key: 'completion_rate', label: 'Done %', width: 70 },
+                    { key: 'pass_rate', label: 'Pass %', width: 70 },
                     { key: 'avg_score', label: 'Avg Score', width: 80 },
+                    { key: 'highest_score', label: 'Best', width: 60 },
+                    { key: 'lowest_score', label: 'Worst', width: 60 },
+                    { key: 'avg_time_minutes', label: 'Avg Min', width: 75 },
                 ];
                 break;
             case 'content':
                 data = reportData.content || [];
                 columns = [
-                    { key: 'title', label: 'Content', width: 150 },
-                    { key: 'type', label: 'Type', width: 80 },
-                    { key: 'views', label: 'Views', width: 70 },
-                    { key: 'avg_watch_time', label: 'Avg Watch', width: 90 },
+                    { key: 'title', label: 'Content', width: 180 },
+                    { key: 'resource_type', label: 'Type', width: 80 },
+                    { key: 'bucket', label: 'Category', width: 100 },
+                    { key: 'learning_path_type', label: 'Path', width: 85 },
+                    { key: 'total_views', label: 'Views', width: 65 },
+                    { key: 'unique_viewers', label: 'Viewers', width: 70 },
+                    { key: 'video_watchers', label: 'Watchers', width: 75 },
+                    { key: 'video_completions', label: 'Vid Done', width: 75 },
+                    { key: 'total_course_completions', label: 'Completed', width: 80 },
+                    { key: 'avg_watch_percent', label: 'Watch %', width: 75 },
+                    { key: 'avg_score', label: 'Avg Score', width: 80 },
+                    { key: 'duration_minutes', label: 'Duration', width: 75 },
+                    { key: 'xp', label: 'XP', width: 55 },
+                    { key: 'engagement_rate', label: 'Engage %', width: 80 },
                 ];
                 break;
             case 'executive':
@@ -1327,9 +1442,17 @@ const AdminReports = ({ navigation }) => {
             );
         }
 
+        const totalRecords = paginationInfo?.total || data.length;
+        const totalPages = paginationInfo?.total_pages || 1;
+
         return (
             <View style={styles.tableContainer}>
-                <Text style={styles.sectionTitle}>Detailed Data</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={styles.sectionTitle}>Detailed Data</Text>
+                    <Text style={{ fontSize: 11, fontFamily: 'Poppins_400Regular', color: '#9CA3AF' }}>
+                        {totalRecords} records
+                    </Text>
+                </View>
                 <ScrollView horizontal showsHorizontalScrollIndicator={true}>
                     <View>
                         {/* Table Header */}
@@ -1344,7 +1467,7 @@ const AdminReports = ({ navigation }) => {
                             ))}
                         </View>
                         {/* Table Body */}
-                        {data.slice(0, 20).map((row, rowIndex) => (
+                        {data.slice(0, 50).map((row, rowIndex) => (
                             <View
                                 key={rowIndex}
                                 style={[
@@ -1352,22 +1475,71 @@ const AdminReports = ({ navigation }) => {
                                     rowIndex % 2 === 0 && styles.tableRowAlt
                                 ]}
                             >
-                                {columns.map((col) => (
-                                    <Text
-                                        key={col.key}
-                                        style={[styles.tableCell, { width: col.width }]}
-                                        numberOfLines={1}
-                                    >
-                                        {row[col.key] ?? '-'}
-                                    </Text>
-                                ))}
+                                {columns.map((col) => {
+                                    let cellVal = row[col.key];
+                                    // Format values for display
+                                    if (cellVal === null || cellVal === undefined || cellVal === '') {
+                                        cellVal = '-';
+                                    } else if (typeof cellVal === 'number') {
+                                        cellVal = Number.isInteger(cellVal) ? String(cellVal) : cellVal.toFixed(1);
+                                    } else if (typeof cellVal === 'boolean') {
+                                        cellVal = cellVal ? 'Yes' : 'No';
+                                    } else if (typeof cellVal === 'string' && cellVal.match(/^\d{4}-\d{2}-\d{2}T/)) {
+                                        // Format ISO dates to readable short date
+                                        try {
+                                            const d = new Date(cellVal);
+                                            cellVal = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
+                                        } catch (e) { cellVal = cellVal.substring(0, 10); }
+                                    } else if (Array.isArray(cellVal)) {
+                                        cellVal = cellVal.length > 0 ? cellVal.join(', ').substring(0, 40) : '-';
+                                    } else if (typeof cellVal === 'object') {
+                                        cellVal = JSON.stringify(cellVal).substring(0, 40);
+                                    } else {
+                                        cellVal = String(cellVal).substring(0, 50);
+                                    }
+                                    return (
+                                        <Text
+                                            key={col.key}
+                                            style={[styles.tableCell, { width: col.width }]}
+                                            numberOfLines={1}
+                                        >
+                                            {cellVal}
+                                        </Text>
+                                    );
+                                })}
                             </View>
                         ))}
                     </View>
                 </ScrollView>
-                {data.length > 20 && (
+
+                {/* Pagination Controls */}
+                {totalPages > 1 && (
+                    <View style={styles.paginationContainer}>
+                        <TouchableOpacity
+                            style={[styles.pageBtn, currentPage <= 1 && styles.pageBtnDisabled]}
+                            onPress={() => { if (currentPage > 1) setCurrentPage(currentPage - 1); }}
+                            disabled={currentPage <= 1}
+                        >
+                            <Feather name="chevron-left" size={16} color={currentPage <= 1 ? '#D1D5DB' : '#F59E0B'} />
+                            <Text style={[styles.pageBtnText, currentPage <= 1 && { color: '#D1D5DB' }]}>Prev</Text>
+                        </TouchableOpacity>
+                        <Text style={styles.pageText}>
+                            Page {currentPage} of {totalPages}
+                        </Text>
+                        <TouchableOpacity
+                            style={[styles.pageBtn, currentPage >= totalPages && styles.pageBtnDisabled]}
+                            onPress={() => { if (currentPage < totalPages) setCurrentPage(currentPage + 1); }}
+                            disabled={currentPage >= totalPages}
+                        >
+                            <Text style={[styles.pageBtnText, currentPage >= totalPages && { color: '#D1D5DB' }]}>Next</Text>
+                            <Feather name="chevron-right" size={16} color={currentPage >= totalPages ? '#D1D5DB' : '#F59E0B'} />
+                        </TouchableOpacity>
+                    </View>
+                )}
+
+                {data.length > 50 && !paginationInfo && (
                     <Text style={styles.tableFooter}>
-                        Showing 20 of {data.length} records. Download for full data.
+                        Showing 50 of {data.length} records. Download for full data.
                     </Text>
                 )}
             </View>
@@ -2037,6 +2209,37 @@ const styles = StyleSheet.create({
         fontSize: 13,
         fontFamily: 'Poppins_400Regular',
         color: '#9CA3AF',
+    },
+    // PAGINATION
+    paginationContainer: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingTop: 16,
+        paddingBottom: 4,
+        gap: 16,
+    },
+    pageBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 8,
+        backgroundColor: '#FEF3C7',
+        gap: 4,
+    },
+    pageBtnDisabled: {
+        backgroundColor: '#F3F4F6',
+    },
+    pageBtnText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#F59E0B',
+    },
+    pageText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_500Medium',
+        color: '#6B7280',
     },
     datePickerBtn: {
         flexDirection: 'row',
