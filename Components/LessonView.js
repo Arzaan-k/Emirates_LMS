@@ -787,11 +787,9 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
             }
         }
 
-        // [FIX] CRITICAL: Don't calculate/sync progress until server baseline is loaded
-        // Without this, video fires status at position=0 → calculates 0% → UI shows regression
-        if (!progressReady.current) return;
-
         // Calculate and update progress percentage
+        // [FIX] Always calculate local progress for UI responsiveness
+        // Only SYNC to server after baseline is loaded (to prevent overwriting server progress)
         if (duration > 0) {
             // ROBUST CALCULATION: Unique seconds / Total duration
             const watchedCount = watchedSeconds.current.size;
@@ -809,9 +807,13 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
                 highestServerPercent.current = effectivePercent;
             }
 
+            // [FIX] Always update UI with local progress (even before server baseline loads)
             setVideoProgress(effectivePercent);
 
             // [SEAMLESS SYNC] Force sync on pause for immediate progress save
+            // Only sync AFTER server baseline is loaded to prevent overwriting
+            if (!progressReady.current) return; // Block server sync only, not UI updates
+
             const justPaused = wasPlaying.current && !status.isPlaying;
             wasPlaying.current = status.isPlaying;
 

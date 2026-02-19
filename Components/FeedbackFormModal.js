@@ -52,7 +52,16 @@ export default function FeedbackFormModal({ visible, onClose, courseId, courseTi
         try {
             // Pass user_email so backend can check if user already submitted
             const emailParam = userEmail ? `?user_email=${encodeURIComponent(userEmail)}` : '';
-            const res = await fetch(`${API_URL}/api/v1/self-learning/survey/${courseId}${emailParam}`);
+
+            // Add timeout to prevent hanging - fallback to legacy form after 5s
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+            const res = await fetch(`${API_URL}/api/v1/self-learning/survey/${courseId}${emailParam}`, {
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
             const data = await res.json();
 
             // If user already submitted the survey → silently close the modal
@@ -63,7 +72,8 @@ export default function FeedbackFormModal({ visible, onClose, courseId, courseTi
 
             setSurvey(data.survey || null);
         } catch (e) {
-            console.error('Survey fetch error:', e);
+            // On timeout or error, fallback to legacy rating form
+            console.log('Survey fetch timeout/error, using legacy form:', e.name);
             setSurvey(null);
         } finally {
             setLoadingSurvey(false);
