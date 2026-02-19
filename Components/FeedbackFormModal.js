@@ -50,8 +50,17 @@ export default function FeedbackFormModal({ visible, onClose, courseId, courseTi
         setAnswers({});
         setValidationErrors({});
         try {
-            const res = await fetch(`${API_URL}/api/v1/self-learning/survey/${courseId}`);
+            // Pass user_email so backend can check if user already submitted
+            const emailParam = userEmail ? `?user_email=${encodeURIComponent(userEmail)}` : '';
+            const res = await fetch(`${API_URL}/api/v1/self-learning/survey/${courseId}${emailParam}`);
             const data = await res.json();
+
+            // If user already submitted the survey → silently close the modal
+            if (data.has_submitted) {
+                onClose();
+                return;
+            }
+
             setSurvey(data.survey || null);
         } catch (e) {
             console.error('Survey fetch error:', e);
@@ -90,6 +99,14 @@ export default function FeedbackFormModal({ visible, onClose, courseId, courseTi
             const nameQ = (survey?.questions || []).find(q => q.type === 'name');
             const userName = nameQ ? (answers[nameQ.id] || '') : '';
 
+            // Resolve MCQ index answers back to option text for readable backend storage
+            const resolvedAnswers = { ...answers };
+            for (const q of (survey?.questions || [])) {
+                if (q.type === 'mcq' && typeof resolvedAnswers[q.id] === 'number') {
+                    resolvedAnswers[q.id] = (q.options || [])[resolvedAnswers[q.id]] || resolvedAnswers[q.id];
+                }
+            }
+
             await fetch(`${API_URL}/api/v1/self-learning/survey/${courseId}/submit`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -97,7 +114,7 @@ export default function FeedbackFormModal({ visible, onClose, courseId, courseTi
                     survey_id: survey.id,
                     user_email: userEmail,
                     user_name: userName,
-                    answers,
+                    answers: resolvedAnswers,
                 }),
             });
             setSubmitted(true);
@@ -214,23 +231,26 @@ export default function FeedbackFormModal({ visible, onClose, courseId, courseTi
                     </View>
                 )}
 
-                {/* MCQ */}
+                {/* MCQ — compare by index to handle duplicate option text */}
                 {q.type === 'mcq' && (
                     <View style={styles.mcqOptions}>
-                        {(q.options || []).map((opt, oi) => (
-                            <TouchableOpacity
-                                key={oi}
-                                style={[styles.mcqOption, ans === opt && styles.mcqOptionSelected]}
-                                onPress={() => setAnswer(q.id, opt)}
-                            >
-                                <View style={[styles.mcqRadio, ans === opt && styles.mcqRadioSelected]}>
-                                    {ans === opt && <View style={styles.mcqRadioDot} />}
-                                </View>
-                                <Text style={[styles.mcqOptionText, ans === opt && styles.mcqOptionTextSelected]}>
-                                    {opt}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
+                        {(q.options || []).map((opt, oi) => {
+                            const isSelected = ans === oi;
+                            return (
+                                <TouchableOpacity
+                                    key={oi}
+                                    style={[styles.mcqOption, isSelected && styles.mcqOptionSelected]}
+                                    onPress={() => setAnswer(q.id, oi)}
+                                >
+                                    <View style={[styles.mcqRadio, isSelected && styles.mcqRadioSelected]}>
+                                        {isSelected && <View style={styles.mcqRadioDot} />}
+                                    </View>
+                                    <Text style={[styles.mcqOptionText, isSelected && styles.mcqOptionTextSelected]}>
+                                        {opt}
+                                    </Text>
+                                </TouchableOpacity>
+                            );
+                        })}
                     </View>
                 )}
 

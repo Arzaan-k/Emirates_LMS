@@ -87,7 +87,7 @@ const CircularProgress = ({ size = 36, strokeWidth = 3, progress = 0, color = TH
 export default function SelfLearningView({ userEmail = 'user', onOpenCourse, refreshKey = 0 }) {
     const [allBuckets, setAllBuckets] = useState([]); // Flat list of all buckets
     const [hierarchy, setHierarchy] = useState([]); // Root level buckets
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false); // Start false — only true while actively fetching
     const [refreshing, setRefreshing] = useState(false);
     const [viewMode, setViewMode] = useState('grid');
 
@@ -128,6 +128,7 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
             console.log('[SelfLearningView] Skipping fetch, invalid userEmail:', userEmail);
             return;
         }
+        setLoading(true); // Show spinner only while actually fetching
         try {
             const response = await fetch(`${API_URL}/api/v1/self-learning/buckets/hierarchy?user_email=${userEmail}`);
             const data = await response.json();
@@ -460,7 +461,9 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
 
                         <View style={styles.progressRow}>
                             <CircularProgress size={28} strokeWidth={3} progress={progress} color={isCompleted ? THEME.green : THEME.primary} />
-                            <Text style={styles.progressLabel}>{course.duration || 'N/A'}</Text>
+                            <Text style={styles.progressLabel}>
+                                {course.duration || (course.resource_type === 'Video' || course.resource_type === 'Audio' ? 'Start' : 'View')}
+                            </Text>
                             {isCompleted && course.enable_certificate && (
                                 <TouchableOpacity
                                     style={{ marginLeft: 'auto', padding: 4 }}
@@ -508,7 +511,9 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
                         <Text style={styles.listTitle} numberOfLines={1}>{course.title}</Text>
                         <View style={styles.courseMeta}>
                             <Feather name="clock" size={11} color="#94A3B8" />
-                            <Text style={styles.listMeta}>{course.duration || 'N/A'}</Text>
+                            <Text style={styles.listMeta}>
+                                {course.duration || (course.resource_type === 'Video' || course.resource_type === 'Audio' ? 'Start' : 'View')}
+                            </Text>
                             {course.xp > 0 && (
                                 <>
                                     <MaterialCommunityIcons name="star-four-points" size={11} color="#F59E0B" style={{ marginLeft: 8 }} />
@@ -536,12 +541,22 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
     // MAIN CONTENT
     // ==========================================
     const renderContent = () => {
-        // Show loading while waiting for valid user email or data fetch
-        if (loading || !isValidUserEmail(userEmail)) {
+        // Show loading only while actively fetching data
+        if (loading) {
             return (
                 <View style={styles.centerWrap}>
                     <ActivityIndicator size="large" color={THEME.primary} />
                     <Text style={styles.loadingText}>Loading...</Text>
+                </View>
+            );
+        }
+
+        // No valid email yet — show a friendly placeholder instead of a permanent spinner
+        if (!isValidUserEmail(userEmail)) {
+            return (
+                <View style={styles.centerWrap}>
+                    <MaterialCommunityIcons name="account-clock-outline" size={48} color="#CBD5E1" />
+                    <Text style={styles.loadingText}>Signing in...</Text>
                 </View>
             );
         }

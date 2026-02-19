@@ -177,7 +177,6 @@ async def get_self_learning_hierarchy(
             from sqlalchemy import or_
             course_filter = or_(Content.learning_path_type == "self_learning", Content.bucket_id.in_(cross_bucket_ids))
         all_courses = db.query(Content).filter(
-            Content.is_path_node == True,
             Content.is_published == True,
             course_filter
         ).all()
@@ -352,7 +351,6 @@ async def get_bucket_courses(
     # (career courses should appear when cross-displayed into self learning)
     bucket_is_cross = getattr(bucket, 'show_in_both_paths', False) or False
     base_query = db.query(Content).filter(
-        Content.is_path_node == True,
         Content.is_published == True,
         (Content.bucket == bucket.name) | (Content.bucket_id == bucket.id)
     )
@@ -939,15 +937,33 @@ async def delete_course_survey(
 @router.get("/survey/{course_id}")
 async def get_survey_for_user(
     course_id: str,
+    user_email: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """Get the active survey for a course (user-facing). Returns null if none or inactive."""
-    from app.models.notification import CourseSurvey
+    """
+    Get the active survey for a course (user-facing).
+    Returns null if none or inactive.
+    If user_email is provided, also returns has_submitted = True/False
+    so the frontend can decide whether to show the form at all.
+    """
+    from app.models.notification import CourseSurvey, SurveyResponse
     survey = db.query(CourseSurvey).filter(
         CourseSurvey.course_id == course_id,
         CourseSurvey.is_active == True
     ).first()
-    return {"survey": survey.to_dict() if survey else None}
+
+    has_submitted = False
+    if survey and user_email:
+        existing = db.query(SurveyResponse).filter(
+            SurveyResponse.survey_id == survey.id,
+            SurveyResponse.user_email == user_email
+        ).first()
+        has_submitted = existing is not None
+
+    return {
+        "survey": survey.to_dict() if survey else None,
+        "has_submitted": has_submitted,
+    }
 
 
 @router.post("/survey/{course_id}/submit")

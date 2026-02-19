@@ -775,11 +775,20 @@ export default function Courses({ userEmail = "user" }) {
                     onClose={(completionResult) => {
                         const justCompleted = !activeLessonWasComplete && !!(completionResult);
                         const lessonTitle = activeLesson.title || 'Module';
+                        const lessonId = activeLesson.id;
+                        const lessonBucket = activeLesson.bucket;
                         setActiveLesson(null);
                         setSlRefreshKey(k => k + 1);
+
                         if (justCompleted) {
-                            setSlCongratsInfo({ title: lessonTitle, courseId: activeLesson.id, bucket: activeLesson.bucket, completedAt: new Date() });
+                            // Fresh completion → show congrats first, then feedback after dismiss
+                            setSlCongratsInfo({ title: lessonTitle, courseId: lessonId, bucket: lessonBucket, completedAt: new Date() });
                             setSlCongratsVisible(true);
+                        } else if (activeLessonWasComplete) {
+                            // Re-visit of already-completed course → show feedback directly
+                            // FeedbackFormModal will silently close itself if user already submitted
+                            setFeedbackCourse({ courseId: lessonId, title: lessonTitle, bucket: lessonBucket });
+                            setFeedbackVisible(true);
                         }
                     }}
                     userEmail={userEmail}
