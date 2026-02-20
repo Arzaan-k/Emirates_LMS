@@ -193,7 +193,7 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
             } catch (e) {
                 console.log('[SelfLearningView] Cache read error:', e);
                 // Clear corrupted cache
-                await AsyncStorage.removeItem(CACHE_KEY_HIERARCHY).catch(() => {});
+                await AsyncStorage.removeItem(CACHE_KEY_HIERARCHY).catch(() => { });
             }
 
             // Step 2: Always fetch fresh data from server
@@ -216,10 +216,23 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
     // Refresh data when a lesson is closed (refreshKey incremented by parent)
     useEffect(() => {
         if (refreshKey > 0 && isValidUserEmail(userEmail)) {
-            // Always background refresh after lesson close
+            // Always background refresh hierarchy after lesson close
             fetchDataBackground();
+
+            // Make sure we trigger a re-fetch of courses if we are inside a leaf node
+            if (currentPath.length > 0) {
+                const currentFolderId = currentPath[currentPath.length - 1].id;
+                const cacheKey = `sl_courses_${currentFolderId}`;
+
+                // On mobile, the async fetch can take a tiny fraction of a second, so we slightly delay the fetch
+                // to make absolutely sure the track-video-progress backend route finishes.
+                setTimeout(() => {
+                    // Try to fetch background explicitly 
+                    fetchCoursesBackground(currentFolderId, cacheKey);
+                }, 1000);
+            }
         }
-    }, [refreshKey, userEmail]);
+    }, [refreshKey, userEmail, currentPath]);
 
     // Background fetch - doesn't show loading spinner
     const fetchDataBackground = async () => {
@@ -383,7 +396,7 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
     const onRefresh = useCallback(() => {
         setRefreshing(true);
         // Clear cache and force fresh fetch
-        AsyncStorage.removeItem(CACHE_KEY_HIERARCHY).catch(() => {});
+        AsyncStorage.removeItem(CACHE_KEY_HIERARCHY).catch(() => { });
         fetchData();
     }, [userEmail]);
 
@@ -392,9 +405,11 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
     // ==========================================
 
     const openFolder = (folder) => {
-        // Prevent circular navigation - don't add if folder is already in path
-        if (currentPath.some(p => p.id === folder.id)) {
-            console.warn('Circular navigation detected, folder already in path:', folder.id);
+        // Prevent circular navigation - don't add if folder is already in path, but instead navigate to it
+        const existingIndex = currentPath.findIndex(p => p.id === folder.id);
+        if (existingIndex !== -1) {
+            console.warn('Circular navigation detected, redirecting to folder in path:', folder.id);
+            goToPathIndex(existingIndex);
             return;
         }
 
@@ -668,7 +683,7 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
                         <View style={styles.progressRow}>
                             <CircularProgress size={28} strokeWidth={3} progress={progress} color={isCompleted ? THEME.green : THEME.primary} />
                             <Text style={styles.progressLabel}>
-                                {course.duration || (course.resource_type === 'Video' || course.resource_type === 'Audio' ? 'Start' : 'View')}
+                                {isCompleted ? 'Completed' : (progress > 0 ? 'Resume' : (course.duration || (course.resource_type === 'Video' || course.resource_type === 'Audio' ? 'Start' : 'View')))}
                             </Text>
                             {isCompleted && course.enable_certificate && (
                                 <TouchableOpacity
@@ -718,7 +733,7 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
                         <View style={styles.courseMeta}>
                             <Feather name="clock" size={11} color="#94A3B8" />
                             <Text style={styles.listMeta}>
-                                {course.duration || (course.resource_type === 'Video' || course.resource_type === 'Audio' ? 'Start' : 'View')}
+                                {isCompleted ? 'Completed' : (progress > 0 ? 'Resume' : (course.duration || (course.resource_type === 'Video' || course.resource_type === 'Audio' ? 'Start' : 'View')))}
                             </Text>
                             {course.xp > 0 && (
                                 <>

@@ -33,6 +33,7 @@ import { WebView } from 'react-native-webview';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import API_URL from '../config';
 import FeedbackFormModal from './FeedbackFormModal';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
 
@@ -365,11 +366,8 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
 
     // No-transcript/no-quiz detection
     // Compute locally from lesson props immediately — don't wait for server
-    const hasNoTranscriptLocal = !lesson.transcript || lesson.transcript.trim().length === 0;
     const hasQuizLocal = !!(lesson.quiz && Array.isArray(lesson.quiz) && lesson.quiz.length > 0);
-    const [hasQuiz, setHasQuiz] = useState(
-        isSelfLearning && hasNoTranscriptLocal ? false : (hasQuizLocal || true)
-    );
+    const [hasQuiz, setHasQuiz] = useState(hasQuizLocal);
 
     // Mid-video quiz states
     const [midVideoQuizzes, setMidVideoQuizzes] = useState([]);
@@ -406,7 +404,11 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
     const toggleSpeed = () => {
         const rates = [1.0, 1.25, 1.5];
         const nextIdx = (rates.indexOf(playbackSpeed) + 1) % rates.length;
-        setPlaybackSpeed(rates[nextIdx]);
+        const newSpeed = rates[nextIdx];
+        setPlaybackSpeed(newSpeed);
+        if (Platform.OS === 'web' && videoRef.current) {
+            videoRef.current.playbackRate = newSpeed;
+        }
     };
 
     const transcriptText = lesson.transcript || lesson.desc || (hasQuiz ? "No transcript available for this lesson." : "This video does not have a transcript. Complete the video to proceed.");
@@ -420,6 +422,24 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
 
     // [NEW] Feedback Form State
     const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+
+    const checkAndShowFeedbackModal = async (delay = 1500) => {
+        try {
+            const storageKey = `feedback_shown_${userEmail}_${lesson.id}`;
+            const shownStr = await AsyncStorage.getItem(storageKey);
+            const shownCount = shownStr ? parseInt(shownStr, 10) : 0;
+
+            if (shownCount < 3) {
+                await AsyncStorage.setItem(storageKey, (shownCount + 1).toString());
+                console.log(`Showing feedback modal (${shownCount + 1}/3)`);
+                setTimeout(() => setShowFeedbackModal(true), delay);
+            } else {
+                console.log("Feedback modal max shown count reached (3/3)");
+            }
+        } catch (e) {
+            console.error("Error checking feedback shown count", e);
+        }
+    };
 
     // Document navigation hint
     const [showDocumentHint, setShowDocumentHint] = useState(true);
@@ -600,6 +620,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
             const data = await response.json();
             if (data.progress) {
                 setNodeProgress(data.progress);
+                setModuleCompleted(data.progress.completed || false);
                 const serverPercent = data.progress.video_watched_percent || 0;
                 setVideoProgress(serverPercent);
                 highestServerPercent.current = serverPercent;
@@ -622,6 +643,11 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
                         watchedSeconds.current.add(i);
                     }
                     console.log(`[Progress] Pre-populated ${watchedSecondsCount} seconds from server (${serverPercent}%)`);
+                }
+
+                // Check if we should pop up feedback on load if already completed but not submitted
+                if (lesson.enable_feedback && data.progress.completed && !data.feedback_submitted) {
+                    checkAndShowFeedbackModal(1500);
                 }
             }
             if (data.requirements) {
@@ -920,10 +946,10 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
             // Sync to server immediately
             trackVideoProgress(duration, duration, true, effectivePercent);
 
-            // [FIX] Trigger feedback if enabled and video is complete
-            if (effectivePercent >= videoRequiredPercent && lesson.enable_feedback) {
+            // [FIX] Trigger feedback if enabled and video is complete AND it wasn't already completed
+            if (effectivePercent >= videoRequiredPercent && lesson.enable_feedback && !nodeProgress?.feedback_submitted && !moduleCompleted) {
                 console.log("Video complete with feedback enabled, triggering modal...");
-                setTimeout(() => setShowFeedbackModal(true), 1500);
+                checkAndShowFeedbackModal(1500);
             }
         }
     };
@@ -943,12 +969,14 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
 
             if (result.status === "success" && result.result?.is_complete) {
                 setEndQuizPassed(true);
+
+                // [FIX] Trigger feedback if enabled and newly completed
+                if (lesson.enable_feedback && !nodeProgress?.feedback_submitted && result.result?.newly_completed && !moduleCompleted) {
+                    checkAndShowFeedbackModal(500);
+                }
+
                 setModuleCompleted(true);
                 setCompletionResult(result.result);
-                // [FIX] Trigger feedback if enabled
-                if (lesson.enable_feedback) {
-                    setTimeout(() => setShowFeedbackModal(true), 500);
-                }
                 await trackModuleCompletion();
             } else if (result.status === "error") {
                 console.log("Video-only completion not yet ready:", result.message);
@@ -1026,17 +1054,17 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
                 setEndQuizPassed(result.result.passed);
 
                 if (result.result.is_complete) {
+                    // [FIX] Trigger feedback if enabled and newly completed
+                    if (lesson.enable_feedback && !nodeProgress?.feedback_submitted && result.result?.newly_completed && !moduleCompleted) {
+                        checkAndShowFeedbackModal(1200);
+                    }
+
                     // Course fully completed!
                     setModuleCompleted(true);
                     setCompletionResult(result.result);
 
                     // Also track to legacy endpoint for XP
                     await trackModuleCompletion();
-
-                    // [FIX] Trigger feedback if enabled
-                    if (lesson.enable_feedback) {
-                        setTimeout(() => setShowFeedbackModal(true), 1200);
-                    }
                 } else if (!result.result.passed) {
                     Alert.alert(
                         "Quiz Not Passed",
@@ -1170,8 +1198,8 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
 
         console.log(`[Close] Final progress: local=${robustPercent}%, server=${highestServerPercent.current}%, final=${finalPercent}%`);
 
-        // [FIX] Fire-and-forget sync - don't await, close immediately
-        // This ensures the back button always works even if network is slow
+        // Ensure we block the UI unmount until the progress is successfully written to the DB.
+        // Mobile platforms often cancel trailing network requests if the component is immediately unmounted.
         if (videoDuration > 0 && finalPercent > lastSyncedPercent.current) {
             const formData = new FormData();
             formData.append("user_email", userEmail);
@@ -1180,19 +1208,26 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
             formData.append("video_duration_seconds", videoDuration.toString());
             formData.append("explicit_progress_percent", finalPercent.toString());
 
-            // Use fetch with keepalive for reliable background sync
-            fetch(`${API_URL}/learning-path/track-video-progress`, {
+            const syncPromise = fetch(`${API_URL}/learning-path/track-video-progress`, {
                 method: "POST",
                 body: formData,
-                keepalive: true // Ensures request completes even after navigation
-            }).then(res => res.json()).then(result => {
-                console.log("[Close] Progress synced successfully:", result?.progress?.video_watched_percent);
-            }).catch(err => {
-                console.log("[Close] Progress sync error (non-blocking):", err);
-            });
+            }).then(res => res.json());
+
+            // Wait up to 1.5 seconds for the database to lock the progress state
+            Promise.race([
+                syncPromise,
+                new Promise(resolve => setTimeout(resolve, 1500))
+            ])
+                .then(() => {
+                    onClose(completionResult);
+                })
+                .catch(() => {
+                    onClose(completionResult);
+                });
+            return;
         }
 
-        // Close immediately - don't wait for network
+        // Close immediately if no sync was needed
         onClose(completionResult);
     }, [videoDuration, maxPositionReached, userEmail, lesson.id, completionResult, onClose]);
 
@@ -1242,26 +1277,97 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
         // Video or Audio content
         if (resourceType === 'Video' || resourceType === 'Audio') {
             if (contentUrl) {
+                // [NEW] Wait for backend to send initial progress so we know where to resume
+                if (!nodeProgress) {
+                    return (
+                        <View style={{ flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' }}>
+                            <ActivityIndicator size="large" color="#F59E0B" />
+                            <Text style={{ color: '#94A3B8', fontSize: 13, marginTop: 10, fontFamily: 'Poppins_400Regular' }}>
+                                Loading your progress...
+                            </Text>
+                        </View>
+                    );
+                }
+
                 return (
-                    <>
-                        <Video
-                            ref={videoRef}
-                            style={{ width: '100%', height: '100%' }}
-                            source={{
-                                uri: contentUrl,
-                                // Hint to expo-av/browser: stream progressively, don't wait for full download
-                                headers: Platform.OS === 'web' ? {} : { 'Cache-Control': 'no-transform' },
-                            }}
-                            useNativeControls
-                            resizeMode={ResizeMode.CONTAIN}
-                            isLooping={false}
-                            shouldPlay={true}
-                            rate={playbackSpeed}
-                            progressUpdateIntervalMillis={500}
-                            onPlaybackStatusUpdate={handleVideoPlaybackStatus}
-                            onFullscreenUpdate={handleFullscreenUpdate}
-                            onReadyForDisplay={() => setVideoBuffering(false)}
-                        />
+                    <View style={{ flex: 1, backgroundColor: '#000', position: 'relative' }}>
+                        {Platform.OS === 'web' ? (
+                            <video
+                                ref={videoRef}
+                                src={contentUrl}
+                                controls
+                                controlsList="nodownload"
+                                style={{
+                                    width: '100%',
+                                    height: '100%',
+                                    backgroundColor: '#000',
+                                    objectFit: 'contain'
+                                }}
+                                preload="auto"
+                                playsInline
+                                onLoadedMetadata={(e) => {
+                                    setVideoBuffering(false);
+                                    // Seek to the exact resume position saved in the database
+                                    const resumeTime = nodeProgress?.video_position_seconds || 0;
+                                    if (resumeTime > 1 && e.target.duration > resumeTime + 2) {
+                                        e.target.currentTime = resumeTime;
+                                    }
+                                }}
+                                onTimeUpdate={(e) => {
+                                    handleVideoPlaybackStatus({
+                                        isLoaded: true,
+                                        positionMillis: e.target.currentTime * 1000,
+                                        durationMillis: e.target.duration * 1000,
+                                        isPlaying: !e.target.paused,
+                                        didJustFinish: e.target.ended
+                                    });
+                                }}
+                                onEnded={(e) => {
+                                    handleVideoPlaybackStatus({
+                                        didJustFinish: true,
+                                        isLoaded: true,
+                                        durationMillis: e.target.duration * 1000,
+                                        positionMillis: e.target.duration * 1000,
+                                        isPlaying: false
+                                    });
+                                }}
+                                onLoadedData={() => setVideoBuffering(false)}
+                                onCanPlay={() => setVideoBuffering(false)}
+                                onCanPlayThrough={() => setVideoBuffering(false)}
+                                onWaiting={() => setVideoBuffering(true)}
+                                onPlaying={(e) => {
+                                    setVideoBuffering(false);
+                                    setIsVideoPlaying(true);
+                                    if (playbackSpeed !== 1.0) e.target.playbackRate = playbackSpeed;
+                                }}
+                                onPause={() => setIsVideoPlaying(false)}
+                            />
+                        ) : (
+                            <Video
+                                ref={videoRef}
+                                style={{ flex: 1, width: '100%', height: '100%' }}
+                                source={{
+                                    uri: contentUrl,
+                                    headers: { 'Cache-Control': 'no-transform' },
+                                }}
+                                useNativeControls
+                                resizeMode={ResizeMode.CONTAIN}
+                                isLooping={false}
+                                shouldPlay={true}
+                                rate={playbackSpeed}
+                                progressUpdateIntervalMillis={500}
+                                positionMillis={(nodeProgress?.video_position_seconds || 0) > 1 ? (nodeProgress.video_position_seconds * 1000) : 0}
+                                onPlaybackStatusUpdate={handleVideoPlaybackStatus}
+                                onFullscreenUpdate={handleFullscreenUpdate}
+                                onReadyForDisplay={() => setVideoBuffering(false)}
+                                onLoadStart={() => setVideoBuffering(true)}
+                                onLoad={(status) => {
+                                    setVideoBuffering(false);
+                                    // Ensure play state is maintained
+                                    if (status.isLoaded) setIsVideoPlaying(status.isPlaying);
+                                }}
+                            />
+                        )}
 
                         {/* Video buffering overlay */}
                         {videoBuffering && (
@@ -1332,7 +1438,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
                                 <MaterialCommunityIcons name="fullscreen" size={20} color="#FFF" />
                             </TouchableOpacity>
                         )}
-                    </>
+                    </View>
                 );
             } else {
                 return (

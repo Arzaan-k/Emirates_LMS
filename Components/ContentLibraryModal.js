@@ -22,6 +22,7 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import CourseSettingsModal from './CourseSettingsModal';
+import QuizManagementModal from './QuizManagementModal';
 import API_URL from '../config';
 
 const { width, height } = Dimensions.get('window');
@@ -96,6 +97,15 @@ export default function ContentLibraryModal({ visible, onClose }) {
     const [settingsModalVisible, setSettingsModalVisible] = useState(false);
     const [settingsItem, setSettingsItem] = useState(null);
     const [settingsItemType, setSettingsItemType] = useState('course');
+
+    // Quiz Management Modal State
+    const [quizModalVisible, setQuizModalVisible] = useState(false);
+    const [quizItem, setQuizItem] = useState(null);
+
+    const openQuizModal = (item) => {
+        setQuizItem(item);
+        setQuizModalVisible(true);
+    };
 
     const openSettingsModal = (item, type = 'course') => {
         setSettingsItem(item);
@@ -938,6 +948,10 @@ export default function ContentLibraryModal({ visible, onClose }) {
                             <Feather name="eye" size={16} color="#10B981" />
                             <Text style={[styles.actionLabel, { color: '#10B981' }]}>Preview</Text>
                         </TouchableOpacity>
+                        <TouchableOpacity onPress={() => openQuizModal(item)} style={[styles.actionBtn, { backgroundColor: '#F3E8FF' }]}>
+                            <MaterialCommunityIcons name="head-question" size={16} color="#9333EA" />
+                            <Text style={[styles.actionLabel, { color: '#9333EA' }]}>Quiz</Text>
+                        </TouchableOpacity>
                         <TouchableOpacity onPress={() => openEditModal(item)} style={[styles.actionBtn, { backgroundColor: '#EFF6FF' }]}>
                             <Feather name="edit-2" size={16} color="#3B82F6" />
                             <Text style={[styles.actionLabel, { color: '#3B82F6' }]}>Edit</Text>
@@ -1444,6 +1458,17 @@ export default function ContentLibraryModal({ visible, onClose }) {
                                 </View>
                             </View>
                         </Modal>
+
+                        {/* Quiz Management Modal */}
+                        <QuizManagementModal
+                            visible={quizModalVisible}
+                            onClose={() => setQuizModalVisible(false)}
+                            contentItem={quizItem}
+                            onSaveSuccess={() => {
+                                fetchContent();
+                                fetchBuckets();
+                            }}
+                        />
 
                         {/* Success Modal */}
                         <Modal visible={successModalVisible} animationType="fade" transparent={true}>

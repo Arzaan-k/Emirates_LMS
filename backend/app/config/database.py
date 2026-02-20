@@ -30,7 +30,7 @@ def get_engine_args():
 
     connect_args = {
         "sslmode": "require",
-        "connect_timeout": 3,  # Fail fast on cold starts
+        "connect_timeout": 15,  # Allow time for Neon serverless cold starts
     }
 
     return {

@@ -193,6 +193,23 @@ class VideoProgressService:
             result.update(validation)
             result["requirements"] = requirements
             result["has_quiz"] = has_quiz
+            
+            # Check feedback
+            from app.models.notification import CourseSurvey, SurveyResponse, CourseFeedback
+            feedback_submitted = False
+            
+            survey = self.db.query(CourseSurvey).filter(CourseSurvey.course_id == node_id, CourseSurvey.is_active == True).first()
+            if survey:
+                existing = self.db.query(SurveyResponse).filter(SurveyResponse.survey_id == survey.id, SurveyResponse.user_email == user_email).first()
+                if existing:
+                    feedback_submitted = True
+            
+            if not feedback_submitted:
+                legacy = self.db.query(CourseFeedback).filter(CourseFeedback.course_id == node_id, CourseFeedback.user_email == user_email).first()
+                if legacy:
+                    feedback_submitted = True
+                    
+            result["feedback_submitted"] = feedback_submitted
 
         return result
 
@@ -240,6 +257,7 @@ class VideoProgressService:
             }
         
         # Mark as completed
+        newly_completed = False
         if not progress.completed:
             progress.completed = True
             progress.completed_at = datetime.utcnow()
@@ -248,6 +266,7 @@ class VideoProgressService:
             progress.end_quiz_score = 100.0
             progress.updated_at = datetime.utcnow()
             self.db.commit()
+            newly_completed = True
             
             logger.info(f"Course COMPLETED (video-only, no quiz): {user_email} - {node_id}")
             
@@ -269,6 +288,7 @@ class VideoProgressService:
                 "current_video_percent": current_video_percent,
                 "quiz_passed": True,
                 "is_complete": True,
+                "newly_completed": newly_completed,
                 "message": "Course completed! (Video progress only)"
             }
         }
@@ -538,9 +558,11 @@ class VideoProgressService:
         )
 
         # Mark as completed if all requirements met
+        newly_completed = False
         if is_complete and not progress.completed:
             progress.completed = True
             progress.completed_at = datetime.utcnow()
+            newly_completed = True
             logger.info(f"Course COMPLETED: {user_email} - {node_id}")
             
             # CRITICAL FIX: Also record in course_completions table
@@ -584,6 +606,7 @@ class VideoProgressService:
                 "quiz_passed": quiz_passed,
                 "mid_quiz_ok": mid_quiz_ok,
                 "is_complete": is_complete,
+                "newly_completed": newly_completed,
                 "message": message
             }
         }
