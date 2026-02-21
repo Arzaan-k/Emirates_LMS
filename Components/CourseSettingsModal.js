@@ -402,6 +402,19 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
             if (data.status === 'success') {
                 showAlert('Saved', 'Settings updated successfully');
 
+                // Clear all SL caches so employee view reflects changes immediately
+                try {
+                    await AsyncStorage.removeItem('sl_hierarchy_cache');
+                    await AsyncStorage.removeItem('sl_hierarchy_timestamp');
+                    const allKeys = await AsyncStorage.getAllKeys();
+                    const courseCacheKeys = allKeys.filter(k => k.startsWith('sl_courses_'));
+                    if (courseCacheKeys.length > 0) {
+                        await AsyncStorage.multiRemove(courseCacheKeys);
+                    }
+                } catch (cacheErr) {
+                    console.log('Cache clear error (non-critical):', cacheErr);
+                }
+
                 // Trigger callback to refetch data in parent component
                 if (onSaveSuccess) {
                     onSaveSuccess();
@@ -1173,7 +1186,7 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
                                                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
                                                             <Text style={styles.responseStatAvg}>{stat.average || '—'}</Text>
                                                             <View style={{ flexDirection: 'row', gap: 2 }}>
-                                                                {[1,2,3,4,5].map(s => (
+                                                                {[1, 2, 3, 4, 5].map(s => (
                                                                     <MaterialCommunityIcons key={s} name={s <= Math.round(stat.average || 0) ? 'star' : 'star-outline'} size={16} color="#F59E0B" />
                                                                 ))}
                                                             </View>

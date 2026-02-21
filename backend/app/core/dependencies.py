@@ -118,8 +118,12 @@ async def require_admin(
     """
     is_superadmin = user.get("is_superadmin", False)
     has_admin_access = user.get("has_admin_access", False)
+    role = str(user.get("role", "")).lower()
 
-    if not is_superadmin and not has_admin_access:
+    # Some admins may only have role set without the boolean flags
+    is_admin_role = any(r in role for r in ["admin", "manager"])
+
+    if not is_superadmin and not has_admin_access and not is_admin_role:
         raise AuthorizationError(
             detail="Admin access required",
             error_code="ADMIN_REQUIRED"

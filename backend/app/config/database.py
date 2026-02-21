@@ -39,7 +39,7 @@ def get_engine_args():
         "max_overflow": settings.DB_MAX_OVERFLOW or 5,
         "pool_timeout": settings.DB_POOL_TIMEOUT or 30,
         "pool_pre_ping": True,
-        "pool_recycle": 300,  # Neon closes idle connections
+        "pool_recycle": 120,  # Neon aggressively closes idle connections - recycle faster
         "connect_args": connect_args,
         "echo": settings.DEBUG,
     }
@@ -73,7 +73,7 @@ def set_connection_options(dbapi_connection, connection_record):
     """
     cursor = dbapi_connection.cursor()
     cursor.execute("SET search_path TO public")
-    cursor.execute("SET statement_timeout = '5s'")  # APIs should be fast
+    cursor.execute("SET statement_timeout = '30s'")  # Allow for Neon cold-start latency
     cursor.close()
 
 

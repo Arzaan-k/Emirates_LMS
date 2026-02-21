@@ -104,7 +104,7 @@ async def get_node_progress(
 # ===========================================
 
 @router.get("/recently-viewed/{user_email}")
-async def get_recently_viewed(
+def get_recently_viewed(
     user_email: str,
     limit: int = Query(default=10, ge=1, le=50),
     db: Session = Depends(get_db)

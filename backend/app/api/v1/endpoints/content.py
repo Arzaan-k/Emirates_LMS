@@ -26,6 +26,7 @@ from app.services.ai_service import AIService
 from app.services.document_service import DocumentService
 from app.services.document_converter import get_converter
 from app.core.websocket import manager
+from app.api.v1.endpoints.self_learning import invalidate_self_learning_cache
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/content", tags=["Content"])
@@ -1433,6 +1434,9 @@ async def bulk_move_content(
                 "error": str(e)
             })
 
+    # Invalidate cache so changes reflect on employee side
+    invalidate_self_learning_cache()
+
     return {
         "status": "completed",
         "message": f"Moved {len(results['success'])} of {results['total']} items to {target_bucket_name}",
@@ -1543,6 +1547,9 @@ async def bulk_copy_content(
                 "id": item_id,
                 "error": str(e)
             })
+
+    # Invalidate cache so changes reflect on employee side
+    invalidate_self_learning_cache()
 
     return {
         "status": "completed",

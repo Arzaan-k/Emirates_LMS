@@ -154,11 +154,10 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
         const loadAndFetch = async () => {
             console.log('[SelfLearningView] loadAndFetch starting, userEmail:', userEmail);
 
-            // TEMPORARY: Clear old cache to fix stale data issue
-            // Bump version to v3 to clear all stale caches including course caches
+            // Bump version to v4 to clear all stale caches (new estimated time fields + published fix)
             const cacheVersion = await AsyncStorage.getItem('sl_cache_version');
-            if (cacheVersion !== 'v3') {
-                console.log('[SelfLearningView] Clearing ALL old caches (upgrading to v3)');
+            if (cacheVersion !== 'v4') {
+                console.log('[SelfLearningView] Clearing ALL old caches (upgrading to v4)');
                 // Clear hierarchy cache
                 await AsyncStorage.removeItem(CACHE_KEY_HIERARCHY);
                 // Clear all course caches (they start with sl_courses_)
@@ -168,7 +167,7 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
                     await AsyncStorage.multiRemove(courseCacheKeys);
                     console.log('[SelfLearningView] Cleared', courseCacheKeys.length, 'course caches');
                 }
-                await AsyncStorage.setItem('sl_cache_version', 'v3');
+                await AsyncStorage.setItem('sl_cache_version', 'v4');
             }
 
             // Step 1: Try to load cached data for instant display
@@ -586,6 +585,17 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
     // ==========================================
     // FOLDER ITEM - GRID VIEW
     // ==========================================
+    // Helper to format remaining time
+    const formatRemainingTime = (seconds) => {
+        if (!seconds || seconds <= 0) return '';
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m left`;
+        if (hours > 0) return `${hours}h left`;
+        if (minutes > 0) return `${minutes}m left`;
+        return '';
+    };
+
     const renderFolderGrid = ({ item, index }) => {
         const color = item.color || getColor(index);
         const progress = item.progress_percent || 0;
@@ -612,6 +622,12 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
                             <CircularProgress size={28} strokeWidth={3} progress={progress} color={color} />
                             <Text style={styles.progressLabel}>{Math.round(progress)}% done</Text>
                         </View>
+                        {item.remaining_duration_seconds > 0 && (
+                            <View style={styles.timeRow}>
+                                <Feather name="clock" size={11} color="#94A3B8" />
+                                <Text style={styles.timeLabel}>{formatRemainingTime(item.remaining_duration_seconds)}</Text>
+                            </View>
+                        )}
                     </View>
                 </TouchableOpacity>
             </Animated.View>
@@ -638,7 +654,9 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
                     </View>
                     <View style={styles.listInfo}>
                         <Text style={styles.listTitle} numberOfLines={1}>{item.name}</Text>
-                        <Text style={styles.listMeta}>{item.total_courses || 0} items • {item.completed_courses || 0} completed</Text>
+                        <Text style={styles.listMeta}>
+                            {item.total_courses || 0} items • {item.completed_courses || 0} completed{item.remaining_duration_seconds > 0 ? ` • ${formatRemainingTime(item.remaining_duration_seconds)}` : ''}
+                        </Text>
                     </View>
                     <CircularProgress size={38} strokeWidth={3} progress={progress} color={color} />
                     <Feather name="chevron-right" size={20} color="#CBD5E1" style={{ marginLeft: 10 }} />
@@ -935,6 +953,8 @@ const styles = StyleSheet.create({
     gridCardTitle: { fontSize: 14, fontWeight: '600', color: THEME.textMain, lineHeight: 18, marginBottom: 8 },
     progressRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     progressLabel: { fontSize: 11, color: THEME.textSub },
+    timeRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
+    timeLabel: { fontSize: 10, color: '#94A3B8', fontWeight: '500' },
 
     // List Row
     listRow: {

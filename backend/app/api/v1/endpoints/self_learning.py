@@ -46,8 +46,41 @@ def invalidate_self_learning_cache():
 # SELF-LEARNING CONTENT FOR USERS
 # ==========================================
 
+# Default estimated durations per resource type (seconds)
+_DEFAULT_DURATION = {
+    'Video': 300,    # 5 minutes
+    'Audio': 240,    # 4 minutes
+    'PDF': 180,      # 3 minutes
+    'Document': 180,
+    'Image': 60,
+    'PPT': 300,
+    'Presentation': 300,
+}
+
+def _estimate_duration(course):
+    """Get duration_seconds for a course, with fallback estimation."""
+    if course.duration_seconds:
+        return course.duration_seconds
+    # Try parsing the duration string (formats: '5:30', '1:02:30', '5m', '300')
+    if course.duration:
+        d = course.duration.strip()
+        try:
+            parts = d.split(':')
+            if len(parts) == 2:
+                return int(parts[0]) * 60 + int(parts[1])
+            elif len(parts) == 3:
+                return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+            elif d.endswith('m'):
+                return int(d[:-1]) * 60
+            elif d.isdigit():
+                return int(d)
+        except (ValueError, IndexError):
+            pass
+    # Fallback: estimate by resource type
+    return _DEFAULT_DURATION.get(course.resource_type, 180)
+
 @router.get("/buckets")
-async def get_self_learning_buckets(
+def get_self_learning_buckets(
     user_email: str = "user",
     db: Session = Depends(get_db)
 ):
@@ -77,7 +110,6 @@ async def get_self_learning_buckets(
         from sqlalchemy import or_
         course_filter = or_(Content.learning_path_type == "self_learning", Content.bucket_id.in_(cross_bucket_ids))
     all_courses = db.query(Content).filter(
-        Content.is_path_node == True,
         Content.is_published == True,
         course_filter
     ).all()
@@ -119,19 +151,25 @@ async def get_self_learning_buckets(
         if not _user_has_bucket_access(user, bucket):
             continue
 
-        # Get courses in this bucket
-        bucket_courses = [c for c in visible_courses if c.bucket == bucket.name or c.bucket_id == bucket.id]
+        # Match courses to bucket: prefer bucket_id over name to avoid double-counting
+        bucket_courses = [c for c in visible_courses if c.bucket_id == bucket.id or (not c.bucket_id and c.bucket == bucket.name)]
         total = len(bucket_courses)
         completed = sum(1 for c in bucket_courses if c.id in completed_ids)
 
-        # Calculate average watch progress
+        # Calculate average watch progress and estimated time
         total_progress = 0
+        total_duration = 0
+        remaining_duration = 0
         for c in bucket_courses:
+            course_dur = _estimate_duration(c)
+            total_duration += course_dur
             p = progress_map.get(c.id, {})
             if p.get("completed"):
                 total_progress += 100
             else:
-                total_progress += p.get("watched_percent", 0)
+                watched = p.get("watched_percent", 0)
+                total_progress += watched
+                remaining_duration += int(course_dur * (1 - watched / 100))
         # Empty folders (0 courses) are considered 100% complete
         avg_progress = round(total_progress / total, 1) if total > 0 else 100
 
@@ -157,6 +195,8 @@ async def get_self_learning_buckets(
             "total_courses": total,
             "completed_courses": completed,
             "progress_percent": avg_progress,
+            "total_duration_seconds": total_duration,
+            "remaining_duration_seconds": remaining_duration,
             "last_attended": last_attended,
         })
 
@@ -210,7 +250,7 @@ def _get_cached_buckets_and_courses(db: Session):
 
 
 @router.get("/buckets/hierarchy")
-async def get_self_learning_hierarchy(
+def get_self_learning_hierarchy(
     user_email: str = "user",
     db: Session = Depends(get_db)
 ):
@@ -259,18 +299,25 @@ async def get_self_learning_hierarchy(
 
         def get_bucket_progress(bucket):
             """Calculate progress for a bucket and its content."""
-            bucket_courses = [c for c in visible_courses if c.bucket == bucket.name or c.bucket_id == bucket.id]
+            # Match courses to bucket: prefer bucket_id over name to avoid double-counting
+            # when parent/child buckets share the same name
+            bucket_courses = [c for c in visible_courses if c.bucket_id == bucket.id or (not c.bucket_id and c.bucket == bucket.name)]
             total = len(bucket_courses)
             completed = sum(1 for c in bucket_courses if c.id in completed_ids)
 
             total_progress = 0
+            total_duration = 0
+            remaining_duration = 0
             for c in bucket_courses:
+                course_dur = _estimate_duration(c)
+                total_duration += course_dur
                 p = progress_map.get(c.id, {})
                 if p.get("completed") or c.id in completed_ids:
                     total_progress += 100
                 else:
                     watched = p.get("watched_percent", 0)
                     total_progress += watched
+                    remaining_duration += int(course_dur * (1 - watched / 100))
 
             # Empty folders (0 courses) are considered 100% complete
             avg_progress = round(total_progress / total, 1) if total > 0 else 100
@@ -278,7 +325,9 @@ async def get_self_learning_hierarchy(
             return {
                 "total_courses": total,
                 "completed_courses": completed,
-                "progress_percent": avg_progress
+                "progress_percent": avg_progress,
+                "total_duration_seconds": total_duration,
+                "remaining_duration_seconds": remaining_duration,
             }
 
         def build_hierarchy(parent_id=None, visited=None, depth=0):
@@ -324,6 +373,11 @@ async def get_self_learning_hierarchy(
 
                         progress["total_courses"] += child_total
                         progress["completed_courses"] += child_completed
+
+                        # Aggregate duration from child buckets
+                        progress["total_duration_seconds"] += sum(cb.get("total_duration_seconds", 0) for cb in child_buckets)
+                        progress["remaining_duration_seconds"] += sum(cb.get("remaining_duration_seconds", 0) for cb in child_buckets)
+
                         if progress["total_courses"] > 0:
                             total_weight = sum(cb.get("total_courses", 0) for cb in child_buckets if cb.get("total_courses", 0) > 0)
                             if total_weight > 0:
@@ -356,7 +410,7 @@ async def get_self_learning_hierarchy(
         raise HTTPException(status_code=500, detail=f"Failed to load hierarchy: {str(e)}")
 
 @router.get("/buckets/{bucket_id}/courses")
-async def get_bucket_courses(
+def get_bucket_courses(
     bucket_id: str,
     user_email: str = "user",
     db: Session = Depends(get_db)
@@ -375,13 +429,25 @@ async def get_bucket_courses(
     bucket_is_cross = getattr(bucket, 'show_in_both_paths', False) or False
     base_query = db.query(Content).filter(
         Content.is_published == True,
-        (Content.bucket == bucket.name) | (Content.bucket_id == bucket.id)
+        Content.bucket_id == bucket.id
     )
     if not bucket_is_cross:
         base_query = base_query.filter(
             Content.learning_path_type == (bucket.learning_path_type or "self_learning")
         )
     courses = base_query.order_by(Content.order_index, Content.timestamp).all()
+    # Also include courses matched by name that don't have a bucket_id assigned
+    if not courses:
+        base_query = db.query(Content).filter(
+            Content.is_published == True,
+            Content.bucket == bucket.name,
+            Content.bucket_id.is_(None)
+        )
+        if not bucket_is_cross:
+            base_query = base_query.filter(
+                Content.learning_path_type == (bucket.learning_path_type or "self_learning")
+            )
+        courses = base_query.order_by(Content.order_index, Content.timestamp).all()
 
     # Filter scheduled
     courses = [c for c in courses if not c.scheduled_at or c.scheduled_at <= now]
@@ -473,7 +539,7 @@ async def get_bucket_courses(
 # ==========================================
 
 @router.get("/admin/users-for-assignment")
-async def get_users_for_assignment(
+def get_users_for_assignment(
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
@@ -550,7 +616,7 @@ async def get_users_for_assignment(
 # ==========================================
 
 @router.put("/admin/buckets/{bucket_id}/settings")
-async def update_bucket_settings(
+def update_bucket_settings(
     bucket_id: str,
     settings: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
@@ -571,12 +637,14 @@ async def update_bucket_settings(
 
     bucket.updated_at = datetime.utcnow()
     db.commit()
+    
+    invalidate_self_learning_cache()
 
     return {"status": "success", "bucket": bucket.to_dict()}
 
 
 @router.put("/admin/courses/{course_id}/settings")
-async def update_course_settings(
+def update_course_settings(
     course_id: str,
     settings: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
@@ -600,12 +668,14 @@ async def update_course_settings(
 
     course.updated_at = datetime.utcnow()
     db.commit()
+    
+    invalidate_self_learning_cache()
 
     return {"status": "success", "course": course.to_dict()}
 
 
 @router.post("/admin/buckets/{bucket_id}/reorder-courses")
-async def reorder_bucket_courses(
+def reorder_bucket_courses(
     bucket_id: str,
     body: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
@@ -646,7 +716,7 @@ async def reorder_bucket_courses(
 # ==========================================
 
 @router.post("/admin/courses/{course_id}/schedule")
-async def schedule_course(
+def schedule_course(
     course_id: str,
     body: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
@@ -684,7 +754,7 @@ async def schedule_course(
 # ==========================================
 
 @router.post("/admin/notifications/send")
-async def send_notification(
+def send_notification(
     body: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(require_admin)
@@ -722,7 +792,7 @@ async def send_notification(
 
 
 @router.get("/notifications")
-async def get_user_notifications(
+def get_user_notifications(
     user_email: str,
     limit: int = 50,
     db: Session = Depends(get_db)
@@ -780,7 +850,7 @@ async def get_user_notifications(
 
 
 @router.post("/notifications/{notification_id}/read")
-async def mark_notification_read(
+def mark_notification_read(
     notification_id: str,
     user_email: str = Body(..., embed=True),
     db: Session = Depends(get_db)
@@ -802,7 +872,7 @@ async def mark_notification_read(
 
 
 @router.post("/notifications/mark-all-read")
-async def mark_all_notifications_read(
+def mark_all_notifications_read(
     user_email: str = Body(..., embed=True),
     db: Session = Depends(get_db)
 ):
@@ -826,7 +896,7 @@ async def mark_all_notifications_read(
 # ==========================================
 
 @router.post("/feedback")
-async def submit_feedback(
+def submit_feedback(
     body: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db)
 ):
@@ -855,7 +925,7 @@ async def submit_feedback(
 
 
 @router.get("/admin/feedback/{course_id}")
-async def get_course_feedback(
+def get_course_feedback(
     course_id: str,
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(require_admin)
@@ -883,7 +953,7 @@ async def get_course_feedback(
 # ==========================================
 
 @router.get("/admin/survey/{course_id}")
-async def get_course_survey(
+def get_course_survey(
     course_id: str,
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(require_admin)
@@ -895,7 +965,7 @@ async def get_course_survey(
 
 
 @router.post("/admin/survey/{course_id}")
-async def create_or_update_survey(
+def create_or_update_survey(
     course_id: str,
     body: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
@@ -946,7 +1016,7 @@ async def create_or_update_survey(
 
 
 @router.delete("/admin/survey/{course_id}")
-async def delete_course_survey(
+def delete_course_survey(
     course_id: str,
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(require_admin)
@@ -962,7 +1032,7 @@ async def delete_course_survey(
 
 
 @router.get("/survey/{course_id}")
-async def get_survey_for_user(
+def get_survey_for_user(
     course_id: str,
     user_email: Optional[str] = None,
     db: Session = Depends(get_db)
@@ -994,7 +1064,7 @@ async def get_survey_for_user(
 
 
 @router.post("/survey/{course_id}/submit")
-async def submit_survey_response(
+def submit_survey_response(
     course_id: str,
     body: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db)
@@ -1040,7 +1110,7 @@ async def submit_survey_response(
 
 
 @router.get("/admin/survey/{course_id}/responses")
-async def get_survey_responses(
+def get_survey_responses(
     course_id: str,
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(require_admin)
@@ -1090,7 +1160,7 @@ async def get_survey_responses(
 # ==========================================
 
 @router.get("/admin/analytics/bucket/{bucket_id}")
-async def get_bucket_analytics(
+def get_bucket_analytics(
     bucket_id: str,
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(require_admin)
@@ -1180,7 +1250,7 @@ async def get_bucket_analytics(
 
 
 @router.get("/admin/analytics/course/{course_id}")
-async def get_course_analytics(
+def get_course_analytics(
     course_id: str,
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(require_admin)
@@ -1275,7 +1345,7 @@ async def get_course_analytics(
 
 
 @router.get("/admin/analytics/user/{user_email}")
-async def get_user_self_learning_analytics(
+def get_user_self_learning_analytics(
     user_email: str,
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(require_admin)
@@ -1335,7 +1405,7 @@ async def get_user_self_learning_analytics(
 # ==========================================
 
 @router.get("/admin/courses/{course_id}/history")
-async def get_course_user_history(
+def get_course_user_history(
     course_id: str,
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(require_admin)
@@ -1394,7 +1464,7 @@ async def get_course_user_history(
 
 
 @router.get("/admin/buckets/check-integrity")
-async def check_bucket_integrity(
+def check_bucket_integrity(
     fix: bool = False,
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(require_admin)
@@ -1481,7 +1551,7 @@ async def check_bucket_integrity(
 
 
 @router.post("/admin/courses/{course_id}/remove-user")
-async def remove_user_from_course(
+def remove_user_from_course(
     course_id: str,
     body: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
@@ -1517,7 +1587,7 @@ async def remove_user_from_course(
 # ==========================================
 
 @router.get("/certificate/{course_id}/{user_email}")
-async def generate_certificate(
+def generate_certificate(
     course_id: str,
     user_email: str,
     db: Session = Depends(get_db)
