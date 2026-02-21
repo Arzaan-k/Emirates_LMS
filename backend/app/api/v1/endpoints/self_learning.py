@@ -121,19 +121,34 @@ async def get_self_learning_buckets(
 
         # Get courses in this bucket
         bucket_courses = [c for c in visible_courses if c.bucket == bucket.name or c.bucket_id == bucket.id]
-        total = len(bucket_courses)
+
+        # Separate mandatory vs optional courses (impacts_existing_progress flag)
+        mandatory_courses = [c for c in bucket_courses if getattr(c, 'impacts_existing_progress', True) is not False]
+
+        # Check if user has completed all mandatory courses
+        mandatory_completed = sum(1 for c in mandatory_courses if c.id in completed_ids)
+        all_mandatory_done = len(mandatory_courses) > 0 and mandatory_completed == len(mandatory_courses)
+
+        # If all mandatory done, progress = 100% (optional courses don't affect)
+        if all_mandatory_done:
+            courses_for_progress = mandatory_courses
+        else:
+            courses_for_progress = bucket_courses
+
+        total = len(bucket_courses)  # Show total including optional
         completed = sum(1 for c in bucket_courses if c.id in completed_ids)
 
         # Calculate average watch progress
         total_progress = 0
-        for c in bucket_courses:
+        for c in courses_for_progress:
             p = progress_map.get(c.id, {})
             if p.get("completed"):
                 total_progress += 100
             else:
                 total_progress += p.get("watched_percent", 0)
         # Empty folders (0 courses) are considered 100% complete
-        avg_progress = round(total_progress / total, 1) if total > 0 else 100
+        progress_count = len(courses_for_progress)
+        avg_progress = round(total_progress / progress_count, 1) if progress_count > 0 else 100
 
         # Last attended date
         last_attended = None
@@ -258,13 +273,37 @@ async def get_self_learning_hierarchy(
             }
 
         def get_bucket_progress(bucket):
-            """Calculate progress for a bucket and its content."""
+            """Calculate progress for a bucket and its content.
+
+            Handles impacts_existing_progress flag:
+            - Courses with impacts_existing_progress=False are excluded from progress
+              calculation if user has completed all mandatory courses in the bucket
+            - This allows admins to add new courses without affecting existing users' 100%
+            """
             bucket_courses = [c for c in visible_courses if c.bucket == bucket.name or c.bucket_id == bucket.id]
-            total = len(bucket_courses)
-            completed = sum(1 for c in bucket_courses if c.id in completed_ids)
+
+            # Separate mandatory vs optional courses
+            mandatory_courses = [c for c in bucket_courses if getattr(c, 'impacts_existing_progress', True) is not False]
+            optional_courses = [c for c in bucket_courses if getattr(c, 'impacts_existing_progress', True) is False]
+
+            # Check if user has completed all mandatory courses
+            mandatory_completed = sum(1 for c in mandatory_courses if c.id in completed_ids)
+            all_mandatory_done = len(mandatory_courses) > 0 and mandatory_completed == len(mandatory_courses)
+
+            # If all mandatory courses are done, use only mandatory for progress (stays 100%)
+            # Otherwise, include optional courses that were added before user started
+            if all_mandatory_done:
+                # User has 100% on mandatory - optional courses don't affect their progress
+                courses_for_progress = mandatory_courses
+            else:
+                # User hasn't completed all mandatory - include all courses
+                courses_for_progress = bucket_courses
+
+            total = len(courses_for_progress)
+            completed = sum(1 for c in courses_for_progress if c.id in completed_ids)
 
             total_progress = 0
-            for c in bucket_courses:
+            for c in courses_for_progress:
                 p = progress_map.get(c.id, {})
                 if p.get("completed") or c.id in completed_ids:
                     total_progress += 100
@@ -276,8 +315,8 @@ async def get_self_learning_hierarchy(
             avg_progress = round(total_progress / total, 1) if total > 0 else 100
 
             return {
-                "total_courses": total,
-                "completed_courses": completed,
+                "total_courses": len(bucket_courses),  # Show total including optional
+                "completed_courses": sum(1 for c in bucket_courses if c.id in completed_ids),
                 "progress_percent": avg_progress
             }
 
@@ -1391,6 +1430,242 @@ async def get_course_user_history(
             })
 
     return {"course_id": course_id, "history": history, "total_users": len(history)}
+
+
+@router.get("/admin/buckets/{bucket_id}/affected-users")
+async def get_affected_users_preview(
+    bucket_id: str,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """
+    Preview which users will be affected when adding new content to a bucket.
+    Returns:
+    - completed_users: Users who have 100% completion (won't be affected if "No Impact" is selected)
+    - in_progress_users: Users who have started but not completed (will be affected either way)
+    - not_started_users: Users who haven't started (will be affected either way)
+    """
+    bucket = db.query(CourseBucket).filter(CourseBucket.id == bucket_id).first()
+    if not bucket:
+        raise HTTPException(status_code=404, detail="Bucket not found")
+
+    # Get all courses in this bucket
+    courses = db.query(Content).filter(
+        Content.is_published == True,
+        (Content.bucket == bucket.name) | (Content.bucket_id == bucket.id)
+    ).all()
+
+    course_ids = [c.id for c in courses]
+    total_courses = len(courses)
+
+    if total_courses == 0:
+        # No courses yet - all users are "not started"
+        all_users = db.query(User).filter(User.is_active == True).all()
+        return {
+            "bucket_id": bucket_id,
+            "bucket_name": bucket.name,
+            "total_courses": 0,
+            "completed_users": [],
+            "in_progress_users": [],
+            "not_started_users": [{"email": u.email, "name": u.name, "role": u.role, "store": u.store} for u in all_users],
+            "summary": {
+                "completed_count": 0,
+                "in_progress_count": 0,
+                "not_started_count": len(all_users),
+                "total_users": len(all_users)
+            }
+        }
+
+    # Get all completions for courses in this bucket
+    completions = db.query(CourseCompletion.user_email, CourseCompletion.course_id).filter(
+        CourseCompletion.course_id.in_(course_ids)
+    ).all()
+
+    # Build user completion map
+    user_completions = {}
+    for comp in completions:
+        if comp.user_email not in user_completions:
+            user_completions[comp.user_email] = set()
+        user_completions[comp.user_email].add(comp.course_id)
+
+    # Get all progress for courses in this bucket
+    progress_rows = db.query(VideoProgress.user_email, VideoProgress.node_id, VideoProgress.video_watched_percent).filter(
+        VideoProgress.node_id.in_(course_ids)
+    ).all()
+
+    # Build user progress map
+    user_progress = {}
+    for p in progress_rows:
+        if p.user_email not in user_progress:
+            user_progress[p.user_email] = {}
+        user_progress[p.user_email][p.node_id] = p.video_watched_percent or 0
+
+    # Get all active users
+    all_users = db.query(User).filter(User.is_active == True).all()
+    user_map = {u.email: {"email": u.email, "name": u.name, "role": u.role, "store": u.store} for u in all_users}
+
+    # Categorize users
+    completed_users = []
+    in_progress_users = []
+    not_started_users = []
+
+    all_emails = set(user_map.keys()) | set(user_completions.keys()) | set(user_progress.keys())
+
+    for email in all_emails:
+        user_info = user_map.get(email, {"email": email, "name": email, "role": None, "store": None})
+        completed_courses = user_completions.get(email, set())
+        progress = user_progress.get(email, {})
+
+        completed_count = len(completed_courses)
+        has_progress = len(progress) > 0 or completed_count > 0
+
+        if completed_count == total_courses:
+            # User has completed all courses - 100%
+            completed_users.append({
+                **user_info,
+                "completed_courses": completed_count,
+                "total_courses": total_courses,
+                "progress_percent": 100
+            })
+        elif has_progress:
+            # User has started but not completed all
+            avg_progress = 0
+            for cid in course_ids:
+                if cid in completed_courses:
+                    avg_progress += 100
+                else:
+                    avg_progress += progress.get(cid, 0)
+            avg_progress = round(avg_progress / total_courses, 1)
+
+            in_progress_users.append({
+                **user_info,
+                "completed_courses": completed_count,
+                "total_courses": total_courses,
+                "progress_percent": avg_progress
+            })
+        else:
+            # User hasn't started
+            not_started_users.append({
+                **user_info,
+                "completed_courses": 0,
+                "total_courses": total_courses,
+                "progress_percent": 0
+            })
+
+    return {
+        "bucket_id": bucket_id,
+        "bucket_name": bucket.name,
+        "total_courses": total_courses,
+        "completed_users": completed_users,
+        "in_progress_users": in_progress_users,
+        "not_started_users": not_started_users,
+        "summary": {
+            "completed_count": len(completed_users),
+            "in_progress_count": len(in_progress_users),
+            "not_started_count": len(not_started_users),
+            "total_users": len(completed_users) + len(in_progress_users) + len(not_started_users)
+        }
+    }
+
+
+@router.get("/admin/learning-path/{learning_path_type}/affected-users")
+async def get_learning_path_affected_users(
+    learning_path_type: str,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """
+    Get users who would be affected when adding new content to a learning path.
+    Returns users categorized by their completion status across ALL buckets in the path.
+    """
+    # Get all buckets for this learning path
+    buckets = db.query(CourseBucket).filter(
+        CourseBucket.is_active == True,
+        CourseBucket.learning_path_type == learning_path_type
+    ).all()
+
+    # Get all courses in these buckets
+    bucket_ids = [b.id for b in buckets]
+    bucket_names = [b.name for b in buckets]
+
+    courses = db.query(Content).filter(
+        Content.is_published == True,
+        Content.learning_path_type == learning_path_type
+    ).all()
+
+    course_ids = [c.id for c in courses]
+    total_courses = len(courses)
+
+    if total_courses == 0:
+        all_users = db.query(User).filter(User.is_active == True).limit(100).all()
+        return {
+            "learning_path_type": learning_path_type,
+            "total_courses": 0,
+            "total_buckets": len(buckets),
+            "completed_users": [],
+            "in_progress_users": [],
+            "summary": {
+                "completed_count": 0,
+                "in_progress_count": 0,
+                "total_users": len(all_users)
+            }
+        }
+
+    # Get completions
+    completions = db.query(CourseCompletion.user_email, CourseCompletion.course_id).filter(
+        CourseCompletion.course_id.in_(course_ids)
+    ).all()
+
+    user_completions = {}
+    for comp in completions:
+        if comp.user_email not in user_completions:
+            user_completions[comp.user_email] = set()
+        user_completions[comp.user_email].add(comp.course_id)
+
+    # Get user info
+    all_emails = list(user_completions.keys())
+    users = db.query(User).filter(User.email.in_(all_emails)).all() if all_emails else []
+    user_map = {u.email: {"email": u.email, "name": u.name, "role": u.role, "store": u.store} for u in users}
+
+    completed_users = []
+    in_progress_users = []
+
+    for email, completed_set in user_completions.items():
+        user_info = user_map.get(email, {"email": email, "name": email, "role": None, "store": None})
+        completed_count = len(completed_set)
+        progress_percent = round((completed_count / total_courses) * 100, 1) if total_courses > 0 else 0
+
+        if completed_count == total_courses:
+            completed_users.append({
+                **user_info,
+                "completed_courses": completed_count,
+                "total_courses": total_courses,
+                "progress_percent": 100
+            })
+        else:
+            in_progress_users.append({
+                **user_info,
+                "completed_courses": completed_count,
+                "total_courses": total_courses,
+                "progress_percent": progress_percent
+            })
+
+    # Sort by progress
+    completed_users.sort(key=lambda x: x["name"] or "")
+    in_progress_users.sort(key=lambda x: -x["progress_percent"])
+
+    return {
+        "learning_path_type": learning_path_type,
+        "total_courses": total_courses,
+        "total_buckets": len(buckets),
+        "completed_users": completed_users[:50],  # Limit to 50 for performance
+        "in_progress_users": in_progress_users[:50],
+        "summary": {
+            "completed_count": len(completed_users),
+            "in_progress_count": len(in_progress_users),
+            "total_users": len(completed_users) + len(in_progress_users)
+        }
+    }
 
 
 @router.get("/admin/buckets/check-integrity")
