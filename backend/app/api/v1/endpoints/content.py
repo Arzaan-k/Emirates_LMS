@@ -39,6 +39,20 @@ class BulkDeleteRequest(BaseModel):
     item_ids: List[str]
 
 
+class BulkMoveRequest(BaseModel):
+    """Request model for moving multiple content items to a new bucket/learning path."""
+    item_ids: List[str]
+    target_bucket_id: str  # "uncategorized" or bucket ID
+    target_learning_path_type: Optional[str] = None  # "self_learning" or "career_progression"
+
+
+class BulkCopyRequest(BaseModel):
+    """Request model for copying multiple content items to a new bucket/learning path."""
+    item_ids: List[str]
+    target_bucket_id: str
+    target_learning_path_type: Optional[str] = None
+
+
 # ==========================================
 # CONTENT CRUD ENDPOINTS
 # ==========================================
@@ -1338,6 +1352,201 @@ async def bulk_delete_content(
     return {
         "status": "completed",
         "message": f"Deleted {len(results['success'])} of {results['total']} items",
+        "results": results
+    }
+
+
+@router.post("/bulk-move")
+async def bulk_move_content(
+    request: BulkMoveRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Bulk move multiple content items to a different bucket/learning path.
+    This is like "Cut + Paste" operation.
+
+    Request Body (JSON):
+    {
+        "item_ids": ["id1", "id2", ...],
+        "target_bucket_id": "bucket_id or 'uncategorized'",
+        "target_learning_path_type": "self_learning" or "career_progression" (optional)
+    }
+    """
+    service = ContentService(db)
+
+    item_ids = request.item_ids
+    target_bucket_id = request.target_bucket_id
+    target_learning_path_type = request.target_learning_path_type
+
+    results = {
+        "total": len(item_ids),
+        "success": [],
+        "failed": []
+    }
+
+    # Resolve target bucket info
+    target_bucket_name = "Uncategorized"
+    if target_bucket_id != "uncategorized":
+        try:
+            bucket = service.get_bucket_by_id(target_bucket_id)
+            target_bucket_name = bucket.name
+            # If no learning_path_type specified, inherit from target bucket
+            if not target_learning_path_type:
+                target_learning_path_type = bucket.learning_path_type
+        except Exception as e:
+            logger.warning(f"Could not resolve bucket '{target_bucket_id}': {e}")
+            return {
+                "status": "error",
+                "message": f"Target bucket not found: {target_bucket_id}",
+                "results": results
+            }
+
+    for item_id in item_ids:
+        try:
+            updates = {
+                "bucket": target_bucket_name,
+                "bucket_id": target_bucket_id if target_bucket_id != "uncategorized" else "uncategorized"
+            }
+
+            # Update learning_path_type if specified
+            if target_learning_path_type:
+                updates["learning_path_type"] = target_learning_path_type
+
+            content = service.update_content(item_id, updates)
+
+            if content:
+                logger.info(f"Content moved: {item_id} -> {target_bucket_name}")
+                results["success"].append({
+                    "id": item_id,
+                    "title": content.title if hasattr(content, 'title') else item_id
+                })
+            else:
+                results["failed"].append({
+                    "id": item_id,
+                    "error": "Content not found"
+                })
+
+        except Exception as e:
+            logger.error(f"Failed to move content {item_id}: {e}")
+            results["failed"].append({
+                "id": item_id,
+                "error": str(e)
+            })
+
+    return {
+        "status": "completed",
+        "message": f"Moved {len(results['success'])} of {results['total']} items to {target_bucket_name}",
+        "results": results
+    }
+
+
+@router.post("/bulk-copy")
+async def bulk_copy_content(
+    request: BulkCopyRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Bulk copy multiple content items to a different bucket/learning path.
+    Creates duplicates of the content items.
+
+    Request Body (JSON):
+    {
+        "item_ids": ["id1", "id2", ...],
+        "target_bucket_id": "bucket_id or 'uncategorized'",
+        "target_learning_path_type": "self_learning" or "career_progression" (optional)
+    }
+    """
+    service = ContentService(db)
+
+    item_ids = request.item_ids
+    target_bucket_id = request.target_bucket_id
+    target_learning_path_type = request.target_learning_path_type
+
+    results = {
+        "total": len(item_ids),
+        "success": [],
+        "failed": [],
+        "new_ids": []
+    }
+
+    # Resolve target bucket info
+    target_bucket_name = "Uncategorized"
+    if target_bucket_id != "uncategorized":
+        try:
+            bucket = service.get_bucket_by_id(target_bucket_id)
+            target_bucket_name = bucket.name
+            if not target_learning_path_type:
+                target_learning_path_type = bucket.learning_path_type
+        except Exception as e:
+            logger.warning(f"Could not resolve bucket '{target_bucket_id}': {e}")
+            return {
+                "status": "error",
+                "message": f"Target bucket not found: {target_bucket_id}",
+                "results": results
+            }
+
+    for item_id in item_ids:
+        try:
+            # Get original content
+            original = service.get_content_by_id(item_id)
+
+            if not original:
+                results["failed"].append({
+                    "id": item_id,
+                    "error": "Content not found"
+                })
+                continue
+
+            # Create new content ID
+            new_id = f"content_{uuid.uuid4().hex[:8]}"
+
+            # Build new content data (copy all fields except id)
+            new_content_data = {
+                "id": new_id,
+                "title": f"{original.title} (Copy)",
+                "description": original.description,
+                "bucket": target_bucket_name,
+                "bucket_id": target_bucket_id if target_bucket_id != "uncategorized" else "uncategorized",
+                "resource_type": original.resource_type,
+                "video_url": original.video_url,
+                "file_url": original.file_url,
+                "pdf_url": original.pdf_url,
+                "thumbnail": original.thumbnail,
+                "duration": original.duration,
+                "duration_seconds": original.duration_seconds,
+                "transcript": original.transcript,
+                "quiz": original.quiz,
+                "learning_path_type": target_learning_path_type or original.learning_path_type,
+                "is_path_node": original.is_path_node,
+                "is_published": original.is_published,
+                "allow_fast_forward": original.allow_fast_forward,
+                "enable_feedback": original.enable_feedback,
+                "enable_certificate": original.enable_certificate,
+                "certificate_template": original.certificate_template,
+                "assigned_users": original.assigned_users,
+            }
+
+            # Create the copy
+            new_content = service.create_content(new_content_data)
+
+            logger.info(f"Content copied: {item_id} -> {new_id} in {target_bucket_name}")
+            results["success"].append({
+                "id": item_id,
+                "new_id": new_id,
+                "title": original.title
+            })
+            results["new_ids"].append(new_id)
+
+        except Exception as e:
+            logger.error(f"Failed to copy content {item_id}: {e}")
+            results["failed"].append({
+                "id": item_id,
+                "error": str(e)
+            })
+
+    return {
+        "status": "completed",
+        "message": f"Copied {len(results['success'])} of {results['total']} items to {target_bucket_name}",
         "results": results
     }
 
