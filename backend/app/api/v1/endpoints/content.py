@@ -175,11 +175,22 @@ async def upload_content(
     bucket: str = Form(None),
     is_path_node: str = Form("false"),
     learning_path_type: str = Form("career_progression"),
+    impacts_existing_progress: str = Form("true"),  # Whether this content affects existing users' progress
+    impacted_users: str = Form("[]"),  # JSON array of user emails who are specifically impacted
     file: UploadFile = File(...)
 ):
     """
     Receives new content (Files + Metadata) from Managers.
     Uploads video to Cloudflare R2 CDN, stores metadata in database.
+
+    impacts_existing_progress:
+        - "true" = New course affects existing users' completion % (they must complete it)
+        - "false" = Users who already completed the folder stay at 100%
+
+    impacted_users:
+        - JSON array of user emails who are specifically impacted by this course
+        - Empty list = all users are impacted (when impacts_existing_progress=true)
+        - Non-empty = only listed users are impacted
     """
     cdn_service = CDNService()
 
@@ -311,8 +322,15 @@ async def upload_content(
 
         # Convert is_path_node string to boolean
         is_path_node_bool = is_path_node.lower() == "true"
+        impacts_existing_progress_bool = impacts_existing_progress.lower() == "true"
 
-        logger.info(f"[UPLOAD DEBUG] Title={title}, isPathNode_raw={is_path_node}, isPathNode_bool={is_path_node_bool}, learning_path_type={learning_path_type}, bucket={bucket_name}")
+        # Parse impacted_users JSON array
+        try:
+            impacted_users_list = json.loads(impacted_users) if impacted_users else []
+        except json.JSONDecodeError:
+            impacted_users_list = []
+
+        logger.info(f"[UPLOAD DEBUG] Title={title}, isPathNode_raw={is_path_node}, isPathNode_bool={is_path_node_bool}, learning_path_type={learning_path_type}, bucket={bucket_name}, impacts_existing={impacts_existing_progress_bool}, impacted_users_count={len(impacted_users_list)}")
 
         # Create content record with FRESH database connection
         # This avoids timeout issues from long-running CloudConvert operations
@@ -329,6 +347,8 @@ async def upload_content(
             "pdf_url": pdf_url,  # Store PDF URL if converted
             "is_path_node": is_path_node_bool,
             "learning_path_type": learning_path_type,
+            "impacts_existing_progress": impacts_existing_progress_bool,
+            "impacted_users": impacted_users_list,
             "timestamp": datetime.utcnow(),
         }
 
@@ -475,11 +495,22 @@ async def bulk_folder_upload_single(
     file_path: str = Form(...),
     skip_duplicates: str = Form("false"),
     duplicate_action: str = Form("skip"),
+    impacts_existing_progress: str = Form("true"),  # Whether this content affects existing users' progress
+    impacted_users: str = Form("[]"),  # JSON array of user emails who are specifically impacted
 ):
     """
     Upload a SINGLE file as part of a bulk folder upload.
     Frontend calls this once per file, sequentially.
     This keeps server memory usage minimal (~1 file at a time).
+
+    impacts_existing_progress:
+        - "true" = New course affects existing users' completion % (they must complete it)
+        - "false" = Users who already completed the folder stay at 100%
+
+    impacted_users:
+        - JSON array of user emails who are specifically impacted by this course
+        - Empty array [] = ALL users are impacted (default behavior)
+        - Non-empty = Only listed users need to complete this course
     """
     cdn_service = CDNService()
 
@@ -589,6 +620,14 @@ async def bulk_folder_upload_single(
 
         # --- Create DB entry ---
         local_url = f"{settings.BASE_URL}/uploads/{content_id}{ext}"
+        impacts_existing_progress_bool = impacts_existing_progress.lower() == "true"
+
+        # Parse impacted_users JSON array
+        try:
+            impacted_users_list = json.loads(impacted_users) if impacted_users else []
+        except json.JSONDecodeError:
+            impacted_users_list = []
+
         with get_db_context() as db:
             service = ContentService(db)
             content_data = {
@@ -602,6 +641,8 @@ async def bulk_folder_upload_single(
                 "file_url": local_url,
                 "is_path_node": True,
                 "learning_path_type": learning_path_type,
+                "impacts_existing_progress": impacts_existing_progress_bool,
+                "impacted_users": impacted_users_list,
                 "xp": 50,
                 "timestamp": datetime.utcnow(),
                 "extra_data": {"status": "queued"},
@@ -647,7 +688,8 @@ async def bulk_folder_upload(
     files: List[UploadFile] = File(default=[]),
     file_paths: str = Form(...),  # JSON string of relative paths
     skip_duplicates: str = Form("false"),  # "true" to skip, "false" to replace
-    duplicate_action: str = Form("skip")  # "skip" or "replace"
+    duplicate_action: str = Form("skip"),  # "skip" or "replace"
+    impacts_existing_progress: str = Form("true"),  # JSON string of per-file impact settings OR single value for all
 ):
     """
     Bulk upload files with folder hierarchy and duplicate handling.
@@ -656,6 +698,7 @@ async def bulk_folder_upload(
     Args:
         learning_path_type: 'self_learning' or 'career_progression'
         root_bucket_name: Name of the root folder being uploaded
+        impacts_existing_progress: JSON array matching file_paths, or single "true"/"false" for all files
         files: List of files to upload
         file_paths: JSON array of relative file paths (e.g., ['file1.pdf', 'subfolder/file2.docx'])
         skip_duplicates: "true" to skip duplicates, "false" to replace
@@ -679,6 +722,19 @@ async def bulk_folder_upload(
                 status_code=400,
                 detail=f"File count mismatch: {len(files)} files but {len(paths_list)} paths"
             )
+
+        # Parse impacts_existing_progress - can be JSON array or single value
+        try:
+            impacts_list = json.loads(impacts_existing_progress)
+            if not isinstance(impacts_list, list):
+                # Single value, apply to all files
+                impacts_list = [impacts_existing_progress.lower() == "true"] * len(files)
+            else:
+                # Convert string values to booleans
+                impacts_list = [str(v).lower() == "true" for v in impacts_list]
+        except json.JSONDecodeError:
+            # Single string value, apply to all files
+            impacts_list = [impacts_existing_progress.lower() == "true"] * len(files)
 
         logger.info(f"Starting bulk folder upload: {root_bucket_name} with {len(files)} files")
 
@@ -733,6 +789,8 @@ async def bulk_folder_upload(
 
         # Process each file
         for idx, (file, relative_path) in enumerate(zip(files, paths_list)):
+            # Get impact setting for this file
+            file_impacts_existing = impacts_list[idx] if idx < len(impacts_list) else True
             try:
                 # Parse path to get folder hierarchy
                 path_parts = relative_path.split('/')
@@ -844,11 +902,11 @@ async def bulk_folder_upload(
 
                 # Use local URL initially (instant response)
                 local_url = f"{settings.BASE_URL}/uploads/{content_id}{ext}"
-                
+
                 # Create DB entry immediately
                 with get_db_context() as db:
                     service = ContentService(db)
-                    
+
                     content_data = {
                         "id": content_id,
                         "title": title,
@@ -860,11 +918,12 @@ async def bulk_folder_upload(
                         "file_url": local_url,   # Temporary local URL
                         "is_path_node": True,
                         "learning_path_type": learning_path_type,
+                        "impacts_existing_progress": file_impacts_existing,
                         "xp": 50,
                         "timestamp": datetime.utcnow(),
                         "extra_data": {"status": "queued"}
                     }
-                    
+
                     service.create_content(content_data)
 
                 # Offload heavy lifting (Optimization + CDN Upload) to background task
