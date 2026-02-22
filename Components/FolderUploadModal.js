@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons } from '@expo/vector-icons';
 import API_URL from '../config';
 
@@ -25,10 +26,11 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
   // Impact Existing Users Progress - default setting for all files
   const [defaultImpactSetting, setDefaultImpactSetting] = useState(true);
 
-  // Affected Users Preview
+  // Affected Users Preview & Selection
   const [affectedUsers, setAffectedUsers] = useState(null);
   const [loadingAffectedUsers, setLoadingAffectedUsers] = useState(false);
   const [showAffectedUsersModal, setShowAffectedUsersModal] = useState(false);
+  const [selectedImpactedUsers, setSelectedImpactedUsers] = useState(new Set()); // Emails of users selected to be impacted
 
   // Duplicate Modal State
   const [duplicateModalVisible, setDuplicateModalVisible] = useState(false);
@@ -45,18 +47,53 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
   const fetchAffectedUsers = async () => {
     setLoadingAffectedUsers(true);
     try {
+      const token = await AsyncStorage.getItem('userToken');
       const response = await fetch(
-        `${API_URL}/api/v1/self-learning/admin/learning-path/${learningPathType}/affected-users`
+        `${API_URL}/api/v1/self-learning/admin/learning-path/${learningPathType}/affected-users`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        }
       );
       if (response.ok) {
         const data = await response.json();
         setAffectedUsers(data);
+        // By default, select all completed users when Impact mode is on
+        if (data.completed_users && defaultImpactSetting) {
+          setSelectedImpactedUsers(new Set(data.completed_users.map(u => u.email)));
+        }
       }
     } catch (error) {
       console.error('Error fetching affected users:', error);
     } finally {
       setLoadingAffectedUsers(false);
     }
+  };
+
+  // Toggle individual user selection for impact
+  const toggleUserImpact = (email) => {
+    setSelectedImpactedUsers(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(email)) {
+        newSet.delete(email);
+      } else {
+        newSet.add(email);
+      }
+      return newSet;
+    });
+  };
+
+  // Select all completed users for impact
+  const selectAllCompletedUsers = () => {
+    if (affectedUsers?.completed_users) {
+      setSelectedImpactedUsers(new Set(affectedUsers.completed_users.map(u => u.email)));
+    }
+  };
+
+  // Deselect all users (no one will be impacted)
+  const deselectAllUsers = () => {
+    setSelectedImpactedUsers(new Set());
   };
 
   // Build tree structure from files
@@ -444,6 +481,8 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
           formData.append('skip_duplicates', skipDuplicates ? 'true' : 'false');
           formData.append('duplicate_action', dupAction);
           formData.append('impacts_existing_progress', fileObj.impactsExisting !== false ? 'true' : 'false');
+          // Send selected users who will be impacted by this course
+          formData.append('impacted_users', JSON.stringify(Array.from(selectedImpactedUsers)));
 
           const response = await fetch(`${API_URL}/api/v1/content/bulk-folder-upload/single`, {
             method: 'POST',
@@ -541,6 +580,7 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
     setDefaultImpactSetting(true);  // Reset to default
     setAffectedUsers(null);
     setShowAffectedUsersModal(false);
+    setSelectedImpactedUsers(new Set());  // Reset selected users
     onClose();
   };
 
@@ -696,13 +736,13 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
                         </View>
                         <View style={styles.affectedUserInfo}>
                           <Text style={styles.affectedUserCount}>
-                            {affectedUsers.summary?.completed_count || 0}
+                            {defaultImpactSetting ? selectedImpactedUsers.size : 0}
                           </Text>
                           <Text style={styles.affectedUserLabel}>
-                            {defaultImpactSetting ? 'Will be affected' : 'Won\'t be affected'}
+                            {defaultImpactSetting ? 'Selected to impact' : 'Won\'t be affected'}
                           </Text>
                           <Text style={styles.affectedUserDesc}>
-                            Users at 100%
+                            of {affectedUsers.summary?.completed_count || 0} users at 100%
                           </Text>
                         </View>
                       </View>
@@ -728,9 +768,9 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
                       style={styles.viewAllUsersBtn}
                       onPress={() => setShowAffectedUsersModal(true)}
                     >
-                      <MaterialIcons name="people" size={16} color="#3B82F6" />
+                      <MaterialIcons name="edit" size={16} color="#3B82F6" />
                       <Text style={styles.viewAllUsersBtnText}>
-                        View All Users ({affectedUsers.summary?.total_users || 0})
+                        {defaultImpactSetting ? 'Select Users to Impact' : 'View Users'} ({affectedUsers.summary?.total_users || 0})
                       </Text>
                       <MaterialIcons name="chevron-right" size={18} color="#3B82F6" />
                     </TouchableOpacity>
@@ -896,7 +936,7 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
             <View style={styles.affectedUsersModalHeader}>
               <View style={styles.affectedUsersModalTitleRow}>
                 <MaterialIcons name="people" size={24} color="#3B82F6" />
-                <Text style={styles.affectedUsersModalTitle}>Users Impact Preview</Text>
+                <Text style={styles.affectedUsersModalTitle}>Select Users to Impact</Text>
               </View>
               <TouchableOpacity onPress={() => setShowAffectedUsersModal(false)}>
                 <MaterialIcons name="close" size={24} color="#6B7280" />
@@ -918,10 +958,24 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
                 defaultImpactSetting ? styles.impactModeTextOn : styles.impactModeTextOff
               ]}>
                 {defaultImpactSetting
-                  ? 'Impact Mode: Users at 100% will need to complete new courses'
-                  : 'No Impact Mode: Users at 100% will stay at 100%'}
+                  ? `Impact Mode: ${selectedImpactedUsers.size} users selected to be impacted`
+                  : 'No Impact Mode: No users will be affected'}
               </Text>
             </View>
+
+            {/* Select All / None Buttons - Only show in Impact Mode */}
+            {defaultImpactSetting && affectedUsers?.completed_users?.length > 0 && (
+              <View style={styles.selectAllContainer}>
+                <TouchableOpacity style={styles.selectAllBtn} onPress={selectAllCompletedUsers}>
+                  <MaterialIcons name="select-all" size={16} color="#3B82F6" />
+                  <Text style={styles.selectAllBtnText}>Select All</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.selectNoneBtn} onPress={deselectAllUsers}>
+                  <MaterialIcons name="deselect" size={16} color="#6B7280" />
+                  <Text style={styles.selectNoneBtnText}>Select None</Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
             <ScrollView style={styles.affectedUsersScrollView}>
               {/* Completed Users Section */}
@@ -935,19 +989,32 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
                         color={defaultImpactSetting ? '#DC2626' : '#10B981'}
                       />
                     </View>
-                    <View>
+                    <View style={{ flex: 1 }}>
                       <Text style={styles.affectedUsersSectionTitle}>
                         Users at 100% ({affectedUsers.completed_users.length})
                       </Text>
                       <Text style={styles.affectedUsersSectionSubtitle}>
                         {defaultImpactSetting
-                          ? 'These users will need to complete new courses'
+                          ? 'Select users who must complete new courses'
                           : 'These users will NOT be affected'}
                       </Text>
                     </View>
                   </View>
-                  {affectedUsers.completed_users.slice(0, 20).map((user, index) => (
-                    <View key={user.email || index} style={styles.affectedUserItem}>
+                  {affectedUsers.completed_users.slice(0, 50).map((user, index) => (
+                    <TouchableOpacity
+                      key={user.email || index}
+                      style={styles.affectedUserItem}
+                      onPress={() => defaultImpactSetting && toggleUserImpact(user.email)}
+                      disabled={!defaultImpactSetting}
+                    >
+                      {/* Checkbox - Only show in Impact Mode */}
+                      {defaultImpactSetting && (
+                        <MaterialIcons
+                          name={selectedImpactedUsers.has(user.email) ? 'check-box' : 'check-box-outline-blank'}
+                          size={22}
+                          color={selectedImpactedUsers.has(user.email) ? '#3B82F6' : '#9CA3AF'}
+                        />
+                      )}
                       <View style={styles.affectedUserAvatar}>
                         <Text style={styles.affectedUserAvatarText}>
                           {(user.name || user.email || '?').charAt(0).toUpperCase()}
@@ -961,20 +1028,20 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
                       </View>
                       <View style={[
                         styles.affectedUserBadge,
-                        { backgroundColor: defaultImpactSetting ? '#FEE2E2' : '#D1FAE5' }
+                        { backgroundColor: (defaultImpactSetting && selectedImpactedUsers.has(user.email)) ? '#FEE2E2' : '#D1FAE5' }
                       ]}>
                         <Text style={[
                           styles.affectedUserBadgeText,
-                          { color: defaultImpactSetting ? '#DC2626' : '#10B981' }
+                          { color: (defaultImpactSetting && selectedImpactedUsers.has(user.email)) ? '#DC2626' : '#10B981' }
                         ]}>
-                          {defaultImpactSetting ? 'Affected' : 'Safe'}
+                          {(defaultImpactSetting && selectedImpactedUsers.has(user.email)) ? 'Impacted' : 'Safe'}
                         </Text>
                       </View>
-                    </View>
+                    </TouchableOpacity>
                   ))}
-                  {affectedUsers.completed_users.length > 20 && (
+                  {affectedUsers.completed_users.length > 50 && (
                     <Text style={styles.affectedUsersMore}>
-                      +{affectedUsers.completed_users.length - 20} more users
+                      +{affectedUsers.completed_users.length - 50} more users
                     </Text>
                   )}
                 </View>
@@ -1638,6 +1705,42 @@ const styles = StyleSheet.create({
   },
   impactModeTextOff: {
     color: '#065F46',
+  },
+  selectAllContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 4,
+  },
+  selectAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  selectAllBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#3B82F6',
+  },
+  selectNoneBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  selectNoneBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#6B7280',
   },
   affectedUsersScrollView: {
     flex: 1,

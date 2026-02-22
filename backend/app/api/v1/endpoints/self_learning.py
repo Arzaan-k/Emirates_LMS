@@ -122,8 +122,19 @@ async def get_self_learning_buckets(
         # Get courses in this bucket
         bucket_courses = [c for c in visible_courses if c.bucket == bucket.name or c.bucket_id == bucket.id]
 
-        # Separate mandatory vs optional courses (impacts_existing_progress flag)
-        mandatory_courses = [c for c in bucket_courses if getattr(c, 'impacts_existing_progress', True) is not False]
+        # Separate mandatory vs optional courses for THIS USER
+        # A course is mandatory if:
+        # 1. impacts_existing_progress is True AND
+        # 2. impacted_users is empty (affects all) OR user_email is in impacted_users
+        def is_mandatory_for_user(course):
+            impacts = getattr(course, 'impacts_existing_progress', True)
+            if impacts is False:
+                return False
+            impacted_list = getattr(course, 'impacted_users', None) or []
+            # Empty list = affects all users; Non-empty = only listed users
+            return len(impacted_list) == 0 or user_email in impacted_list
+
+        mandatory_courses = [c for c in bucket_courses if is_mandatory_for_user(c)]
 
         # Check if user has completed all mandatory courses
         mandatory_completed = sum(1 for c in mandatory_courses if c.id in completed_ids)
@@ -275,16 +286,25 @@ async def get_self_learning_hierarchy(
         def get_bucket_progress(bucket):
             """Calculate progress for a bucket and its content.
 
-            Handles impacts_existing_progress flag:
-            - Courses with impacts_existing_progress=False are excluded from progress
-              calculation if user has completed all mandatory courses in the bucket
+            Handles impacts_existing_progress flag AND impacted_users list:
+            - Courses with impacts_existing_progress=False don't affect any user
+            - Courses with non-empty impacted_users only affect those specific users
             - This allows admins to add new courses without affecting existing users' 100%
             """
             bucket_courses = [c for c in visible_courses if c.bucket == bucket.name or c.bucket_id == bucket.id]
 
-            # Separate mandatory vs optional courses
-            mandatory_courses = [c for c in bucket_courses if getattr(c, 'impacts_existing_progress', True) is not False]
-            optional_courses = [c for c in bucket_courses if getattr(c, 'impacts_existing_progress', True) is False]
+            # Check if course is mandatory for THIS specific user
+            def is_mandatory_for_user(course):
+                impacts = getattr(course, 'impacts_existing_progress', True)
+                if impacts is False:
+                    return False
+                impacted_list = getattr(course, 'impacted_users', None) or []
+                # Empty list = affects all users; Non-empty = only listed users
+                return len(impacted_list) == 0 or user_email in impacted_list
+
+            # Separate mandatory vs optional courses FOR THIS USER
+            mandatory_courses = [c for c in bucket_courses if is_mandatory_for_user(c)]
+            optional_courses = [c for c in bucket_courses if not is_mandatory_for_user(c)]
 
             # Check if user has completed all mandatory courses
             mandatory_completed = sum(1 for c in mandatory_courses if c.id in completed_ids)

@@ -56,6 +56,10 @@ class Content(Base):
     # False = Users who already completed the folder stay at 100%, don't need to complete this
     impacts_existing_progress = Column(Boolean, default=True)
 
+    # Specific users who are impacted by this course (when impacts_existing_progress=True)
+    # Empty list = all users are impacted; Non-empty = only listed users are impacted
+    impacted_users = Column(JSON, default=list)  # List of user emails who must complete this course
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -111,6 +115,7 @@ class Content(Base):
             "scheduled_at": self.scheduled_at.isoformat() if self.scheduled_at else None,
             "is_published": self.is_published if self.is_published is not None else True,
             "impacts_existing_progress": self.impacts_existing_progress if self.impacts_existing_progress is not None else True,
+            "impacted_users": self.impacted_users or [],
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "extra_data": self.extra_data or {},

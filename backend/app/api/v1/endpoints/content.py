@@ -175,6 +175,7 @@ async def upload_content(
     is_path_node: str = Form("false"),
     learning_path_type: str = Form("career_progression"),
     impacts_existing_progress: str = Form("true"),  # Whether this content affects existing users' progress
+    impacted_users: str = Form("[]"),  # JSON array of user emails who are specifically impacted
     file: UploadFile = File(...)
 ):
     """
@@ -184,6 +185,11 @@ async def upload_content(
     impacts_existing_progress:
         - "true" = New course affects existing users' completion % (they must complete it)
         - "false" = Users who already completed the folder stay at 100%
+
+    impacted_users:
+        - JSON array of user emails who are specifically impacted by this course
+        - Empty list = all users are impacted (when impacts_existing_progress=true)
+        - Non-empty = only listed users are impacted
     """
     cdn_service = CDNService()
 
@@ -317,7 +323,13 @@ async def upload_content(
         is_path_node_bool = is_path_node.lower() == "true"
         impacts_existing_progress_bool = impacts_existing_progress.lower() == "true"
 
-        logger.info(f"[UPLOAD DEBUG] Title={title}, isPathNode_raw={is_path_node}, isPathNode_bool={is_path_node_bool}, learning_path_type={learning_path_type}, bucket={bucket_name}, impacts_existing={impacts_existing_progress_bool}")
+        # Parse impacted_users JSON array
+        try:
+            impacted_users_list = json.loads(impacted_users) if impacted_users else []
+        except json.JSONDecodeError:
+            impacted_users_list = []
+
+        logger.info(f"[UPLOAD DEBUG] Title={title}, isPathNode_raw={is_path_node}, isPathNode_bool={is_path_node_bool}, learning_path_type={learning_path_type}, bucket={bucket_name}, impacts_existing={impacts_existing_progress_bool}, impacted_users_count={len(impacted_users_list)}")
 
         # Create content record with FRESH database connection
         # This avoids timeout issues from long-running CloudConvert operations
@@ -335,6 +347,7 @@ async def upload_content(
             "is_path_node": is_path_node_bool,
             "learning_path_type": learning_path_type,
             "impacts_existing_progress": impacts_existing_progress_bool,
+            "impacted_users": impacted_users_list,
             "timestamp": datetime.utcnow(),
         }
 
@@ -482,6 +495,7 @@ async def bulk_folder_upload_single(
     skip_duplicates: str = Form("false"),
     duplicate_action: str = Form("skip"),
     impacts_existing_progress: str = Form("true"),  # Whether this content affects existing users' progress
+    impacted_users: str = Form("[]"),  # JSON array of user emails who are specifically impacted
 ):
     """
     Upload a SINGLE file as part of a bulk folder upload.
@@ -491,6 +505,11 @@ async def bulk_folder_upload_single(
     impacts_existing_progress:
         - "true" = New course affects existing users' completion % (they must complete it)
         - "false" = Users who already completed the folder stay at 100%
+
+    impacted_users:
+        - JSON array of user emails who are specifically impacted by this course
+        - Empty array [] = ALL users are impacted (default behavior)
+        - Non-empty = Only listed users need to complete this course
     """
     cdn_service = CDNService()
 
@@ -602,6 +621,12 @@ async def bulk_folder_upload_single(
         local_url = f"{settings.BASE_URL}/uploads/{content_id}{ext}"
         impacts_existing_progress_bool = impacts_existing_progress.lower() == "true"
 
+        # Parse impacted_users JSON array
+        try:
+            impacted_users_list = json.loads(impacted_users) if impacted_users else []
+        except json.JSONDecodeError:
+            impacted_users_list = []
+
         with get_db_context() as db:
             service = ContentService(db)
             content_data = {
@@ -616,6 +641,7 @@ async def bulk_folder_upload_single(
                 "is_path_node": True,
                 "learning_path_type": learning_path_type,
                 "impacts_existing_progress": impacts_existing_progress_bool,
+                "impacted_users": impacted_users_list,
                 "xp": 50,
                 "timestamp": datetime.utcnow(),
                 "extra_data": {"status": "queued"},
