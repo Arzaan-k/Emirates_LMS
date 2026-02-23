@@ -71,9 +71,27 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
     const [analytics, setAnalytics] = useState(null);
     const [loadingAnalytics, setLoadingAnalytics] = useState(false);
 
-    // Feedback
+    // Feedback (legacy ratings view)
     const [feedbackData, setFeedbackData] = useState(null);
     const [loadingFeedback, setLoadingFeedback] = useState(false);
+
+    // Survey Builder
+    const [survey, setSurvey] = useState(null);
+    const [surveyTitle, setSurveyTitle] = useState('Course Feedback Survey');
+    const [surveyDesc, setSurveyDesc] = useState('');
+    const [surveyActive, setSurveyActive] = useState(true);
+    const [surveyQuestions, setSurveyQuestions] = useState([]);
+    const [loadingSurvey, setLoadingSurvey] = useState(false);
+    const [savingSurvey, setSavingSurvey] = useState(false);
+    const [surveyResponses, setSurveyResponses] = useState(null);
+    const [loadingResponses, setLoadingResponses] = useState(false);
+    const [surveyTab, setSurveyTab] = useState('builder'); // 'builder' | 'responses'
+    const [editingQuestion, setEditingQuestion] = useState(null); // question being edited
+    const [showAddQuestion, setShowAddQuestion] = useState(false);
+    const [newQType, setNewQType] = useState('text');
+    const [newQLabel, setNewQLabel] = useState('');
+    const [newQMandatory, setNewQMandatory] = useState(false);
+    const [newQOptions, setNewQOptions] = useState(['', '']);
 
     // Fetch latest bucket/course data when modal opens
     const fetchLatestData = async () => {
@@ -226,6 +244,130 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
         }
     };
 
+    const fetchSurvey = async () => {
+        if (!item || itemType !== 'course') return;
+        setLoadingSurvey(true);
+        try {
+            const token = await AsyncStorage.getItem('userToken');
+            const res = await fetch(`${API_URL}/api/v1/self-learning/admin/survey/${item.id}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (data.survey) {
+                setSurvey(data.survey);
+                setSurveyTitle(data.survey.title || 'Course Feedback Survey');
+                setSurveyDesc(data.survey.description || '');
+                setSurveyActive(data.survey.is_active !== false);
+                setSurveyQuestions(data.survey.questions || []);
+            } else {
+                setSurvey(null);
+                setSurveyTitle('Course Feedback Survey');
+                setSurveyDesc('');
+                setSurveyActive(true);
+                setSurveyQuestions([]);
+            }
+        } catch (e) {
+            console.error('Survey fetch error:', e);
+        } finally {
+            setLoadingSurvey(false);
+        }
+    };
+
+    const fetchSurveyResponses = async () => {
+        if (!item || itemType !== 'course') return;
+        setLoadingResponses(true);
+        try {
+            const token = await AsyncStorage.getItem('userToken');
+            const res = await fetch(`${API_URL}/api/v1/self-learning/admin/survey/${item.id}/responses`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            setSurveyResponses(await res.json());
+        } catch (e) {
+            console.error('Survey responses fetch error:', e);
+        } finally {
+            setLoadingResponses(false);
+        }
+    };
+
+    const handleSaveSurvey = async () => {
+        if (!item) return;
+        setSavingSurvey(true);
+        try {
+            const token = await AsyncStorage.getItem('userToken');
+            const res = await fetch(`${API_URL}/api/v1/self-learning/admin/survey/${item.id}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({
+                    title: surveyTitle,
+                    description: surveyDesc,
+                    is_active: surveyActive,
+                    questions: surveyQuestions,
+                }),
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                setSurvey(data.survey);
+                showAlert('Saved', 'Survey saved successfully!');
+            }
+        } catch (e) {
+            showAlert('Error', 'Failed to save survey');
+        } finally {
+            setSavingSurvey(false);
+        }
+    };
+
+    const handleDeleteSurvey = async () => {
+        if (!item || !survey) return;
+        if (Platform.OS === 'web') {
+            if (!window.confirm('Delete this survey? All responses will remain but the survey will be removed.')) return;
+        }
+        try {
+            const token = await AsyncStorage.getItem('userToken');
+            await fetch(`${API_URL}/api/v1/self-learning/admin/survey/${item.id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            setSurvey(null);
+            setSurveyQuestions([]);
+            showAlert('Deleted', 'Survey deleted');
+        } catch (e) {
+            showAlert('Error', 'Failed to delete survey');
+        }
+    };
+
+    const addQuestion = () => {
+        if (!newQLabel.trim()) {
+            showAlert('Missing', 'Please enter a question label');
+            return;
+        }
+        const q = {
+            id: `q_${Date.now()}`,
+            type: newQType,
+            label: newQLabel.trim(),
+            mandatory: newQMandatory,
+            options: newQType === 'mcq' ? newQOptions.filter(o => o.trim()) : [],
+        };
+        setSurveyQuestions(prev => [...prev, q]);
+        setNewQLabel('');
+        setNewQMandatory(false);
+        setNewQOptions(['', '']);
+        setShowAddQuestion(false);
+    };
+
+    const removeQuestion = (qid) => {
+        setSurveyQuestions(prev => prev.filter(q => q.id !== qid));
+    };
+
+    const moveQuestion = (index, dir) => {
+        setSurveyQuestions(prev => {
+            const arr = [...prev];
+            const target = index + dir;
+            if (target < 0 || target >= arr.length) return arr;
+            [arr[index], arr[target]] = [arr[target], arr[index]];
+            return arr;
+        });
+    };
+
     const handleSaveSettings = async () => {
         setSaving(true);
         try {
@@ -259,6 +401,19 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
             const data = await res.json();
             if (data.status === 'success') {
                 showAlert('Saved', 'Settings updated successfully');
+
+                // Clear all SL caches so employee view reflects changes immediately
+                try {
+                    await AsyncStorage.removeItem('sl_hierarchy_cache');
+                    await AsyncStorage.removeItem('sl_hierarchy_timestamp');
+                    const allKeys = await AsyncStorage.getAllKeys();
+                    const courseCacheKeys = allKeys.filter(k => k.startsWith('sl_courses_'));
+                    if (courseCacheKeys.length > 0) {
+                        await AsyncStorage.multiRemove(courseCacheKeys);
+                    }
+                } catch (cacheErr) {
+                    console.log('Cache clear error (non-critical):', cacheErr);
+                }
 
                 // Trigger callback to refetch data in parent component
                 if (onSaveSuccess) {
@@ -447,7 +602,7 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
                             onPress={() => {
                                 setActiveSection(s.key);
                                 if (s.key === 'analytics') fetchAnalytics();
-                                if (s.key === 'feedback') fetchFeedback();
+                                if (s.key === 'feedback') { fetchSurvey(); setSurveyTab('builder'); }
                             }}
                         >
                             <Feather name={s.icon} size={14} color={activeSection === s.key ? '#FFF' : '#78350F'} />
@@ -782,53 +937,317 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
                         </View>
                     )}
 
-                    {/* ========== FEEDBACK ========== */}
+                    {/* ========== SURVEY BUILDER ========== */}
                     {activeSection === 'feedback' && itemType === 'course' && (
                         <View>
-                            <Text style={styles.sectionTitle}>Course Feedback</Text>
-                            {loadingFeedback ? (
-                                <ActivityIndicator size="large" color={THEME.primary} style={{ marginTop: 40 }} />
-                            ) : feedbackData ? (
-                                <>
-                                    <View style={styles.feedbackSummary}>
-                                        <Text style={styles.feedbackAvg}>{feedbackData.average_rating || '—'}</Text>
-                                        <View style={{ flexDirection: 'row', gap: 2 }}>
-                                            {[1,2,3,4,5].map(s => (
-                                                <MaterialCommunityIcons
-                                                    key={s}
-                                                    name={s <= Math.round(feedbackData.average_rating || 0) ? 'star' : 'star-outline'}
-                                                    size={18}
-                                                    color="#F59E0B"
-                                                />
-                                            ))}
-                                        </View>
-                                        <Text style={styles.feedbackCount}>{feedbackData.total || 0} reviews</Text>
-                                    </View>
+                            {/* Sub-tabs: Builder | Responses */}
+                            <View style={styles.surveySubTabs}>
+                                <TouchableOpacity
+                                    style={[styles.surveySubTab, surveyTab === 'builder' && styles.surveySubTabActive]}
+                                    onPress={() => setSurveyTab('builder')}
+                                >
+                                    <Feather name="edit-3" size={13} color={surveyTab === 'builder' ? '#FFF' : THEME.primaryDark} />
+                                    <Text style={[styles.surveySubTabText, surveyTab === 'builder' && { color: '#FFF' }]}>Survey Builder</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.surveySubTab, surveyTab === 'responses' && styles.surveySubTabActive]}
+                                    onPress={() => { setSurveyTab('responses'); fetchSurveyResponses(); }}
+                                >
+                                    <Feather name="bar-chart-2" size={13} color={surveyTab === 'responses' ? '#FFF' : THEME.primaryDark} />
+                                    <Text style={[styles.surveySubTabText, surveyTab === 'responses' && { color: '#FFF' }]}>Responses</Text>
+                                </TouchableOpacity>
+                            </View>
 
-                                    {(feedbackData.feedbacks || []).map((fb, i) => (
-                                        <View key={i} style={styles.feedbackItem}>
-                                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                <Text style={styles.feedbackUser}>{fb.user_email}</Text>
-                                                <View style={{ flexDirection: 'row', gap: 1 }}>
-                                                    {[1,2,3,4,5].map(s => (
-                                                        <MaterialCommunityIcons
-                                                            key={s}
-                                                            name={s <= fb.rating ? 'star' : 'star-outline'}
-                                                            size={12}
-                                                            color="#F59E0B"
-                                                        />
+                            {/* ---- BUILDER TAB ---- */}
+                            {surveyTab === 'builder' && (
+                                loadingSurvey ? (
+                                    <ActivityIndicator size="large" color={THEME.primary} style={{ marginTop: 40 }} />
+                                ) : (
+                                    <View>
+                                        {/* Survey Meta */}
+                                        <View style={styles.surveyMetaCard}>
+                                            <Text style={styles.inputLabel}>Survey Title</Text>
+                                            <TextInput
+                                                style={styles.input}
+                                                value={surveyTitle}
+                                                onChangeText={setSurveyTitle}
+                                                placeholder="e.g. Course Feedback Survey"
+                                                placeholderTextColor="#9CA3AF"
+                                            />
+                                            <Text style={[styles.inputLabel, { marginTop: 10 }]}>Description (optional)</Text>
+                                            <TextInput
+                                                style={[styles.input, { minHeight: 60 }]}
+                                                value={surveyDesc}
+                                                onChangeText={setSurveyDesc}
+                                                placeholder="Brief description shown to users"
+                                                placeholderTextColor="#9CA3AF"
+                                                multiline
+                                                textAlignVertical="top"
+                                            />
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 10 }}>
+                                                <Switch value={surveyActive} onValueChange={setSurveyActive} trackColor={{ true: THEME.green }} />
+                                                <Text style={styles.settingLabel}>Survey Active (shown to users)</Text>
+                                            </View>
+                                        </View>
+
+                                        {/* Questions List */}
+                                        <Text style={[styles.sectionTitle, { marginTop: 16, marginBottom: 8 }]}>
+                                            Questions ({surveyQuestions.length})
+                                        </Text>
+
+                                        {surveyQuestions.length === 0 && (
+                                            <View style={styles.emptyQBox}>
+                                                <Feather name="clipboard" size={28} color="#D1D5DB" />
+                                                <Text style={styles.emptyQText}>No questions yet. Add your first question below.</Text>
+                                            </View>
+                                        )}
+
+                                        {surveyQuestions.map((q, idx) => (
+                                            <View key={q.id} style={styles.questionCard}>
+                                                <View style={styles.questionCardHeader}>
+                                                    <View style={[styles.qTypeBadge, {
+                                                        backgroundColor: q.type === 'rating' ? '#FEF3C7' : q.type === 'mcq' ? '#EFF6FF' : q.type === 'name' ? '#F0FDF4' : '#F5F3FF'
+                                                    }]}>
+                                                        <Text style={[styles.qTypeBadgeText, {
+                                                            color: q.type === 'rating' ? '#92400E' : q.type === 'mcq' ? '#1E40AF' : q.type === 'name' ? '#166534' : '#6B21A8'
+                                                        }]}>
+                                                            {q.type === 'rating' ? '⭐ Rating' : q.type === 'mcq' ? '☑ MCQ' : q.type === 'name' ? '👤 Name' : '✏ Text'}
+                                                        </Text>
+                                                    </View>
+                                                    {q.mandatory && (
+                                                        <View style={styles.mandatoryBadge}>
+                                                            <Text style={styles.mandatoryBadgeText}>Required</Text>
+                                                        </View>
+                                                    )}
+                                                    <View style={{ flex: 1 }} />
+                                                    <TouchableOpacity onPress={() => moveQuestion(idx, -1)} style={styles.qActionBtn}>
+                                                        <Feather name="chevron-up" size={16} color="#6B7280" />
+                                                    </TouchableOpacity>
+                                                    <TouchableOpacity onPress={() => moveQuestion(idx, 1)} style={styles.qActionBtn}>
+                                                        <Feather name="chevron-down" size={16} color="#6B7280" />
+                                                    </TouchableOpacity>
+                                                    <TouchableOpacity onPress={() => removeQuestion(q.id)} style={[styles.qActionBtn, { backgroundColor: '#FEE2E2' }]}>
+                                                        <Feather name="trash-2" size={14} color={THEME.red} />
+                                                    </TouchableOpacity>
+                                                </View>
+                                                <Text style={styles.questionLabel}>{idx + 1}. {q.label}</Text>
+                                                {q.type === 'mcq' && q.options?.length > 0 && (
+                                                    <View style={{ marginTop: 6, gap: 3 }}>
+                                                        {q.options.map((opt, oi) => (
+                                                            <Text key={oi} style={styles.mcqOptionPreview}>○  {opt}</Text>
+                                                        ))}
+                                                    </View>
+                                                )}
+                                            </View>
+                                        ))}
+
+                                        {/* Add Question Panel */}
+                                        {showAddQuestion ? (
+                                            <View style={styles.addQCard}>
+                                                <Text style={styles.addQTitle}>New Question</Text>
+
+                                                {/* Type Selector */}
+                                                <Text style={styles.inputLabel}>Question Type</Text>
+                                                <View style={styles.qTypeRow}>
+                                                    {[
+                                                        { key: 'text', label: '✏ Text', color: '#6B21A8', bg: '#F5F3FF' },
+                                                        { key: 'mcq', label: '☑ MCQ', color: '#1E40AF', bg: '#EFF6FF' },
+                                                        { key: 'rating', label: '⭐ Rating', color: '#92400E', bg: '#FEF3C7' },
+                                                        { key: 'name', label: '👤 Name', color: '#166534', bg: '#F0FDF4' },
+                                                    ].map(t => (
+                                                        <TouchableOpacity
+                                                            key={t.key}
+                                                            style={[styles.qTypeChip, { backgroundColor: newQType === t.key ? t.color : t.bg, borderColor: t.color }]}
+                                                            onPress={() => setNewQType(t.key)}
+                                                        >
+                                                            <Text style={[styles.qTypeChipText, { color: newQType === t.key ? '#FFF' : t.color }]}>{t.label}</Text>
+                                                        </TouchableOpacity>
                                                     ))}
                                                 </View>
+
+                                                {/* Label */}
+                                                <Text style={[styles.inputLabel, { marginTop: 10 }]}>Question Label *</Text>
+                                                <TextInput
+                                                    style={styles.input}
+                                                    value={newQLabel}
+                                                    onChangeText={setNewQLabel}
+                                                    placeholder={newQType === 'name' ? 'e.g. Your Full Name' : newQType === 'rating' ? 'e.g. Rate this course' : newQType === 'mcq' ? 'e.g. How did you find the content?' : 'e.g. Any additional comments?'}
+                                                    placeholderTextColor="#9CA3AF"
+                                                />
+
+                                                {/* MCQ Options */}
+                                                {newQType === 'mcq' && (
+                                                    <View style={{ marginTop: 10 }}>
+                                                        <Text style={styles.inputLabel}>Options</Text>
+                                                        {newQOptions.map((opt, oi) => (
+                                                            <View key={oi} style={{ flexDirection: 'row', gap: 8, marginBottom: 6, alignItems: 'center' }}>
+                                                                <TextInput
+                                                                    style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                                                                    value={opt}
+                                                                    onChangeText={v => {
+                                                                        const arr = [...newQOptions];
+                                                                        arr[oi] = v;
+                                                                        setNewQOptions(arr);
+                                                                    }}
+                                                                    placeholder={`Option ${oi + 1}`}
+                                                                    placeholderTextColor="#9CA3AF"
+                                                                />
+                                                                {newQOptions.length > 2 && (
+                                                                    <TouchableOpacity onPress={() => setNewQOptions(prev => prev.filter((_, i) => i !== oi))}>
+                                                                        <Feather name="x" size={16} color={THEME.red} />
+                                                                    </TouchableOpacity>
+                                                                )}
+                                                            </View>
+                                                        ))}
+                                                        <TouchableOpacity
+                                                            style={styles.addOptionBtn}
+                                                            onPress={() => setNewQOptions(prev => [...prev, ''])}
+                                                        >
+                                                            <Feather name="plus" size={14} color={THEME.primaryDark} />
+                                                            <Text style={styles.addOptionBtnText}>Add Option</Text>
+                                                        </TouchableOpacity>
+                                                    </View>
+                                                )}
+
+                                                {/* Mandatory toggle */}
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 10 }}>
+                                                    <Switch value={newQMandatory} onValueChange={setNewQMandatory} trackColor={{ true: THEME.red }} />
+                                                    <Text style={styles.settingLabel}>Mandatory (required to submit)</Text>
+                                                </View>
+
+                                                <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+                                                    <TouchableOpacity style={[styles.scheduleBtn, { flex: 1, backgroundColor: '#F3F4F6' }]} onPress={() => setShowAddQuestion(false)}>
+                                                        <Text style={[styles.scheduleBtnText, { color: THEME.textMain }]}>Cancel</Text>
+                                                    </TouchableOpacity>
+                                                    <TouchableOpacity style={[styles.scheduleBtn, { flex: 2, backgroundColor: THEME.primaryDark }]} onPress={addQuestion}>
+                                                        <Feather name="plus" size={16} color="#FFF" />
+                                                        <Text style={styles.scheduleBtnText}>Add Question</Text>
+                                                    </TouchableOpacity>
+                                                </View>
                                             </View>
-                                            {fb.comment ? <Text style={styles.feedbackComment}>{fb.comment}</Text> : null}
+                                        ) : (
+                                            <TouchableOpacity
+                                                style={styles.addQBtn}
+                                                onPress={() => setShowAddQuestion(true)}
+                                            >
+                                                <Feather name="plus-circle" size={18} color={THEME.primaryDark} />
+                                                <Text style={styles.addQBtnText}>Add Question</Text>
+                                            </TouchableOpacity>
+                                        )}
+
+                                        {/* Save / Delete Survey */}
+                                        <View style={{ flexDirection: 'row', gap: 10, marginTop: 20 }}>
+                                            {survey && (
+                                                <TouchableOpacity
+                                                    style={[styles.scheduleBtn, { flex: 1, backgroundColor: '#FEE2E2' }]}
+                                                    onPress={handleDeleteSurvey}
+                                                >
+                                                    <Feather name="trash-2" size={15} color={THEME.red} />
+                                                    <Text style={[styles.scheduleBtnText, { color: THEME.red }]}>Delete</Text>
+                                                </TouchableOpacity>
+                                            )}
+                                            <TouchableOpacity
+                                                style={[styles.saveBtn, { flex: 3, marginTop: 0 }]}
+                                                onPress={handleSaveSurvey}
+                                                disabled={savingSurvey}
+                                            >
+                                                {savingSurvey ? <ActivityIndicator color="#FFF" /> : (
+                                                    <>
+                                                        <Feather name="save" size={16} color="#FFF" />
+                                                        <Text style={styles.saveBtnText}>{survey ? 'Update Survey' : 'Create Survey'}</Text>
+                                                    </>
+                                                )}
+                                            </TouchableOpacity>
                                         </View>
-                                    ))}
-                                </>
-                            ) : (
-                                <TouchableOpacity style={styles.loadBtn} onPress={fetchFeedback}>
-                                    <Feather name="refresh-cw" size={16} color={THEME.primaryDark} />
-                                    <Text style={styles.loadBtnText}>Load Feedback</Text>
-                                </TouchableOpacity>
+                                    </View>
+                                )
+                            )}
+
+                            {/* ---- RESPONSES TAB ---- */}
+                            {surveyTab === 'responses' && (
+                                loadingResponses ? (
+                                    <ActivityIndicator size="large" color={THEME.primary} style={{ marginTop: 40 }} />
+                                ) : surveyResponses ? (
+                                    <View>
+                                        {/* Summary */}
+                                        <View style={styles.responseSummaryCard}>
+                                            <Feather name="users" size={20} color="#3B82F6" />
+                                            <Text style={styles.responseSummaryCount}>{surveyResponses.total || 0}</Text>
+                                            <Text style={styles.responseSummaryLabel}>Total Responses</Text>
+                                        </View>
+
+                                        {/* Per-question stats */}
+                                        {(surveyResponses.survey?.questions || []).map(q => {
+                                            const stat = (surveyResponses.stats || {})[q.id];
+                                            return (
+                                                <View key={q.id} style={styles.responseStatCard}>
+                                                    <Text style={styles.responseStatQ}>{q.label}</Text>
+                                                    {stat?.type === 'rating' && (
+                                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                                                            <Text style={styles.responseStatAvg}>{stat.average || '—'}</Text>
+                                                            <View style={{ flexDirection: 'row', gap: 2 }}>
+                                                                {[1, 2, 3, 4, 5].map(s => (
+                                                                    <MaterialCommunityIcons key={s} name={s <= Math.round(stat.average || 0) ? 'star' : 'star-outline'} size={16} color="#F59E0B" />
+                                                                ))}
+                                                            </View>
+                                                            <Text style={styles.responseStatCount}>({stat.count} responses)</Text>
+                                                        </View>
+                                                    )}
+                                                    {stat?.type === 'mcq' && (
+                                                        <View style={{ marginTop: 6, gap: 4 }}>
+                                                            {Object.entries(stat.counts || {}).map(([opt, cnt]) => {
+                                                                const total = Object.values(stat.counts).reduce((a, b) => a + b, 0);
+                                                                const pct = total > 0 ? Math.round((cnt / total) * 100) : 0;
+                                                                return (
+                                                                    <View key={opt}>
+                                                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                                                            <Text style={styles.mcqOptLabel}>{opt}</Text>
+                                                                            <Text style={styles.mcqOptCount}>{cnt} ({pct}%)</Text>
+                                                                        </View>
+                                                                        <View style={styles.mcqBar}>
+                                                                            <View style={[styles.mcqBarFill, { width: `${pct}%` }]} />
+                                                                        </View>
+                                                                    </View>
+                                                                );
+                                                            })}
+                                                        </View>
+                                                    )}
+                                                    {(stat?.type === 'text' || stat?.type === 'name') && (
+                                                        <Text style={styles.responseStatCount}>{stat.count} answered</Text>
+                                                    )}
+                                                </View>
+                                            );
+                                        })}
+
+                                        {/* Individual responses */}
+                                        {surveyResponses.total > 0 && (
+                                            <>
+                                                <Text style={[styles.inputLabel, { marginTop: 16, marginBottom: 8 }]}>Individual Responses</Text>
+                                                {(surveyResponses.responses || []).map((r, i) => (
+                                                    <View key={r.id} style={styles.feedbackItem}>
+                                                        <Text style={styles.feedbackUser}>{r.user_name || r.user_email}</Text>
+                                                        <Text style={[styles.feedbackComment, { fontSize: 10, marginBottom: 4 }]}>{r.created_at?.slice(0, 10)}</Text>
+                                                        {(surveyResponses.survey?.questions || []).map(q => (
+                                                            <Text key={q.id} style={styles.feedbackComment}>
+                                                                <Text style={{ fontWeight: '600' }}>{q.label}: </Text>
+                                                                {String((r.answers || {})[q.id] ?? '—')}
+                                                            </Text>
+                                                        ))}
+                                                    </View>
+                                                ))}
+                                            </>
+                                        )}
+
+                                        {surveyResponses.total === 0 && (
+                                            <Text style={styles.emptyText}>No responses yet</Text>
+                                        )}
+                                    </View>
+                                ) : (
+                                    <TouchableOpacity style={styles.loadBtn} onPress={fetchSurveyResponses}>
+                                        <Feather name="refresh-cw" size={16} color={THEME.primaryDark} />
+                                        <Text style={styles.loadBtnText}>Load Responses</Text>
+                                    </TouchableOpacity>
+                                )
                             )}
                         </View>
                     )}
@@ -1019,4 +1438,100 @@ const styles = StyleSheet.create({
     },
     assignSummaryRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     assignSummaryLabel: { fontSize: 12, color: THEME.textMain, fontWeight: '500' },
+
+    // Survey Builder
+    surveySubTabs: {
+        flexDirection: 'row', gap: 8, marginBottom: 16,
+        backgroundColor: '#FEF3C7', borderRadius: 12, padding: 4,
+    },
+    surveySubTab: {
+        flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
+        paddingVertical: 8, borderRadius: 10,
+    },
+    surveySubTabActive: { backgroundColor: THEME.primaryDark },
+    surveySubTabText: { fontSize: 12, fontWeight: '700', color: THEME.primaryDark },
+
+    surveyMetaCard: {
+        backgroundColor: '#FFFBEB', borderRadius: 14, padding: 14,
+        borderWidth: 1, borderColor: '#FDE68A', marginBottom: 4,
+    },
+
+    emptyQBox: {
+        alignItems: 'center', paddingVertical: 28, gap: 8,
+        backgroundColor: '#F9FAFB', borderRadius: 12, marginBottom: 12,
+        borderWidth: 1, borderColor: THEME.border, borderStyle: 'dashed',
+    },
+    emptyQText: { fontSize: 13, color: THEME.textSub, textAlign: 'center' },
+
+    questionCard: {
+        backgroundColor: THEME.card, borderRadius: 12, padding: 12,
+        borderWidth: 1, borderColor: THEME.border, marginBottom: 8,
+    },
+    questionCardHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+    questionLabel: { fontSize: 14, fontWeight: '600', color: THEME.textMain },
+
+    qTypeBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+    qTypeBadgeText: { fontSize: 11, fontWeight: '700' },
+
+    mandatoryBadge: {
+        backgroundColor: '#FEE2E2', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6,
+    },
+    mandatoryBadgeText: { fontSize: 10, fontWeight: '700', color: THEME.red },
+
+    qActionBtn: {
+        width: 28, height: 28, borderRadius: 8, backgroundColor: '#F3F4F6',
+        justifyContent: 'center', alignItems: 'center',
+    },
+
+    mcqOptionPreview: { fontSize: 12, color: THEME.textSub, paddingLeft: 4 },
+
+    addQCard: {
+        backgroundColor: '#F0FDF4', borderRadius: 14, padding: 14,
+        borderWidth: 1, borderColor: '#BBF7D0', marginBottom: 12,
+    },
+    addQTitle: { fontSize: 14, fontWeight: '700', color: '#166534', marginBottom: 10 },
+
+    qTypeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+    qTypeChip: {
+        paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, borderWidth: 1.5,
+    },
+    qTypeChipText: { fontSize: 12, fontWeight: '700' },
+
+    addOptionBtn: {
+        flexDirection: 'row', alignItems: 'center', gap: 6,
+        paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8,
+        backgroundColor: '#FEF3C7', marginTop: 4, alignSelf: 'flex-start',
+    },
+    addOptionBtnText: { fontSize: 12, fontWeight: '600', color: THEME.primaryDark },
+
+    addQBtn: {
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+        paddingVertical: 12, borderRadius: 12, borderWidth: 1.5,
+        borderColor: THEME.primaryDark, borderStyle: 'dashed', marginBottom: 4,
+    },
+    addQBtnText: { fontSize: 14, fontWeight: '600', color: THEME.primaryDark },
+
+    // Responses
+    responseSummaryCard: {
+        alignItems: 'center', paddingVertical: 20, gap: 4,
+        backgroundColor: '#EFF6FF', borderRadius: 14, marginBottom: 14,
+        borderWidth: 1, borderColor: '#BFDBFE',
+    },
+    responseSummaryCount: { fontSize: 36, fontWeight: '800', color: '#1D4ED8' },
+    responseSummaryLabel: { fontSize: 12, color: '#3B82F6', fontWeight: '600' },
+
+    responseStatCard: {
+        backgroundColor: THEME.card, borderRadius: 12, padding: 12,
+        borderWidth: 1, borderColor: THEME.border, marginBottom: 8,
+    },
+    responseStatQ: { fontSize: 13, fontWeight: '700', color: THEME.textMain },
+    responseStatAvg: { fontSize: 22, fontWeight: '800', color: '#F59E0B' },
+    responseStatCount: { fontSize: 11, color: THEME.textSub, marginTop: 4 },
+
+    mcqOptLabel: { fontSize: 12, color: THEME.textMain, flex: 1 },
+    mcqOptCount: { fontSize: 11, color: THEME.textSub, fontWeight: '600' },
+    mcqBar: {
+        height: 6, backgroundColor: '#F3F4F6', borderRadius: 3, marginTop: 3, marginBottom: 6,
+    },
+    mcqBarFill: { height: 6, backgroundColor: '#3B82F6', borderRadius: 3 },
 });

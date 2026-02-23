@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons } from '@expo/vector-icons';
 import API_URL from '../config';
 
@@ -22,10 +23,78 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
   const [uploadStatus, setUploadStatus] = useState('');
   const fileInputRef = useRef(null);
 
+  // Impact Existing Users Progress - default setting for all files
+  const [defaultImpactSetting, setDefaultImpactSetting] = useState(true);
+
+  // Affected Users Preview & Selection
+  const [affectedUsers, setAffectedUsers] = useState(null);
+  const [loadingAffectedUsers, setLoadingAffectedUsers] = useState(false);
+  const [showAffectedUsersModal, setShowAffectedUsersModal] = useState(false);
+  const [selectedImpactedUsers, setSelectedImpactedUsers] = useState(new Set()); // Emails of users selected to be impacted
+
   // Duplicate Modal State
   const [duplicateModalVisible, setDuplicateModalVisible] = useState(false);
   const [duplicateFiles, setDuplicateFiles] = useState([]);
   const [duplicateAction, setDuplicateAction] = useState('skip'); // 'skip' or 'replace'
+
+  // Fetch affected users when learning path type changes
+  useEffect(() => {
+    if (visible && learningPathType) {
+      fetchAffectedUsers();
+    }
+  }, [visible, learningPathType]);
+
+  const fetchAffectedUsers = async () => {
+    setLoadingAffectedUsers(true);
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const response = await fetch(
+        `${API_URL}/api/v1/self-learning/admin/learning-path/${learningPathType}/affected-users`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setAffectedUsers(data);
+        // By default, select all completed users when Impact mode is on
+        if (data.completed_users && defaultImpactSetting) {
+          setSelectedImpactedUsers(new Set(data.completed_users.map(u => u.email)));
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching affected users:', error);
+    } finally {
+      setLoadingAffectedUsers(false);
+    }
+  };
+
+  // Toggle individual user selection for impact
+  const toggleUserImpact = (email) => {
+    setSelectedImpactedUsers(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(email)) {
+        newSet.delete(email);
+      } else {
+        newSet.add(email);
+      }
+      return newSet;
+    });
+  };
+
+  // Select all completed users for impact
+  const selectAllCompletedUsers = () => {
+    if (affectedUsers?.completed_users) {
+      setSelectedImpactedUsers(new Set(affectedUsers.completed_users.map(u => u.email)));
+    }
+  };
+
+  // Deselect all users (no one will be impacted)
+  const deselectAllUsers = () => {
+    setSelectedImpactedUsers(new Set());
+  };
 
   // Build tree structure from files
   const buildFileTree = (files) => {
@@ -45,7 +114,8 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
             file: file,
             path: entry.path || file.webkitRelativePath || file.name,
             selected: entry.selected !== false,
-            type: entry.type || getFileType(part)
+            type: entry.type || getFileType(part),
+            impactsExisting: entry.impactsExisting !== undefined ? entry.impactsExisting : defaultImpactSetting
           });
         } else {
           // It's a folder
@@ -120,6 +190,7 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
         path: f.webkitRelativePath || f.name,
         selected: true,
         type: getFileType(f.name),
+        impactsExisting: defaultImpactSetting,
       }));
       setSelectedFiles(wrapped);
       setFileTree(buildFileTree(wrapped));
@@ -157,6 +228,62 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
         });
       } else if (typeof tree[key] === 'object') {
         updateFileSelectionInTree(tree[key], filePath);
+      }
+    });
+  };
+
+  const toggleFileImpact = (filePath) => {
+    setSelectedFiles(prevFiles =>
+      prevFiles.map(f => {
+        if (f.path === filePath) {
+          return { ...f, impactsExisting: !f.impactsExisting };
+        }
+        return f;
+      })
+    );
+
+    setFileTree(prevTree => {
+      const newTree = cloneTreePreserveFiles(prevTree);
+      updateFileImpactInTree(newTree, filePath);
+      return newTree;
+    });
+  };
+
+  const updateFileImpactInTree = (tree, filePath) => {
+    Object.keys(tree).forEach(key => {
+      if (key === '_files') {
+        tree._files = tree._files.map(f => {
+          if (f.path === filePath) {
+            return { ...f, impactsExisting: !f.impactsExisting };
+          }
+          return f;
+        });
+      } else if (typeof tree[key] === 'object') {
+        updateFileImpactInTree(tree[key], filePath);
+      }
+    });
+  };
+
+  const applyDefaultImpactToAll = (impactValue) => {
+    setDefaultImpactSetting(impactValue);
+    setSelectedFiles(prevFiles =>
+      prevFiles.map(f => ({ ...f, impactsExisting: impactValue }))
+    );
+    if (fileTree) {
+      setFileTree(prevTree => {
+        const newTree = cloneTreePreserveFiles(prevTree);
+        setAllImpactsInTree(newTree, impactValue);
+        return newTree;
+      });
+    }
+  };
+
+  const setAllImpactsInTree = (tree, impactValue) => {
+    Object.keys(tree).forEach(key => {
+      if (key === '_files') {
+        tree._files = tree._files.map(f => ({ ...f, impactsExisting: impactValue }));
+      } else if (typeof tree[key] === 'object') {
+        setAllImpactsInTree(tree[key], impactValue);
       }
     });
   };
@@ -225,27 +352,50 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
       return null;
     }).filter(Boolean).concat(
       tree._files?.map(file => (
-        <TouchableOpacity
-          key={file.path}
-          style={[styles.treeItem, { marginLeft: level * 20 }]}
-          onPress={() => toggleFileSelection(file.path)}
-        >
-          <MaterialIcons
-            name={file.selected ? 'check-box' : 'check-box-outline-blank'}
-            size={20}
-            color={file.selected ? '#10B981' : '#999'}
-          />
-          <MaterialIcons
-            name={getFileIcon(file.type)}
-            size={18}
-            color="#666"
-            style={{ marginLeft: 5 }}
-          />
-          <Text style={[styles.fileItemText, !file.selected && styles.fileDeselected]}>
-            {file.name}
-          </Text>
-          <Text style={styles.fileType}>{file.type}</Text>
-        </TouchableOpacity>
+        <View key={file.path} style={[styles.treeFileRow, { marginLeft: level * 20 }]}>
+          <TouchableOpacity
+            style={styles.treeItem}
+            onPress={() => toggleFileSelection(file.path)}
+          >
+            <MaterialIcons
+              name={file.selected ? 'check-box' : 'check-box-outline-blank'}
+              size={20}
+              color={file.selected ? '#10B981' : '#999'}
+            />
+            <MaterialIcons
+              name={getFileIcon(file.type)}
+              size={18}
+              color="#666"
+              style={{ marginLeft: 5 }}
+            />
+            <Text style={[styles.fileItemText, !file.selected && styles.fileDeselected]}>
+              {file.name}
+            </Text>
+            <Text style={styles.fileType}>{file.type}</Text>
+          </TouchableOpacity>
+          {/* Impact Toggle for each file */}
+          {file.selected && (
+            <TouchableOpacity
+              style={[
+                styles.impactToggle,
+                file.impactsExisting ? styles.impactToggleOn : styles.impactToggleOff
+              ]}
+              onPress={() => toggleFileImpact(file.path)}
+            >
+              <MaterialIcons
+                name={file.impactsExisting ? 'group' : 'group-off'}
+                size={14}
+                color={file.impactsExisting ? '#FFF' : '#6B7280'}
+              />
+              <Text style={[
+                styles.impactToggleText,
+                file.impactsExisting ? styles.impactToggleTextOn : styles.impactToggleTextOff
+              ]}>
+                {file.impactsExisting ? 'Impact' : 'No Impact'}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
       )) || []
     );
   };
@@ -330,6 +480,9 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
           formData.append('learning_path_type', learningPathType);
           formData.append('skip_duplicates', skipDuplicates ? 'true' : 'false');
           formData.append('duplicate_action', dupAction);
+          formData.append('impacts_existing_progress', fileObj.impactsExisting !== false ? 'true' : 'false');
+          // Send selected users who will be impacted by this course
+          formData.append('impacted_users', JSON.stringify(Array.from(selectedImpactedUsers)));
 
           const response = await fetch(`${API_URL}/api/v1/content/bulk-folder-upload/single`, {
             method: 'POST',
@@ -424,6 +577,10 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
     setUploading(false);
     setUploadProgress(0);
     setUploadStatus('');
+    setDefaultImpactSetting(true);  // Reset to default
+    setAffectedUsers(null);
+    setShowAffectedUsersModal(false);
+    setSelectedImpactedUsers(new Set());  // Reset selected users
     onClose();
   };
 
@@ -508,6 +665,117 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
                 <Text style={styles.treeTitle}>
                   {rootFolderName} ({selectedCount} files selected)
                 </Text>
+              </View>
+
+              {/* Impact Existing Users Setting */}
+              <View style={styles.impactSettingContainer}>
+                <View style={styles.impactSettingHeader}>
+                  <MaterialIcons name="info-outline" size={18} color="#3B82F6" />
+                  <Text style={styles.impactSettingTitle}>Impact Existing Users' Progress</Text>
+                </View>
+                <Text style={styles.impactSettingDesc}>
+                  Choose whether new courses affect existing users who have already completed this folder.
+                </Text>
+                <View style={styles.impactButtons}>
+                  <TouchableOpacity
+                    style={[
+                      styles.impactButton,
+                      defaultImpactSetting && styles.impactButtonActive
+                    ]}
+                    onPress={() => applyDefaultImpactToAll(true)}
+                  >
+                    <MaterialIcons name="group" size={18} color={defaultImpactSetting ? '#FFF' : '#6B7280'} />
+                    <View style={styles.impactButtonTextContainer}>
+                      <Text style={[styles.impactButtonTitle, defaultImpactSetting && styles.impactButtonTitleActive]}>
+                        Impact All
+                      </Text>
+                      <Text style={[styles.impactButtonSubtitle, defaultImpactSetting && styles.impactButtonSubtitleActive]}>
+                        Users must complete new courses
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.impactButton,
+                      !defaultImpactSetting && styles.impactButtonActiveGreen
+                    ]}
+                    onPress={() => applyDefaultImpactToAll(false)}
+                  >
+                    <MaterialIcons name="group-off" size={18} color={!defaultImpactSetting ? '#FFF' : '#6B7280'} />
+                    <View style={styles.impactButtonTextContainer}>
+                      <Text style={[styles.impactButtonTitle, !defaultImpactSetting && styles.impactButtonTitleActive]}>
+                        No Impact
+                      </Text>
+                      <Text style={[styles.impactButtonSubtitle, !defaultImpactSetting && styles.impactButtonSubtitleActive]}>
+                        Users who completed stay at 100%
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.impactHint}>
+                  Tip: Click individual file badges to customize per-file settings
+                </Text>
+
+                {/* Affected Users Preview */}
+                {loadingAffectedUsers ? (
+                  <View style={styles.affectedUsersLoading}>
+                    <ActivityIndicator size="small" color="#3B82F6" />
+                    <Text style={styles.affectedUsersLoadingText}>Loading user data...</Text>
+                  </View>
+                ) : affectedUsers && (
+                  <View style={styles.affectedUsersPreview}>
+                    <View style={styles.affectedUsersSummary}>
+                      {/* Users who will be affected */}
+                      <View style={styles.affectedUserBox}>
+                        <View style={[styles.affectedUserIcon, { backgroundColor: defaultImpactSetting ? '#FEE2E2' : '#D1FAE5' }]}>
+                          <MaterialIcons
+                            name={defaultImpactSetting ? 'warning' : 'check-circle'}
+                            size={20}
+                            color={defaultImpactSetting ? '#DC2626' : '#10B981'}
+                          />
+                        </View>
+                        <View style={styles.affectedUserInfo}>
+                          <Text style={styles.affectedUserCount}>
+                            {defaultImpactSetting ? selectedImpactedUsers.size : 0}
+                          </Text>
+                          <Text style={styles.affectedUserLabel}>
+                            {defaultImpactSetting ? 'Selected to impact' : 'Won\'t be affected'}
+                          </Text>
+                          <Text style={styles.affectedUserDesc}>
+                            of {affectedUsers.summary?.completed_count || 0} users at 100%
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* Users in progress */}
+                      <View style={styles.affectedUserBox}>
+                        <View style={[styles.affectedUserIcon, { backgroundColor: '#FEF3C7' }]}>
+                          <MaterialIcons name="schedule" size={20} color="#D97706" />
+                        </View>
+                        <View style={styles.affectedUserInfo}>
+                          <Text style={styles.affectedUserCount}>
+                            {affectedUsers.summary?.in_progress_count || 0}
+                          </Text>
+                          <Text style={styles.affectedUserLabel}>Always affected</Text>
+                          <Text style={styles.affectedUserDesc}>
+                            Users in progress
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    <TouchableOpacity
+                      style={styles.viewAllUsersBtn}
+                      onPress={() => setShowAffectedUsersModal(true)}
+                    >
+                      <MaterialIcons name="edit" size={16} color="#3B82F6" />
+                      <Text style={styles.viewAllUsersBtnText}>
+                        {defaultImpactSetting ? 'Select Users to Impact' : 'View Users'} ({affectedUsers.summary?.total_users || 0})
+                      </Text>
+                      <MaterialIcons name="chevron-right" size={18} color="#3B82F6" />
+                    </TouchableOpacity>
+                  </View>
+                )}
               </View>
               <ScrollView style={styles.treeContainer}>
                 {renderFileTree(fileTree)}
@@ -659,6 +927,193 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
           </View>
         </View>
       </Modal>
+
+      {/* Affected Users Modal */}
+      <Modal visible={showAffectedUsersModal} animationType="slide" transparent={true}>
+        <View style={styles.affectedUsersModalOverlay}>
+          <View style={styles.affectedUsersModalContent}>
+            {/* Header */}
+            <View style={styles.affectedUsersModalHeader}>
+              <View style={styles.affectedUsersModalTitleRow}>
+                <MaterialIcons name="people" size={24} color="#3B82F6" />
+                <Text style={styles.affectedUsersModalTitle}>Select Users to Impact</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowAffectedUsersModal(false)}>
+                <MaterialIcons name="close" size={24} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Impact Mode Indicator */}
+            <View style={[
+              styles.impactModeIndicator,
+              defaultImpactSetting ? styles.impactModeOn : styles.impactModeOff
+            ]}>
+              <MaterialIcons
+                name={defaultImpactSetting ? 'warning' : 'check-circle'}
+                size={18}
+                color={defaultImpactSetting ? '#DC2626' : '#10B981'}
+              />
+              <Text style={[
+                styles.impactModeText,
+                defaultImpactSetting ? styles.impactModeTextOn : styles.impactModeTextOff
+              ]}>
+                {defaultImpactSetting
+                  ? `Impact Mode: ${selectedImpactedUsers.size} users selected to be impacted`
+                  : 'No Impact Mode: No users will be affected'}
+              </Text>
+            </View>
+
+            {/* Select All / None Buttons - Only show in Impact Mode */}
+            {defaultImpactSetting && affectedUsers?.completed_users?.length > 0 && (
+              <View style={styles.selectAllContainer}>
+                <TouchableOpacity style={styles.selectAllBtn} onPress={selectAllCompletedUsers}>
+                  <MaterialIcons name="select-all" size={16} color="#3B82F6" />
+                  <Text style={styles.selectAllBtnText}>Select All</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.selectNoneBtn} onPress={deselectAllUsers}>
+                  <MaterialIcons name="deselect" size={16} color="#6B7280" />
+                  <Text style={styles.selectNoneBtnText}>Select None</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            <ScrollView style={styles.affectedUsersScrollView}>
+              {/* Completed Users Section */}
+              {affectedUsers?.completed_users?.length > 0 && (
+                <View style={styles.affectedUsersSection}>
+                  <View style={styles.affectedUsersSectionHeader}>
+                    <View style={[styles.sectionIconBadge, { backgroundColor: defaultImpactSetting ? '#FEE2E2' : '#D1FAE5' }]}>
+                      <MaterialIcons
+                        name={defaultImpactSetting ? 'warning' : 'check-circle'}
+                        size={16}
+                        color={defaultImpactSetting ? '#DC2626' : '#10B981'}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.affectedUsersSectionTitle}>
+                        Users at 100% ({affectedUsers.completed_users.length})
+                      </Text>
+                      <Text style={styles.affectedUsersSectionSubtitle}>
+                        {defaultImpactSetting
+                          ? 'Select users who must complete new courses'
+                          : 'These users will NOT be affected'}
+                      </Text>
+                    </View>
+                  </View>
+                  {affectedUsers.completed_users.slice(0, 50).map((user, index) => (
+                    <TouchableOpacity
+                      key={user.email || index}
+                      style={styles.affectedUserItem}
+                      onPress={() => defaultImpactSetting && toggleUserImpact(user.email)}
+                      disabled={!defaultImpactSetting}
+                    >
+                      {/* Checkbox - Only show in Impact Mode */}
+                      {defaultImpactSetting && (
+                        <MaterialIcons
+                          name={selectedImpactedUsers.has(user.email) ? 'check-box' : 'check-box-outline-blank'}
+                          size={22}
+                          color={selectedImpactedUsers.has(user.email) ? '#3B82F6' : '#9CA3AF'}
+                        />
+                      )}
+                      <View style={styles.affectedUserAvatar}>
+                        <Text style={styles.affectedUserAvatarText}>
+                          {(user.name || user.email || '?').charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                      <View style={styles.affectedUserDetails}>
+                        <Text style={styles.affectedUserName}>{user.name || user.email}</Text>
+                        <Text style={styles.affectedUserMeta}>
+                          {user.role || 'No Role'} • {user.store || 'No Store'}
+                        </Text>
+                      </View>
+                      <View style={[
+                        styles.affectedUserBadge,
+                        { backgroundColor: (defaultImpactSetting && selectedImpactedUsers.has(user.email)) ? '#FEE2E2' : '#D1FAE5' }
+                      ]}>
+                        <Text style={[
+                          styles.affectedUserBadgeText,
+                          { color: (defaultImpactSetting && selectedImpactedUsers.has(user.email)) ? '#DC2626' : '#10B981' }
+                        ]}>
+                          {(defaultImpactSetting && selectedImpactedUsers.has(user.email)) ? 'Impacted' : 'Safe'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                  {affectedUsers.completed_users.length > 50 && (
+                    <Text style={styles.affectedUsersMore}>
+                      +{affectedUsers.completed_users.length - 50} more users
+                    </Text>
+                  )}
+                </View>
+              )}
+
+              {/* In Progress Users Section */}
+              {affectedUsers?.in_progress_users?.length > 0 && (
+                <View style={styles.affectedUsersSection}>
+                  <View style={styles.affectedUsersSectionHeader}>
+                    <View style={[styles.sectionIconBadge, { backgroundColor: '#FEF3C7' }]}>
+                      <MaterialIcons name="schedule" size={16} color="#D97706" />
+                    </View>
+                    <View>
+                      <Text style={styles.affectedUsersSectionTitle}>
+                        Users In Progress ({affectedUsers.in_progress_users.length})
+                      </Text>
+                      <Text style={styles.affectedUsersSectionSubtitle}>
+                        These users will always need to complete new courses
+                      </Text>
+                    </View>
+                  </View>
+                  {affectedUsers.in_progress_users.slice(0, 20).map((user, index) => (
+                    <View key={user.email || index} style={styles.affectedUserItem}>
+                      <View style={styles.affectedUserAvatar}>
+                        <Text style={styles.affectedUserAvatarText}>
+                          {(user.name || user.email || '?').charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                      <View style={styles.affectedUserDetails}>
+                        <Text style={styles.affectedUserName}>{user.name || user.email}</Text>
+                        <Text style={styles.affectedUserMeta}>
+                          {user.role || 'No Role'} • {user.store || 'No Store'}
+                        </Text>
+                      </View>
+                      <View style={styles.progressBadge}>
+                        <Text style={styles.progressBadgeText}>
+                          {user.progress_percent || 0}%
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                  {affectedUsers.in_progress_users.length > 20 && (
+                    <Text style={styles.affectedUsersMore}>
+                      +{affectedUsers.in_progress_users.length - 20} more users
+                    </Text>
+                  )}
+                </View>
+              )}
+
+              {/* Empty State */}
+              {(!affectedUsers?.completed_users?.length && !affectedUsers?.in_progress_users?.length) && (
+                <View style={styles.emptyAffectedUsers}>
+                  <MaterialIcons name="info-outline" size={48} color="#D1D5DB" />
+                  <Text style={styles.emptyAffectedUsersText}>
+                    No users have started this learning path yet
+                  </Text>
+                </View>
+              )}
+            </ScrollView>
+
+            {/* Footer */}
+            <View style={styles.affectedUsersModalFooter}>
+              <TouchableOpacity
+                style={styles.affectedUsersCloseBtn}
+                onPress={() => setShowAffectedUsersModal(false)}
+              >
+                <Text style={styles.affectedUsersCloseBtnText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 };
@@ -766,7 +1221,13 @@ const styles = StyleSheet.create({
     maxHeight: 400,
     marginBottom: 20,
   },
+  treeFileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   treeItem: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 8,
@@ -795,6 +1256,105 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 4,
+  },
+  impactToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginRight: 8,
+  },
+  impactToggleOn: {
+    backgroundColor: '#3B82F6',
+  },
+  impactToggleOff: {
+    backgroundColor: '#E5E7EB',
+  },
+  impactToggleText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  impactToggleTextOn: {
+    color: '#FFF',
+  },
+  impactToggleTextOff: {
+    color: '#6B7280',
+  },
+  impactSettingContainer: {
+    backgroundColor: '#F0F9FF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  impactSettingHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  impactSettingTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#1E40AF',
+  },
+  impactSettingDesc: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginBottom: 12,
+    lineHeight: 18,
+  },
+  impactButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 8,
+  },
+  impactButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: '#FFF',
+    borderWidth: 2,
+    borderColor: '#D1D5DB',
+  },
+  impactButtonActive: {
+    backgroundColor: '#3B82F6',
+    borderColor: '#3B82F6',
+  },
+  impactButtonActiveGreen: {
+    backgroundColor: '#10B981',
+    borderColor: '#10B981',
+  },
+  impactButtonTextContainer: {
+    flex: 1,
+  },
+  impactButtonTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#374151',
+  },
+  impactButtonTitleActive: {
+    color: '#FFF',
+  },
+  impactButtonSubtitle: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    marginTop: 2,
+  },
+  impactButtonSubtitleActive: {
+    color: 'rgba(255,255,255,0.8)',
+  },
+  impactHint: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontStyle: 'italic',
+    textAlign: 'center',
   },
   footer: {
     flexDirection: 'row',
@@ -1008,6 +1568,296 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   duplicateConfirmText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFF',
+  },
+
+  // Affected Users Preview Styles
+  affectedUsersLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 16,
+  },
+  affectedUsersLoadingText: {
+    fontSize: 13,
+    color: '#6B7280',
+  },
+  affectedUsersPreview: {
+    marginTop: 16,
+    backgroundColor: '#FFF',
+    borderRadius: 10,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  affectedUsersSummary: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 12,
+  },
+  affectedUserBox: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#F9FAFB',
+    padding: 12,
+    borderRadius: 8,
+  },
+  affectedUserIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  affectedUserInfo: {
+    flex: 1,
+  },
+  affectedUserCount: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  affectedUserLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  affectedUserDesc: {
+    fontSize: 11,
+    color: '#9CA3AF',
+  },
+  viewAllUsersBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    backgroundColor: '#EFF6FF',
+    borderRadius: 8,
+  },
+  viewAllUsersBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#3B82F6',
+  },
+
+  // Affected Users Modal Styles
+  affectedUsersModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  affectedUsersModalContent: {
+    width: '100%',
+    maxWidth: 600,
+    maxHeight: '85%',
+    backgroundColor: '#FFF',
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  affectedUsersModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  affectedUsersModalTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  affectedUsersModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  impactModeIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 20,
+    marginTop: 16,
+    padding: 12,
+    borderRadius: 8,
+  },
+  impactModeOn: {
+    backgroundColor: '#FEF2F2',
+  },
+  impactModeOff: {
+    backgroundColor: '#ECFDF5',
+  },
+  impactModeText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  impactModeTextOn: {
+    color: '#991B1B',
+  },
+  impactModeTextOff: {
+    color: '#065F46',
+  },
+  selectAllContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 4,
+  },
+  selectAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  selectAllBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#3B82F6',
+  },
+  selectNoneBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  selectNoneBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  affectedUsersScrollView: {
+    flex: 1,
+    padding: 20,
+  },
+  affectedUsersSection: {
+    marginBottom: 24,
+  },
+  affectedUsersSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 12,
+  },
+  sectionIconBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  affectedUsersSectionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  affectedUsersSectionSubtitle: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  affectedUserItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#F9FAFB',
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 8,
+  },
+  affectedUserAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#3B82F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  affectedUserAvatarText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFF',
+  },
+  affectedUserDetails: {
+    flex: 1,
+  },
+  affectedUserName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  affectedUserMeta: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  affectedUserBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  affectedUserBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  progressBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: '#FEF3C7',
+  },
+  progressBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#D97706',
+  },
+  affectedUsersMore: {
+    fontSize: 13,
+    color: '#6B7280',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    paddingVertical: 8,
+  },
+  emptyAffectedUsers: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  emptyAffectedUsersText: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  affectedUsersModalFooter: {
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+    alignItems: 'center',
+  },
+  affectedUsersCloseBtn: {
+    backgroundColor: '#3B82F6',
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    borderRadius: 8,
+  },
+  affectedUsersCloseBtnText: {
     fontSize: 15,
     fontWeight: '600',
     color: '#FFF',

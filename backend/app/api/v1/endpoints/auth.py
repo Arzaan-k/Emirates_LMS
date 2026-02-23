@@ -45,8 +45,8 @@ async def login(
         try:
              repo = AnalyticsRepository(db)
              log_data = {
-                 "user_email": result.user.email,
-                 "user_name": result.user.name,
+                 "user_email": result["user"]["email"],
+                 "user_name": result["user"]["name"],
                  "action": "USER_LOGIN",
                  "target": "User logged into the system",
                  "details": "system signed in successfully",
@@ -86,8 +86,8 @@ async def login_json(
         try:
              repo = AnalyticsRepository(db)
              log_data = {
-                 "user_email": result.user.email,
-                 "user_name": result.user.name,
+                 "user_email": result["user"]["email"],
+                 "user_name": result["user"]["name"],
                  "action": "USER_LOGIN",
                  "target": "User logged into the system",
                  "details": "system signed in successfully",

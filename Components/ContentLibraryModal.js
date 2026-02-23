@@ -22,6 +22,7 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import CourseSettingsModal from './CourseSettingsModal';
+import QuizManagementModal from './QuizManagementModal';
 import API_URL from '../config';
 
 const { width, height } = Dimensions.get('window');
@@ -88,6 +89,12 @@ export default function ContentLibraryModal({ visible, onClose }) {
     const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
     const [deletingInBackground, setDeletingInBackground] = useState(false);
 
+    // Clipboard State (Cut/Copy/Paste)
+    const [clipboardItems, setClipboardItems] = useState([]);  // Array of item IDs
+    const [clipboardMode, setClipboardMode] = useState(null);  // 'cut' or 'copy'
+    const [pasteModalVisible, setPasteModalVisible] = useState(false);
+    const [pasteLoading, setPasteLoading] = useState(false);
+
     // Success Modal State
     const [successModalVisible, setSuccessModalVisible] = useState(false);
     const [successMessage, setSuccessMessage] = useState({ title: '', count: 0 });
@@ -96,6 +103,15 @@ export default function ContentLibraryModal({ visible, onClose }) {
     const [settingsModalVisible, setSettingsModalVisible] = useState(false);
     const [settingsItem, setSettingsItem] = useState(null);
     const [settingsItemType, setSettingsItemType] = useState('course');
+
+    // Quiz Management Modal State
+    const [quizModalVisible, setQuizModalVisible] = useState(false);
+    const [quizItem, setQuizItem] = useState(null);
+
+    const openQuizModal = (item) => {
+        setQuizItem(item);
+        setQuizModalVisible(true);
+    };
 
     const openSettingsModal = (item, type = 'course') => {
         setSettingsItem(item);
@@ -459,6 +475,121 @@ export default function ContentLibraryModal({ visible, onClose }) {
                 ]
             );
         }
+    };
+
+    // ==========================================
+    // CUT / COPY / PASTE HANDLERS
+    // ==========================================
+
+    const handleCut = () => {
+        if (selectedItems.size === 0) {
+            Alert.alert("No Items Selected", "Please select items to cut");
+            return;
+        }
+        const itemIds = Array.from(selectedItems);
+        setClipboardItems(itemIds);
+        setClipboardMode('cut');
+        setSelectionMode(false);
+        setSelectedItems(new Set());
+
+        // Show feedback
+        showAlert("Items Cut", `${itemIds.length} item(s) ready to move. Select a destination folder and paste.`);
+    };
+
+    const handleCopy = () => {
+        if (selectedItems.size === 0) {
+            Alert.alert("No Items Selected", "Please select items to copy");
+            return;
+        }
+        const itemIds = Array.from(selectedItems);
+        setClipboardItems(itemIds);
+        setClipboardMode('copy');
+        setSelectionMode(false);
+        setSelectedItems(new Set());
+
+        // Show feedback
+        showAlert("Items Copied", `${itemIds.length} item(s) ready to paste. Select a destination folder and paste.`);
+    };
+
+    const handlePaste = () => {
+        if (clipboardItems.length === 0) {
+            Alert.alert("Clipboard Empty", "No items to paste. Cut or copy items first.");
+            return;
+        }
+        // Open paste destination modal
+        setPasteModalVisible(true);
+    };
+
+    const executePaste = async (targetBucketId, targetLearningPathType) => {
+        if (clipboardItems.length === 0) return;
+
+        setPasteLoading(true);
+
+        try {
+            const endpoint = clipboardMode === 'cut'
+                ? `${API_URL}/api/v1/content/bulk-move`
+                : `${API_URL}/api/v1/content/bulk-copy`;
+
+            const requestBody = {
+                item_ids: clipboardItems,
+                target_bucket_id: targetBucketId,
+                target_learning_path_type: targetLearningPathType
+            };
+
+            console.log(`📋 ${clipboardMode === 'cut' ? 'Moving' : 'Copying'} items:`, requestBody);
+
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestBody),
+            });
+
+            const result = await response.json();
+            console.log("Paste result:", result);
+
+            if (result.status === 'completed') {
+                const successCount = result.results.success.length;
+                const failedCount = result.results.failed.length;
+
+                // Clear clipboard after successful paste
+                setClipboardItems([]);
+                setClipboardMode(null);
+                setPasteModalVisible(false);
+
+                // Refresh content
+                fetchContent();
+
+                // Show success message
+                setSuccessMessage({
+                    title: clipboardMode === 'cut' ? 'Items Moved' : 'Items Copied',
+                    count: successCount
+                });
+                setSuccessModalVisible(true);
+
+                if (failedCount > 0) {
+                    setTimeout(() => {
+                        Alert.alert(
+                            "Partial Success",
+                            `${successCount} item(s) ${clipboardMode === 'cut' ? 'moved' : 'copied'} successfully.\n${failedCount} item(s) failed.`
+                        );
+                    }, 1500);
+                }
+            } else {
+                Alert.alert("Error", result.message || "Failed to paste items");
+            }
+        } catch (error) {
+            console.error("Paste error:", error);
+            Alert.alert("Error", "An error occurred while pasting items");
+        } finally {
+            setPasteLoading(false);
+        }
+    };
+
+    const clearClipboard = () => {
+        setClipboardItems([]);
+        setClipboardMode(null);
     };
 
     const handleChangeCategory = async (bucketId) => {
@@ -890,9 +1021,17 @@ export default function ContentLibraryModal({ visible, onClose }) {
         // Calculate indentation for nested content
         const indentWidth = indentLevel * 12;
         const isSelected = selectedItems.has(item.id);
+        const isCut = clipboardMode === 'cut' && clipboardItems.includes(item.id);
 
         return (
-            <View style={[styles.contentItem, { marginLeft: indentWidth }, isSelected && styles.selectedItem]}>
+            <View style={[
+                styles.contentItem,
+                { marginLeft: indentWidth },
+                isSelected && styles.selectedItem,
+                isCut && styles.cutItem
+            ]}>
+                {/* Cut indicator overlay */}
+                {isCut && <View style={styles.cutItemOverlay} pointerEvents="none" />}
                 {/* Top row: checkbox + icon + info */}
                 <View style={styles.contentItemTopRow}>
                     {selectionMode && (
@@ -937,6 +1076,10 @@ export default function ContentLibraryModal({ visible, onClose }) {
                         <TouchableOpacity onPress={() => openPreviewModal(item)} style={[styles.actionBtn, { backgroundColor: '#ECFDF5' }]}>
                             <Feather name="eye" size={16} color="#10B981" />
                             <Text style={[styles.actionLabel, { color: '#10B981' }]}>Preview</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => openQuizModal(item)} style={[styles.actionBtn, { backgroundColor: '#F3E8FF' }]}>
+                            <MaterialCommunityIcons name="head-question" size={16} color="#9333EA" />
+                            <Text style={[styles.actionLabel, { color: '#9333EA' }]}>Quiz</Text>
                         </TouchableOpacity>
                         <TouchableOpacity onPress={() => openEditModal(item)} style={[styles.actionBtn, { backgroundColor: '#EFF6FF' }]}>
                             <Feather name="edit-2" size={16} color="#3B82F6" />
@@ -1015,6 +1158,28 @@ export default function ContentLibraryModal({ visible, onClose }) {
                                         <Feather name="square" size={16} color="#FFF" />
                                         <Text style={styles.bulkActionText}>Deselect All</Text>
                                     </TouchableOpacity>
+
+                                    {/* Cut Button */}
+                                    <TouchableOpacity
+                                        onPress={handleCut}
+                                        disabled={selectedItems.size === 0}
+                                        style={[styles.bulkActionBtn, styles.bulkCutBtn, selectedItems.size === 0 && { opacity: 0.5 }]}
+                                    >
+                                        <MaterialCommunityIcons name="content-cut" size={16} color="#FFF" />
+                                        <Text style={styles.bulkActionText}>Cut</Text>
+                                    </TouchableOpacity>
+
+                                    {/* Copy Button */}
+                                    <TouchableOpacity
+                                        onPress={handleCopy}
+                                        disabled={selectedItems.size === 0}
+                                        style={[styles.bulkActionBtn, styles.bulkCopyBtn, selectedItems.size === 0 && { opacity: 0.5 }]}
+                                    >
+                                        <MaterialCommunityIcons name="content-copy" size={16} color="#FFF" />
+                                        <Text style={styles.bulkActionText}>Copy</Text>
+                                    </TouchableOpacity>
+
+                                    {/* Delete Button */}
                                     <TouchableOpacity
                                         onPress={() => {
                                             console.log(" DELETE BUTTON PRESSED!");
@@ -1034,6 +1199,37 @@ export default function ContentLibraryModal({ visible, onClose }) {
                                             </>
                                         )}
                                     </TouchableOpacity>
+                                </View>
+                            )}
+
+                            {/* Clipboard/Paste Bar (shown when clipboard has items) */}
+                            {clipboardItems.length > 0 && !selectionMode && (
+                                <View style={styles.clipboardBar}>
+                                    <View style={styles.clipboardInfo}>
+                                        <MaterialCommunityIcons
+                                            name={clipboardMode === 'cut' ? 'content-cut' : 'content-copy'}
+                                            size={18}
+                                            color="#FFF"
+                                        />
+                                        <Text style={styles.clipboardText}>
+                                            {clipboardItems.length} item(s) {clipboardMode === 'cut' ? 'cut' : 'copied'}
+                                        </Text>
+                                    </View>
+                                    <View style={styles.clipboardActions}>
+                                        <TouchableOpacity
+                                            onPress={handlePaste}
+                                            style={styles.pasteBtn}
+                                        >
+                                            <MaterialCommunityIcons name="content-paste" size={16} color="#FFF" />
+                                            <Text style={styles.pasteBtnText}>Paste Here</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            onPress={clearClipboard}
+                                            style={styles.clearClipboardBtn}
+                                        >
+                                            <Feather name="x" size={16} color="#FFF" />
+                                        </TouchableOpacity>
+                                    </View>
                                 </View>
                             )}
 
@@ -1445,6 +1641,17 @@ export default function ContentLibraryModal({ visible, onClose }) {
                             </View>
                         </Modal>
 
+                        {/* Quiz Management Modal */}
+                        <QuizManagementModal
+                            visible={quizModalVisible}
+                            onClose={() => setQuizModalVisible(false)}
+                            contentItem={quizItem}
+                            onSaveSuccess={() => {
+                                fetchContent();
+                                fetchBuckets();
+                            }}
+                        />
+
                         {/* Success Modal */}
                         <Modal visible={successModalVisible} animationType="fade" transparent={true}>
                             <View style={styles.successModalOverlay}>
@@ -1459,11 +1666,11 @@ export default function ContentLibraryModal({ visible, onClose }) {
 
                                     {/* Message */}
                                     <Text style={styles.successMessage}>
-                                        {successMessage.count} item(s) deleted successfully.
+                                        {successMessage.count} item(s) {successMessage.title.includes('Moved') || successMessage.title.includes('Copied') ? 'processed' : 'deleted'} successfully.
                                     </Text>
 
                                     <Text style={styles.successSubMessage}>
-                                        Cleanup is happening in the background.
+                                        {successMessage.title.includes('Deleted') ? 'Cleanup is happening in the background.' : 'Content library updated.'}
                                     </Text>
 
                                     {/* OK Button */}
@@ -1473,6 +1680,109 @@ export default function ContentLibraryModal({ visible, onClose }) {
                                     >
                                         <Text style={styles.successOkText}>OK</Text>
                                     </TouchableOpacity>
+                                </View>
+                            </View>
+                        </Modal>
+
+                        {/* Paste Destination Modal */}
+                        <Modal visible={pasteModalVisible} animationType="slide" transparent={true}>
+                            <View style={styles.pasteModalOverlay}>
+                                <View style={styles.pasteModalContent}>
+                                    {/* Header */}
+                                    <View style={styles.pasteModalHeader}>
+                                        <MaterialCommunityIcons
+                                            name={clipboardMode === 'cut' ? 'content-cut' : 'content-copy'}
+                                            size={24}
+                                            color="#3B82F6"
+                                        />
+                                        <Text style={styles.pasteModalTitle}>
+                                            {clipboardMode === 'cut' ? 'Move' : 'Copy'} to Folder
+                                        </Text>
+                                        <TouchableOpacity
+                                            onPress={() => setPasteModalVisible(false)}
+                                            style={styles.pasteModalCloseBtn}
+                                        >
+                                            <Feather name="x" size={24} color="#6B7280" />
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    <Text style={styles.pasteModalSubtitle}>
+                                        Select destination for {clipboardItems.length} item(s)
+                                    </Text>
+
+                                    {/* Learning Path Selector */}
+                                    <View style={styles.pastePathSelector}>
+                                        {learningPaths.map((lp) => (
+                                            <TouchableOpacity
+                                                key={lp.id}
+                                                style={[
+                                                    styles.pastePathOption,
+                                                    { borderColor: lp.color }
+                                                ]}
+                                                onPress={() => executePaste('uncategorized', lp.id)}
+                                                disabled={pasteLoading}
+                                            >
+                                                <View style={[styles.pastePathIcon, { backgroundColor: lp.color + '20' }]}>
+                                                    <Feather name={lp.icon || 'folder'} size={20} color={lp.color} />
+                                                </View>
+                                                <View style={{ flex: 1 }}>
+                                                    <Text style={[styles.pastePathName, { color: lp.color }]}>{lp.name}</Text>
+                                                    <Text style={styles.pastePathDesc}>Root level (Uncategorized)</Text>
+                                                </View>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+
+                                    {/* Folder List */}
+                                    <Text style={styles.pasteFolderListTitle}>Or select a specific folder:</Text>
+                                    <ScrollView style={styles.pasteFolderList}>
+                                        {availableBuckets.map((bucket) => (
+                                            <TouchableOpacity
+                                                key={bucket.id}
+                                                style={styles.pasteFolderItem}
+                                                onPress={() => executePaste(bucket.id, bucket.learning_path_type)}
+                                                disabled={pasteLoading}
+                                            >
+                                                <View style={[
+                                                    styles.pasteFolderIcon,
+                                                    { backgroundColor: (bucket.color || '#3B82F6') + '20' }
+                                                ]}>
+                                                    <MaterialCommunityIcons
+                                                        name={bucket.icon || 'folder'}
+                                                        size={18}
+                                                        color={bucket.color || '#3B82F6'}
+                                                    />
+                                                </View>
+                                                <View style={{ flex: 1 }}>
+                                                    <Text style={styles.pasteFolderName}>{bucket.name}</Text>
+                                                    <Text style={styles.pasteFolderPath}>
+                                                        {bucket.folder_path || bucket.learning_path_type === 'self_learning' ? 'Self Learning' : 'Career Progression'}
+                                                    </Text>
+                                                </View>
+                                                <View style={[
+                                                    styles.pasteFolderPathBadge,
+                                                    { backgroundColor: bucket.learning_path_type === 'self_learning' ? '#10B98120' : '#3B82F620' }
+                                                ]}>
+                                                    <Text style={[
+                                                        styles.pasteFolderPathBadgeText,
+                                                        { color: bucket.learning_path_type === 'self_learning' ? '#10B981' : '#3B82F6' }
+                                                    ]}>
+                                                        {bucket.learning_path_type === 'self_learning' ? 'SL' : 'CP'}
+                                                    </Text>
+                                                </View>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </ScrollView>
+
+                                    {/* Loading Indicator */}
+                                    {pasteLoading && (
+                                        <View style={styles.pasteLoadingOverlay}>
+                                            <ActivityIndicator size="large" color="#3B82F6" />
+                                            <Text style={styles.pasteLoadingText}>
+                                                {clipboardMode === 'cut' ? 'Moving' : 'Copying'} items...
+                                            </Text>
+                                        </View>
+                                    )}
                                 </View>
                             </View>
                         </Modal>
@@ -1808,6 +2118,14 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.03,
         shadowRadius: 8,
         elevation: 2,
+        position: 'relative',
+        overflow: 'hidden',
+    },
+    cutItem: {
+        opacity: 0.6,
+        borderWidth: 2,
+        borderColor: '#F59E0B',
+        borderStyle: 'dashed',
     },
     contentItemTopRow: {
         flexDirection: 'row',
@@ -2039,11 +2357,223 @@ const styles = StyleSheet.create({
         borderColor: '#DC2626',
         marginLeft: 'auto',
     },
+    bulkCutBtn: {
+        backgroundColor: '#F59E0B',
+        borderColor: '#D97706',
+    },
+    bulkCopyBtn: {
+        backgroundColor: '#8B5CF6',
+        borderColor: '#7C3AED',
+    },
     bulkActionText: {
         fontSize: 13,
         fontFamily: 'Poppins_600SemiBold',
         color: '#FFF',
     },
+
+    // Clipboard Bar Styles
+    clipboardBar: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: '#1E3A5F',
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        marginTop: 8,
+        borderRadius: 12,
+    },
+    clipboardInfo: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    clipboardText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF',
+    },
+    clipboardActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    pasteBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        backgroundColor: '#10B981',
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 8,
+    },
+    pasteBtnText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF',
+    },
+    clearClipboardBtn: {
+        width: 32,
+        height: 32,
+        borderRadius: 8,
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+
+    // Paste Modal Styles
+    pasteModalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'flex-end',
+    },
+    pasteModalContent: {
+        backgroundColor: '#FFF',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        maxHeight: '80%',
+        paddingBottom: 30,
+    },
+    pasteModalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 20,
+        borderBottomWidth: 1,
+        borderBottomColor: '#E5E7EB',
+        gap: 12,
+    },
+    pasteModalTitle: {
+        fontSize: 18,
+        fontFamily: 'Poppins_700Bold',
+        color: '#1F2937',
+        flex: 1,
+    },
+    pasteModalCloseBtn: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: '#F3F4F6',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    pasteModalSubtitle: {
+        fontSize: 14,
+        fontFamily: 'Poppins_400Regular',
+        color: '#6B7280',
+        paddingHorizontal: 20,
+        paddingTop: 12,
+        paddingBottom: 16,
+    },
+    pastePathSelector: {
+        flexDirection: 'row',
+        paddingHorizontal: 20,
+        gap: 12,
+        marginBottom: 20,
+    },
+    pastePathOption: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+        borderRadius: 12,
+        borderWidth: 2,
+        backgroundColor: '#F9FAFB',
+        gap: 12,
+    },
+    pastePathIcon: {
+        width: 44,
+        height: 44,
+        borderRadius: 12,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    pastePathName: {
+        fontSize: 14,
+        fontFamily: 'Poppins_700Bold',
+    },
+    pastePathDesc: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#9CA3AF',
+    },
+    pasteFolderListTitle: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#6B7280',
+        paddingHorizontal: 20,
+        marginBottom: 8,
+    },
+    pasteFolderList: {
+        maxHeight: 300,
+        paddingHorizontal: 20,
+    },
+    pasteFolderItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 14,
+        borderRadius: 12,
+        backgroundColor: '#F9FAFB',
+        marginBottom: 8,
+        gap: 12,
+    },
+    pasteFolderIcon: {
+        width: 36,
+        height: 36,
+        borderRadius: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    pasteFolderName: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#1F2937',
+    },
+    pasteFolderPath: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        color: '#9CA3AF',
+    },
+    pasteFolderPathBadge: {
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 6,
+    },
+    pasteFolderPathBadgeText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_700Bold',
+    },
+    pasteLoadingOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(255,255,255,0.9)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+    },
+    pasteLoadingText: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#3B82F6',
+        marginTop: 12,
+    },
+
+    // Cut item indicator style
+    cutItemOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(245, 158, 11, 0.15)',
+        borderRadius: 12,
+        borderWidth: 2,
+        borderColor: '#F59E0B',
+        borderStyle: 'dashed',
+    },
+
     backgroundDeleteIndicator: {
         width: 36,
         height: 36,

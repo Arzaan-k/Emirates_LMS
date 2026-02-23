@@ -5,6 +5,7 @@ Bucket/course settings, analytics, feedback, notifications, certificates, schedu
 
 import uuid
 import logging
+import time
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
@@ -23,13 +24,63 @@ from app.models.user import User
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/self-learning", tags=["Self Learning"])
 
+# ===========================================
+# IN-MEMORY CACHE FOR FAST RESPONSES
+# ===========================================
+# Cache buckets/courses structure (user-independent) for 5 minutes
+# Longer TTL to reduce DB queries and handle Neon cold-starts
+_buckets_cache = {"data": None, "expires": 0}
+_courses_cache = {"data": None, "expires": 0}
+CACHE_TTL = 300  # 5 minutes - longer to minimize slow DB queries
+
+
+def invalidate_self_learning_cache():
+    """Call this when buckets or courses are modified to clear the cache."""
+    global _buckets_cache, _courses_cache
+    _buckets_cache = {"data": None, "expires": 0}
+    _courses_cache = {"data": None, "expires": 0}
+    logger.info("Self-learning cache invalidated")
+
 
 # ==========================================
 # SELF-LEARNING CONTENT FOR USERS
 # ==========================================
 
+# Default estimated durations per resource type (seconds)
+_DEFAULT_DURATION = {
+    'Video': 300,    # 5 minutes
+    'Audio': 240,    # 4 minutes
+    'PDF': 180,      # 3 minutes
+    'Document': 180,
+    'Image': 60,
+    'PPT': 300,
+    'Presentation': 300,
+}
+
+def _estimate_duration(course):
+    """Get duration_seconds for a course, with fallback estimation."""
+    if course.duration_seconds:
+        return course.duration_seconds
+    # Try parsing the duration string (formats: '5:30', '1:02:30', '5m', '300')
+    if course.duration:
+        d = course.duration.strip()
+        try:
+            parts = d.split(':')
+            if len(parts) == 2:
+                return int(parts[0]) * 60 + int(parts[1])
+            elif len(parts) == 3:
+                return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+            elif d.endswith('m'):
+                return int(d[:-1]) * 60
+            elif d.isdigit():
+                return int(d)
+        except (ValueError, IndexError):
+            pass
+    # Fallback: estimate by resource type
+    return _DEFAULT_DURATION.get(course.resource_type, 180)
+
 @router.get("/buckets")
-async def get_self_learning_buckets(
+def get_self_learning_buckets(
     user_email: str = "user",
     db: Session = Depends(get_db)
 ):
@@ -59,7 +110,6 @@ async def get_self_learning_buckets(
         from sqlalchemy import or_
         course_filter = or_(Content.learning_path_type == "self_learning", Content.bucket_id.in_(cross_bucket_ids))
     all_courses = db.query(Content).filter(
-        Content.is_path_node == True,
         Content.is_published == True,
         course_filter
     ).all()
@@ -101,21 +151,56 @@ async def get_self_learning_buckets(
         if not _user_has_bucket_access(user, bucket):
             continue
 
-        # Get courses in this bucket
-        bucket_courses = [c for c in visible_courses if c.bucket == bucket.name or c.bucket_id == bucket.id]
-        total = len(bucket_courses)
+        # Match courses to bucket: prefer bucket_id over name to avoid double-counting
+        bucket_courses = [c for c in visible_courses if c.bucket_id == bucket.id or (not c.bucket_id and c.bucket == bucket.name)]
+
+        # Separate mandatory vs optional courses for THIS USER
+        # A course is mandatory if:
+        # 1. impacts_existing_progress is True AND
+        # 2. impacted_users is empty (affects all) OR user_email is in impacted_users
+        def is_mandatory_for_user(course):
+            impacts = getattr(course, 'impacts_existing_progress', True)
+            if impacts is False:
+                return False
+            impacted_list = getattr(course, 'impacted_users', None) or []
+            # Empty list = affects all users; Non-empty = only listed users
+            return len(impacted_list) == 0 or user_email in impacted_list
+
+        mandatory_courses = [c for c in bucket_courses if is_mandatory_for_user(c)]
+
+        # Check if user has completed all mandatory courses
+        mandatory_completed = sum(1 for c in mandatory_courses if c.id in completed_ids)
+        all_mandatory_done = len(mandatory_courses) > 0 and mandatory_completed == len(mandatory_courses)
+
+        # If all mandatory done, progress = 100% (optional courses don't affect)
+        if all_mandatory_done:
+            courses_for_progress = mandatory_courses
+        else:
+            courses_for_progress = bucket_courses
+
+        total = len(bucket_courses)  # Show total including optional
         completed = sum(1 for c in bucket_courses if c.id in completed_ids)
 
-        # Calculate average watch progress
-        total_progress = 0
+        # Calculate total duration for all courses (for display)
+        total_duration = 0
         for c in bucket_courses:
+            total_duration += _estimate_duration(c)
+
+        # Calculate average watch progress and remaining time using courses_for_progress
+        total_progress = 0
+        remaining_duration = 0
+        for c in courses_for_progress:
+            course_dur = _estimate_duration(c)
             p = progress_map.get(c.id, {})
             if p.get("completed"):
                 total_progress += 100
             else:
-                total_progress += p.get("watched_percent", 0)
+                watched = p.get("watched_percent", 0)
+                total_progress += watched
+                remaining_duration += int(course_dur * (1 - watched / 100))
         # Empty folders (0 courses) are considered 100% complete
-        avg_progress = round(total_progress / total, 1) if total > 0 else 100
+        progress_count = len(courses_for_progress)
+        avg_progress = round(total_progress / progress_count, 1) if progress_count > 0 else 100
 
         # Last attended date
         last_attended = None
@@ -139,23 +224,26 @@ async def get_self_learning_buckets(
             "total_courses": total,
             "completed_courses": completed,
             "progress_percent": avg_progress,
+            "total_duration_seconds": total_duration,
+            "remaining_duration_seconds": remaining_duration,
             "last_attended": last_attended,
         })
 
     return {"buckets": result}
 
 
-@router.get("/buckets/hierarchy")
-async def get_self_learning_hierarchy(
-    user_email: str = "user",
-    db: Session = Depends(get_db)
-):
+def _get_cached_buckets_and_courses(db: Session):
     """
-    Get self-learning buckets in hierarchical tree structure.
-    Returns nested folders with progress at each level.
+    Get buckets and courses with in-memory caching.
+    Caches for CACHE_TTL seconds to avoid repeated DB queries.
     """
-    try:
-        # Get all active self-learning buckets + career_progression buckets with show_in_both_paths
+    global _buckets_cache, _courses_cache
+    from sqlalchemy import or_
+
+    now = time.time()
+
+    # Check if buckets cache is valid
+    if _buckets_cache["data"] is None or now > _buckets_cache["expires"]:
         all_buckets = db.query(CourseBucket).filter(
             CourseBucket.is_active == True,
             (
@@ -166,46 +254,65 @@ async def get_self_learning_hierarchy(
                 )
             )
         ).order_by(CourseBucket.order_index).all()
+        _buckets_cache["data"] = all_buckets
+        _buckets_cache["expires"] = now + CACHE_TTL
+    else:
+        all_buckets = _buckets_cache["data"]
 
-        # Get user info
-        user = db.query(User).filter(User.email == user_email).first()
-
-        # Get all self-learning courses + career courses from cross-displayed buckets
+    # Check if courses cache is valid
+    if _courses_cache["data"] is None or now > _courses_cache["expires"]:
         cross_bucket_ids = [b.id for b in all_buckets if b.learning_path_type == 'career_progression']
         course_filter = Content.learning_path_type == "self_learning"
         if cross_bucket_ids:
-            from sqlalchemy import or_
             course_filter = or_(Content.learning_path_type == "self_learning", Content.bucket_id.in_(cross_bucket_ids))
+
         all_courses = db.query(Content).filter(
-            Content.is_path_node == True,
             Content.is_published == True,
             course_filter
         ).all()
+        _courses_cache["data"] = all_courses
+        _courses_cache["expires"] = now + CACHE_TTL
+    else:
+        all_courses = _courses_cache["data"]
+
+    return all_buckets, all_courses
+
+
+@router.get("/buckets/hierarchy")
+def get_self_learning_hierarchy(
+    user_email: str = "user",
+    db: Session = Depends(get_db)
+):
+    """
+    Get self-learning buckets in hierarchical tree structure.
+    Returns nested folders with progress at each level.
+
+    OPTIMIZED: In-memory caching for buckets/courses, reduced DB round trips.
+    """
+    try:
+        # Check if user_email looks like a real email (contains @) or is the test user
+        is_real_user = user_email and (user_email == "user" or "@" in user_email or len(user_email) > 3)
+
+        # OPTIMIZATION: Use cached buckets and courses (user-independent data)
+        all_buckets, all_courses = _get_cached_buckets_and_courses(db)
+
+        # Get user info (only if real user)
+        user = db.query(User).filter(User.email == user_email).first() if is_real_user else None
 
         now = datetime.utcnow()
+        visible_courses = [c for c in all_courses if not c.scheduled_at or c.scheduled_at <= now]
 
-        visible_courses = [
-            c for c in all_courses
-            if not c.scheduled_at or c.scheduled_at <= now
-        ]
-
-        # Get user completions - ALWAYS fetch if we have a valid email
+        # Query user-specific data: completions and progress
         completed_ids = set()
         progress_map = {}
 
-        # Check if user_email looks like a real email (contains @) or is not the default
-        is_real_user = user_email and user_email != "user" and ("@" in user_email or len(user_email) > 4)
-
-        logger.info(f"[Hierarchy] user_email={user_email}, is_real_user={is_real_user}")
-
         if is_real_user:
+            # Batch: completions + progress in single transaction window
             completions = db.query(CourseCompletion.course_id).filter(
                 CourseCompletion.user_email == user_email
             ).all()
             completed_ids = {r[0] for r in completions}
-            logger.info(f"[Hierarchy] Found {len(completed_ids)} completed courses for {user_email}")
 
-            # Get user watch progress
             progress_rows = db.query(
                 VideoProgress.node_id,
                 VideoProgress.video_watched_percent,
@@ -213,50 +320,74 @@ async def get_self_learning_hierarchy(
             ).filter(
                 VideoProgress.user_email == user_email
             ).all()
-            for row in progress_rows:
-                progress_map[row[0]] = {
-                    "watched_percent": row[1] or 0,
-                    "completed": row[2] or False
-                }
-            logger.info(f"[Hierarchy] Found {len(progress_map)} progress records for {user_email}")
-            # Log first few progress entries for debugging
-            if progress_map:
-                sample_entries = list(progress_map.items())[:3]
-                for node_id, prog in sample_entries:
-                    logger.info(f"[Hierarchy] Sample progress: node_id={node_id}, data={prog}")
 
-        # Log course sample for debugging
-        if visible_courses:
-            sample_courses = visible_courses[:3]
-            for c in sample_courses:
-                logger.info(f"[Hierarchy] Sample course: id={c.id}, title={c.title}, bucket={c.bucket}, bucket_id={c.bucket_id}")
+            progress_map = {
+                row[0]: {"watched_percent": row[1] or 0, "completed": row[2] or False}
+                for row in progress_rows
+            }
 
         def get_bucket_progress(bucket):
-            """Calculate progress for a bucket and its content."""
-            bucket_courses = [c for c in visible_courses if c.bucket == bucket.name or c.bucket_id == bucket.id]
-            total = len(bucket_courses)
-            completed = sum(1 for c in bucket_courses if c.id in completed_ids)
+            """Calculate progress for a bucket and its content.
 
-            total_progress = 0
+            Handles impacts_existing_progress flag AND impacted_users list:
+            - Courses with impacts_existing_progress=False don't affect any user
+            - Courses with non-empty impacted_users only affect those specific users
+            - This allows admins to add new courses without affecting existing users' 100%
+            """
+            # Match courses to bucket: prefer bucket_id over name to avoid double-counting
+            bucket_courses = [c for c in visible_courses if c.bucket_id == bucket.id or (not c.bucket_id and c.bucket == bucket.name)]
+
+            # Check if course is mandatory for THIS specific user
+            def is_mandatory_for_user(course):
+                impacts = getattr(course, 'impacts_existing_progress', True)
+                if impacts is False:
+                    return False
+                impacted_list = getattr(course, 'impacted_users', None) or []
+                # Empty list = affects all users; Non-empty = only listed users
+                return len(impacted_list) == 0 or user_email in impacted_list
+
+            # Separate mandatory vs optional courses FOR THIS USER
+            mandatory_courses = [c for c in bucket_courses if is_mandatory_for_user(c)]
+
+            # Check if user has completed all mandatory courses
+            mandatory_completed = sum(1 for c in mandatory_courses if c.id in completed_ids)
+            all_mandatory_done = len(mandatory_courses) > 0 and mandatory_completed == len(mandatory_courses)
+
+            # If all mandatory courses are done, use only mandatory for progress (stays 100%)
+            # Otherwise, include optional courses that were added before user started
+            if all_mandatory_done:
+                courses_for_progress = mandatory_courses
+            else:
+                courses_for_progress = bucket_courses
+
+            # Calculate total duration for all courses
+            total_duration = 0
             for c in bucket_courses:
+                total_duration += _estimate_duration(c)
+
+            # Calculate progress and remaining time using courses_for_progress
+            total_progress = 0
+            remaining_duration = 0
+            for c in courses_for_progress:
+                course_dur = _estimate_duration(c)
                 p = progress_map.get(c.id, {})
                 if p.get("completed") or c.id in completed_ids:
                     total_progress += 100
                 else:
                     watched = p.get("watched_percent", 0)
                     total_progress += watched
+                    remaining_duration += int(course_dur * (1 - watched / 100))
 
             # Empty folders (0 courses) are considered 100% complete
-            avg_progress = round(total_progress / total, 1) if total > 0 else 100
-
-            # Debug log for buckets with courses
-            if total > 0:
-                logger.info(f"[BucketProgress] {bucket.name} (id={bucket.id}): {completed}/{total} complete, {avg_progress}% progress")
+            progress_count = len(courses_for_progress)
+            avg_progress = round(total_progress / progress_count, 1) if progress_count > 0 else 100
 
             return {
-                "total_courses": total,
-                "completed_courses": completed,
-                "progress_percent": avg_progress
+                "total_courses": len(bucket_courses),  # Show total including optional
+                "completed_courses": sum(1 for c in bucket_courses if c.id in completed_ids),
+                "progress_percent": avg_progress,
+                "total_duration_seconds": total_duration,
+                "remaining_duration_seconds": remaining_duration,
             }
 
         def build_hierarchy(parent_id=None, visited=None, depth=0):
@@ -270,11 +401,6 @@ async def get_self_learning_hierarchy(
                 logger.warning(f"Max hierarchy depth reached at parent_id={parent_id}")
                 return []
 
-            # Cycle detection - prevent processing the same bucket twice in one path
-            if parent_id is not None and parent_id in visited:
-                logger.warning(f"Cycle detected in bucket hierarchy at parent_id={parent_id}")
-                return []
-
             children = []
             for bucket in all_buckets:
                 bucket_parent = getattr(bucket, 'parent_bucket_id', None)
@@ -284,8 +410,13 @@ async def get_self_learning_hierarchy(
                         logger.warning(f"Self-referencing bucket detected: {bucket.id}")
                         continue
 
-                    # Check access
-                    if not _user_has_bucket_access(user, bucket):
+                    # Cycle detection - skip if we've already processed this bucket in current path
+                    if bucket.id in visited:
+                        logger.warning(f"Cycle detected: bucket {bucket.id} already in path")
+                        continue
+
+                    # Check access (skip for test user "user")
+                    if user_email != "user" and not _user_has_bucket_access(user, bucket):
                         continue
 
                     progress = get_bucket_progress(bucket)
@@ -302,6 +433,11 @@ async def get_self_learning_hierarchy(
 
                         progress["total_courses"] += child_total
                         progress["completed_courses"] += child_completed
+
+                        # Aggregate duration from child buckets
+                        progress["total_duration_seconds"] += sum(cb.get("total_duration_seconds", 0) for cb in child_buckets)
+                        progress["remaining_duration_seconds"] += sum(cb.get("remaining_duration_seconds", 0) for cb in child_buckets)
+
                         if progress["total_courses"] > 0:
                             total_weight = sum(cb.get("total_courses", 0) for cb in child_buckets if cb.get("total_courses", 0) > 0)
                             if total_weight > 0:
@@ -334,7 +470,7 @@ async def get_self_learning_hierarchy(
         raise HTTPException(status_code=500, detail=f"Failed to load hierarchy: {str(e)}")
 
 @router.get("/buckets/{bucket_id}/courses")
-async def get_bucket_courses(
+def get_bucket_courses(
     bucket_id: str,
     user_email: str = "user",
     db: Session = Depends(get_db)
@@ -352,36 +488,51 @@ async def get_bucket_courses(
     # (career courses should appear when cross-displayed into self learning)
     bucket_is_cross = getattr(bucket, 'show_in_both_paths', False) or False
     base_query = db.query(Content).filter(
-        Content.is_path_node == True,
         Content.is_published == True,
-        (Content.bucket == bucket.name) | (Content.bucket_id == bucket.id)
+        Content.bucket_id == bucket.id
     )
     if not bucket_is_cross:
         base_query = base_query.filter(
             Content.learning_path_type == (bucket.learning_path_type or "self_learning")
         )
     courses = base_query.order_by(Content.order_index, Content.timestamp).all()
+    # Also include courses matched by name that don't have a bucket_id assigned
+    if not courses:
+        base_query = db.query(Content).filter(
+            Content.is_published == True,
+            Content.bucket == bucket.name,
+            Content.bucket_id.is_(None)
+        )
+        if not bucket_is_cross:
+            base_query = base_query.filter(
+                Content.learning_path_type == (bucket.learning_path_type or "self_learning")
+            )
+        courses = base_query.order_by(Content.order_index, Content.timestamp).all()
 
     # Filter scheduled
     courses = [c for c in courses if not c.scheduled_at or c.scheduled_at <= now]
 
     # Filter per-course access control (if course has assigned_users set)
-    user = db.query(User).filter(User.email == user_email).first() if user_email != "user" else None
-    courses = [c for c in courses if _user_has_course_access(user, c)]
+    # Skip access check for test user "user"
+    if user_email != "user":
+        user = db.query(User).filter(User.email == user_email).first()
+        courses = [c for c in courses if _user_has_course_access(user, c)]
 
-    # Get user progress
+    # Get user progress - accept "user" as valid for testing
     completed_ids = set()
     progress_map = {}
-    if user_email != "user":
+    is_real_user = user_email and (user_email == "user" or "@" in user_email or len(user_email) > 3)
+    if is_real_user and courses:
+        course_ids = [c.id for c in courses]
         completions = db.query(CourseCompletion.course_id).filter(
             CourseCompletion.user_email == user_email,
-            CourseCompletion.course_id.in_([c.id for c in courses])
+            CourseCompletion.course_id.in_(course_ids)
         ).all()
         completed_ids = {r[0] for r in completions}
 
         progress_rows = db.query(VideoProgress).filter(
             VideoProgress.user_email == user_email,
-            VideoProgress.node_id.in_([c.id for c in courses])
+            VideoProgress.node_id.in_(course_ids)
         ).all()
         for p in progress_rows:
             progress_map[p.node_id] = p.to_dict()
@@ -448,7 +599,7 @@ async def get_bucket_courses(
 # ==========================================
 
 @router.get("/admin/users-for-assignment")
-async def get_users_for_assignment(
+def get_users_for_assignment(
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
@@ -525,7 +676,7 @@ async def get_users_for_assignment(
 # ==========================================
 
 @router.put("/admin/buckets/{bucket_id}/settings")
-async def update_bucket_settings(
+def update_bucket_settings(
     bucket_id: str,
     settings: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
@@ -546,12 +697,14 @@ async def update_bucket_settings(
 
     bucket.updated_at = datetime.utcnow()
     db.commit()
+    
+    invalidate_self_learning_cache()
 
     return {"status": "success", "bucket": bucket.to_dict()}
 
 
 @router.put("/admin/courses/{course_id}/settings")
-async def update_course_settings(
+def update_course_settings(
     course_id: str,
     settings: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
@@ -575,12 +728,14 @@ async def update_course_settings(
 
     course.updated_at = datetime.utcnow()
     db.commit()
+    
+    invalidate_self_learning_cache()
 
     return {"status": "success", "course": course.to_dict()}
 
 
 @router.post("/admin/buckets/{bucket_id}/reorder-courses")
-async def reorder_bucket_courses(
+def reorder_bucket_courses(
     bucket_id: str,
     body: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
@@ -621,7 +776,7 @@ async def reorder_bucket_courses(
 # ==========================================
 
 @router.post("/admin/courses/{course_id}/schedule")
-async def schedule_course(
+def schedule_course(
     course_id: str,
     body: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
@@ -659,7 +814,7 @@ async def schedule_course(
 # ==========================================
 
 @router.post("/admin/notifications/send")
-async def send_notification(
+def send_notification(
     body: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(require_admin)
@@ -697,7 +852,7 @@ async def send_notification(
 
 
 @router.get("/notifications")
-async def get_user_notifications(
+def get_user_notifications(
     user_email: str,
     limit: int = 50,
     db: Session = Depends(get_db)
@@ -755,7 +910,7 @@ async def get_user_notifications(
 
 
 @router.post("/notifications/{notification_id}/read")
-async def mark_notification_read(
+def mark_notification_read(
     notification_id: str,
     user_email: str = Body(..., embed=True),
     db: Session = Depends(get_db)
@@ -777,7 +932,7 @@ async def mark_notification_read(
 
 
 @router.post("/notifications/mark-all-read")
-async def mark_all_notifications_read(
+def mark_all_notifications_read(
     user_email: str = Body(..., embed=True),
     db: Session = Depends(get_db)
 ):
@@ -801,7 +956,7 @@ async def mark_all_notifications_read(
 # ==========================================
 
 @router.post("/feedback")
-async def submit_feedback(
+def submit_feedback(
     body: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db)
 ):
@@ -830,7 +985,7 @@ async def submit_feedback(
 
 
 @router.get("/admin/feedback/{course_id}")
-async def get_course_feedback(
+def get_course_feedback(
     course_id: str,
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(require_admin)
@@ -852,12 +1007,220 @@ async def get_course_feedback(
     }
 
 
+
+# ==========================================
+# CUSTOMIZABLE SURVEY (ADMIN BUILDER)
+# ==========================================
+
+@router.get("/admin/survey/{course_id}")
+def get_course_survey(
+    course_id: str,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """Get the survey template for a course (admin). Returns null if none exists."""
+    from app.models.notification import CourseSurvey
+    survey = db.query(CourseSurvey).filter(CourseSurvey.course_id == course_id).first()
+    return {"survey": survey.to_dict() if survey else None}
+
+
+@router.post("/admin/survey/{course_id}")
+def create_or_update_survey(
+    course_id: str,
+    body: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """
+    Create or update the survey template for a course.
+    body: {
+        title: str,
+        description: str,
+        is_active: bool,
+        questions: [
+            { id: str, type: 'rating'|'mcq'|'text'|'name', label: str, options: [str], mandatory: bool }
+        ]
+    }
+    """
+    from app.models.notification import CourseSurvey
+    from sqlalchemy.orm.attributes import flag_modified
+
+    survey = db.query(CourseSurvey).filter(CourseSurvey.course_id == course_id).first()
+    if survey:
+        # Update existing
+        survey.title = body.get("title", survey.title)
+        survey.description = body.get("description", survey.description)
+        survey.is_active = body.get("is_active", survey.is_active)
+        survey.questions = body.get("questions", survey.questions)
+        survey.updated_at = datetime.utcnow()
+        flag_modified(survey, "questions")
+    else:
+        # Create new
+        survey = CourseSurvey(
+            id=str(uuid.uuid4()),
+            course_id=course_id,
+            title=body.get("title", "Course Feedback Survey"),
+            description=body.get("description", ""),
+            is_active=body.get("is_active", True),
+            questions=body.get("questions", []),
+            created_by=current_user.get("email", "admin"),
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(survey)
+
+    db.commit()
+    db.refresh(survey)
+    logger.info(f"Survey saved for course {course_id} by {current_user.get('email')}")
+    return {"status": "success", "survey": survey.to_dict()}
+
+
+@router.delete("/admin/survey/{course_id}")
+def delete_course_survey(
+    course_id: str,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """Delete the survey template for a course."""
+    from app.models.notification import CourseSurvey
+    survey = db.query(CourseSurvey).filter(CourseSurvey.course_id == course_id).first()
+    if not survey:
+        raise HTTPException(status_code=404, detail="Survey not found")
+    db.delete(survey)
+    db.commit()
+    return {"status": "success", "message": "Survey deleted"}
+
+
+@router.get("/survey/{course_id}")
+def get_survey_for_user(
+    course_id: str,
+    user_email: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Get the active survey for a course (user-facing).
+    Returns null if none or inactive.
+    If user_email is provided, also returns has_submitted = True/False
+    so the frontend can decide whether to show the form at all.
+    """
+    from app.models.notification import CourseSurvey, SurveyResponse
+    survey = db.query(CourseSurvey).filter(
+        CourseSurvey.course_id == course_id,
+        CourseSurvey.is_active == True
+    ).first()
+
+    has_submitted = False
+    if survey and user_email:
+        existing = db.query(SurveyResponse).filter(
+            SurveyResponse.survey_id == survey.id,
+            SurveyResponse.user_email == user_email
+        ).first()
+        has_submitted = existing is not None
+
+    return {
+        "survey": survey.to_dict() if survey else None,
+        "has_submitted": has_submitted,
+    }
+
+
+@router.post("/survey/{course_id}/submit")
+def submit_survey_response(
+    course_id: str,
+    body: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Submit a user's survey response.
+    body: { survey_id, user_email, user_name, answers: {question_id: answer} }
+    """
+    from app.models.notification import CourseSurvey, SurveyResponse
+
+    survey_id = body.get("survey_id")
+    user_email = body.get("user_email", "")
+    if not survey_id or not user_email:
+        raise HTTPException(status_code=400, detail="survey_id and user_email are required")
+
+    # Check if user already responded
+    existing = db.query(SurveyResponse).filter(
+        SurveyResponse.survey_id == survey_id,
+        SurveyResponse.user_email == user_email
+    ).first()
+    if existing:
+        # Update existing response
+        existing.answers = body.get("answers", {})
+        existing.user_name = body.get("user_name", existing.user_name)
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(existing, "answers")
+        db.commit()
+        return {"status": "success", "response": existing.to_dict()}
+
+    response = SurveyResponse(
+        id=str(uuid.uuid4()),
+        survey_id=survey_id,
+        course_id=course_id,
+        user_email=user_email,
+        user_name=body.get("user_name", ""),
+        answers=body.get("answers", {}),
+        created_at=datetime.utcnow(),
+    )
+    db.add(response)
+    db.commit()
+    logger.info(f"Survey response submitted by {user_email} for course {course_id}")
+    return {"status": "success", "response": response.to_dict()}
+
+
+@router.get("/admin/survey/{course_id}/responses")
+def get_survey_responses(
+    course_id: str,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """Get all survey responses for a course with aggregated stats."""
+    from app.models.notification import CourseSurvey, SurveyResponse
+
+    survey = db.query(CourseSurvey).filter(CourseSurvey.course_id == course_id).first()
+    if not survey:
+        return {"survey": None, "responses": [], "total": 0, "stats": {}}
+
+    responses = db.query(SurveyResponse).filter(
+        SurveyResponse.survey_id == survey.id
+    ).order_by(SurveyResponse.created_at.desc()).all()
+
+    # Aggregate stats per question
+    stats = {}
+    for q in (survey.questions or []):
+        qid = q.get("id")
+        qtype = q.get("type")
+        if qtype == "mcq":
+            counts = {}
+            for opt in (q.get("options") or []):
+                counts[opt] = 0
+            for r in responses:
+                ans = (r.answers or {}).get(qid)
+                if ans and ans in counts:
+                    counts[ans] += 1
+            stats[qid] = {"type": "mcq", "counts": counts}
+        elif qtype == "rating":
+            vals = [(r.answers or {}).get(qid) for r in responses if (r.answers or {}).get(qid)]
+            avg = round(sum(float(v) for v in vals) / len(vals), 1) if vals else 0
+            stats[qid] = {"type": "rating", "average": avg, "count": len(vals)}
+        else:
+            stats[qid] = {"type": qtype, "count": len([r for r in responses if (r.answers or {}).get(qid)])}
+
+    return {
+        "survey": survey.to_dict(),
+        "responses": [r.to_dict() for r in responses],
+        "total": len(responses),
+        "stats": stats,
+    }
+
+
 # ==========================================
 # ANALYTICS
 # ==========================================
 
 @router.get("/admin/analytics/bucket/{bucket_id}")
-async def get_bucket_analytics(
+def get_bucket_analytics(
     bucket_id: str,
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(require_admin)
@@ -947,7 +1310,7 @@ async def get_bucket_analytics(
 
 
 @router.get("/admin/analytics/course/{course_id}")
-async def get_course_analytics(
+def get_course_analytics(
     course_id: str,
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(require_admin)
@@ -1042,7 +1405,7 @@ async def get_course_analytics(
 
 
 @router.get("/admin/analytics/user/{user_email}")
-async def get_user_self_learning_analytics(
+def get_user_self_learning_analytics(
     user_email: str,
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(require_admin)
@@ -1102,7 +1465,7 @@ async def get_user_self_learning_analytics(
 # ==========================================
 
 @router.get("/admin/courses/{course_id}/history")
-async def get_course_user_history(
+def get_course_user_history(
     course_id: str,
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(require_admin)
@@ -1160,8 +1523,244 @@ async def get_course_user_history(
     return {"course_id": course_id, "history": history, "total_users": len(history)}
 
 
+@router.get("/admin/buckets/{bucket_id}/affected-users")
+async def get_affected_users_preview(
+    bucket_id: str,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """
+    Preview which users will be affected when adding new content to a bucket.
+    Returns:
+    - completed_users: Users who have 100% completion (won't be affected if "No Impact" is selected)
+    - in_progress_users: Users who have started but not completed (will be affected either way)
+    - not_started_users: Users who haven't started (will be affected either way)
+    """
+    bucket = db.query(CourseBucket).filter(CourseBucket.id == bucket_id).first()
+    if not bucket:
+        raise HTTPException(status_code=404, detail="Bucket not found")
+
+    # Get all courses in this bucket
+    courses = db.query(Content).filter(
+        Content.is_published == True,
+        (Content.bucket == bucket.name) | (Content.bucket_id == bucket.id)
+    ).all()
+
+    course_ids = [c.id for c in courses]
+    total_courses = len(courses)
+
+    if total_courses == 0:
+        # No courses yet - all users are "not started"
+        all_users = db.query(User).filter(User.is_active == True).all()
+        return {
+            "bucket_id": bucket_id,
+            "bucket_name": bucket.name,
+            "total_courses": 0,
+            "completed_users": [],
+            "in_progress_users": [],
+            "not_started_users": [{"email": u.email, "name": u.name, "role": u.role, "store": u.store} for u in all_users],
+            "summary": {
+                "completed_count": 0,
+                "in_progress_count": 0,
+                "not_started_count": len(all_users),
+                "total_users": len(all_users)
+            }
+        }
+
+    # Get all completions for courses in this bucket
+    completions = db.query(CourseCompletion.user_email, CourseCompletion.course_id).filter(
+        CourseCompletion.course_id.in_(course_ids)
+    ).all()
+
+    # Build user completion map
+    user_completions = {}
+    for comp in completions:
+        if comp.user_email not in user_completions:
+            user_completions[comp.user_email] = set()
+        user_completions[comp.user_email].add(comp.course_id)
+
+    # Get all progress for courses in this bucket
+    progress_rows = db.query(VideoProgress.user_email, VideoProgress.node_id, VideoProgress.video_watched_percent).filter(
+        VideoProgress.node_id.in_(course_ids)
+    ).all()
+
+    # Build user progress map
+    user_progress = {}
+    for p in progress_rows:
+        if p.user_email not in user_progress:
+            user_progress[p.user_email] = {}
+        user_progress[p.user_email][p.node_id] = p.video_watched_percent or 0
+
+    # Get all active users
+    all_users = db.query(User).filter(User.is_active == True).all()
+    user_map = {u.email: {"email": u.email, "name": u.name, "role": u.role, "store": u.store} for u in all_users}
+
+    # Categorize users
+    completed_users = []
+    in_progress_users = []
+    not_started_users = []
+
+    all_emails = set(user_map.keys()) | set(user_completions.keys()) | set(user_progress.keys())
+
+    for email in all_emails:
+        user_info = user_map.get(email, {"email": email, "name": email, "role": None, "store": None})
+        completed_courses = user_completions.get(email, set())
+        progress = user_progress.get(email, {})
+
+        completed_count = len(completed_courses)
+        has_progress = len(progress) > 0 or completed_count > 0
+
+        if completed_count == total_courses:
+            # User has completed all courses - 100%
+            completed_users.append({
+                **user_info,
+                "completed_courses": completed_count,
+                "total_courses": total_courses,
+                "progress_percent": 100
+            })
+        elif has_progress:
+            # User has started but not completed all
+            avg_progress = 0
+            for cid in course_ids:
+                if cid in completed_courses:
+                    avg_progress += 100
+                else:
+                    avg_progress += progress.get(cid, 0)
+            avg_progress = round(avg_progress / total_courses, 1)
+
+            in_progress_users.append({
+                **user_info,
+                "completed_courses": completed_count,
+                "total_courses": total_courses,
+                "progress_percent": avg_progress
+            })
+        else:
+            # User hasn't started
+            not_started_users.append({
+                **user_info,
+                "completed_courses": 0,
+                "total_courses": total_courses,
+                "progress_percent": 0
+            })
+
+    return {
+        "bucket_id": bucket_id,
+        "bucket_name": bucket.name,
+        "total_courses": total_courses,
+        "completed_users": completed_users,
+        "in_progress_users": in_progress_users,
+        "not_started_users": not_started_users,
+        "summary": {
+            "completed_count": len(completed_users),
+            "in_progress_count": len(in_progress_users),
+            "not_started_count": len(not_started_users),
+            "total_users": len(completed_users) + len(in_progress_users) + len(not_started_users)
+        }
+    }
+
+
+@router.get("/admin/learning-path/{learning_path_type}/affected-users")
+async def get_learning_path_affected_users(
+    learning_path_type: str,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """
+    Get users who would be affected when adding new content to a learning path.
+    Returns users categorized by their completion status across ALL buckets in the path.
+    """
+    # Get all buckets for this learning path
+    buckets = db.query(CourseBucket).filter(
+        CourseBucket.is_active == True,
+        CourseBucket.learning_path_type == learning_path_type
+    ).all()
+
+    # Get all courses in these buckets
+    bucket_ids = [b.id for b in buckets]
+    bucket_names = [b.name for b in buckets]
+
+    courses = db.query(Content).filter(
+        Content.is_published == True,
+        Content.learning_path_type == learning_path_type
+    ).all()
+
+    course_ids = [c.id for c in courses]
+    total_courses = len(courses)
+
+    if total_courses == 0:
+        all_users = db.query(User).filter(User.is_active == True).limit(100).all()
+        return {
+            "learning_path_type": learning_path_type,
+            "total_courses": 0,
+            "total_buckets": len(buckets),
+            "completed_users": [],
+            "in_progress_users": [],
+            "summary": {
+                "completed_count": 0,
+                "in_progress_count": 0,
+                "total_users": len(all_users)
+            }
+        }
+
+    # Get completions
+    completions = db.query(CourseCompletion.user_email, CourseCompletion.course_id).filter(
+        CourseCompletion.course_id.in_(course_ids)
+    ).all()
+
+    user_completions = {}
+    for comp in completions:
+        if comp.user_email not in user_completions:
+            user_completions[comp.user_email] = set()
+        user_completions[comp.user_email].add(comp.course_id)
+
+    # Get user info
+    all_emails = list(user_completions.keys())
+    users = db.query(User).filter(User.email.in_(all_emails)).all() if all_emails else []
+    user_map = {u.email: {"email": u.email, "name": u.name, "role": u.role, "store": u.store} for u in users}
+
+    completed_users = []
+    in_progress_users = []
+
+    for email, completed_set in user_completions.items():
+        user_info = user_map.get(email, {"email": email, "name": email, "role": None, "store": None})
+        completed_count = len(completed_set)
+        progress_percent = round((completed_count / total_courses) * 100, 1) if total_courses > 0 else 0
+
+        if completed_count == total_courses:
+            completed_users.append({
+                **user_info,
+                "completed_courses": completed_count,
+                "total_courses": total_courses,
+                "progress_percent": 100
+            })
+        else:
+            in_progress_users.append({
+                **user_info,
+                "completed_courses": completed_count,
+                "total_courses": total_courses,
+                "progress_percent": progress_percent
+            })
+
+    # Sort by progress
+    completed_users.sort(key=lambda x: x["name"] or "")
+    in_progress_users.sort(key=lambda x: -x["progress_percent"])
+
+    return {
+        "learning_path_type": learning_path_type,
+        "total_courses": total_courses,
+        "total_buckets": len(buckets),
+        "completed_users": completed_users[:50],  # Limit to 50 for performance
+        "in_progress_users": in_progress_users[:50],
+        "summary": {
+            "completed_count": len(completed_users),
+            "in_progress_count": len(in_progress_users),
+            "total_users": len(completed_users) + len(in_progress_users)
+        }
+    }
+
+
 @router.get("/admin/buckets/check-integrity")
-async def check_bucket_integrity(
+def check_bucket_integrity(
     fix: bool = False,
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(require_admin)
@@ -1248,7 +1847,7 @@ async def check_bucket_integrity(
 
 
 @router.post("/admin/courses/{course_id}/remove-user")
-async def remove_user_from_course(
+def remove_user_from_course(
     course_id: str,
     body: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
@@ -1284,7 +1883,7 @@ async def remove_user_from_course(
 # ==========================================
 
 @router.get("/certificate/{course_id}/{user_email}")
-async def generate_certificate(
+def generate_certificate(
     course_id: str,
     user_email: str,
     db: Session = Depends(get_db)

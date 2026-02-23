@@ -23,8 +23,7 @@ class ContentRepository(BaseRepository[Content]):
         return self.db.query(Content).filter(Content.bucket == bucket).all()
 
     def get_path_nodes(self, learning_path_type: Optional[str] = None) -> List[Content]:
-        """Get all learning path nodes."""
-        query = self.db.query(Content).filter(Content.is_path_node == True)
+        query = self.db.query(Content).filter(Content.is_path_node == True, Content.is_published == True)
         if learning_path_type:
             query = query.filter(Content.learning_path_type == learning_path_type)
         return query.order_by(Content.timestamp).all()
@@ -33,6 +32,7 @@ class ContentRepository(BaseRepository[Content]):
         """Get all self-learning content."""
         return self.db.query(Content).filter(
             Content.is_path_node == True,
+            Content.is_published == True,
             Content.learning_path_type == "self_learning"
         ).order_by(Content.timestamp).all()
 
@@ -40,6 +40,7 @@ class ContentRepository(BaseRepository[Content]):
         """Get all career progression content that are path nodes."""
         return self.db.query(Content).filter(
             Content.is_path_node == True,
+            Content.is_published == True,
             or_(
                 Content.learning_path_type == "career_progression",
                 Content.learning_path_type == None,

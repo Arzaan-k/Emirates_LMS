@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     View,
     Text,
@@ -15,8 +15,14 @@ import {
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
 import Svg, { Circle, G } from 'react-native-svg';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import CertificateModal from './CertificateModal';
 import API_URL from '../config';
+
+// Cache keys for instant loading
+const CACHE_KEY_HIERARCHY = 'sl_hierarchy_cache';
+const CACHE_KEY_TIMESTAMP = 'sl_hierarchy_timestamp';
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes cache validity
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -87,9 +93,10 @@ const CircularProgress = ({ size = 36, strokeWidth = 3, progress = 0, color = TH
 export default function SelfLearningView({ userEmail = 'user', onOpenCourse, refreshKey = 0 }) {
     const [allBuckets, setAllBuckets] = useState([]); // Flat list of all buckets
     const [hierarchy, setHierarchy] = useState([]); // Root level buckets
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false); // Start false — only true while actively fetching
     const [refreshing, setRefreshing] = useState(false);
     const [viewMode, setViewMode] = useState('grid');
+    const [isBackgroundRefresh, setIsBackgroundRefresh] = useState(false); // True when refreshing cache in background
 
     // Responsive layout state for web
     const [containerWidth, setContainerWidth] = useState(screenWidth);
@@ -107,87 +114,301 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
     const [certModalVisible, setCertModalVisible] = useState(false);
     const [certCourseId, setCertCourseId] = useState(null);
 
-    // Helper to check if userEmail is a valid real email (not default 'user')
-    const isValidUserEmail = (email) => email && email !== 'user' && (email.includes('@') || email.length > 4);
+    // Track if initial load is done
+    const initialLoadDone = useRef(false);
+    // Track if fetch is in progress to prevent duplicate calls
+    const fetchInProgress = useRef(false);
 
-    useEffect(() => {
-        // Only fetch when we have a valid user email
-        if (isValidUserEmail(userEmail)) {
-            fetchData();
+    // Helper to check if userEmail is a valid email
+    // Accept 'user' as valid for testing, or any email with @ or length > 3
+    const isValidUserEmail = (email) => email && (email === 'user' || email.includes('@') || email.length > 3);
+
+    // Helper to flatten buckets
+    const flattenBuckets = (items, result = []) => {
+        items.forEach(item => {
+            result.push(item);
+            if (item.children?.length > 0) {
+                flattenBuckets(item.children, result);
+            }
+        });
+        return result;
+    };
+
+    // Helper to process and set hierarchy data
+    const processHierarchyData = (hierarchyData) => {
+        console.log('[SelfLearningView] processHierarchyData called with', hierarchyData?.length, 'items');
+        // UX IMPROVEMENT: If only one root folder exists, flatten it
+        let processed = hierarchyData;
+        if (processed.length === 1 && processed[0].children?.length > 0) {
+            processed = processed[0].children;
         }
-    }, [userEmail]); // Refetch when userEmail changes (initially null -> actual email)
+        console.log('[SelfLearningView] Setting displayItems to', processed?.length, 'items');
+        setHierarchy(processed);
+        setAllBuckets(flattenBuckets(processed));
+        setDisplayItems(processed);
+        return processed;
+    };
+
+    // Load cached data instantly on mount, then fetch fresh data
+    useEffect(() => {
+        const loadAndFetch = async () => {
+            console.log('[SelfLearningView] loadAndFetch starting, userEmail:', userEmail);
+
+            // Bump version to v4 to clear all stale caches (new estimated time fields + published fix)
+            const cacheVersion = await AsyncStorage.getItem('sl_cache_version');
+            if (cacheVersion !== 'v4') {
+                console.log('[SelfLearningView] Clearing ALL old caches (upgrading to v4)');
+                // Clear hierarchy cache
+                await AsyncStorage.removeItem(CACHE_KEY_HIERARCHY);
+                // Clear all course caches (they start with sl_courses_)
+                const allKeys = await AsyncStorage.getAllKeys();
+                const courseCacheKeys = allKeys.filter(k => k.startsWith('sl_courses_'));
+                if (courseCacheKeys.length > 0) {
+                    await AsyncStorage.multiRemove(courseCacheKeys);
+                    console.log('[SelfLearningView] Cleared', courseCacheKeys.length, 'course caches');
+                }
+                await AsyncStorage.setItem('sl_cache_version', 'v4');
+            }
+
+            // Step 1: Try to load cached data for instant display
+            let hasCachedData = false;
+            try {
+                const cached = await AsyncStorage.getItem(CACHE_KEY_HIERARCHY);
+                console.log('[SelfLearningView] Cache check:', cached ? 'found' : 'empty');
+                if (cached) {
+                    const hierarchyData = JSON.parse(cached);
+                    // Validate cached data has actual content
+                    if (hierarchyData && Array.isArray(hierarchyData) && hierarchyData.length > 0) {
+                        console.log('[SelfLearningView] Using cached data:', hierarchyData.length, 'items');
+                        processHierarchyData(hierarchyData);
+                        initialLoadDone.current = true;
+                        hasCachedData = true;
+                    } else {
+                        // Clear invalid cache
+                        console.log('[SelfLearningView] Cache invalid, clearing');
+                        await AsyncStorage.removeItem(CACHE_KEY_HIERARCHY);
+                    }
+                }
+            } catch (e) {
+                console.log('[SelfLearningView] Cache read error:', e);
+                // Clear corrupted cache
+                await AsyncStorage.removeItem(CACHE_KEY_HIERARCHY).catch(() => { });
+            }
+
+            // Step 2: Always fetch fresh data from server
+            if (isValidUserEmail(userEmail)) {
+                console.log('[SelfLearningView] Fetching fresh data, hasCachedData:', hasCachedData);
+                if (hasCachedData) {
+                    // Have cache - fetch silently in background
+                    fetchDataBackground();
+                } else {
+                    // No cache - show loading spinner and fetch
+                    fetchData();
+                }
+            } else {
+                console.log('[SelfLearningView] Invalid userEmail, not fetching');
+            }
+        };
+        loadAndFetch();
+    }, [userEmail]);
 
     // Refresh data when a lesson is closed (refreshKey incremented by parent)
     useEffect(() => {
-        if (refreshKey > 0 && isValidUserEmail(userEmail)) fetchData();
-    }, [refreshKey, userEmail]);
+        if (refreshKey > 0 && isValidUserEmail(userEmail)) {
+            // Always background refresh hierarchy after lesson close
+            fetchDataBackground();
 
+            // Make sure we trigger a re-fetch of courses if we are inside a leaf node
+            if (currentPath.length > 0) {
+                const currentFolderId = currentPath[currentPath.length - 1].id;
+                const cacheKey = `sl_courses_${currentFolderId}`;
+
+                // On mobile, the async fetch can take a tiny fraction of a second, so we slightly delay the fetch
+                // to make absolutely sure the track-video-progress backend route finishes.
+                setTimeout(() => {
+                    // Try to fetch background explicitly 
+                    fetchCoursesBackground(currentFolderId, cacheKey);
+                }, 1000);
+            }
+        }
+    }, [refreshKey, userEmail, currentPath]);
+
+    // Background fetch - doesn't show loading spinner
+    const fetchDataBackground = async () => {
+        if (!isValidUserEmail(userEmail)) return;
+
+        setIsBackgroundRefresh(true);
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+            const response = await fetch(
+                `${API_URL}/api/v1/self-learning/buckets/hierarchy?user_email=${userEmail}`,
+                { signal: controller.signal }
+            );
+            clearTimeout(timeoutId);
+
+            const data = await response.json();
+            let hierarchyData = data.hierarchy || [];
+
+            if (hierarchyData.length > 0) {
+                processHierarchyData(hierarchyData);
+                // Cache the fresh data
+                await AsyncStorage.setItem(CACHE_KEY_HIERARCHY, JSON.stringify(hierarchyData));
+                await AsyncStorage.setItem(CACHE_KEY_TIMESTAMP, Date.now().toString());
+            }
+        } catch (error) {
+            if (error.name !== 'AbortError') {
+                console.log('[SelfLearningView] Background fetch error:', error);
+            }
+        } finally {
+            setIsBackgroundRefresh(false);
+            setRefreshing(false);
+        }
+    };
+
+    // Main fetch - shows loading spinner only if no cached data
     const fetchData = async () => {
-        // Double-check we have a valid email before fetching
         if (!isValidUserEmail(userEmail)) {
             console.log('[SelfLearningView] Skipping fetch, invalid userEmail:', userEmail);
             return;
         }
+
+        // Prevent duplicate fetches (React StrictMode runs effects twice)
+        if (fetchInProgress.current) {
+            console.log('[SelfLearningView] fetchData skipped - already in progress');
+            return;
+        }
+        fetchInProgress.current = true;
+
+        // Only show loading if we don't have any data yet
+        if (hierarchy.length === 0) {
+            setLoading(true);
+        }
+
+        const url = `${API_URL}/api/v1/self-learning/buckets/hierarchy?user_email=${userEmail}`;
+        console.log('[SelfLearningView] fetchData starting, URL:', url);
+
         try {
-            const response = await fetch(`${API_URL}/api/v1/self-learning/buckets/hierarchy?user_email=${userEmail}`);
+            const controller = new AbortController();
+            // Increase timeout to 30s for Neon cold-start
+            const timeoutId = setTimeout(() => {
+                console.log('[SelfLearningView] fetchData TIMEOUT after 30s');
+                controller.abort();
+            }, 30000);
+
+            console.log('[SelfLearningView] fetchData calling fetch...');
+            const response = await fetch(url, { signal: controller.signal });
+            console.log('[SelfLearningView] fetchData got response, status:', response.status);
+            clearTimeout(timeoutId);
+
             const data = await response.json();
+            console.log('[SelfLearningView] fetchData parsed JSON, hierarchy items:', data?.hierarchy?.length);
             let hierarchyData = data.hierarchy || [];
 
-            // UX IMPROVEMENT: If only one root folder exists (e.g. "Self Learning"), flatten it to remove redundancy
-            if (hierarchyData.length === 1 && hierarchyData[0].children?.length > 0) {
-                hierarchyData = hierarchyData[0].children;
+            if (hierarchyData.length > 0) {
+                processHierarchyData(hierarchyData);
+                initialLoadDone.current = true;
+                // Cache the fresh data
+                await AsyncStorage.setItem(CACHE_KEY_HIERARCHY, JSON.stringify(hierarchyData));
+                await AsyncStorage.setItem(CACHE_KEY_TIMESTAMP, Date.now().toString());
+                console.log('[SelfLearningView] fetchData SUCCESS - cached', hierarchyData.length, 'items');
+            } else {
+                console.log('[SelfLearningView] fetchData returned EMPTY hierarchy');
             }
-
-            setHierarchy(hierarchyData);
-
-            // Flatten all buckets for easy lookup
-            const flattenBuckets = (items, result = []) => {
-                items.forEach(item => {
-                    result.push(item);
-                    if (item.children?.length > 0) {
-                        flattenBuckets(item.children, result);
-                    }
-                });
-                return result;
-            };
-            setAllBuckets(flattenBuckets(hierarchyData));
-
-            // Show root level items
-            setDisplayItems(hierarchyData);
         } catch (error) {
-            console.error('Error fetching data:', error);
+            if (error.name === 'AbortError') {
+                console.log('[SelfLearningView] fetchData ABORTED (timeout)');
+            } else {
+                console.error('[SelfLearningView] fetchData ERROR:', error.message || error);
+            }
         } finally {
+            fetchInProgress.current = false;
             setLoading(false);
             setRefreshing(false);
         }
     };
 
     const fetchCourses = async (bucketId) => {
+        console.log('[SelfLearningView] fetchCourses called for bucket:', bucketId);
         setLoadingContent(true);
         try {
-            const response = await fetch(`${API_URL}/api/v1/self-learning/buckets/${bucketId}/courses?user_email=${userEmail}`);
+            // Try cache first for instant display
+            const cacheKey = `sl_courses_${bucketId}`;
+            const cached = await AsyncStorage.getItem(cacheKey);
+            if (cached) {
+                const cachedCourses = JSON.parse(cached);
+                console.log('[SelfLearningView] Using cached courses:', cachedCourses.length);
+                setCourses(cachedCourses);
+                setLoadingContent(false);
+                // Fetch fresh data in background
+                fetchCoursesBackground(bucketId, cacheKey);
+                return;
+            }
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000); // Increase to 30s
+
+            const url = `${API_URL}/api/v1/self-learning/buckets/${bucketId}/courses?user_email=${userEmail}`;
+            console.log('[SelfLearningView] fetchCourses calling API:', url);
+            const response = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeoutId);
+
             const data = await response.json();
-            setCourses(data.courses || []);
+            const coursesData = data.courses || [];
+            console.log('[SelfLearningView] fetchCourses got', coursesData.length, 'courses');
+            setCourses(coursesData);
+            // Cache for next time
+            await AsyncStorage.setItem(cacheKey, JSON.stringify(coursesData));
         } catch (error) {
-            console.error('Error fetching courses:', error);
+            if (error.name !== 'AbortError') {
+                console.error('[SelfLearningView] Error fetching courses:', error);
+            } else {
+                console.log('[SelfLearningView] fetchCourses TIMEOUT');
+            }
         } finally {
             setLoadingContent(false);
         }
     };
 
+    // Background fetch for courses (silent update)
+    const fetchCoursesBackground = async (bucketId, cacheKey) => {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+            const response = await fetch(
+                `${API_URL}/api/v1/self-learning/buckets/${bucketId}/courses?user_email=${userEmail}`,
+                { signal: controller.signal }
+            );
+            clearTimeout(timeoutId);
+
+            const data = await response.json();
+            const coursesData = data.courses || [];
+            setCourses(coursesData);
+            await AsyncStorage.setItem(cacheKey, JSON.stringify(coursesData));
+        } catch (error) {
+            // Silent fail for background refresh
+        }
+    };
+
     const onRefresh = useCallback(() => {
         setRefreshing(true);
+        // Clear cache and force fresh fetch
+        AsyncStorage.removeItem(CACHE_KEY_HIERARCHY).catch(() => { });
         fetchData();
-    }, []);
+    }, [userEmail]);
 
     // ==========================================
     // WINDOWS-STYLE NAVIGATION
     // ==========================================
 
     const openFolder = (folder) => {
-        // Prevent circular navigation - don't add if folder is already in path
-        if (currentPath.some(p => p.id === folder.id)) {
-            console.warn('Circular navigation detected, folder already in path:', folder.id);
+        // Prevent circular navigation - don't add if folder is already in path, but instead navigate to it
+        const existingIndex = currentPath.findIndex(p => p.id === folder.id);
+        if (existingIndex !== -1) {
+            console.warn('Circular navigation detected, redirecting to folder in path:', folder.id);
+            goToPathIndex(existingIndex);
             return;
         }
 
@@ -364,6 +585,17 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
     // ==========================================
     // FOLDER ITEM - GRID VIEW
     // ==========================================
+    // Helper to format remaining time
+    const formatRemainingTime = (seconds) => {
+        if (!seconds || seconds <= 0) return '';
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m left`;
+        if (hours > 0) return `${hours}h left`;
+        if (minutes > 0) return `${minutes}m left`;
+        return '';
+    };
+
     const renderFolderGrid = ({ item, index }) => {
         const color = item.color || getColor(index);
         const progress = item.progress_percent || 0;
@@ -390,6 +622,12 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
                             <CircularProgress size={28} strokeWidth={3} progress={progress} color={color} />
                             <Text style={styles.progressLabel}>{Math.round(progress)}% done</Text>
                         </View>
+                        {item.remaining_duration_seconds > 0 && (
+                            <View style={styles.timeRow}>
+                                <Feather name="clock" size={11} color="#94A3B8" />
+                                <Text style={styles.timeLabel}>{formatRemainingTime(item.remaining_duration_seconds)}</Text>
+                            </View>
+                        )}
                     </View>
                 </TouchableOpacity>
             </Animated.View>
@@ -416,7 +654,9 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
                     </View>
                     <View style={styles.listInfo}>
                         <Text style={styles.listTitle} numberOfLines={1}>{item.name}</Text>
-                        <Text style={styles.listMeta}>{item.total_courses || 0} items • {item.completed_courses || 0} completed</Text>
+                        <Text style={styles.listMeta}>
+                            {item.total_courses || 0} items • {item.completed_courses || 0} completed{item.remaining_duration_seconds > 0 ? ` • ${formatRemainingTime(item.remaining_duration_seconds)}` : ''}
+                        </Text>
                     </View>
                     <CircularProgress size={38} strokeWidth={3} progress={progress} color={color} />
                     <Feather name="chevron-right" size={20} color="#CBD5E1" style={{ marginLeft: 10 }} />
@@ -460,7 +700,9 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
 
                         <View style={styles.progressRow}>
                             <CircularProgress size={28} strokeWidth={3} progress={progress} color={isCompleted ? THEME.green : THEME.primary} />
-                            <Text style={styles.progressLabel}>{course.duration || 'N/A'}</Text>
+                            <Text style={styles.progressLabel}>
+                                {isCompleted ? 'Completed' : (progress > 0 ? 'Resume' : (course.duration || (course.resource_type === 'Video' || course.resource_type === 'Audio' ? 'Start' : 'View')))}
+                            </Text>
                             {isCompleted && course.enable_certificate && (
                                 <TouchableOpacity
                                     style={{ marginLeft: 'auto', padding: 4 }}
@@ -508,7 +750,9 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
                         <Text style={styles.listTitle} numberOfLines={1}>{course.title}</Text>
                         <View style={styles.courseMeta}>
                             <Feather name="clock" size={11} color="#94A3B8" />
-                            <Text style={styles.listMeta}>{course.duration || 'N/A'}</Text>
+                            <Text style={styles.listMeta}>
+                                {isCompleted ? 'Completed' : (progress > 0 ? 'Resume' : (course.duration || (course.resource_type === 'Video' || course.resource_type === 'Audio' ? 'Start' : 'View')))}
+                            </Text>
                             {course.xp > 0 && (
                                 <>
                                     <MaterialCommunityIcons name="star-four-points" size={11} color="#F59E0B" style={{ marginLeft: 8 }} />
@@ -536,12 +780,22 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
     // MAIN CONTENT
     // ==========================================
     const renderContent = () => {
-        // Show loading while waiting for valid user email or data fetch
-        if (loading || !isValidUserEmail(userEmail)) {
+        // Show loading only while actively fetching data
+        if (loading) {
             return (
                 <View style={styles.centerWrap}>
                     <ActivityIndicator size="large" color={THEME.primary} />
                     <Text style={styles.loadingText}>Loading...</Text>
+                </View>
+            );
+        }
+
+        // No valid email yet — show a friendly placeholder instead of a permanent spinner
+        if (!isValidUserEmail(userEmail)) {
+            return (
+                <View style={styles.centerWrap}>
+                    <MaterialCommunityIcons name="account-clock-outline" size={48} color="#CBD5E1" />
+                    <Text style={styles.loadingText}>Signing in...</Text>
                 </View>
             );
         }
@@ -699,6 +953,8 @@ const styles = StyleSheet.create({
     gridCardTitle: { fontSize: 14, fontWeight: '600', color: THEME.textMain, lineHeight: 18, marginBottom: 8 },
     progressRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     progressLabel: { fontSize: 11, color: THEME.textSub },
+    timeRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
+    timeLabel: { fontSize: 10, color: '#94A3B8', fontWeight: '500' },
 
     // List Row
     listRow: {

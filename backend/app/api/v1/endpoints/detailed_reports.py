@@ -64,18 +64,28 @@ def _excel(data, filename, sheet="Report"):
 @router.get("/participants/user-login")
 async def user_login_report(db: Session = Depends(get_db)):
     """User login activity report - last active, login frequency."""
-    users = db.query(User).filter(User.category != 'Admin').all()
+    login_sub = db.query(
+        UserInteraction.user_email,
+        func.count(UserInteraction.id).label('login_count')
+    ).filter(
+        UserInteraction.interaction_type == 'login'
+    ).group_by(UserInteraction.user_email).subquery()
+
+    rows = db.query(
+        User, login_sub.c.login_count
+    ).outerjoin(
+        login_sub, User.email == login_sub.c.user_email
+    ).filter(User.category != 'Admin').all()
+
+    now = datetime.utcnow()
     data = []
-    for u in users:
-        interactions = db.query(func.count(UserInteraction.id)).filter(
-            UserInteraction.user_email == u.email, UserInteraction.interaction_type == 'login'
-        ).scalar() or 0
+    for u, login_count in rows:
         data.append({
             "name": u.name, "email": u.email, "role": u.role or "N/A",
             "store": u.store or "Unassigned", "category": u.category or "N/A",
             "last_active": u.last_active.strftime('%Y-%m-%d %H:%M') if u.last_active else "Never",
-            "login_count": interactions,
-            "status": "Active" if u.last_active and (datetime.utcnow() - u.last_active).days < 30 else "Inactive",
+            "login_count": login_count or 0,
+            "status": "Active" if u.last_active and (now - u.last_active).days < 30 else "Inactive",
             "created_at": u.created_at.strftime('%Y-%m-%d') if u.created_at else "N/A",
         })
     return {"report_name": "User Login Report", "data": data, "total": len(data)}
@@ -88,23 +98,40 @@ async def user_login_excel(db: Session = Depends(get_db)):
 @router.get("/participants/headcount")
 async def headcount_report(db: Session = Depends(get_db)):
     """Headcount by role, store, category."""
-    users = db.query(User).filter(User.category != 'Admin').all()
-    role_counts, store_counts, cat_counts = {}, {}, {}
-    for u in users:
-        role_counts[u.role or 'N/A'] = role_counts.get(u.role or 'N/A', 0) + 1
-        store_counts[u.store or 'Unassigned'] = store_counts.get(u.store or 'Unassigned', 0) + 1
-        cat_counts[u.category or 'N/A'] = cat_counts.get(u.category or 'N/A', 0) + 1
+    total_users = db.query(func.count(User.id)).filter(User.category != 'Admin').scalar() or 0
+
+    role_rows = db.query(
+        func.coalesce(User.role, 'N/A').label('value'),
+        func.count(User.id).label('headcount')
+    ).filter(User.category != 'Admin').group_by(
+        func.coalesce(User.role, 'N/A')
+    ).order_by(desc('headcount')).all()
+
+    store_rows = db.query(
+        func.coalesce(User.store, 'Unassigned').label('value'),
+        func.count(User.id).label('headcount')
+    ).filter(User.category != 'Admin').group_by(
+        func.coalesce(User.store, 'Unassigned')
+    ).order_by(desc('headcount')).all()
+
+    cat_rows = db.query(
+        func.coalesce(User.category, 'N/A').label('value'),
+        func.count(User.id).label('headcount')
+    ).filter(User.category != 'Admin').group_by(
+        func.coalesce(User.category, 'N/A')
+    ).order_by(desc('headcount')).all()
+
     data = []
-    for role, count in sorted(role_counts.items(), key=lambda x: -x[1]):
-        data.append({"dimension": "Role", "value": role, "headcount": count,
-                      "percentage": round(count/len(users)*100, 1) if users else 0})
-    for store, count in sorted(store_counts.items(), key=lambda x: -x[1]):
-        data.append({"dimension": "Store", "value": store, "headcount": count,
-                      "percentage": round(count/len(users)*100, 1) if users else 0})
-    for cat, count in sorted(cat_counts.items(), key=lambda x: -x[1]):
-        data.append({"dimension": "Category", "value": cat, "headcount": count,
-                      "percentage": round(count/len(users)*100, 1) if users else 0})
-    return {"report_name": "Headcount Report", "data": data, "total_users": len(users)}
+    for value, count in role_rows:
+        data.append({"dimension": "Role", "value": value, "headcount": count,
+                      "percentage": round(count / total_users * 100, 1) if total_users else 0})
+    for value, count in store_rows:
+        data.append({"dimension": "Store", "value": value, "headcount": count,
+                      "percentage": round(count / total_users * 100, 1) if total_users else 0})
+    for value, count in cat_rows:
+        data.append({"dimension": "Category", "value": value, "headcount": count,
+                      "percentage": round(count / total_users * 100, 1) if total_users else 0})
+    return {"report_name": "Headcount Report", "data": data, "total_users": total_users}
 
 @router.get("/participants/headcount/excel")
 async def headcount_excel(db: Session = Depends(get_db)):
@@ -140,9 +167,10 @@ async def attrition_report(days: int = Query(90), db: Session = Depends(get_db))
         or_(User.last_active < cutoff, User.last_active.is_(None)),
         User.category != 'Admin'
     ).all()
+    now = datetime.utcnow()
     data = []
     for u in users:
-        inactive_days = (datetime.utcnow() - u.last_active).days if u.last_active else 999
+        inactive_days = (now - u.last_active).days if u.last_active else 999
         data.append({
             "name": u.name, "email": u.email, "role": u.role or "N/A",
             "store": u.store or "Unassigned",
@@ -161,14 +189,23 @@ async def attrition_excel(days: int = Query(90), db: Session = Depends(get_db)):
 @router.get("/participants/stakeholder-mapping")
 async def stakeholder_mapping(db: Session = Depends(get_db)):
     """Users grouped by store with their roles and completion stats."""
-    users = db.query(User).filter(User.category != 'Admin').all()
+    comp_sub = db.query(
+        CourseCompletion.user_email,
+        func.count(CourseCompletion.id).label('comp_count')
+    ).group_by(CourseCompletion.user_email).subquery()
+
+    rows = db.query(
+        User, comp_sub.c.comp_count
+    ).outerjoin(
+        comp_sub, User.email == comp_sub.c.user_email
+    ).filter(User.category != 'Admin').all()
+
     data = []
-    for u in users:
-        completions = db.query(func.count(CourseCompletion.id)).filter(CourseCompletion.user_email == u.email).scalar() or 0
+    for u, comp_count in rows:
         data.append({
             "name": u.name, "email": u.email, "role": u.role or "N/A",
             "store": u.store or "Unassigned", "category": u.category or "N/A",
-            "courses_completed": completions, "xp_points": u.xp_points or 0,
+            "courses_completed": comp_count or 0, "xp_points": u.xp_points or 0,
             "is_external": "Yes" if u.is_external else "No",
         })
     return {"report_name": "Stakeholder Mapping Report", "data": data, "total": len(data)}
@@ -205,17 +242,22 @@ async def export_users_excel(db: Session = Depends(get_db)):
 @router.get("/participants/user-deactivation")
 async def user_deactivation_report(db: Session = Depends(get_db)):
     """Users never logged in or inactive >180 days."""
-    users = db.query(User).filter(User.category != 'Admin').all()
+    cutoff_180 = datetime.utcnow() - timedelta(days=180)
+    users = db.query(User).filter(
+        User.category != 'Admin',
+        or_(User.last_active.is_(None), User.last_active < cutoff_180)
+    ).all()
+    now = datetime.utcnow()
     data = []
     for u in users:
-        if u.last_active is None or (datetime.utcnow() - u.last_active).days > 180:
-            data.append({
-                "name": u.name, "email": u.email, "role": u.role or "N/A",
-                "store": u.store or "Unassigned",
-                "last_active": u.last_active.strftime('%Y-%m-%d') if u.last_active else "Never",
-                "days_inactive": (datetime.utcnow() - u.last_active).days if u.last_active else 999,
-                "recommendation": "Deactivate" if (u.last_active is None or (datetime.utcnow() - u.last_active).days > 365) else "Review",
-            })
+        days_inactive = (now - u.last_active).days if u.last_active else 999
+        data.append({
+            "name": u.name, "email": u.email, "role": u.role or "N/A",
+            "store": u.store or "Unassigned",
+            "last_active": u.last_active.strftime('%Y-%m-%d') if u.last_active else "Never",
+            "days_inactive": days_inactive,
+            "recommendation": "Deactivate" if (u.last_active is None or (now - u.last_active).days > 365) else "Review",
+        })
     return {"report_name": "User Deactivation Report", "data": data, "total": len(data)}
 
 @router.get("/participants/user-deactivation/excel")
@@ -231,27 +273,35 @@ async def user_deactivation_excel(db: Session = Depends(get_db)):
 @router.get("/learning/completion-overview")
 async def completion_overview(db: Session = Depends(get_db)):
     """Overall completion stats across all courses."""
-    completions = db.query(CourseCompletion).all()
+    rows = db.query(
+        CourseCompletion.course_id,
+        CourseCompletion.course_title,
+        CourseCompletion.bucket,
+        func.count(CourseCompletion.id).label('total_completions'),
+        func.avg(CourseCompletion.score).label('avg_score'),
+        func.sum(case(
+            (CourseCompletion.score_percent >= 70, 1),
+            else_=0
+        )).label('pass_count')
+    ).group_by(
+        CourseCompletion.course_id,
+        CourseCompletion.course_title,
+        CourseCompletion.bucket
+    ).order_by(desc('total_completions')).all()
+
     data = []
-    course_groups = {}
-    for c in completions:
-        cid = c.course_id
-        if cid not in course_groups:
-            course_groups[cid] = {"title": c.course_title or cid, "bucket": c.bucket or "N/A",
-                                   "users": 0, "total_score": 0, "passed": 0}
-        course_groups[cid]["users"] += 1
-        course_groups[cid]["total_score"] += (c.score or 0)
-        if (c.score_percent or 0) >= 70:
-            course_groups[cid]["passed"] += 1
-    for cid, g in course_groups.items():
+    for course_id, course_title, bucket, total_completions, avg_score, pass_count in rows:
+        tc = total_completions or 0
+        pc = pass_count or 0
         data.append({
-            "course_id": cid, "course_title": g["title"], "bucket": g["bucket"],
-            "total_completions": g["users"],
-            "avg_score": round(g["total_score"]/g["users"], 1) if g["users"] else 0,
-            "pass_count": g["passed"],
-            "pass_rate": round(g["passed"]/g["users"]*100, 1) if g["users"] else 0,
+            "course_id": course_id,
+            "course_title": course_title or course_id,
+            "bucket": bucket or "N/A",
+            "total_completions": tc,
+            "avg_score": round(float(avg_score or 0), 1),
+            "pass_count": pc,
+            "pass_rate": round(pc / tc * 100, 1) if tc else 0,
         })
-    data.sort(key=lambda x: -x["total_completions"])
     return {"report_name": "Completion Overview Report", "data": data, "total": len(data)}
 
 @router.get("/learning/completion-overview/excel")
@@ -299,17 +349,34 @@ async def learning_history_excel(db: Session = Depends(get_db)):
 @router.get("/learning/course-status")
 async def course_status_report(db: Session = Depends(get_db)):
     """Status of all courses - completions, active learners."""
-    contents = db.query(Content).all()
+    comp_sub = db.query(
+        CourseCompletion.course_id,
+        func.count(CourseCompletion.id).label('completed_users')
+    ).group_by(CourseCompletion.course_id).subquery()
+
+    prog_sub = db.query(
+        VideoProgress.node_id,
+        func.count(VideoProgress.id).label('in_progress_users')
+    ).filter(
+        VideoProgress.completed == False
+    ).group_by(VideoProgress.node_id).subquery()
+
+    rows = db.query(
+        Content,
+        comp_sub.c.completed_users,
+        prog_sub.c.in_progress_users
+    ).outerjoin(
+        comp_sub, Content.id == comp_sub.c.course_id
+    ).outerjoin(
+        prog_sub, Content.id == prog_sub.c.node_id
+    ).all()
+
     data = []
-    for c in contents:
-        total_comp = db.query(func.count(CourseCompletion.id)).filter(CourseCompletion.course_id == str(c.id)).scalar() or 0
-        in_progress = db.query(func.count(VideoProgress.id)).filter(
-            VideoProgress.node_id == str(c.id), VideoProgress.completed == False
-        ).scalar() or 0
+    for c, completed_users, in_progress_users in rows:
         data.append({
             "course_title": c.title, "course_id": str(c.id),
             "resource_type": c.resource_type or "N/A", "bucket": c.bucket or "N/A",
-            "completed_users": total_comp, "in_progress_users": in_progress,
+            "completed_users": completed_users or 0, "in_progress_users": in_progress_users or 0,
             "is_published": "Yes" if c.is_published else "No",
             "created_at": c.created_at.strftime('%Y-%m-%d') if c.created_at else "",
         })
@@ -388,15 +455,28 @@ async def course_details_excel(db: Session = Depends(get_db)):
 async def training_coverage(db: Session = Depends(get_db)):
     """Training coverage: % of users who completed each course."""
     total_users = db.query(func.count(User.id)).filter(User.category != 'Admin').scalar() or 1
-    contents = db.query(Content).filter(Content.is_path_node == True).all()
+
+    comp_sub = db.query(
+        CourseCompletion.course_id,
+        func.count(distinct(CourseCompletion.user_email)).label('users_completed')
+    ).group_by(CourseCompletion.course_id).subquery()
+
+    rows = db.query(
+        Content.title,
+        Content.id,
+        Content.bucket,
+        comp_sub.c.users_completed
+    ).outerjoin(
+        comp_sub, Content.id == comp_sub.c.course_id
+    ).filter(Content.is_path_node == True).all()
+
     data = []
-    for c in contents:
-        comp_count = db.query(func.count(distinct(CourseCompletion.user_email))).filter(
-            CourseCompletion.course_id == str(c.id)).scalar() or 0
+    for title, content_id, bucket, users_completed in rows:
+        uc = users_completed or 0
         data.append({
-            "course_title": c.title, "bucket": c.bucket or "N/A",
-            "users_completed": comp_count, "total_users": total_users,
-            "coverage_percent": round(comp_count/total_users*100, 1),
+            "course_title": title, "bucket": bucket or "N/A",
+            "users_completed": uc, "total_users": total_users,
+            "coverage_percent": round(uc / total_users * 100, 1),
         })
     data.sort(key=lambda x: -x["coverage_percent"])
     return {"report_name": "Training Coverage", "data": data, "total": len(data)}
@@ -427,20 +507,43 @@ async def attendance_tracker_excel(db: Session = Depends(get_db)):
 
 @router.get("/training/training-master")
 async def training_master(db: Session = Depends(get_db)):
-    """Master training report - users × courses matrix."""
-    users = db.query(User).filter(User.category != 'Admin').all()
+    """Master training report - users x courses matrix."""
+    comp_sub = db.query(
+        CourseCompletion.user_email,
+        func.count(CourseCompletion.id).label('courses_completed'),
+        func.sum(func.coalesce(CourseCompletion.time_spent_seconds, 0)).label('total_time'),
+        func.avg(CourseCompletion.score).label('avg_score')
+    ).group_by(CourseCompletion.user_email).subquery()
+
+    quiz_sub = db.query(
+        QuizSubmission.user_email,
+        func.count(QuizSubmission.id).label('quizzes_taken')
+    ).group_by(QuizSubmission.user_email).subquery()
+
+    rows = db.query(
+        User,
+        comp_sub.c.courses_completed,
+        comp_sub.c.total_time,
+        comp_sub.c.avg_score,
+        quiz_sub.c.quizzes_taken
+    ).outerjoin(
+        comp_sub, User.email == comp_sub.c.user_email
+    ).outerjoin(
+        quiz_sub, User.email == quiz_sub.c.user_email
+    ).filter(User.category != 'Admin').all()
+
     data = []
-    for u in users:
-        comps = db.query(CourseCompletion).filter(CourseCompletion.user_email == u.email).all()
-        total_time = sum(c.time_spent_seconds or 0 for c in comps)
-        avg_score = sum(c.score or 0 for c in comps) / len(comps) if comps else 0
-        quizzes = db.query(func.count(QuizSubmission.id)).filter(QuizSubmission.user_email == u.email).scalar() or 0
+    for u, courses_completed, total_time, avg_score, quizzes_taken in rows:
+        cc = courses_completed or 0
+        qt = quizzes_taken or 0
+        tt = total_time or 0
+        avs = float(avg_score) if avg_score else 0
         data.append({
             "name": u.name, "email": u.email, "role": u.role or "N/A",
             "store": u.store or "Unassigned",
-            "courses_completed": len(comps), "quizzes_taken": quizzes,
-            "avg_score": round(avg_score, 1),
-            "total_learning_hours": round(total_time/3600, 1),
+            "courses_completed": cc, "quizzes_taken": qt,
+            "avg_score": round(avs, 1),
+            "total_learning_hours": round(tt / 3600, 1),
             "xp_points": u.xp_points or 0,
         })
     data.sort(key=lambda x: -x["courses_completed"])
@@ -454,18 +557,29 @@ async def training_master_excel(db: Session = Depends(get_db)):
 @router.get("/training/ilt-report")
 async def ilt_report(db: Session = Depends(get_db)):
     """Instructor-Led Training (scheduled exams as ILT proxy)."""
-    exams = db.query(ScheduledExam).order_by(desc(ScheduledExam.created_at)).all()
+    att_sub = db.query(
+        ExamAttendance.exam_id,
+        func.count(ExamAttendance.id).label('attended')
+    ).filter(
+        ExamAttendance.marked_present == True
+    ).group_by(ExamAttendance.exam_id).subquery()
+
+    rows = db.query(
+        ScheduledExam, att_sub.c.attended
+    ).outerjoin(
+        att_sub, ScheduledExam.id == att_sub.c.exam_id
+    ).order_by(desc(ScheduledExam.created_at)).all()
+
     data = []
-    for e in exams:
-        att_count = db.query(func.count(ExamAttendance.id)).filter(
-            ExamAttendance.exam_id == e.id, ExamAttendance.marked_present == True).scalar() or 0
+    for e, att_count in rows:
+        ac = att_count or 0
         total_assigned = len(e.assigned_users or [])
         data.append({
             "title": e.title, "exam_date": e.exam_date or "N/A",
             "location": e.location or "N/A", "status": e.status or "N/A",
             "supervisor": e.supervisor_name or e.supervisor_email or "N/A",
-            "assigned_users": total_assigned, "attended": att_count,
-            "attendance_rate": round(att_count/total_assigned*100, 1) if total_assigned else 0,
+            "assigned_users": total_assigned, "attended": ac,
+            "attendance_rate": round(ac / total_assigned * 100, 1) if total_assigned else 0,
             "passing_score": e.passing_score or 70,
         })
     return {"report_name": "ILT Report", "data": data, "total": len(data)}
@@ -483,19 +597,35 @@ async def ilt_report_excel(db: Session = Depends(get_db)):
 @router.get("/career/summary")
 async def career_summary(db: Session = Depends(get_db)):
     """Career progression summary per user."""
-    users = db.query(User).filter(User.category != 'Admin').all()
+    cp_sub = db.query(
+        CourseCompletion.user_email,
+        func.count(CourseCompletion.id).label('career_modules_completed')
+    ).filter(
+        CourseCompletion.learning_path_type == 'career_progression'
+    ).group_by(CourseCompletion.user_email).subquery()
+
+    node_sub = db.query(
+        UserNodeProgress.user_email,
+        func.count(UserNodeProgress.id).label('nodes_in_progress')
+    ).group_by(UserNodeProgress.user_email).subquery()
+
+    rows = db.query(
+        User,
+        cp_sub.c.career_modules_completed,
+        node_sub.c.nodes_in_progress
+    ).outerjoin(
+        cp_sub, User.email == cp_sub.c.user_email
+    ).outerjoin(
+        node_sub, User.email == node_sub.c.user_email
+    ).filter(User.category != 'Admin').all()
+
     data = []
-    for u in users:
-        cp_completions = db.query(func.count(CourseCompletion.id)).filter(
-            CourseCompletion.user_email == u.email, CourseCompletion.learning_path_type == 'career_progression'
-        ).scalar() or 0
-        node_progress = db.query(func.count(UserNodeProgress.id)).filter(
-            UserNodeProgress.user_email == u.email).scalar() or 0
+    for u, career_modules, nodes in rows:
         data.append({
             "name": u.name, "email": u.email, "current_role": u.role or "N/A",
             "store": u.store or "Unassigned",
-            "career_modules_completed": cp_completions,
-            "nodes_in_progress": node_progress, "xp_points": u.xp_points or 0,
+            "career_modules_completed": career_modules or 0,
+            "nodes_in_progress": nodes or 0, "xp_points": u.xp_points or 0,
         })
     data.sort(key=lambda x: -x["career_modules_completed"])
     return {"report_name": "Career Progression Summary", "data": data, "total": len(data)}
@@ -508,18 +638,41 @@ async def career_summary_excel(db: Session = Depends(get_db)):
 @router.get("/career/module-report")
 async def module_report(db: Session = Depends(get_db)):
     """Career progression by module/bucket."""
-    buckets = db.query(CourseBucket).filter(CourseBucket.learning_path_type == 'career_progression').all()
+    # Single query: CourseBucket LEFT JOIN Content on bucket_id, LEFT JOIN CourseCompletion on course_id
+    # GROUP BY bucket fields
+    content_sub = db.query(
+        Content.bucket_id,
+        func.count(Content.id).label('total_courses')
+    ).group_by(Content.bucket_id).subquery()
+
+    # Completions for content items within each bucket
+    comp_sub = db.query(
+        Content.bucket_id,
+        func.count(CourseCompletion.id).label('total_completions')
+    ).join(
+        CourseCompletion, CourseCompletion.course_id == Content.id
+    ).group_by(Content.bucket_id).subquery()
+
+    rows = db.query(
+        CourseBucket.name,
+        CourseBucket.id,
+        CourseBucket.is_linear,
+        content_sub.c.total_courses,
+        comp_sub.c.total_completions
+    ).outerjoin(
+        content_sub, CourseBucket.id == content_sub.c.bucket_id
+    ).outerjoin(
+        comp_sub, CourseBucket.id == comp_sub.c.bucket_id
+    ).filter(
+        CourseBucket.learning_path_type == 'career_progression'
+    ).all()
+
     data = []
-    for b in buckets:
-        contents = db.query(Content).filter(Content.bucket_id == b.id).all()
-        total_comps = 0
-        for c in contents:
-            total_comps += db.query(func.count(CourseCompletion.id)).filter(
-                CourseCompletion.course_id == str(c.id)).scalar() or 0
+    for name, bucket_id, is_linear, total_courses, total_completions in rows:
         data.append({
-            "module_name": b.name, "module_id": b.id,
-            "total_courses": len(contents), "total_completions": total_comps,
-            "is_linear": "Yes" if b.is_linear else "No",
+            "module_name": name, "module_id": bucket_id,
+            "total_courses": total_courses or 0, "total_completions": total_completions or 0,
+            "is_linear": "Yes" if is_linear else "No",
         })
     return {"report_name": "Module Report", "data": data, "total": len(data)}
 
@@ -556,17 +709,32 @@ async def node_progress_excel(db: Session = Depends(get_db)):
 @router.get("/exams/overview")
 async def exams_overview(db: Session = Depends(get_db)):
     """All scheduled exams with stats."""
-    exams = db.query(ScheduledExam).order_by(desc(ScheduledExam.created_at)).all()
+    sub_stats = db.query(
+        AssessmentSubmission.assessment_id,
+        func.count(AssessmentSubmission.id).label('total_submissions'),
+        func.sum(case(
+            (AssessmentSubmission.passed == True, 1),
+            else_=0
+        )).label('passed'),
+        func.avg(AssessmentSubmission.score_percent).label('avg_score')
+    ).group_by(AssessmentSubmission.assessment_id).subquery()
+
+    rows = db.query(
+        ScheduledExam, sub_stats.c.total_submissions, sub_stats.c.passed, sub_stats.c.avg_score
+    ).outerjoin(
+        sub_stats, ScheduledExam.id == sub_stats.c.assessment_id
+    ).order_by(desc(ScheduledExam.created_at)).all()
+
     data = []
-    for e in exams:
-        subs = db.query(AssessmentSubmission).filter(AssessmentSubmission.assessment_id == e.id).all()
-        passed = sum(1 for s in subs if s.passed)
+    for e, total_subs, passed, avg_score in rows:
+        ts = total_subs or 0
+        pc = passed or 0
         data.append({
             "title": e.title, "exam_date": e.exam_date or "N/A",
             "status": e.status or "N/A", "location": e.location or "N/A",
-            "total_submissions": len(subs), "passed": passed,
-            "pass_rate": round(passed/len(subs)*100, 1) if subs else 0,
-            "avg_score": round(sum(s.score_percent or 0 for s in subs)/len(subs), 1) if subs else 0,
+            "total_submissions": ts, "passed": pc,
+            "pass_rate": round(pc / ts * 100, 1) if ts else 0,
+            "avg_score": round(float(avg_score or 0), 1),
             "time_limit": e.time_limit_minutes or 30,
         })
     return {"report_name": "Exams Overview", "data": data, "total": len(data)}
@@ -579,13 +747,20 @@ async def exams_overview_excel(db: Session = Depends(get_db)):
 @router.get("/exams/quiz-results")
 async def quiz_results(db: Session = Depends(get_db)):
     """All quiz submission results."""
-    subs = db.query(QuizSubmission).order_by(desc(QuizSubmission.submitted_at)).limit(2000).all()
+    # QuizSubmission.passed is a @property, not a column.
+    # We join with Quiz to get passing_score and compute passed in Python.
+    rows = db.query(
+        QuizSubmission, Quiz.passing_score
+    ).outerjoin(
+        Quiz, QuizSubmission.quiz_id == Quiz.id
+    ).order_by(desc(QuizSubmission.submitted_at)).limit(2000).all()
+
     data = [{
         "user_name": s.user_name, "user_email": s.user_email or "N/A",
         "quiz_id": s.quiz_id, "score": round(s.score or 0, 1),
-        "passed": "Yes" if s.passed else "No",
+        "passed": "Yes" if (s.score or 0) >= (passing_score if passing_score is not None else 70) else "No",
         "submitted_at": s.submitted_at.strftime('%Y-%m-%d %H:%M') if s.submitted_at else "",
-    } for s in subs]
+    } for s, passing_score in rows]
     return {"report_name": "Quiz Results", "data": data, "total": len(data)}
 
 @router.get("/exams/quiz-results/excel")
@@ -596,12 +771,16 @@ async def quiz_results_excel(db: Session = Depends(get_db)):
 @router.get("/exams/exam-attendance")
 async def exam_attendance_report(db: Session = Depends(get_db)):
     """Exam attendance per scheduled exam."""
-    records = db.query(ExamAttendance).order_by(desc(ExamAttendance.marked_at)).all()
+    rows = db.query(
+        ExamAttendance, ScheduledExam.title
+    ).outerjoin(
+        ScheduledExam, ExamAttendance.exam_id == ScheduledExam.id
+    ).order_by(desc(ExamAttendance.marked_at)).all()
+
     data = []
-    for r in records:
-        exam = db.query(ScheduledExam).filter(ScheduledExam.id == r.exam_id).first()
+    for r, exam_title in rows:
         data.append({
-            "exam_title": exam.title if exam else r.exam_id,
+            "exam_title": exam_title if exam_title else r.exam_id,
             "user_name": r.user_name or r.user_email, "user_email": r.user_email,
             "present": "Yes" if r.marked_present else "No",
             "started_exam": "Yes" if r.started_exam else "No",
@@ -647,14 +826,25 @@ async def submission_history_excel(db: Session = Depends(get_db)):
 @router.get("/rewards/points-overview")
 async def points_overview(db: Session = Depends(get_db)):
     """Points/XP overview across all users."""
-    users = db.query(User).filter(User.category != 'Admin', User.xp_points > 0).order_by(desc(User.xp_points)).all()
+    comp_sub = db.query(
+        CourseCompletion.user_email,
+        func.count(CourseCompletion.id).label('courses_completed')
+    ).group_by(CourseCompletion.user_email).subquery()
+
+    rows = db.query(
+        User, comp_sub.c.courses_completed
+    ).outerjoin(
+        comp_sub, User.email == comp_sub.c.user_email
+    ).filter(
+        User.category != 'Admin', User.xp_points > 0
+    ).order_by(desc(User.xp_points)).all()
+
     data = [{
         "name": u.name, "email": u.email, "role": u.role or "N/A",
         "store": u.store or "Unassigned", "xp_points": u.xp_points or 0,
-        "courses_completed": db.query(func.count(CourseCompletion.id)).filter(
-            CourseCompletion.user_email == u.email).scalar() or 0,
+        "courses_completed": courses_completed or 0,
         "rank": idx + 1,
-    } for idx, u in enumerate(users)]
+    } for idx, (u, courses_completed) in enumerate(rows)]
     return {"report_name": "Points Overview Report", "data": data, "total": len(data)}
 
 @router.get("/rewards/points-overview/excel")
@@ -682,11 +872,30 @@ async def points_earned_excel(db: Session = Depends(get_db)):
 @router.get("/rewards/leaderboard")
 async def leaderboard_report(db: Session = Depends(get_db)):
     """Full leaderboard ranking."""
-    users = db.query(User).filter(User.category != 'Admin').all()
+    comp_sub = db.query(
+        CourseCompletion.user_email,
+        func.count(CourseCompletion.id).label('courses_completed')
+    ).group_by(CourseCompletion.user_email).subquery()
+
+    quiz_sub = db.query(
+        QuizSubmission.user_email,
+        func.count(QuizSubmission.id).label('quizzes_taken')
+    ).group_by(QuizSubmission.user_email).subquery()
+
+    rows = db.query(
+        User,
+        comp_sub.c.courses_completed,
+        quiz_sub.c.quizzes_taken
+    ).outerjoin(
+        comp_sub, User.email == comp_sub.c.user_email
+    ).outerjoin(
+        quiz_sub, User.email == quiz_sub.c.user_email
+    ).filter(User.category != 'Admin').all()
+
     board = []
-    for u in users:
-        comps = db.query(func.count(CourseCompletion.id)).filter(CourseCompletion.user_email == u.email).scalar() or 0
-        quizzes = db.query(func.count(QuizSubmission.id)).filter(QuizSubmission.user_email == u.email).scalar() or 0
+    for u, courses_completed, quizzes_taken in rows:
+        comps = courses_completed or 0
+        quizzes = quizzes_taken or 0
         board.append({
             "name": u.name, "email": u.email, "role": u.role or "N/A",
             "store": u.store or "Unassigned",
@@ -707,24 +916,33 @@ async def leaderboard_excel(db: Session = Depends(get_db)):
 @router.get("/rewards/xp-summary")
 async def xp_summary(db: Session = Depends(get_db)):
     """XP distribution summary by role and store."""
-    users = db.query(User).filter(User.category != 'Admin').all()
-    role_xp, store_xp = {}, {}
-    for u in users:
-        r = u.role or 'N/A'
-        s = u.store or 'Unassigned'
-        role_xp.setdefault(r, {"total_xp": 0, "count": 0})
-        store_xp.setdefault(s, {"total_xp": 0, "count": 0})
-        role_xp[r]["total_xp"] += u.xp_points or 0
-        role_xp[r]["count"] += 1
-        store_xp[s]["total_xp"] += u.xp_points or 0
-        store_xp[s]["count"] += 1
+    role_rows = db.query(
+        func.coalesce(User.role, 'N/A').label('value'),
+        func.sum(func.coalesce(User.xp_points, 0)).label('total_xp'),
+        func.count(User.id).label('user_count')
+    ).filter(User.category != 'Admin').group_by(
+        func.coalesce(User.role, 'N/A')
+    ).all()
+
+    store_rows = db.query(
+        func.coalesce(User.store, 'Unassigned').label('value'),
+        func.sum(func.coalesce(User.xp_points, 0)).label('total_xp'),
+        func.count(User.id).label('user_count')
+    ).filter(User.category != 'Admin').group_by(
+        func.coalesce(User.store, 'Unassigned')
+    ).all()
+
     data = []
-    for k, v in role_xp.items():
-        data.append({"dimension": "Role", "value": k, "total_xp": v["total_xp"],
-                      "user_count": v["count"], "avg_xp": round(v["total_xp"]/v["count"], 1) if v["count"] else 0})
-    for k, v in store_xp.items():
-        data.append({"dimension": "Store", "value": k, "total_xp": v["total_xp"],
-                      "user_count": v["count"], "avg_xp": round(v["total_xp"]/v["count"], 1) if v["count"] else 0})
+    for value, total_xp, user_count in role_rows:
+        tx = int(total_xp or 0)
+        uc = user_count or 0
+        data.append({"dimension": "Role", "value": value, "total_xp": tx,
+                      "user_count": uc, "avg_xp": round(tx / uc, 1) if uc else 0})
+    for value, total_xp, user_count in store_rows:
+        tx = int(total_xp or 0)
+        uc = user_count or 0
+        data.append({"dimension": "Store", "value": value, "total_xp": tx,
+                      "user_count": uc, "avg_xp": round(tx / uc, 1) if uc else 0})
     return {"report_name": "XP Summary", "data": data, "total": len(data)}
 
 @router.get("/rewards/xp-summary/excel")

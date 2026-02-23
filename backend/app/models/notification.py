@@ -205,3 +205,98 @@ class CourseFeedback(Base):
             "comment": self.comment,
             "created_at": format_dt(self.created_at),
         }
+
+
+class CourseSurvey(Base):
+    """
+    Customizable survey template created by Super Admin for a course.
+    Contains a list of questions with types: rating, mcq, text, name.
+    Each question can be mandatory or optional.
+    """
+    __tablename__ = "course_surveys"
+
+    id = Column(String(255), primary_key=True)
+    course_id = Column(String(255), nullable=False, unique=True)
+    title = Column(String(500), default="Course Feedback Survey")
+    description = Column(Text)
+    is_active = Column(Boolean, default=True)
+    # questions: list of {id, type, label, options, mandatory}
+    # type: 'rating' | 'mcq' | 'text' | 'name'
+    # options: list of strings (for mcq only)
+    questions = Column(JSON, default=[])
+    created_by = Column(String(255))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_survey_course', 'course_id'),
+        Index('idx_survey_active', 'is_active'),
+    )
+
+    def __repr__(self):
+        return f"<CourseSurvey {self.course_id}>"
+
+    def to_dict(self):
+        def format_dt(dt):
+            if not dt:
+                return None
+            iso = dt.isoformat()
+            if dt.tzinfo is None and not iso.endswith("Z") and "+" not in iso:
+                return f"{iso}Z"
+            return iso
+
+        return {
+            "id": self.id,
+            "course_id": self.course_id,
+            "title": self.title,
+            "description": self.description,
+            "is_active": self.is_active,
+            "questions": self.questions or [],
+            "created_by": self.created_by,
+            "created_at": format_dt(self.created_at),
+            "updated_at": format_dt(self.updated_at),
+        }
+
+
+class SurveyResponse(Base):
+    """
+    A user's response to a CourseSurvey.
+    answers: {question_id: answer_value}
+    """
+    __tablename__ = "survey_responses"
+
+    id = Column(String(255), primary_key=True)
+    survey_id = Column(String(255), nullable=False)
+    course_id = Column(String(255), nullable=False)
+    user_email = Column(String(255), nullable=False)
+    user_name = Column(String(255))
+    answers = Column(JSON, default={})  # {question_id: answer}
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_survey_response_survey', 'survey_id'),
+        Index('idx_survey_response_course', 'course_id'),
+        Index('idx_survey_response_user', 'user_email'),
+    )
+
+    def __repr__(self):
+        return f"<SurveyResponse {self.user_email} - {self.course_id}>"
+
+    def to_dict(self):
+        def format_dt(dt):
+            if not dt:
+                return None
+            iso = dt.isoformat()
+            if dt.tzinfo is None and not iso.endswith("Z") and "+" not in iso:
+                return f"{iso}Z"
+            return iso
+
+        return {
+            "id": self.id,
+            "survey_id": self.survey_id,
+            "course_id": self.course_id,
+            "user_email": self.user_email,
+            "user_name": self.user_name,
+            "answers": self.answers or {},
+            "created_at": format_dt(self.created_at),
+        }

@@ -7,7 +7,13 @@ import json
 import uuid
 import shutil
 import numpy as np
-from typing import Dict, Any, List
+import base64
+from typing import Dict, Any, List, Optional
+import PyPDF2
+from docx import Document as DocxDocument
+from pptx import Presentation
+import pandas as pd
+import io
 
 from fastapi import APIRouter, Depends, HTTPException, Body, Form, UploadFile, File, Request
 from sqlalchemy.orm import Session
@@ -310,6 +316,133 @@ async def get_suggested_questions(db: Session = Depends(get_db)):
         logger.warning(f"Could not fetch courses for suggestions: {e}")
     
     return {"suggestions": suggestions[:8]}
+
+@router.post("/generate-quiz")
+async def generate_custom_quiz(
+    text: Optional[str] = Form(""),
+    file: Optional[UploadFile] = File(None),
+    num_questions: int = Form(5),
+    difficulty: str = Form("medium")
+):
+    """
+    Generate multiple-choice quiz questions from a custom text description or uploaded document.
+    Used by admins to manually generate quizzes for videos lacking audio.
+    """
+    try:
+        extracted_text = text or ""
+        
+        if file:
+            content = await file.read()
+            filename = file.filename.lower()
+            
+            if filename.endswith('.pdf'):
+                import io
+                pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
+                text_chunks = [page.extract_text() for page in pdf_reader.pages if page.extract_text()]
+                extracted_text += "\n" + "\n".join(text_chunks)
+            elif filename.endswith('.docx') or filename.endswith('.doc'):
+                import io
+                doc = DocxDocument(io.BytesIO(content))
+                text_chunks = [para.text for para in doc.paragraphs if para.text]
+                extracted_text += "\n" + "\n".join(text_chunks)
+            elif filename.endswith('.pptx') or filename.endswith('.ppt'):
+                import io
+                prs = Presentation(io.BytesIO(content))
+                text_chunks = []
+                for slide in prs.slides:
+                    for shape in slide.shapes:
+                        if hasattr(shape, "text") and shape.text:
+                            text_chunks.append(shape.text)
+                extracted_text += "\n" + "\n".join(text_chunks)
+            elif filename.endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                # Use Groq Vision to transcribe the image text natively!
+                try:
+                    base64_img = base64.b64encode(content).decode('utf-8')
+                    fmt = "image/jpeg"
+                    if filename.endswith(".png"): fmt = "image/png"
+                    elif filename.endswith(".webp"): fmt = "image/webp"
+                    
+                    client = Groq(api_key=settings.GROQ_API_KEY)
+                    vision_res = client.chat.completions.create(
+                        model="llama-3.2-11b-vision-preview",
+                        messages=[{
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": "Transcribe all visible strings and textual data explicitly in plain-text from this image without introductory dialogue."},
+                                {"type": "image_url", "image_url": {"url": f"data:{fmt};base64,{base64_img}"}}
+                            ]
+                        }],
+                        temperature=0.1,
+                        max_tokens=6000
+                    )
+                    extracted_text += "\n" + vision_res.choices[0].message.content.strip()
+                except Exception as ve:
+                    logger.error(f"Groq Vision Extraction Error: {ve}")
+                    pass
+            else:
+                # Assume raw text string
+                try:
+                    extracted_text += "\n" + content.decode('utf-8')
+                except:
+                    pass
+
+        if not extracted_text.strip():
+            return {"status": "error", "error": "No valid text provided or extracted from file."}
+
+        service = AIService()
+        questions = await service.generate_quiz_from_text(extracted_text.strip(), num_questions, difficulty)
+        return {"status": "success", "questions": questions}
+    except Exception as e:
+        logger.error(f"Manual Quiz Generation Error: {e}")
+        return {"status": "error", "error": str(e)}
+
+@router.post("/parse-bulk-quiz")
+async def parse_bulk_quiz(
+    file: UploadFile = File(...)
+):
+    """
+    Parse a CSV or Excel file containing raw quiz structured columns.
+    Returns JSON array of questions to be loaded into the Quiz Editor UI.
+    Requires formats mapping standard Question | Opt1 | Opt2 | Opt3 | Opt4 | AnswerIdx
+    """
+    try:
+        content = await file.read()
+        filename = file.filename.lower()
+        
+        if filename.endswith('.csv'):
+            df = pd.read_csv(io.BytesIO(content))
+        elif filename.endswith('.xlsx') or filename.endswith('.xls'):
+            df = pd.read_excel(io.BytesIO(content))
+        else:
+            return {"status": "error", "error": "Invalid format, requires .csv or .xlsx"}
+            
+        questions = []
+        for index, row in df.iterrows():
+            if pd.isna(row.iloc[0]): continue # skip empty
+            try:
+                question = str(row.iloc[0]).strip()
+                opts = [
+                    str(row.iloc[1]).strip(),
+                    str(row.iloc[2]).strip(),
+                    str(row.iloc[3]).strip(),
+                    str(row.iloc[4]).strip()
+                ]
+                ans_idx = int(row.iloc[5]) - 1
+                
+                if 0 <= ans_idx < len(opts):
+                    questions.append({
+                        "question": question,
+                        "options": opts,
+                        "answer": opts[ans_idx]
+                    })
+            except Exception as e:
+                logger.warning(f"Error parsing row {index}: {e}")
+                
+        return {"status": "success", "questions": questions}
+
+    except Exception as e:
+        logger.error(f"Bulk Parse Quiz Error: {e}")
+        return {"status": "error", "error": str(e)}
 
 
 # ===========================================

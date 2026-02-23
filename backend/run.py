@@ -22,10 +22,12 @@ if __name__ == "__main__":
     print(f"Starting server on {host}:{port} with verbose logging enabled...")
     
     # Run with uvicorn
+    # Note: reload=True adds overhead. Set DEV_RELOAD=true env var to enable hot reload.
+    enable_reload = os.environ.get("DEV_RELOAD", "false").lower() == "true"
     uvicorn.run(
         "run:app",
         host=host,
         port=port,
-        reload=True,
+        reload=enable_reload,
         log_level="info"
     )
