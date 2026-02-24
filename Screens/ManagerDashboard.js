@@ -49,6 +49,7 @@ import ExamHistoryModal from '../Components/ExamHistoryModal'; // [NEW] Exam His
 import RoleplayHistoryModal from '../Components/RoleplayHistoryModal'; // [NEW] Roleplay History
 import ModeSwitcher from '../Components/ModeSwitcher'; // [NEW] Mode Switcher
 import ModeIndicator from '../Components/ModeIndicator'; // [NEW] Mode Indicator
+import ImpactUserPickerModal from '../Components/ImpactUserPickerModal';
 
 
 
@@ -2042,178 +2043,14 @@ export default function ManagerDashboard({ route, navigation }) {
             </Modal >
 
             {/* AFFECTED USERS MODAL - for selecting users to impact */}
-            <Modal visible={showAffectedUsersModal} animationType="slide" transparent={true}>
-                <View style={styles.affectedUsersModalOverlay}>
-                    <View style={styles.affectedUsersModalContent}>
-                        {/* Header */}
-                        <View style={styles.affectedUsersModalHeader}>
-                            <View style={styles.affectedUsersModalTitleRow}>
-                                <MaterialIcons name="people" size={24} color="#3B82F6" />
-                                <Text style={styles.affectedUsersModalTitle}>Select Users to Impact</Text>
-                            </View>
-                            <TouchableOpacity onPress={() => setShowAffectedUsersModal(false)}>
-                                <MaterialIcons name="close" size={24} color="#6B7280" />
-                            </TouchableOpacity>
-                        </View>
-
-                        {/* Impact Mode Indicator */}
-                        <View style={[
-                            styles.impactModeIndicator,
-                            impactExisting ? styles.impactModeOn : styles.impactModeOff
-                        ]}>
-                            <MaterialIcons
-                                name={impactExisting ? 'warning' : 'check-circle'}
-                                size={18}
-                                color={impactExisting ? '#DC2626' : '#10B981'}
-                            />
-                            <Text style={[
-                                styles.impactModeText,
-                                impactExisting ? styles.impactModeTextOn : styles.impactModeTextOff
-                            ]}>
-                                {impactExisting
-                                    ? `${selectedImpactedUsers.size} users selected to be impacted`
-                                    : 'No users will be affected'}
-                            </Text>
-                        </View>
-
-                        {/* Select All / None Buttons */}
-                        {impactExisting && affectedUsers?.completed_users?.length > 0 && (
-                            <View style={styles.selectAllContainer}>
-                                <TouchableOpacity style={styles.selectAllBtn} onPress={selectAllCompletedUsers}>
-                                    <MaterialIcons name="select-all" size={16} color="#3B82F6" />
-                                    <Text style={styles.selectAllBtnText}>Select All</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity style={styles.selectNoneBtn} onPress={deselectAllUsers}>
-                                    <MaterialIcons name="deselect" size={16} color="#6B7280" />
-                                    <Text style={styles.selectNoneBtnText}>Select None</Text>
-                                </TouchableOpacity>
-                            </View>
-                        )}
-
-                        <ScrollView style={styles.affectedUsersScrollView}>
-                            {/* Completed Users Section */}
-                            {affectedUsers?.completed_users?.length > 0 && (
-                                <View style={styles.affectedUsersSection}>
-                                    <View style={styles.affectedUsersSectionHeader}>
-                                        <View style={[styles.sectionIconBadge, { backgroundColor: impactExisting ? '#FEE2E2' : '#D1FAE5' }]}>
-                                            <MaterialIcons
-                                                name={impactExisting ? 'warning' : 'check-circle'}
-                                                size={16}
-                                                color={impactExisting ? '#DC2626' : '#10B981'}
-                                            />
-                                        </View>
-                                        <View style={{ flex: 1 }}>
-                                            <Text style={styles.affectedUsersSectionTitle}>
-                                                Users at 100% ({affectedUsers.completed_users.length})
-                                            </Text>
-                                            <Text style={styles.affectedUsersSectionSubtitle}>
-                                                {impactExisting ? 'Select users who must complete' : 'These users will NOT be affected'}
-                                            </Text>
-                                        </View>
-                                    </View>
-                                    {affectedUsers.completed_users.slice(0, 50).map((user, index) => (
-                                        <TouchableOpacity
-                                            key={user.email || index}
-                                            style={styles.affectedUserItem}
-                                            onPress={() => impactExisting && toggleUserImpact(user.email)}
-                                            disabled={!impactExisting}
-                                        >
-                                            {impactExisting && (
-                                                <MaterialIcons
-                                                    name={selectedImpactedUsers.has(user.email) ? 'check-box' : 'check-box-outline-blank'}
-                                                    size={22}
-                                                    color={selectedImpactedUsers.has(user.email) ? '#3B82F6' : '#9CA3AF'}
-                                                />
-                                            )}
-                                            <View style={styles.affectedUserAvatar}>
-                                                <Text style={styles.affectedUserAvatarText}>
-                                                    {(user.name || user.email || '?').charAt(0).toUpperCase()}
-                                                </Text>
-                                            </View>
-                                            <View style={styles.affectedUserDetails}>
-                                                <Text style={styles.affectedUserName}>{user.name || user.email}</Text>
-                                                <Text style={styles.affectedUserMeta}>
-                                                    {user.role || 'No Role'} • {user.store || 'No Store'}
-                                                </Text>
-                                            </View>
-                                            <View style={[
-                                                styles.affectedUserBadge,
-                                                { backgroundColor: (impactExisting && selectedImpactedUsers.has(user.email)) ? '#FEE2E2' : '#D1FAE5' }
-                                            ]}>
-                                                <Text style={[
-                                                    styles.affectedUserBadgeText,
-                                                    { color: (impactExisting && selectedImpactedUsers.has(user.email)) ? '#DC2626' : '#10B981' }
-                                                ]}>
-                                                    {(impactExisting && selectedImpactedUsers.has(user.email)) ? 'Impacted' : 'Safe'}
-                                                </Text>
-                                            </View>
-                                        </TouchableOpacity>
-                                    ))}
-                                </View>
-                            )}
-
-                            {/* In Progress Users Section */}
-                            {affectedUsers?.in_progress_users?.length > 0 && (
-                                <View style={styles.affectedUsersSection}>
-                                    <View style={styles.affectedUsersSectionHeader}>
-                                        <View style={[styles.sectionIconBadge, { backgroundColor: '#FEF3C7' }]}>
-                                            <MaterialIcons name="schedule" size={16} color="#D97706" />
-                                        </View>
-                                        <View>
-                                            <Text style={styles.affectedUsersSectionTitle}>
-                                                In Progress ({affectedUsers.in_progress_users.length})
-                                            </Text>
-                                            <Text style={styles.affectedUsersSectionSubtitle}>
-                                                These users will always need to complete new courses
-                                            </Text>
-                                        </View>
-                                    </View>
-                                    {affectedUsers.in_progress_users.slice(0, 20).map((user, index) => (
-                                        <View key={user.email || index} style={styles.affectedUserItem}>
-                                            <View style={styles.affectedUserAvatar}>
-                                                <Text style={styles.affectedUserAvatarText}>
-                                                    {(user.name || user.email || '?').charAt(0).toUpperCase()}
-                                                </Text>
-                                            </View>
-                                            <View style={styles.affectedUserDetails}>
-                                                <Text style={styles.affectedUserName}>{user.name || user.email}</Text>
-                                                <Text style={styles.affectedUserMeta}>
-                                                    {user.role || 'No Role'} • {user.store || 'No Store'}
-                                                </Text>
-                                            </View>
-                                            <View style={styles.progressBadge}>
-                                                <Text style={styles.progressBadgeText}>
-                                                    {user.progress_percent || 0}%
-                                                </Text>
-                                            </View>
-                                        </View>
-                                    ))}
-                                </View>
-                            )}
-
-                            {/* Empty State */}
-                            {(!affectedUsers?.completed_users?.length && !affectedUsers?.in_progress_users?.length) && (
-                                <View style={styles.emptyAffectedUsers}>
-                                    <MaterialIcons name="info-outline" size={48} color="#D1D5DB" />
-                                    <Text style={styles.emptyAffectedUsersText}>
-                                        No users have started this learning path yet
-                                    </Text>
-                                </View>
-                            )}
-                        </ScrollView>
-
-                        {/* Footer */}
-                        <View style={styles.affectedUsersModalFooter}>
-                            <TouchableOpacity
-                                style={styles.affectedUsersCloseBtn}
-                                onPress={() => setShowAffectedUsersModal(false)}
-                            >
-                                <Text style={styles.affectedUsersCloseBtnText}>Close</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
+            <ImpactUserPickerModal
+                visible={showAffectedUsersModal}
+                onClose={() => setShowAffectedUsersModal(false)}
+                completedUsers={affectedUsers?.completed_users || []}
+                inProgressUsers={affectedUsers?.in_progress_users || []}
+                preSelectedEmails={selectedImpactedUsers}
+                onSave={(emailsSet) => setSelectedImpactedUsers(emailsSet)}
+            />
 
             {/* QUIZ CREATION MODAL */}
             <QuizCreationModal
