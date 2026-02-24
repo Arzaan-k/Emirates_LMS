@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.config.database import get_db
 from app.core.dependencies import get_current_user, require_admin
+from app.core.access_filter import get_access_filter_context, should_include_user, check_access
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
@@ -37,16 +38,24 @@ def _day_date_range(d: date) -> Tuple[datetime, datetime]:
 # ==========================================
 
 @router.get("/dashboard")
-async def get_analytics_dashboard(db: Session = Depends(get_db)):
+async def get_analytics_dashboard(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Main analytics dashboard with overview metrics.
+    Results are filtered based on the current user's access grants.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Get access control context
+    access_context = get_access_filter_context(db, current_user)
+    accessible_emails = None if access_context.get('is_superadmin') else access_context.get('accessible_emails', set())
+
     repo = AnalyticsRepository(db)
-    
+
     try:
-        dashboard = repo.get_dashboard_metrics()
+        dashboard = repo.get_dashboard_metrics(accessible_emails=accessible_emails)
         return dashboard
     except Exception as e:
         logger.error(f"Dashboard fetch failed: {e}")
@@ -72,6 +81,7 @@ def get_calendar_month(
     year: int,
     month: int,
     db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     from collections import defaultdict
 
@@ -81,6 +91,10 @@ def get_calendar_month(
     from app.models.assessment import AssessmentSubmission
     from app.models.simulation import SimulationProgress
     from app.models.crm import AuditSubmission
+
+    # Access control: Verify current user can access the requested user's data
+    if not check_access(db, current_user.get('email'), user_email):
+        raise HTTPException(status_code=403, detail="You don't have access to this user's data")
 
     if month < 1 or month > 12:
         raise HTTPException(status_code=400, detail="Invalid month")
@@ -274,11 +288,16 @@ def get_calendar_day(
     user_email: str,
     day: str,
     db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     from app.models.video_progress import VideoProgress
     from app.models.quiz import QuizSubmission
     from app.models.tracking import CourseCompletion, AttendanceRecord
     from app.models.assessment import AssessmentSubmission
+
+    # Access control: Verify current user can access the requested user's data
+    if not check_access(db, current_user.get('email'), user_email):
+        raise HTTPException(status_code=403, detail="You don't have access to this user's data")
 
     try:
         d = date.fromisoformat(day)
@@ -503,16 +522,24 @@ def get_calendar_day(
 
 
 @router.get("/store-performance")
-async def get_store_performance(db: Session = Depends(get_db)):
+async def get_store_performance(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Store-wise performance analytics.
+    Results are filtered based on the current user's access grants.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Get access control context
+    access_context = get_access_filter_context(db, current_user)
+    accessible_emails = None if access_context.get('is_superadmin') else access_context.get('accessible_emails', set())
+
     repo = AnalyticsRepository(db)
-    
+
     try:
-        performance = repo.get_store_performance()
+        performance = repo.get_store_performance(accessible_emails=accessible_emails)
         return performance
     except Exception as e:
         logger.error(f"Store performance fetch failed: {e}")
@@ -522,17 +549,23 @@ async def get_store_performance(db: Session = Depends(get_db)):
 @router.get("/store/{store_name}")
 async def get_store_detail(
     store_name: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Detailed store analytics with tabs.
+    Results are filtered based on the current user's access grants.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Get access control context
+    access_context = get_access_filter_context(db, current_user)
+    accessible_emails = None if access_context.get('is_superadmin') else access_context.get('accessible_emails', set())
+
     repo = AnalyticsRepository(db)
-    
+
     try:
-        detail = repo.get_store_detail(store_name)
+        detail = repo.get_store_detail(store_name, accessible_emails=accessible_emails)
         return detail
     except Exception as e:
         logger.error(f"Store detail fetch failed: {e}")
@@ -540,16 +573,24 @@ async def get_store_detail(
 
 
 @router.get("/employee-performance")
-async def get_employee_performance(db: Session = Depends(get_db)):
+async def get_employee_performance(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Employee-wise performance analytics.
+    Results are filtered based on the current user's access grants.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Get access control context
+    access_context = get_access_filter_context(db, current_user)
+    accessible_emails = None if access_context.get('is_superadmin') else access_context.get('accessible_emails', set())
+
     repo = AnalyticsRepository(db)
-    
+
     try:
-        performance = repo.get_employee_performance()
+        performance = repo.get_employee_performance(accessible_emails=accessible_emails)
         return performance
     except Exception as e:
         logger.error(f"Employee performance fetch failed: {e}")
@@ -559,15 +600,21 @@ async def get_employee_performance(db: Session = Depends(get_db)):
 @router.get("/employee/{user_email}")
 async def get_employee_detail(
     user_email: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Detailed employee analytics with tabs.
+    Access control: User must have access to view the requested employee's data.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Access control: Verify current user can access the requested user's data
+    if not check_access(db, current_user.get('email'), user_email):
+        raise HTTPException(status_code=403, detail="You don't have access to this employee's data")
+
     repo = AnalyticsRepository(db)
-    
+
     try:
         detail = repo.get_employee_detail(user_email)
         return detail
@@ -650,16 +697,25 @@ async def get_ai_learning_insights(db: Session = Depends(get_db)):
 # ==========================================
 
 @router.get("/leaderboard")
-async def get_leaderboard(limit: int = 10, db: Session = Depends(get_db)):
+async def get_leaderboard(
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Get top learners leaderboard based on XP and completions.
+    Results are filtered based on the current user's access grants.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Get access control context
+    access_context = get_access_filter_context(db, current_user)
+    accessible_emails = None if access_context.get('is_superadmin') else access_context.get('accessible_emails', set())
+
     repo = AnalyticsRepository(db)
-    
+
     try:
-        leaderboard = repo.get_leaderboard(limit)
+        leaderboard = repo.get_leaderboard(limit, accessible_emails=accessible_emails)
         return leaderboard
     except Exception as e:
         logger.error(f"Leaderboard fetch failed: {e}")
@@ -667,16 +723,25 @@ async def get_leaderboard(limit: int = 10, db: Session = Depends(get_db)):
 
 
 @router.get("/leaderboard/global")
-async def get_global_leaderboard(limit: int = 10, db: Session = Depends(get_db)):
+async def get_global_leaderboard(
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Get company-wide XP leaderboard.
+    Results are filtered based on the current user's access grants.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Get access control context
+    access_context = get_access_filter_context(db, current_user)
+    accessible_emails = None if access_context.get('is_superadmin') else access_context.get('accessible_emails', set())
+
     repo = AnalyticsRepository(db)
-    
+
     try:
-        leaderboard = repo.get_leaderboard(limit)
+        leaderboard = repo.get_leaderboard(limit, accessible_emails=accessible_emails)
         return leaderboard
     except Exception as e:
         logger.error(f"Global leaderboard fetch failed: {e}")
@@ -687,17 +752,23 @@ async def get_global_leaderboard(limit: int = 10, db: Session = Depends(get_db))
 async def get_store_leaderboard(
     store_id: str,
     limit: int = 10,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Get store-specific leaderboard.
+    Results are filtered based on the current user's access grants.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Get access control context
+    access_context = get_access_filter_context(db, current_user)
+    accessible_emails = None if access_context.get('is_superadmin') else access_context.get('accessible_emails', set())
+
     repo = AnalyticsRepository(db)
-    
+
     try:
-        leaderboard = repo.get_store_leaderboard(store_id, limit)
+        leaderboard = repo.get_store_leaderboard(store_id, limit, accessible_emails=accessible_emails)
         return leaderboard
     except Exception as e:
         logger.error(f"Store leaderboard fetch failed: {e}")
@@ -711,15 +782,21 @@ async def get_store_leaderboard(
 @router.get("/profile/{user_email}")
 async def get_learning_profile(
     user_email: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Get a user's complete learning profile including skill scores and gaps.
+    Access control: User must have access to view the requested user's data.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Access control: Verify current user can access the requested user's data
+    if not check_access(db, current_user.get('email'), user_email):
+        raise HTTPException(status_code=403, detail="You don't have access to this user's data")
+
     repo = AnalyticsRepository(db)
-    
+
     try:
         profile = repo.get_user_learning_profile(user_email)
         skill_gaps_data = repo.get_skill_gaps(user_email)
@@ -749,15 +826,21 @@ async def get_learning_profile(
 @router.get("/skill-gaps/{user_email}")
 async def get_skill_gaps(
     user_email: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Get detailed skill gap analysis for a user.
+    Access control: User must have access to view the requested user's data.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Access control: Verify current user can access the requested user's data
+    if not check_access(db, current_user.get('email'), user_email):
+        raise HTTPException(status_code=403, detail="You don't have access to this user's data")
+
     repo = AnalyticsRepository(db)
-    
+
     try:
         gaps = repo.get_skill_gaps(user_email)
         return gaps
@@ -770,15 +853,21 @@ async def get_skill_gaps(
 async def get_recommendations(
     user_email: str,
     limit: int = 5,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Generate AI-powered personalized course recommendations.
+    Access control: User must have access to view the requested user's data.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Access control: Verify current user can access the requested user's data
+    if not check_access(db, current_user.get('email'), user_email):
+        raise HTTPException(status_code=403, detail="You don't have access to this user's data")
+
     repo = AnalyticsRepository(db)
-    
+
     try:
         recommendations = repo.get_recommendations(user_email, limit)
         return recommendations
@@ -1007,16 +1096,24 @@ async def get_all_skills():
 
 
 @router.get("/competency-matrix")
-async def get_competency_matrix(db: Session = Depends(get_db)):
+async def get_competency_matrix(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Get full competency matrix for all users.
+    Results are filtered based on the current user's access grants.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Get access control context
+    access_context = get_access_filter_context(db, current_user)
+    accessible_emails = None if access_context.get('is_superadmin') else access_context.get('accessible_emails', set())
+
     repo = AnalyticsRepository(db)
-    
+
     try:
-        matrix = repo.get_competency_matrix()
+        matrix = repo.get_competency_matrix(accessible_emails=accessible_emails)
         return matrix
     except Exception as e:
         logger.error(f"Competency matrix fetch failed: {e}")
@@ -1024,16 +1121,24 @@ async def get_competency_matrix(db: Session = Depends(get_db)):
 
 
 @router.get("/skill-gaps-analysis")
-async def get_skill_gaps_analysis(db: Session = Depends(get_db)):
+async def get_skill_gaps_analysis(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Get company-wide skill gap analysis.
+    Results are filtered based on the current user's access grants.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
+
+    # Get access control context
+    access_context = get_access_filter_context(db, current_user)
+    accessible_emails = None if access_context.get('is_superadmin') else access_context.get('accessible_emails', set())
 
     repo = AnalyticsRepository(db)
 
     try:
-        analysis = repo.get_company_skill_gaps()
+        analysis = repo.get_company_skill_gaps(accessible_emails=accessible_emails)
         return analysis
     except Exception as e:
         logger.error(f"Skill gaps analysis fetch failed: {e}")
@@ -1043,14 +1148,20 @@ async def get_skill_gaps_analysis(db: Session = Depends(get_db)):
 @router.get("/detailed-report/{user_email}")
 async def get_user_detailed_report(
     user_email: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Get aggregated data for detailed employee report.
     Includes profile, activity log, completions, quizzes, and attendance.
+    Access control: User must have access to view the requested user's data.
     """
     from app.repositories.user_repository import UserRepository
     from app.repositories.analytics_repository import AnalyticsRepository
+
+    # Access control: Verify current user can access the requested user's data
+    if not check_access(db, current_user.get('email'), user_email):
+        raise HTTPException(status_code=403, detail="You don't have access to this user's data")
 
     user_repo = UserRepository(db)
     analytics_repo = AnalyticsRepository(db)

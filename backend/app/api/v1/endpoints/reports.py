@@ -28,7 +28,8 @@ from app.models.simulation import Simulation, SimulationProgress
 from app.models.analytics import AuditLog
 from app.models.simulation import SimulationAnalyticsSnapshot
 from app.models.video_progress import VideoProgress
-from app.core.dependencies import PaginationParams, get_pagination
+from app.core.dependencies import PaginationParams, get_pagination, get_current_user
+from app.core.access_filter import get_access_filter_context, should_include_user
 
 # PDF Generation imports
 from reportlab.lib import colors
@@ -425,47 +426,106 @@ def build_pagination_meta(total: int, page: int, per_page: int) -> Dict:
 # ==========================================
 
 @router.get("/overview")
-async def get_reports_overview(db: Session = Depends(get_db)):
+async def get_reports_overview(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """Get overview statistics for the main reports dashboard.
-    Consolidated from 12 queries into 3 batch queries."""
+    Consolidated from 12 queries into 3 batch queries.
+    Results are filtered based on the current user's access grants.
+    """
     try:
+        # Get access control context for filtering
+        access_context = get_access_filter_context(db, current_user)
+
         thirty_days_ago = datetime.utcnow() - timedelta(days=30)
         week_ago = datetime.utcnow() - timedelta(days=7)
         today = date.today()
 
+        # Build base user query with access filter
+        user_query = db.query(User)
+        if not access_context.get('is_superadmin'):
+            accessible_emails = access_context.get('accessible_emails', set())
+            if accessible_emails:
+                user_query = user_query.filter(User.email.in_(accessible_emails))
+            else:
+                viewer_email = access_context.get('viewer_email')
+                user_query = user_query.filter(User.email == viewer_email)
+
         # Batch query 1: User counts (including 7d active and new 30d)
-        user_stats = db.query(
+        user_stats_query = db.query(
             func.count(User.id).label('total_users'),
             func.count(case((User.last_active >= thirty_days_ago, User.id))).label('active_users'),
             func.count(case((User.last_active >= week_ago, User.id))).label('active_users_7d'),
             func.count(case((User.created_at >= thirty_days_ago, User.id))).label('new_users_30d'),
-        ).first()
+        )
+        # Apply access filter to user stats
+        if not access_context.get('is_superadmin'):
+            accessible_emails = access_context.get('accessible_emails', set())
+            if accessible_emails:
+                user_stats_query = user_stats_query.filter(User.email.in_(accessible_emails))
+            else:
+                viewer_email = access_context.get('viewer_email')
+                user_stats_query = user_stats_query.filter(User.email == viewer_email)
+        user_stats = user_stats_query.first()
 
-        # Batch query 2: Course, quiz, assessment aggregates
-        course_stats = db.query(
+        # Batch query 2: Course, quiz, assessment aggregates (filtered by access)
+        course_stats_query = db.query(
             func.count(CourseCompletion.id).label('total_completions'),
             func.count(case((CourseCompletion.completed_at >= week_ago, CourseCompletion.id))).label('weekly_completions'),
             func.coalesce(func.avg(CourseCompletion.score), 0).label('avg_score'),
             func.coalesce(func.sum(CourseCompletion.time_spent_seconds), 0).label('total_time_spent'),
             func.count(case((CourseCompletion.certificate_issued == True, CourseCompletion.id))).label('total_certificates'),
-        ).first()
+        )
+        if not access_context.get('is_superadmin'):
+            accessible_emails = access_context.get('accessible_emails', set())
+            if accessible_emails:
+                course_stats_query = course_stats_query.filter(CourseCompletion.user_email.in_(accessible_emails))
+            else:
+                viewer_email = access_context.get('viewer_email')
+                course_stats_query = course_stats_query.filter(CourseCompletion.user_email == viewer_email)
+        course_stats = course_stats_query.first()
 
-        quiz_stats = db.query(
+        quiz_stats_query = db.query(
             func.count(QuizSubmission.id).label('total_submissions'),
             func.coalesce(func.avg(QuizSubmission.score), 0).label('avg_quiz_score'),
-        ).first()
+        )
+        if not access_context.get('is_superadmin'):
+            accessible_emails = access_context.get('accessible_emails', set())
+            if accessible_emails:
+                quiz_stats_query = quiz_stats_query.filter(QuizSubmission.user_email.in_(accessible_emails))
+            else:
+                viewer_email = access_context.get('viewer_email')
+                quiz_stats_query = quiz_stats_query.filter(QuizSubmission.user_email == viewer_email)
+        quiz_stats = quiz_stats_query.first()
 
-        assessment_stats = db.query(
+        assessment_stats_query = db.query(
             func.count(AssessmentSubmission.id).label('total_assessments'),
             func.count(case((AssessmentSubmission.passed == True, AssessmentSubmission.id))).label('passed_count'),
-        ).first()
+        )
+        if not access_context.get('is_superadmin'):
+            accessible_emails = access_context.get('accessible_emails', set())
+            if accessible_emails:
+                assessment_stats_query = assessment_stats_query.filter(AssessmentSubmission.user_email.in_(accessible_emails))
+            else:
+                viewer_email = access_context.get('viewer_email')
+                assessment_stats_query = assessment_stats_query.filter(AssessmentSubmission.user_email == viewer_email)
+        assessment_stats = assessment_stats_query.first()
 
-        # Batch query 3: Content, attendance, quiz count
+        # Batch query 3: Content, attendance, quiz count (content/quiz are entity counts, attendance filtered)
         total_content = db.query(func.count(Content.id)).scalar() or 0
         total_quizzes = db.query(func.count(Quiz.id)).scalar() or 0
-        today_attendance = db.query(func.count(AttendanceRecord.id)).filter(
+        attendance_query = db.query(func.count(AttendanceRecord.id)).filter(
             func.date(AttendanceRecord.punch_in) == today
-        ).scalar() or 0
+        )
+        if not access_context.get('is_superadmin'):
+            accessible_emails = access_context.get('accessible_emails', set())
+            if accessible_emails:
+                attendance_query = attendance_query.filter(AttendanceRecord.user_email.in_(accessible_emails))
+            else:
+                viewer_email = access_context.get('viewer_email')
+                attendance_query = attendance_query.filter(AttendanceRecord.user_email == viewer_email)
+        today_attendance = attendance_query.scalar() or 0
 
         total_users = user_stats.total_users or 0
         active_users = user_stats.active_users or 0
@@ -482,11 +542,19 @@ async def get_reports_overview(db: Session = Depends(get_db)):
         passed_count = assessment_stats.passed_count or 0
         assessment_pass_rate = (passed_count / total_assessments) if total_assessments > 0 else 0
 
-        # Simulation stats
-        sim_stats = db.query(
+        # Simulation stats (filtered by access)
+        sim_stats_query = db.query(
             func.count(SimulationProgress.id).label('total_sim_attempts'),
             func.sum(case((SimulationProgress.completed == True, 1), else_=0)).label('sim_completions'),
-        ).first()
+        )
+        if not access_context.get('is_superadmin'):
+            accessible_emails = access_context.get('accessible_emails', set())
+            if accessible_emails:
+                sim_stats_query = sim_stats_query.filter(SimulationProgress.user_email.in_(accessible_emails))
+            else:
+                viewer_email = access_context.get('viewer_email')
+                sim_stats_query = sim_stats_query.filter(SimulationProgress.user_email == viewer_email)
+        sim_stats = sim_stats_query.first()
 
         # Derived metrics
         total_learning_hours = round(total_time_spent / 3600, 1)
@@ -529,43 +597,73 @@ async def get_reports_overview(db: Session = Depends(get_db)):
 # ==========================================
 
 @router.get("/filters")
-async def get_report_filters(db: Session = Depends(get_db)):
-    """Get unique filter options for frontend dropdowns using DISTINCT queries."""
+async def get_report_filters(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get unique filter options for frontend dropdowns using DISTINCT queries.
+    Results are filtered based on the current user's access grants.
+    """
     try:
+        # Get access control context for filtering
+        access_context = get_access_filter_context(db, current_user)
+
+        # Build email filter condition for access control
+        email_filter_sql = ""
+        if not access_context.get('is_superadmin'):
+            accessible_emails = access_context.get('accessible_emails', set())
+            if accessible_emails:
+                # Create SQL IN clause with emails
+                email_list = "','".join(accessible_emails)
+                email_filter_sql = f" AND email IN ('{email_list}')"
+            else:
+                viewer_email = access_context.get('viewer_email')
+                email_filter_sql = f" AND email = '{viewer_email}'" if viewer_email else " AND 1=0"
+
+        # Build base query with access filter for ORM queries
+        base_user_filter = [User.category != 'Admin']
+        if not access_context.get('is_superadmin'):
+            accessible_emails = access_context.get('accessible_emails', set())
+            if accessible_emails:
+                base_user_filter.append(User.email.in_(accessible_emails))
+            else:
+                viewer_email = access_context.get('viewer_email')
+                base_user_filter.append(User.email == viewer_email)
+
         # Efficient DISTINCT queries instead of loading all users
         roles_raw = db.query(distinct(User.role)).filter(
-            User.category != 'Admin', User.role.isnot(None), User.role != ''
+            *base_user_filter, User.role.isnot(None), User.role != ''
         ).all()
         roles = sorted([r[0] for r in roles_raw if r[0]])
 
         stores_raw = db.query(distinct(User.store)).filter(
-            User.category != 'Admin', User.store.isnot(None), User.store != ''
+            *base_user_filter, User.store.isnot(None), User.store != ''
         ).all()
         stores = sorted([r[0] for r in stores_raw if r[0]])
 
         categories_raw = db.query(distinct(User.category)).filter(
-            User.category != 'Admin', User.category.isnot(None), User.category != ''
+            *base_user_filter, User.category.isnot(None), User.category != ''
         ).all()
         categories = sorted([r[0] for r in categories_raw if r[0]])
 
-        # JSON field extraction using raw SQL for PostgreSQL
+        # JSON field extraction using raw SQL for PostgreSQL (with access filter)
         states_raw = db.execute(text(
-            "SELECT DISTINCT profile_data->>'State' FROM users WHERE category != 'Admin' AND profile_data->>'State' IS NOT NULL AND profile_data->>'State' != ''"
+            f"SELECT DISTINCT profile_data->>'State' FROM users WHERE category != 'Admin' AND profile_data->>'State' IS NOT NULL AND profile_data->>'State' != ''{email_filter_sql}"
         )).fetchall()
         states = sorted([r[0] for r in states_raw if r[0]])
 
         regions_raw = db.execute(text(
-            "SELECT DISTINCT profile_data->>'Region' FROM users WHERE category != 'Admin' AND profile_data->>'Region' IS NOT NULL AND profile_data->>'Region' != ''"
+            f"SELECT DISTINCT profile_data->>'Region' FROM users WHERE category != 'Admin' AND profile_data->>'Region' IS NOT NULL AND profile_data->>'Region' != ''{email_filter_sql}"
         )).fetchall()
         regions = sorted([r[0] for r in regions_raw if r[0]])
 
         cities_raw = db.execute(text(
-            "SELECT DISTINCT profile_data->>'City' FROM users WHERE category != 'Admin' AND profile_data->>'City' IS NOT NULL AND profile_data->>'City' != ''"
+            f"SELECT DISTINCT profile_data->>'City' FROM users WHERE category != 'Admin' AND profile_data->>'City' IS NOT NULL AND profile_data->>'City' != ''{email_filter_sql}"
         )).fetchall()
         cities = sorted([r[0] for r in cities_raw if r[0]])
 
         countries_raw = db.execute(text(
-            "SELECT DISTINCT profile_data->>'Country' FROM users WHERE category != 'Admin' AND profile_data->>'Country' IS NOT NULL AND profile_data->>'Country' != ''"
+            f"SELECT DISTINCT profile_data->>'Country' FROM users WHERE category != 'Admin' AND profile_data->>'Country' IS NOT NULL AND profile_data->>'Country' != ''{email_filter_sql}"
         )).fetchall()
         countries = sorted([r[0] for r in countries_raw if r[0]])
 
@@ -603,10 +701,16 @@ async def get_user_analytics(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     _paginate: bool = Query(True),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-    """Get comprehensive user analytics with JOINs, subqueries, and pagination."""
+    """Get comprehensive user analytics with JOINs, subqueries, and pagination.
+    Results are filtered based on the current user's access grants.
+    """
     try:
+        # Get access control context for filtering
+        access_context = get_access_filter_context(db, current_user)
+
         # Parse date filters once
         date_from_dt = None
         date_to_dt = None
@@ -717,9 +821,13 @@ async def get_user_analytics(
 
         rows = main_query.all()
 
+        # Apply access control filter
         user_data = []
         for row in rows:
             user = row[0]  # User object
+            # Skip users that the current user doesn't have access to
+            if not should_include_user(access_context, user.email):
+                continue
             courses_completed = int(row[1] or 0)
             avg_course_score = float(row[2] or 0)
             total_time_seconds = int(row[3] or 0)
@@ -1613,10 +1721,15 @@ async def get_attendance_report(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     _paginate: bool = Query(True),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-    """Get attendance and learning hours report using GROUP BY with JOINs."""
+    """Get attendance and learning hours report using GROUP BY with JOINs.
+    Results are filtered based on the current user's access grants.
+    """
     try:
+        # Get access control context for filtering
+        access_context = get_access_filter_context(db, current_user)
         date_from_dt = None
         date_to_dt = None
         if date_from:
@@ -1669,9 +1782,15 @@ async def get_attendance_report(
 
         rows = att_query.all()
 
+        # Apply access control filter
         attendance_data = []
         total_records_count = 0
         for row in rows:
+            user_email = row[0]
+            # Skip users that the current user doesn't have access to
+            if not should_include_user(access_context, user_email):
+                continue
+
             total_sessions = int(row[3] or 0)
             total_minutes = float(row[4] or 0)
             total_hours = round(total_minutes / 60, 1)
@@ -1682,8 +1801,8 @@ async def get_attendance_report(
             avg_hours_per_day = round(total_hours / total_sessions, 1) if total_sessions else 0
 
             attendance_data.append({
-                "user_email": row[0],
-                "user_name": row[1] or row[0],
+                "user_email": user_email,
+                "user_name": row[1] or user_email,
                 "store": row[2] or "Unknown",
                 "role": row[7] or 'N/A',
                 "total_sessions": total_sessions,
@@ -1807,10 +1926,16 @@ async def get_store_performance(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     _paginate: bool = Query(True),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-    """Get store-wise performance metrics using GROUP BY User.store with JOINs."""
+    """Get store-wise performance metrics using GROUP BY User.store with JOINs.
+    Results are filtered based on the current user's access grants.
+    """
     try:
+        # Get access control context for filtering
+        access_context = get_access_filter_context(db, current_user)
+
         date_from_dt = None
         date_to_dt = None
         if date_from:
@@ -1866,6 +1991,16 @@ async def get_store_performance(
             User.store.isnot(None),
             User.store != '',
         )
+
+        # Apply access control filter at query level (for efficient GROUP BY)
+        if not access_context.get('is_superadmin'):
+            accessible_emails = access_context.get('accessible_emails', set())
+            if accessible_emails:
+                main_query = main_query.filter(User.email.in_(accessible_emails))
+            else:
+                # No access grants - user can only see their own store data
+                viewer_email = access_context.get('viewer_email')
+                main_query = main_query.filter(User.email == viewer_email)
 
         if store_filter:
             main_query = main_query.filter(User.store.ilike(f'%{store_filter}%'))

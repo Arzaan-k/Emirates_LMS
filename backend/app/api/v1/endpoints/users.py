@@ -16,6 +16,7 @@ import uuid
 from app.config.database import get_db
 from app.core.dependencies import get_current_user, require_admin, require_privilege
 from app.core.middleware import limiter
+from app.core.access_filter import get_access_filter_context, should_include_user
 from app.services.user_service import UserService
 from app.schemas.user import UserCreate, UserResponse, UserUpdate
 from app.models.user import User
@@ -29,12 +30,29 @@ router = APIRouter(prefix="/users", tags=["Users"])
 # ==========================================
 
 @router.get("/filters")
-def list_filters(db: Session = Depends(get_db)):
+def list_filters(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
     """
     Get all available filter options for users.
     Returns distinct values for roles, stores, and profile fields.
+    Options are filtered based on the current user's access grants.
     """
-    all_users = db.query(User).all()
+    # Get access control context for filtering
+    access_context = get_access_filter_context(db, current_user)
+
+    # Build filtered user query
+    user_query = db.query(User)
+    if not access_context.get('is_superadmin'):
+        accessible_emails = access_context.get('accessible_emails', set())
+        if accessible_emails:
+            user_query = user_query.filter(User.email.in_(accessible_emails))
+        else:
+            viewer_email = access_context.get('viewer_email')
+            user_query = user_query.filter(User.email == viewer_email)
+
+    all_users = user_query.all()
 
     filters = {
         "roles": set(),
@@ -131,10 +149,14 @@ def list_users(
     marital_status: List[str] = Query(None),
     blood_group: List[str] = Query(None),
     db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Optimized users list with pagination and filtering.
+    Results are filtered based on the current user's access grants.
     """
+    # Get access control context for filtering
+    access_context = get_access_filter_context(db, current_user)
 
     skip = (page - 1) * limit
     service = UserService(db)
@@ -180,6 +202,22 @@ def list_users(
     
     if store: filters["store"] = store
     if role: filters["role"] = role
+
+    # For access control filtering, we need to get accessible emails first
+    # then pass them as an additional filter for efficiency
+    accessible_emails_filter = None
+    if not access_context.get('is_superadmin'):
+        accessible_emails = access_context.get('accessible_emails', set())
+        if accessible_emails:
+            accessible_emails_filter = list(accessible_emails)
+        else:
+            # No grants - user can only see themselves
+            viewer_email = access_context.get('viewer_email')
+            accessible_emails_filter = [viewer_email] if viewer_email else []
+
+    # Add access filter to the filters dict
+    if accessible_emails_filter is not None:
+        filters["email"] = accessible_emails_filter
 
     users, total = service.get_users_with_count(
         skip=skip,
@@ -249,9 +287,11 @@ def list_users_alias(
     marital_status: List[str] = Query(None),
     blood_group: List[str] = Query(None),
     db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Alias for /users/ - backward compatibility with frontend.
+    Results are filtered based on the current user's access grants.
     """
     return list_users(
         page=page, limit=limit, search=search,
@@ -263,7 +303,7 @@ def list_users_alias(
         franchise=franchise, concept=concept, function=function,
         sub_function=sub_function, job_role=job_role,
         marital_status=marital_status, blood_group=blood_group,
-        db=db,
+        db=db, current_user=current_user,
     )
 
 
@@ -1061,10 +1101,14 @@ async def bulk_toggle_external(
 # ==========================================
 
 @router.get("/smart-categories")
-async def get_smart_user_categories(db: Session = Depends(get_db)):
+async def get_smart_user_categories(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Get smart user categories based on learning progress, roles, and stores.
     Used for intelligent user selection in Schedule Exams feature.
+    Results are filtered based on the current user's access grants.
 
     Returns categories like:
     - Completed All Waffler Courses
@@ -1080,9 +1124,21 @@ async def get_smart_user_categories(db: Session = Depends(get_db)):
     service = UserService(db)
     categories = []
 
+    # Get access control context for filtering
+    access_context = get_access_filter_context(db, current_user)
+
     try:
-        # Get all users
-        all_users = db.query(User).all()
+        # Get users filtered by access control
+        user_query = db.query(User)
+        if not access_context.get('is_superadmin'):
+            accessible_emails = access_context.get('accessible_emails', set())
+            if accessible_emails:
+                user_query = user_query.filter(User.email.in_(accessible_emails))
+            else:
+                # No grants - user can only see themselves
+                viewer_email = access_context.get('viewer_email')
+                user_query = user_query.filter(User.email == viewer_email)
+        all_users = user_query.all()
 
         # Category 1: By Current Role
         role_counts = {}

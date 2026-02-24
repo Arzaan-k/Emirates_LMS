@@ -121,7 +121,10 @@ const TeamListScreen = ({ navigation, route }) => {
 
     const fetchLevels = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/v1/levels/`);
+            const token = await AsyncStorage.getItem('userToken');
+            const response = await fetch(`${API_URL}/api/v1/levels/`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
             const data = await response.json();
             if (data.levels && Array.isArray(data.levels)) {
                 const sortedLevels = data.levels.sort((a, b) => a.order - b.order);
@@ -138,7 +141,10 @@ const TeamListScreen = ({ navigation, route }) => {
 
     const fetchFilterOptions = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/v1/users/filters`);
+            const token = await AsyncStorage.getItem('userToken');
+            const response = await fetch(`${API_URL}/api/v1/users/filters`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
             const data = await response.json();
             setFilterOptions(data);
         } catch (error) {
@@ -172,7 +178,10 @@ const TeamListScreen = ({ navigation, route }) => {
                 }
             });
 
-            const response = await fetch(`${API_URL}/api/v1/users/list?${params.toString()}`);
+            const token = await AsyncStorage.getItem('userToken');
+            const response = await fetch(`${API_URL}/api/v1/users/list?${params.toString()}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
             const data = await response.json();
 
             if (data.users) {
@@ -247,10 +256,13 @@ const TeamListScreen = ({ navigation, route }) => {
             let pageNum = 1;
             let totalPagesLocal = 1;
             let allUsers = [];
+            const token = await AsyncStorage.getItem('userToken');
 
             while (pageNum <= totalPagesLocal) {
                 const params = buildUsersListParams(pageNum, limit);
-                const response = await fetch(`${API_URL}/api/v1/users/list?${params.toString()}`);
+                const response = await fetch(`${API_URL}/api/v1/users/list?${params.toString()}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
                 const data = await response.json();
 
                 if (!response.ok) {

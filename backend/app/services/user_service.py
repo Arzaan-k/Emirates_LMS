@@ -115,11 +115,12 @@ PRIVILEGE_GROUPS = [
         "group": "Operations",
         "icon": "settings",
         "items": [
-            {"id": "access_control",     "label": "Access Control", "access": "manage", "description": "Manage user access & permissions"},
-            {"id": "schedule_meeting",   "label": "Meetings",       "access": "manage", "description": "Schedule & manage meetings"},
-            {"id": "crm_tickets",        "label": "CRM Tickets",    "access": "manage", "description": "Handle CRM support tickets"},
-            {"id": "manage_simulations", "label": "Simulations",    "access": "manage", "description": "Manage roleplay simulations"},
-            {"id": "support_library",    "label": "Support Library","access": "manage", "description": "Manage support library content"},
+            {"id": "access_control",      "label": "Curriculum Hierarchy", "access": "manage", "description": "Manage curriculum hierarchy & course access by level"},
+            {"id": "data_access_control", "label": "Data Access Control",  "access": "manage", "description": "Manage who can view which users' data (reports, analytics)"},
+            {"id": "schedule_meeting",    "label": "Meetings",             "access": "manage", "description": "Schedule & manage meetings"},
+            {"id": "crm_tickets",         "label": "CRM Tickets",          "access": "manage", "description": "Handle CRM support tickets"},
+            {"id": "manage_simulations",  "label": "Simulations",          "access": "manage", "description": "Manage roleplay simulations"},
+            {"id": "support_library",     "label": "Support Library",      "access": "manage", "description": "Manage support library content"},
         ]
     },
 ]

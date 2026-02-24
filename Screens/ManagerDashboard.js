@@ -28,7 +28,8 @@ import EditNodeModal from '../Components/EditNodeModal';
 import BulkUploadModal from '../Components/BulkUploadModal'; // [NEW]
 import FolderUploadModal from '../Components/FolderUploadModal'; // [NEW] Folder hierarchy upload
 import BucketManagementModal from '../Components/BucketManagementModal'; // [NEW] Bucket management
-import AccessControlModal from '../Components/AccessControlModal'; // [NEW] Hierarchy & Access Control
+import CurriculumHierarchyModal from '../Components/CurriculumHierarchyModal'; // Curriculum hierarchy (level-to-course mapping)
+import DataAccessControlModal from '../Components/DataAccessControlModal'; // [NEW] Granular user data access control
 import CreateUser from '../Screens/CreateUser';
 import API_URL from '../config';
 import * as SecureStore from 'expo-secure-store';
@@ -304,8 +305,10 @@ export default function ManagerDashboard({ route, navigation }) {
     const [courseBuckets, setCourseBuckets] = useState([]);
     const [selectedBucket, setSelectedBucket] = useState(null);
 
-    // [NEW] Access Control Modal State
-    const [accessControlVisible, setAccessControlVisible] = useState(false);
+    // Curriculum Hierarchy Modal State (formerly Access Control)
+    const [curriculumHierarchyVisible, setCurriculumHierarchyVisible] = useState(false);
+    // [NEW] Data Access Control Modal State
+    const [dataAccessControlVisible, setDataAccessControlVisible] = useState(false);
     const [loadingBuckets, setLoadingBuckets] = useState(false);
 
     // [NEW] Simulation Flow Builder State
@@ -1364,14 +1367,27 @@ export default function ManagerDashboard({ route, navigation }) {
                             </TouchableOpacity>
                         )}
 
-                        {/* ACCESS CONTROL - requires access_control privilege */}
+                        {/* CURRICULUM HIERARCHY - requires access_control privilege */}
                         {hasPrivilege('access_control') && (
                             <TouchableOpacity
                                 style={styles.actionBtn}
-                                onPress={() => setAccessControlVisible(true)}
+                                onPress={() => setCurriculumHierarchyVisible(true)}
                             >
                                 <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
-                                    <MaterialCommunityIcons name="shield-lock-outline" size={24} color="#D97706" />
+                                    <MaterialCommunityIcons name="sitemap" size={24} color="#D97706" />
+                                </View>
+                                <Text style={styles.actionText}>Curriculum</Text>
+                            </TouchableOpacity>
+                        )}
+
+                        {/* DATA ACCESS CONTROL - requires data_access_control privilege */}
+                        {hasPrivilege('data_access_control') && (
+                            <TouchableOpacity
+                                style={styles.actionBtn}
+                                onPress={() => setDataAccessControlVisible(true)}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#DBEAFE' }]}>
+                                    <MaterialCommunityIcons name="account-key-outline" size={24} color="#3B82F6" />
                                 </View>
                                 <Text style={styles.actionText}>Access Control</Text>
                             </TouchableOpacity>
@@ -2510,10 +2526,16 @@ export default function ManagerDashboard({ route, navigation }) {
                 </View>
             </Modal>
 
-            {/* ACCESS CONTROL MODAL */}
-            <AccessControlModal
-                visible={accessControlVisible}
-                onClose={() => setAccessControlVisible(false)}
+            {/* CURRICULUM HIERARCHY MODAL */}
+            <CurriculumHierarchyModal
+                visible={curriculumHierarchyVisible}
+                onClose={() => setCurriculumHierarchyVisible(false)}
+            />
+
+            {/* DATA ACCESS CONTROL MODAL */}
+            <DataAccessControlModal
+                visible={dataAccessControlVisible}
+                onClose={() => setDataAccessControlVisible(false)}
             />
 
             {/* CRM TICKET MODAL */}
