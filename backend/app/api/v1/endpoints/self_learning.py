@@ -1716,7 +1716,21 @@ async def get_learning_path_affected_users(
     # Get user info
     all_emails = list(user_completions.keys())
     users = db.query(User).filter(User.email.in_(all_emails)).all() if all_emails else []
-    user_map = {u.email: {"email": u.email, "name": u.name, "role": u.role, "store": u.store} for u in users}
+    user_map = {
+        u.email: {
+            "email": u.email,
+            "name": u.name,
+            "role": u.role,
+            "store": u.store,
+            "category": getattr(u, 'category', None),
+            "region": getattr(u, 'region', None),
+            "city": getattr(u, 'city', None),
+            "state": getattr(u, 'state', None),
+            "designation": getattr(u, 'designation', None),
+            "department": getattr(u, 'department', None)
+        } 
+        for u in users
+    }
 
     completed_users = []
     in_progress_users = []
