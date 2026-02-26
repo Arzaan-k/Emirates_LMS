@@ -3,6 +3,7 @@ Content Repository
 Data access layer for content-related operations
 """
 
+import time as _time
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 from sqlalchemy import func, or_
@@ -10,6 +11,25 @@ from sqlalchemy.orm import Session
 
 from app.repositories.base import BaseRepository
 from app.models.content import Content, CourseBucket, Resource, ProgressionLevel, AccessRule
+
+# ---------------------------------------------------------------------------
+# Process-level content cache
+# Career progression and self-learning content rarely changes — safe to
+# cache for 3 minutes so every Courses-tab load doesn't hit the DB.
+# Call invalidate_content_repository_cache() after content writes.
+# ---------------------------------------------------------------------------
+_CONTENT_CACHE: dict = {
+    "career": {"data": None, "expires": 0.0},
+    "self_learning": {"data": None, "expires": 0.0},
+}
+_CONTENT_CACHE_TTL = 180.0  # 3 minutes
+
+
+def invalidate_content_repository_cache() -> None:
+    """Flush the content repository cache after any write operation."""
+    for key in _CONTENT_CACHE:
+        _CONTENT_CACHE[key]["data"] = None
+        _CONTENT_CACHE[key]["expires"] = 0.0
 
 
 class ContentRepository(BaseRepository[Content]):
@@ -29,16 +49,27 @@ class ContentRepository(BaseRepository[Content]):
         return query.order_by(Content.timestamp).all()
 
     def get_self_learning_content(self) -> List[Content]:
-        """Get all self-learning content."""
-        return self.db.query(Content).filter(
+        """Get all self-learning content. Cached for 3 minutes."""
+        slot = _CONTENT_CACHE["self_learning"]
+        now = _time.monotonic()
+        if slot["data"] is not None and now < slot["expires"]:
+            return slot["data"]
+        result = self.db.query(Content).filter(
             Content.is_path_node == True,
             Content.is_published == True,
             Content.learning_path_type == "self_learning"
         ).order_by(Content.timestamp).all()
+        slot["data"] = result
+        slot["expires"] = now + _CONTENT_CACHE_TTL
+        return result
 
     def get_career_progression_content(self) -> List[Content]:
-        """Get all career progression content that are path nodes."""
-        return self.db.query(Content).filter(
+        """Get all career progression content that are path nodes. Cached for 3 minutes."""
+        slot = _CONTENT_CACHE["career"]
+        now = _time.monotonic()
+        if slot["data"] is not None and now < slot["expires"]:
+            return slot["data"]
+        result = self.db.query(Content).filter(
             Content.is_path_node == True,
             Content.is_published == True,
             or_(
@@ -47,6 +78,9 @@ class ContentRepository(BaseRepository[Content]):
                 Content.learning_path_type == ""
             )
         ).order_by(Content.timestamp).all()
+        slot["data"] = result
+        slot["expires"] = now + _CONTENT_CACHE_TTL
+        return result
 
     def get_content_by_ids(self, content_ids: List[str]) -> List[Content]:
         """Get content by list of IDs."""

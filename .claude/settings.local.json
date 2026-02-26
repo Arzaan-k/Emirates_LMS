@@ -10,7 +10,10 @@
       "Bash(Select-String -Pattern \"Randomize|Exam ID|Allow Different\")",
       "Bash(pip install:*)",
       "Bash(xargs:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(wc:*)",
+      "Bash(find:*)",
+      "Bash(du:*)"
     ]
   }
 }

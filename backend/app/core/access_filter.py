@@ -154,9 +154,15 @@ def get_access_filter_context(db: Session, current_user: dict) -> dict:
     viewer_email = current_user.get('email')
     user_is_superadmin = current_user.get('is_superadmin', False)
 
-    # Double-check superadmin status from DB
+    # Double-check superadmin status — use the process cache to avoid a DB hit per request
     if not user_is_superadmin:
-        user = db.query(User).filter(User.email == viewer_email).first()
+        from app.services._user_cache import user_cache as _user_cache
+        cached = _user_cache.get()
+        if cached is not None:
+            # Find in cache (O(n) but n is small and no DB round-trip)
+            user = next((u for u in cached if u.email == viewer_email), None)
+        else:
+            user = db.query(User).filter(User.email == viewer_email).first()
         user_is_superadmin = user.is_superadmin if user else False
 
     if user_is_superadmin:

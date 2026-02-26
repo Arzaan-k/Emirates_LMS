@@ -1,10 +1,11 @@
 // Screens/Home.js
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
+  FlatList,
   Image,
   TextInput,
   TouchableOpacity,
@@ -53,6 +54,11 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import { useLanguage } from "../context/language.context";
 import API_URL from "../config";
 
+// Performance utilities
+import { cachedFetch, prefetch, clearCache } from '../utils/requestCache';
+import { SkeletonHorizontalList, SkeletonList, SkeletonBanner } from '../Components/SkeletonLoader';
+import useTabPrefetch from '../hooks/useTabPrefetch';
+
 const { width, height } = Dimensions.get('window');
 
 // --- PREMIUM ACCENT: FLOATING WAFFLE ---
@@ -92,6 +98,30 @@ const handleVideoFullscreenUpdate = async ({ fullscreenUpdate }) => {
 
 // --- NEW: NOTIFICATIONS LIST MODAL ---
 function NotificationsModal({ visible, notifications, onClose, onAction }) {
+  const renderNotif = useCallback(({ item: notif }) => (
+    <TouchableOpacity
+      style={styles.notifItem}
+      onPress={() => onAction(notif)}
+      activeOpacity={0.7}
+    >
+      <View style={[styles.notifIconBox, { backgroundColor: notif.type === 'quiz' ? '#F59E0B' : (notif.type === 'crucial' ? '#EF4444' : '#3B82F6') }]}>
+        <MaterialCommunityIcons
+          name={notif.type === 'quiz' ? 'school' : (notif.type === 'proctored' ? 'shield-lock' : ((notif.mediaUrl || notif.media_url) ? 'paperclip' : 'bell'))}
+          size={20}
+          color="#FFF"
+        />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.notifItemTitle}>{notif.title}</Text>
+        <Text style={styles.notifItemMsg} numberOfLines={2}>
+          {(notif.mediaUrl || notif.media_url) && "📎 "}{notif.message}
+        </Text>
+        <Text style={styles.notifTime}>{new Date(notif.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+      </View>
+      <Feather name="chevron-right" size={16} color="rgba(255,255,255,0.3)" />
+    </TouchableOpacity>
+  ), [onAction]);
+
   if (!visible) return null;
 
   return (
@@ -106,39 +136,22 @@ function NotificationsModal({ visible, notifications, onClose, onAction }) {
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20 }}>
-            {notifications.length === 0 ? (
+          <FlatList
+            data={notifications}
+            keyExtractor={(item, index) => String(item.id || index)}
+            renderItem={renderNotif}
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingBottom: 20 }}
+            initialNumToRender={10}
+            maxToRenderPerBatch={10}
+            windowSize={5}
+            ListEmptyComponent={
               <View style={styles.emptyState}>
                 <Feather name="bell-off" size={48} color="rgba(255,255,255,0.2)" />
                 <Text style={styles.emptyStateText}>No notifications yet</Text>
               </View>
-            ) : (
-              notifications.map((notif, index) => (
-                <TouchableOpacity
-                  key={index}
-                  style={styles.notifItem}
-                  onPress={() => onAction(notif)}
-                  activeOpacity={0.7}
-                >
-                  <View style={[styles.notifIconBox, { backgroundColor: notif.type === 'quiz' ? '#F59E0B' : (notif.type === 'crucial' ? '#EF4444' : '#3B82F6') }]}>
-                    <MaterialCommunityIcons
-                      name={notif.type === 'quiz' ? 'school' : (notif.type === 'proctored' ? 'shield-lock' : ((notif.mediaUrl || notif.media_url) ? 'paperclip' : 'bell'))}
-                      size={20}
-                      color="#FFF"
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.notifItemTitle}>{notif.title}</Text>
-                    <Text style={styles.notifItemMsg} numberOfLines={2}>
-                      {(notif.mediaUrl || notif.media_url) && "📎 "}{notif.message}
-                    </Text>
-                    <Text style={styles.notifTime}>{new Date(notif.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
-                  </View>
-                  <Feather name="chevron-right" size={16} color="rgba(255,255,255,0.3)" />
-                </TouchableOpacity>
-              ))
-            )}
-          </ScrollView>
+            }
+          />
         </View>
       </View>
     </Modal>
@@ -524,9 +537,29 @@ function VideoPlayerModal({ visible, videoData, userEmail, onClose }) {
 
 // ... (Existing Components)
 
-function LiveFeedSection({ data, onPlay }) {
+const LiveFeedSection = memo(function LiveFeedSection({ data, onPlay }) {
   const { t } = useLanguage();
   if (!data || data.length === 0) return null;
+
+  const renderItem = useCallback(({ item, index }) => (
+    <Animated.View entering={FadeInRight.duration(500)} style={styles.liveCard}>
+      <TouchableOpacity
+        style={styles.liveCardInner}
+        onPress={() => item.videoUrl && onPlay(item)}
+      >
+        <View style={styles.liveIcon}>
+          <Feather name="play-circle" size={24} color="#FFF" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.liveTitle} numberOfLines={1}>{item.title}</Text>
+          <Text style={styles.liveAuthor}>By {item.authorRole}</Text>
+        </View>
+        <View style={styles.newBadge}>
+          <Text style={styles.newBadgeText}>{t('justNow')}</Text>
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  ), [onPlay, t]);
 
   return (
     <View style={styles.sectionContainer}>
@@ -536,34 +569,42 @@ function LiveFeedSection({ data, onPlay }) {
           <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Live Updates</Text>
         </View>
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20, paddingBottom: 10 }}>
-        {data.map((item, index) => (
-          <Animated.View key={index} entering={FadeInRight.duration(500)} style={styles.liveCard}>
-            <TouchableOpacity
-              style={styles.liveCardInner}
-              onPress={() => item.videoUrl && onPlay(item)}
-            >
-              <View style={styles.liveIcon}>
-                <Feather name="play-circle" size={24} color="#FFF" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.liveTitle} numberOfLines={1}>{item.title}</Text>
-                <Text style={styles.liveAuthor}>By {item.authorRole}</Text>
-              </View>
-              <View style={styles.newBadge}>
-                <Text style={styles.newBadgeText}>{/* JUST NOW handled dynamically, or use t('justNow') but item.time usually dynamic */}{t('justNow')}</Text>
-              </View>
-            </TouchableOpacity>
-          </Animated.View>
-        ))}
-      </ScrollView>
+      <FlatList
+        data={data}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingLeft: 20, paddingBottom: 10 }}
+        keyExtractor={(item, index) => String(item.id || index)}
+        renderItem={renderItem}
+        initialNumToRender={4}
+        maxToRenderPerBatch={4}
+        windowSize={3}
+        removeClippedSubviews={true}
+      />
     </View>
   );
-}
+});
 
-function QuizFeedSection({ data, onStart }) {
+const QuizFeedSection = memo(function QuizFeedSection({ data, onStart }) {
   const { t } = useLanguage();
   if (!data || data.length === 0) return null;
+
+  const renderItem = useCallback(({ item }) => (
+    <Animated.View entering={FadeInRight.duration(500)} style={styles.quizFeedCard}>
+      <TouchableOpacity style={styles.quizFeedCardInner} onPress={() => onStart(item)}>
+        <View style={styles.quizFeedIcon}>
+          <MaterialCommunityIcons name="school" size={24} color="#FFF" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.quizFeedTitle} numberOfLines={1}>{item.title}</Text>
+          <Text style={styles.quizFeedMeta}>Assigned by Manager</Text>
+        </View>
+        <View style={styles.quizFeedBadge}>
+          <Text style={styles.quizFeedBadgeText}>{t('actionRequired')}</Text>
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  ), [onStart, t]);
 
   return (
     <View style={styles.sectionContainer}>
@@ -573,34 +614,42 @@ function QuizFeedSection({ data, onStart }) {
           <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Assigned Quizzes</Text>
         </View>
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20, paddingBottom: 10 }}>
-        {data.map((item, index) => (
-          <Animated.View key={index} entering={FadeInRight.duration(500)} style={styles.quizFeedCard}>
-            <TouchableOpacity
-              style={styles.quizFeedCardInner}
-              onPress={() => onStart(item)}
-            >
-              <View style={styles.quizFeedIcon}>
-                <MaterialCommunityIcons name="school" size={24} color="#FFF" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.quizFeedTitle} numberOfLines={1}>{item.title}</Text>
-                <Text style={styles.quizFeedMeta}>Assigned by Manager</Text>
-              </View>
-              <View style={styles.quizFeedBadge}>
-                <Text style={styles.quizFeedBadgeText}>{t('actionRequired')}</Text>
-              </View>
-            </TouchableOpacity>
-          </Animated.View>
-        ))}
-      </ScrollView>
+      <FlatList
+        data={data}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingLeft: 20, paddingBottom: 10 }}
+        keyExtractor={(item, index) => String(item.id || index)}
+        renderItem={renderItem}
+        initialNumToRender={4}
+        maxToRenderPerBatch={4}
+        windowSize={3}
+        removeClippedSubviews={true}
+      />
     </View>
   );
-}
+});
 
-function ProctoredFeedSection({ data, onStart }) {
+const ProctoredFeedSection = memo(function ProctoredFeedSection({ data, onStart }) {
   const { t } = useLanguage();
   if (!data || data.length === 0) return null;
+
+  const renderItem = useCallback(({ item }) => (
+    <Animated.View entering={FadeInRight.duration(500)} style={styles.proctorFeedCard}>
+      <TouchableOpacity style={styles.proctorFeedCardInner} onPress={() => onStart(item)}>
+        <View style={styles.proctorFeedIcon}>
+          <MaterialCommunityIcons name="shield-lock" size={24} color="#FFF" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.proctorFeedTitle} numberOfLines={1}>{item.title}</Text>
+          <Text style={styles.proctorFeedMeta}>Proctored • High Stakes</Text>
+        </View>
+        <View style={styles.proctorFeedBadge}>
+          <Text style={styles.proctorFeedBadgeText}>{t('official')}</Text>
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  ), [onStart, t]);
 
   return (
     <View style={styles.sectionContainer}>
@@ -610,30 +659,21 @@ function ProctoredFeedSection({ data, onStart }) {
           <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Live Assessments</Text>
         </View>
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20, paddingBottom: 10 }}>
-        {data.map((item, index) => (
-          <Animated.View key={index} entering={FadeInRight.duration(500)} style={styles.proctorFeedCard}>
-            <TouchableOpacity
-              style={styles.proctorFeedCardInner}
-              onPress={() => onStart(item)}
-            >
-              <View style={styles.proctorFeedIcon}>
-                <MaterialCommunityIcons name="shield-lock" size={24} color="#FFF" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.proctorFeedTitle} numberOfLines={1}>{item.title}</Text>
-                <Text style={styles.proctorFeedMeta}>Proctored • High Stakes</Text>
-              </View>
-              <View style={styles.proctorFeedBadge}>
-                <Text style={styles.proctorFeedBadgeText}>{t('official')}</Text>
-              </View>
-            </TouchableOpacity>
-          </Animated.View>
-        ))}
-      </ScrollView>
+      <FlatList
+        data={data}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingLeft: 20, paddingBottom: 10 }}
+        keyExtractor={(item, index) => String(item.id || index)}
+        renderItem={renderItem}
+        initialNumToRender={4}
+        maxToRenderPerBatch={4}
+        windowSize={3}
+        removeClippedSubviews={true}
+      />
     </View>
   );
-}
+});
 
 // --- NEW: MEETINGS FEED SECTION ---
 function MeetingsFeedSection({ data, onJoin }) {
@@ -1202,6 +1242,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
   };
 
   // FETCH RECENTLY VIEWED (Jump Back In) - per-user based on real watch history
+  // Note: Not cached — personalized per-user, should always be fresh
   const fetchPathNodes = async () => {
     try {
       // Get email - either from props or AsyncStorage
@@ -1230,11 +1271,10 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
     }
   };
 
-  // FETCH NEWS FEED
+  // FETCH NEWS FEED — cached for 2 minutes
   const fetchNews = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/v1/notifications/news`);
-      const data = await response.json();
+      const data = await cachedFetch(`${API_URL}/api/v1/notifications/news`, {}, { ttl: 120000 });
       if (Array.isArray(data)) {
         setNewsData(data);
       }
@@ -1243,11 +1283,10 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
     }
   };
 
-  // FETCH LIVE QUIZZES
+  // FETCH LIVE QUIZZES — cached for 60 seconds
   const fetchLiveQuizzes = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/v1/quizzes/live`);
-      const data = await response.json();
+      const data = await cachedFetch(`${API_URL}/api/v1/quizzes/live`, {}, { ttl: 60000 });
       if (Array.isArray(data)) {
         setLiveQuizzesData(data);
       }
@@ -1274,18 +1313,15 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
     setQuizModalVisible(true);
   };
 
-  // FETCH NOTIFICATIONS
-  // FETCH NOTIFICATIONS
+  // FETCH NOTIFICATIONS — cached for 30 seconds
   const fetchNotifications = async () => {
     if (!userEmail) return;
     try {
-      const res = await fetch(`${API_URL}/api/v1/notifications`);
-      const data = await res.json();
+      const data = await cachedFetch(`${API_URL}/api/v1/notifications`, {}, { ttl: 30000 });
       if (Array.isArray(data)) {
         // Filter notifications relevant to this user
         const filtered = data.filter(n => {
-          if (!n.target_users || n.target_users.length === 0) return true; // Global? Or maybe restrict? Assuming global if empty.
-          // Better to assume if target_users exists, check it.
+          if (!n.target_users || n.target_users.length === 0) return true;
           return n.target_users.includes(userEmail);
         });
         setAllNotifications(filtered);
@@ -1339,11 +1375,10 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
     }
   };
 
-  // [NEW] FETCH MEETINGS
+  // [NEW] FETCH MEETINGS — cached for 60 seconds
   const fetchMeetings = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/v1/meetings`);
-      const data = await response.json();
+      const data = await cachedFetch(`${API_URL}/api/v1/meetings`, {}, { ttl: 60000 });
       if (Array.isArray(data)) {
         // Filter only scheduled/ongoing meetings
         const active = data.filter(m => m.status !== 'ended');
@@ -1358,8 +1393,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
     try {
       // Use actual user email from props
       if (!userEmail) return; // Skip if userEmail not loaded yet
-      const response = await fetch(`${API_URL}/api/v1/crm/my-tasks?user_email=${encodeURIComponent(userEmail)}`);
-      const data = await response.json();
+      const data = await cachedFetch(`${API_URL}/api/v1/crm/my-tasks?user_email=${encodeURIComponent(userEmail)}`, {}, { ttl: 60000 });
       if (Array.isArray(data)) {
         setCrmTasks(data);
       }
@@ -1368,15 +1402,25 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
     }
   };
 
+  // Prefetch adjacent tab data 2 seconds after mount to make tab switches instant
+  useTabPrefetch([
+    { url: `${API_URL}/api/v1/self-learning/buckets?user_email=${userEmail || ''}`, ttl: 120000 },
+    { url: `${API_URL}/api/v1/analytics/dashboard`, ttl: 60000 },
+  ]);
+
   useEffect(() => {
     // CRITICAL: Fetch crucial notifications FIRST to block app if needed
     fetchCrucialNotifications();
-    fetchPathNodes();
-    fetchNews();
-    fetchLiveQuizzes();
-    fetchProctoredAssessments();
-    fetchMeetings();
-    fetchCrmTasks();
+
+    // Fire all non-critical fetches in parallel — eliminates sequential waterfall
+    Promise.all([
+      fetchPathNodes(),
+      fetchNews(),
+      fetchLiveQuizzes(),
+      fetchProctoredAssessments(),
+      fetchMeetings(),
+      fetchCrmTasks(),
+    ]).catch(() => {}); // individual functions handle their own errors
   }, []);
 
   useEffect(() => {
@@ -2021,47 +2065,102 @@ function AIRecommendationsCard({ navigation }) {
   );
 }
 
-function AIToolsSection({ onOpenTool }) {
+const AIToolsSection = memo(function AIToolsSection({ onOpenTool }) {
   const { t } = useLanguage();
+
+  const renderTool = useCallback(({ item: tool, index }) => (
+    <Animated.View entering={FadeInRight.delay(400 + index * 100)}>
+      <TouchableOpacity style={styles.aiCard} onPress={() => onOpenTool(tool.id)} activeOpacity={0.9}>
+        <LinearGradient colors={tool.color} style={styles.aiCardGradient}>
+          <MaterialCommunityIcons name={tool.icon} size={32} color="#FFF" />
+          <View style={styles.aiCardContent}>
+            <Text style={styles.aiTitle}>{tool.title}</Text>
+            <View style={{ height: 4 }} />
+            <Text style={styles.aiDesc}>{tool.desc}</Text>
+          </View>
+        </LinearGradient>
+      </TouchableOpacity>
+    </Animated.View>
+  ), [onOpenTool]);
+
   return (
     <View style={styles.sectionContainer}>
       <Animated.Text entering={FadeInDown.delay(300)} style={[styles.sectionTitle, { paddingHorizontal: 20 }]}>{t('aiPowerSuite')}</Animated.Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20, paddingTop: 10, paddingBottom: 20 }}>
-        {AI_TOOLS.map((tool, index) => (
-          <Animated.View key={tool.id} entering={FadeInRight.delay(400 + index * 100)}>
-            <TouchableOpacity
-              style={styles.aiCard}
-              onPress={() => onOpenTool(tool.id)}
-              activeOpacity={0.9}
-            >
-              <LinearGradient
-                colors={tool.color}
-                style={styles.aiCardGradient}
-              >
-                <MaterialCommunityIcons name={tool.icon} size={32} color="#FFF" />
-                <View style={styles.aiCardContent}>
-                  <Text style={styles.aiTitle}>{tool.title}</Text>
-                  <View style={{ height: 4 }} />
-                  <Text style={styles.aiDesc}>{tool.desc}</Text>
-                </View>
-              </LinearGradient>
-            </TouchableOpacity>
-          </Animated.View>
-        ))}
-      </ScrollView>
+      <FlatList
+        data={AI_TOOLS}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingLeft: 20, paddingTop: 10, paddingBottom: 20 }}
+        keyExtractor={(item) => item.id}
+        renderItem={renderTool}
+        initialNumToRender={4}
+        maxToRenderPerBatch={4}
+        windowSize={3}
+        removeClippedSubviews={true}
+      />
     </View>
-  )
-}
+  );
+});
 
-function CourseList({ items, hasRealWatchHistory, onPlay }) {
+const CourseList = memo(function CourseList({ items, hasRealWatchHistory, onPlay, isLoading }) {
   const { t } = useLanguage();
 
-  const formatResumeTime = (seconds) => {
+  const formatResumeTime = useCallback((seconds) => {
     if (!seconds || seconds <= 0) return null;
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
     return m > 0 ? `${m}m ${s}s` : `${s}s`;
-  };
+  }, []);
+
+  const renderCourse = useCallback(({ item, index }) => {
+    const progressPct = item.progress_percent ?? 0;
+    const resumeTime = formatResumeTime(item.resume_position);
+    const isCompleted = item.completed || progressPct >= 100;
+
+    return (
+      <Animated.View entering={FadeInRight.delay(Math.min(index * 80, 400))}>
+        <TouchableOpacity
+          style={styles.courseCard}
+          onPress={() => (item.videoUrl || item.video_url) && onPlay({ ...item, videoUrl: item.videoUrl || item.video_url, resumePosition: item.resume_position || 0 })}
+        >
+          <Image
+            source={{ uri: item.thumbnail || "https://images.unsplash.com/photo-1497935586351-b67a49e012bf?q=80&w=2000" }}
+            style={styles.courseImg}
+          />
+          <BlurView intensity={20} tint="dark" style={styles.playOverlay}>
+            <Ionicons name={isCompleted ? "checkmark-circle" : "play-circle"} size={40} color={isCompleted ? "#10B981" : "rgba(255,255,255,0.9)"} />
+          </BlurView>
+
+          {resumeTime && !isCompleted && (
+            <View style={styles.resumeBadge}>
+              <Ionicons name="time-outline" size={10} color="#FFF" />
+              <Text style={styles.resumeBadgeText}>{resumeTime}</Text>
+            </View>
+          )}
+
+          <View style={[
+            styles.pathTypeBadge,
+            { backgroundColor: item.learning_path_type === 'self_learning' ? 'rgba(16, 185, 129, 0.9)' : 'rgba(99, 102, 241, 0.9)' }
+          ]}>
+            <Ionicons name={item.learning_path_type === 'self_learning' ? 'book-outline' : 'trending-up-outline'} size={10} color="#FFF" />
+            <Text style={styles.pathTypeBadgeText}>
+              {item.learning_path_type === 'self_learning' ? 'Self Learning' : 'Career'}
+            </Text>
+          </View>
+
+          <View style={styles.courseMeta}>
+            <Text style={styles.courseTitle} numberOfLines={1}>{item.title}</Text>
+            <View style={styles.progressRow}>
+              <View style={styles.progressBar}>
+                <View style={[styles.progressFill, { width: `${Math.min(100, progressPct)}%`, backgroundColor: isCompleted ? '#10B981' : '#F59E0B' }]} />
+              </View>
+              <Text style={styles.durationText}>{isCompleted ? '✓ Done' : `${Math.round(progressPct)}%`}</Text>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Animated.View>
+    );
+  }, [formatResumeTime, onPlay]);
 
   return (
     <View style={styles.sectionContainer}>
@@ -2069,122 +2168,87 @@ function CourseList({ items, hasRealWatchHistory, onPlay }) {
         <Text style={styles.sectionTitle}>{t('jumpBackIn')}</Text>
       </View>
 
-      {/* Empty state - no watch history yet */}
-      {!hasRealWatchHistory && (
+      {/* Skeleton while loading */}
+      {isLoading && <SkeletonHorizontalList count={3} cardWidth={160} cardHeight={140} />}
+
+      {/* Empty state */}
+      {!isLoading && !hasRealWatchHistory && (
         <View style={{ paddingHorizontal: 20, paddingBottom: 20 }}>
           <View style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 16, padding: 24, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
             <Ionicons name="play-circle-outline" size={40} color="#4B5563" />
-            <Text style={{ color: '#9CA3AF', fontSize: 14, fontFamily: 'Poppins_500Medium', marginTop: 10, textAlign: 'center' }}>
-              Nothing here yet
-            </Text>
-            <Text style={{ color: '#6B7280', fontSize: 12, fontFamily: 'Poppins_400Regular', marginTop: 4, textAlign: 'center' }}>
-              Start watching a course and it'll appear here
-            </Text>
+            <Text style={{ color: '#9CA3AF', fontSize: 14, fontFamily: 'Poppins_500Medium', marginTop: 10, textAlign: 'center' }}>Nothing here yet</Text>
+            <Text style={{ color: '#6B7280', fontSize: 12, fontFamily: 'Poppins_400Regular', marginTop: 4, textAlign: 'center' }}>Start watching a course and it'll appear here</Text>
           </View>
         </View>
       )}
 
-      {/* Real watch history */}
-      {hasRealWatchHistory && items.length > 0 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20, paddingBottom: 20 }}>
-          {items.map((item, index) => {
-            const progressPct = item.progress_percent ?? 0;
-            const resumeTime = formatResumeTime(item.resume_position);
-            const isCompleted = item.completed || progressPct >= 100;
-
-            return (
-              <Animated.View key={item.id || index} entering={FadeInRight.delay(600 + index * 100)}>
-                <TouchableOpacity
-                  style={styles.courseCard}
-                  onPress={() => (item.videoUrl || item.video_url) && onPlay({ ...item, videoUrl: item.videoUrl || item.video_url, resumePosition: item.resume_position || 0 })}
-                >
-                  <Image
-                    source={{ uri: item.thumbnail || "https://images.unsplash.com/photo-1497935586351-b67a49e012bf?q=80&w=2000" }}
-                    style={styles.courseImg}
-                  />
-                  <BlurView intensity={20} tint="dark" style={styles.playOverlay}>
-                    <Ionicons name={isCompleted ? "checkmark-circle" : "play-circle"} size={40} color={isCompleted ? "#10B981" : "rgba(255,255,255,0.9)"} />
-                  </BlurView>
-
-                  {/* Resume time badge */}
-                  {resumeTime && !isCompleted && (
-                    <View style={styles.resumeBadge}>
-                      <Ionicons name="time-outline" size={10} color="#FFF" />
-                      <Text style={styles.resumeBadgeText}>{resumeTime}</Text>
-                    </View>
-                  )}
-
-                  {/* Learning path type tag */}
-                  <View style={[
-                    styles.pathTypeBadge,
-                    { backgroundColor: item.learning_path_type === 'self_learning' ? 'rgba(16, 185, 129, 0.9)' : 'rgba(99, 102, 241, 0.9)' }
-                  ]}>
-                    <Ionicons
-                      name={item.learning_path_type === 'self_learning' ? 'book-outline' : 'trending-up-outline'}
-                      size={10}
-                      color="#FFF"
-                    />
-                    <Text style={styles.pathTypeBadgeText}>
-                      {item.learning_path_type === 'self_learning' ? 'Self Learning' : 'Career'}
-                    </Text>
-                  </View>
-
-                  <View style={styles.courseMeta}>
-                    <Text style={styles.courseTitle} numberOfLines={1}>{item.title}</Text>
-                    <View style={styles.progressRow}>
-                      <View style={styles.progressBar}>
-                        <View style={[styles.progressFill, { width: `${Math.min(100, progressPct)}%`, backgroundColor: isCompleted ? '#10B981' : '#F59E0B' }]} />
-                      </View>
-                      <Text style={styles.durationText}>
-                        {isCompleted ? '✓ Done' : `${Math.round(progressPct)}%`}
-                      </Text>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              </Animated.View>
-            );
-          })}
-        </ScrollView>
+      {/* Real watch history — virtualized */}
+      {!isLoading && hasRealWatchHistory && items.length > 0 && (
+        <FlatList
+          data={items}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingLeft: 20, paddingBottom: 20 }}
+          keyExtractor={(item, index) => String(item.id || index)}
+          renderItem={renderCourse}
+          initialNumToRender={3}
+          maxToRenderPerBatch={3}
+          windowSize={3}
+          removeClippedSubviews={true}
+        />
       )}
     </View>
   );
-}
+});
 
-function NewArrivals({ news = [], onOpenNews }) {
+const NewArrivals = memo(function NewArrivals({ news = [], onOpenNews, isLoading }) {
   const { t } = useLanguage();
+
+  const renderNews = useCallback(({ item, index }) => (
+    <Animated.View entering={FadeInDown.delay(Math.min(index * 80, 400))}>
+      <TouchableOpacity style={styles.newsCard} onPress={() => onOpenNews && onOpenNews(item)}>
+        <Image source={{ uri: item.image }} style={styles.newsImg} />
+        <LinearGradient colors={['transparent', 'rgba(0,0,0,0.8)']} style={styles.newsOverlay}>
+          <View style={styles.newsContent}>
+            <View style={styles.newsMetaRow}>
+              <Text style={styles.newsAuthor}>{item.author}</Text>
+              <Text style={styles.newsDate}>• {item.date}</Text>
+            </View>
+            <Text style={styles.newsTitle}>{item.title}</Text>
+            <Text style={styles.newsBody} numberOfLines={2}>{item.content}</Text>
+          </View>
+        </LinearGradient>
+      </TouchableOpacity>
+    </Animated.View>
+  ), [onOpenNews]);
+
   return (
     <View style={[styles.sectionContainer, { marginBottom: 100 }]}>
       <Text style={[styles.sectionTitle, { paddingHorizontal: 20, marginBottom: 15 }]}>{t('freshlyBrewed')}</Text>
       <View style={{ paddingHorizontal: 20 }}>
-        {news.length === 0 ? (
+        {isLoading && <SkeletonList count={3} />}
+        {!isLoading && news.length === 0 && (
           <View style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 16, padding: 30, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', borderStyle: 'dashed' }}>
             <MaterialCommunityIcons name="newspaper-variant-outline" size={48} color="#4B5563" />
             <Text style={{ color: '#9CA3AF', fontSize: 14, fontFamily: 'Poppins_500Medium', marginTop: 12, textAlign: 'center' }}>No news at this time</Text>
             <Text style={{ color: '#6B7280', fontSize: 12, fontFamily: 'Poppins_400Regular', marginTop: 4 }}>Check back later for updates!</Text>
           </View>
-        ) : (
-          news.map((item, index) => (
-            <Animated.View key={item.id} entering={FadeInDown.delay(800 + index * 100)}>
-              <TouchableOpacity style={styles.newsCard} onPress={() => onOpenNews && onOpenNews(item)}>
-                <Image source={{ uri: item.image }} style={styles.newsImg} />
-                <LinearGradient colors={['transparent', 'rgba(0,0,0,0.8)']} style={styles.newsOverlay}>
-                  <View style={styles.newsContent}>
-                    <View style={styles.newsMetaRow}>
-                      <Text style={styles.newsAuthor}>{item.author}</Text>
-                      <Text style={styles.newsDate}>• {item.date}</Text>
-                    </View>
-                    <Text style={styles.newsTitle}>{item.title}</Text>
-                    <Text style={styles.newsBody} numberOfLines={2}>{item.content}</Text>
-                  </View>
-                </LinearGradient>
-              </TouchableOpacity>
-            </Animated.View>
-          ))
+        )}
+        {!isLoading && news.length > 0 && (
+          <FlatList
+            data={news}
+            keyExtractor={(item, index) => String(item.id || index)}
+            renderItem={renderNews}
+            scrollEnabled={false}
+            initialNumToRender={3}
+            maxToRenderPerBatch={3}
+            windowSize={3}
+          />
         )}
       </View>
     </View>
-  )
-}
+  );
+});
 
 // --- TOPIC QUIZZES DATA ---
 const LIVE_QUIZZES = [
@@ -2232,8 +2296,45 @@ const LIVE_QUIZZES = [
   },
 ];
 
-function TopicQuizzes({ quizzes = [], onStartQuiz }) {
-  const { t } = useLanguage();
+const TopicQuizzes = memo(function TopicQuizzes({ quizzes = [], onStartQuiz }) {
+  const renderQuiz = useCallback(({ item: quiz, index }) => (
+    <Animated.View entering={FadeInRight.delay(400 + Math.min(index * 100, 400))}>
+      <TouchableOpacity style={styles.topicQuizCard} onPress={() => onStartQuiz(quiz)}>
+        <Image source={{ uri: quiz.image }} style={styles.topicQuizBg} />
+        <LinearGradient colors={['transparent', 'rgba(0,0,0,0.95)']} style={styles.topicQuizGradient}>
+
+          <View style={styles.topicQuizTop}>
+            <BlurView intensity={30} tint="light" style={styles.topicQuizBadge}>
+              <Text style={[styles.topicQuizBadgeText, { color: quiz.difficulty === 'Hard' ? '#EF4444' : quiz.difficulty === 'Medium' ? '#F59E0B' : '#10B981' }]}>
+                {quiz.difficulty}
+              </Text>
+            </BlurView>
+          </View>
+
+          <View>
+            <Text style={styles.topicQuizTitle}>{quiz.title}</Text>
+            <View style={styles.topicQuizMetaRow}>
+              <View style={styles.topicQuizMetaItem}>
+                <MaterialCommunityIcons name="help-circle-outline" size={14} color="#CBD5E1" />
+                <Text style={styles.topicQuizMetaText}>{quiz.questions?.length || 0} Qs</Text>
+              </View>
+              <View style={styles.topicQuizMetaItem}>
+                <MaterialCommunityIcons name="clock-outline" size={14} color="#CBD5E1" />
+                <Text style={styles.topicQuizMetaText}>{quiz.time}</Text>
+              </View>
+            </View>
+
+            <TouchableOpacity style={styles.startQuizBtnSmall} onPress={() => onStartQuiz(quiz)}>
+              <Text style={styles.startQuizBtnText}>Start</Text>
+              <Feather name="arrow-right" size={12} color="#FFF" />
+            </TouchableOpacity>
+          </View>
+
+        </LinearGradient>
+      </TouchableOpacity>
+    </Animated.View>
+  ), [onStartQuiz]);
+
   return (
     <View style={styles.sectionContainer}>
       <View style={[styles.sectionHeader, { paddingHorizontal: 20 }]}>
@@ -2250,49 +2351,22 @@ function TopicQuizzes({ quizzes = [], onStartQuiz }) {
           <Text style={{ color: '#6B7280', fontSize: 12, fontFamily: 'Poppins_400Regular', marginTop: 4 }}>New quizzes coming soon!</Text>
         </View>
       ) : (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20, paddingBottom: 20 }}>
-          {quizzes.map((quiz, index) => (
-            <Animated.View key={quiz.id} entering={FadeInRight.delay(400 + index * 100)}>
-              <TouchableOpacity style={styles.topicQuizCard} onPress={() => onStartQuiz(quiz)}>
-                <Image source={{ uri: quiz.image }} style={styles.topicQuizBg} />
-                <LinearGradient colors={['transparent', 'rgba(0,0,0,0.95)']} style={styles.topicQuizGradient}>
-
-                  <View style={styles.topicQuizTop}>
-                    <BlurView intensity={30} tint="light" style={styles.topicQuizBadge}>
-                      <Text style={[styles.topicQuizBadgeText, { color: quiz.difficulty === 'Hard' ? '#EF4444' : quiz.difficulty === 'Medium' ? '#F59E0B' : '#10B981' }]}>
-                        {quiz.difficulty}
-                      </Text>
-                    </BlurView>
-                  </View>
-
-                  <View>
-                    <Text style={styles.topicQuizTitle}>{quiz.title}</Text>
-                    <View style={styles.topicQuizMetaRow}>
-                      <View style={styles.topicQuizMetaItem}>
-                        <MaterialCommunityIcons name="help-circle-outline" size={14} color="#CBD5E1" />
-                        <Text style={styles.topicQuizMetaText}>{quiz.questions?.length || 0} Qs</Text>
-                      </View>
-                      <View style={styles.topicQuizMetaItem}>
-                        <MaterialCommunityIcons name="clock-outline" size={14} color="#CBD5E1" />
-                        <Text style={styles.topicQuizMetaText}>{quiz.time}</Text>
-                      </View>
-                    </View>
-
-                    <TouchableOpacity style={styles.startQuizBtnSmall} onPress={() => onStartQuiz(quiz)}>
-                      <Text style={styles.startQuizBtnText}>Start</Text>
-                      <Feather name="arrow-right" size={12} color="#FFF" />
-                    </TouchableOpacity>
-                  </View>
-
-                </LinearGradient>
-              </TouchableOpacity>
-            </Animated.View>
-          ))}
-        </ScrollView>
+        <FlatList
+          data={quizzes}
+          keyExtractor={(item) => String(item.id)}
+          renderItem={renderQuiz}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingLeft: 20, paddingBottom: 20 }}
+          initialNumToRender={4}
+          maxToRenderPerBatch={4}
+          windowSize={3}
+          removeClippedSubviews={true}
+        />
       )}
     </View>
-  )
-}
+  );
+});
 
 
 

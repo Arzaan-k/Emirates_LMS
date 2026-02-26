@@ -145,6 +145,32 @@ def get_self_learning_buckets(
                 "completed": row[2] or False
             }
 
+    # --- N+1 FIX: batch last_attended lookup BEFORE the loop ---
+    # Fetch max(completed_at) per course and max(updated_at) per node in ONE query each.
+    # Replaces 2 DB queries per bucket with 2 total queries for ALL buckets.
+    last_completion_by_course: dict = {}
+    last_progress_by_node: dict = {}
+    if user_email != "user":
+        all_visible_ids = [c.id for c in visible_courses]
+        if all_visible_ids:
+            completion_rows = db.query(
+                CourseCompletion.course_id,
+                func.max(CourseCompletion.completed_at).label("max_completed_at")
+            ).filter(
+                CourseCompletion.user_email == user_email,
+                CourseCompletion.course_id.in_(all_visible_ids)
+            ).group_by(CourseCompletion.course_id).all()
+            last_completion_by_course = {r.course_id: r.max_completed_at for r in completion_rows}
+
+            progress_rows_dates = db.query(
+                VideoProgress.node_id,
+                func.max(VideoProgress.updated_at).label("max_updated_at")
+            ).filter(
+                VideoProgress.user_email == user_email,
+                VideoProgress.node_id.in_(all_visible_ids)
+            ).group_by(VideoProgress.node_id).all()
+            last_progress_by_node = {r.node_id: r.max_updated_at for r in progress_rows_dates}
+
     result = []
     for bucket in buckets:
         # Access control: check if user is assigned
@@ -202,20 +228,23 @@ def get_self_learning_buckets(
         progress_count = len(courses_for_progress)
         avg_progress = round(total_progress / progress_count, 1) if progress_count > 0 else 100
 
-        # Last attended date
+        # Last attended date — O(1) dict lookup, no DB query per bucket
         last_attended = None
         if user_email != "user":
-            last_completion = db.query(func.max(CourseCompletion.completed_at)).filter(
-                CourseCompletion.user_email == user_email,
-                CourseCompletion.course_id.in_([c.id for c in bucket_courses])
-            ).scalar()
+            bucket_course_ids = [c.id for c in bucket_courses]
+            # Find the most recent completion timestamp across this bucket's courses
+            last_completion = max(
+                (last_completion_by_course[cid] for cid in bucket_course_ids if cid in last_completion_by_course),
+                default=None
+            )
             if last_completion:
                 last_attended = last_completion.isoformat()
             else:
-                last_progress = db.query(func.max(VideoProgress.updated_at)).filter(
-                    VideoProgress.user_email == user_email,
-                    VideoProgress.node_id.in_([c.id for c in bucket_courses])
-                ).scalar()
+                # Fall back to most recent watch progress
+                last_progress = max(
+                    (last_progress_by_node[cid] for cid in bucket_course_ids if cid in last_progress_by_node),
+                    default=None
+                )
                 if last_progress:
                     last_attended = last_progress.isoformat()
 

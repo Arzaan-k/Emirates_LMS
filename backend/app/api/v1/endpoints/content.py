@@ -27,9 +27,16 @@ from app.services.document_service import DocumentService
 from app.services.document_converter import get_converter
 from app.core.websocket import manager
 from app.api.v1.endpoints.self_learning import invalidate_self_learning_cache
+from app.repositories.content_repository import invalidate_content_repository_cache
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/content", tags=["Content"])
+
+# Process-level cache for path-nodes (career progression courses).
+# This is user-independent structure data — safe to cache for 3 minutes.
+import time as _time
+_PATH_NODES_CACHE: dict = {"data": None, "expires": 0.0}
+_PATH_NODES_TTL = 180.0  # 3 minutes
 
 
 # ==========================================
@@ -356,6 +363,7 @@ async def upload_content(
         with get_db_context() as db:
             service = ContentService(db)
             content = service.create_content(content_data)
+            invalidate_content_repository_cache()
             logger.info(f"Content created: {content_id}, is_path_node stored as: {content.is_path_node}")
             response = content.to_dict() if hasattr(content, 'to_dict') else dict(content)
 
@@ -1242,6 +1250,7 @@ async def update_content(
 
     try:
         content = service.update_content(item_id, updates)
+        invalidate_content_repository_cache()
         logger.info(f"Content updated: {item_id}")
 
         result = content.to_dict() if hasattr(content, 'to_dict') else dict(content)
@@ -1331,6 +1340,7 @@ async def delete_content(
         
         # Delete from database
         service.delete_content(item_id)
+        invalidate_content_repository_cache()
         logger.info(f"Content deleted: {item_id}")
         
         return {"status": "success", "message": f"Content {item_id} deleted successfully"}

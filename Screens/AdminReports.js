@@ -28,6 +28,7 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import API_URL from '../config';
+import { cachedFetch } from '../utils/requestCache';
 
 const { width } = Dimensions.get('window');
 const isWeb = Platform.OS === 'web';
@@ -260,6 +261,7 @@ const AdminReports = ({ navigation }) => {
     const [subsLoading, setSubsLoading] = useState(false);
     const [subscriptions, setSubscriptions] = useState({});
     const [userEmail, setUserEmail] = useState('');
+    const [authToken, setAuthToken] = useState('');
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
@@ -275,26 +277,29 @@ const AdminReports = ({ navigation }) => {
     useEffect(() => {
         const init = async () => {
             try {
-                const email = await AsyncStorage.getItem('userEmail');
+                const [email, token] = await Promise.all([
+                    AsyncStorage.getItem('userEmail'),
+                    AsyncStorage.getItem('userToken'),
+                ]);
+                if (token) setAuthToken(token);
                 if (email) {
                     setUserEmail(email);
                     fetchSubscriptions(email);
                 }
+                // Load filters and overview only after we have the token
+                loadFilterOptions(token);
+                fetchOverviewData(token);
             } catch (e) { console.error(e); }
         };
         init();
     }, []);
 
-    useEffect(() => {
-        loadFilterOptions();
-        fetchOverviewData();
-    }, []);
-
-    const loadFilterOptions = async () => {
+    const loadFilterOptions = async (token) => {
         try {
-            // Fetch comprehensive filter options
-            const response = await fetch(`${API_URL}/api/v1/reports/filters`);
-            const data = await response.json();
+            const t = token || authToken;
+            const headers = t ? { 'Authorization': `Bearer ${t}` } : {};
+            // Fetch comprehensive filter options — cached for 5 minutes (rarely changes)
+            const data = await cachedFetch(`${API_URL}/api/v1/reports/filters`, headers, { ttl: 300000 });
 
             if (data) {
                 // Formatting for picker (needs id/name)
@@ -315,13 +320,17 @@ const AdminReports = ({ navigation }) => {
 
     const fetchSubscriptions = async (email) => {
         try {
-            const response = await fetch(`${API_URL}/api/v1/reports/subscriptions?user_email=${email}`);
-            if (response.ok) {
-                const data = await response.json();
+            // Cache for 2 minutes — subscriptions rarely change mid-session
+            const data = await cachedFetch(
+                `${API_URL}/api/v1/reports/subscriptions?user_email=${email}`,
+                {},
+                { ttl: 120000 }
+            );
+            if (data && Array.isArray(data)) {
                 const divMap = {};
                 data.forEach(sub => {
                     divMap[sub.report_type] = {
-                        isActive: true, // Only active ones returned or check sub.is_active
+                        isActive: true,
                         day: sub.day_of_week || 'Monday',
                         time: sub.time_of_day || '09:00'
                     };
@@ -381,7 +390,10 @@ const AdminReports = ({ navigation }) => {
 
             const response = await fetch(`${API_URL}/api/v1/reports/subscriptions?user_email=${userEmail}`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+                },
                 body: JSON.stringify({ subscriptions: subList })
             });
 
@@ -399,25 +411,19 @@ const AdminReports = ({ navigation }) => {
         }
     };
 
+    // Fetch report data when category or page changes — only after token is loaded
     useEffect(() => {
-        loadFilterOptions();
-        fetchOverviewData();
-    }, []);
-
-    // Fetch report data when category or page changes
-    useEffect(() => {
-        if (selectedCategory) {
+        if (selectedCategory && authToken) {
             fetchReportData(selectedCategory, currentPage);
         }
-    }, [selectedCategory, currentPage]);
+    }, [selectedCategory, currentPage, authToken]);
 
-    const fetchOverviewData = async () => {
+    const fetchOverviewData = async (token) => {
         try {
-            const response = await fetch(`${API_URL}/api/v1/reports/overview`);
-            if (response.ok) {
-                const data = await response.json();
-                setOverviewData(data);
-            }
+            const t = token || authToken;
+            const headers = t ? { 'Authorization': `Bearer ${t}` } : {};
+            const data = await cachedFetch(`${API_URL}/api/v1/reports/overview`, headers, { ttl: 60000 });
+            if (data) setOverviewData(data);
         } catch (error) {
             console.error('Error fetching overview:', error);
         }
@@ -451,11 +457,11 @@ const AdminReports = ({ navigation }) => {
             params.append('per_page', '50');
 
             const url = `${API_URL}${categoryInfo.endpoint}?${params.toString()}`;
-            const response = await fetch(url);
+            const headers = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
+            const response = await fetch(url, { headers });
             if (response.ok) {
                 const data = await response.json();
                 setReportData(data);
-                // Extract pagination info from response
                 if (data.pagination) {
                     setPaginationInfo(data.pagination);
                 } else {
@@ -503,10 +509,12 @@ const AdminReports = ({ navigation }) => {
 
             const downloadUrl = `${API_URL}${categoryInfo.downloadEndpoint}${params.toString() ? '?' + params.toString() : ''}`;
 
+            const authHeaders = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
+
             if (isWeb) {
                 // On web, use fetch and blob to trigger actual file download
                 try {
-                    const response = await fetch(downloadUrl);
+                    const response = await fetch(downloadUrl, { headers: authHeaders });
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
                     }
@@ -576,11 +584,12 @@ const AdminReports = ({ navigation }) => {
             if (categoryFilter) params.append('category', categoryFilter);
 
             const downloadUrl = `${API_URL}${categoryInfo.pdfEndpoint}${params.toString() ? '?' + params.toString() : ''}`;
+            const authHeadersPdf = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
 
             if (isWeb) {
                 // On web, use fetch and blob to trigger actual file download
                 try {
-                    const response = await fetch(downloadUrl);
+                    const response = await fetch(downloadUrl, { headers: authHeadersPdf });
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
                     }
@@ -1677,9 +1686,10 @@ const AdminReports = ({ navigation }) => {
         setExcelDownloading(report.id);
         try {
             const downloadUrl = `${API_URL}${report.endpoint}/excel`;
+            const authHdrs = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
             if (isWeb) {
                 try {
-                    const response = await fetch(downloadUrl);
+                    const response = await fetch(downloadUrl, { headers: authHdrs });
                     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                     const blob = await response.blob();
                     const url = window.URL.createObjectURL(blob);
@@ -1719,7 +1729,8 @@ const AdminReports = ({ navigation }) => {
         setDetailedLoading(true);
         setSelectedDetailReport(report.id);
         try {
-            const response = await fetch(`${API_URL}${report.endpoint}`);
+            const headers = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
+            const response = await fetch(`${API_URL}${report.endpoint}`, { headers });
             const data = await response.json();
             setDetailedReportData(data);
         } catch (error) {

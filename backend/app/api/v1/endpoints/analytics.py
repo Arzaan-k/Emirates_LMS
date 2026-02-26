@@ -116,8 +116,19 @@ def get_calendar_month(
         "attendance_minutes": 0,
     })
 
+    # Optimized: select only the columns we need — avoids hydrating full ORM objects.
+    # Each query fetches a narrow projection, drastically reducing data transfer.
+    score_acc = defaultdict(list)
+    bucket_acc = defaultdict(list)
+
     try:
-        completions = db.query(CourseCompletion).filter(
+        # -- Completions: day, focus_seconds, score_percent, bucket --
+        completions = db.query(
+            CourseCompletion.completed_at,
+            CourseCompletion.time_spent_seconds,
+            CourseCompletion.score_percent,
+            CourseCompletion.bucket,
+        ).filter(
             CourseCompletion.user_email == user_email,
             CourseCompletion.completed_at >= start_dt,
             CourseCompletion.completed_at < end_dt,
@@ -126,8 +137,17 @@ def get_calendar_month(
             d = c.completed_at.date().day
             daily[d]["completions"] += 1
             daily[d]["focus_seconds"] += int(c.time_spent_seconds or 0)
+            if c.score_percent is not None:
+                score_acc[d].append(float(c.score_percent))
+            if c.bucket:
+                bucket_acc[d].append(c.bucket)
 
-        quizzes = db.query(QuizSubmission).filter(
+        # -- Quizzes: day, focus_seconds, score --
+        quizzes = db.query(
+            QuizSubmission.submitted_at,
+            QuizSubmission.time_taken_seconds,
+            QuizSubmission.score,
+        ).filter(
             QuizSubmission.user_email == user_email,
             QuizSubmission.submitted_at >= start_dt,
             QuizSubmission.submitted_at < end_dt,
@@ -136,8 +156,15 @@ def get_calendar_month(
             d = q.submitted_at.date().day
             daily[d]["quizzes"] += 1
             daily[d]["focus_seconds"] += int(q.time_taken_seconds or 0)
+            if q.score is not None:
+                score_acc[d].append(float(q.score))
 
-        assessments = db.query(AssessmentSubmission).filter(
+        # -- Assessments: day, focus_seconds, score_percent --
+        assessments = db.query(
+            AssessmentSubmission.submitted_at,
+            AssessmentSubmission.time_taken_seconds,
+            AssessmentSubmission.score_percent,
+        ).filter(
             AssessmentSubmission.user_email == user_email,
             AssessmentSubmission.submitted_at >= start_dt,
             AssessmentSubmission.submitted_at < end_dt,
@@ -146,20 +173,20 @@ def get_calendar_month(
             d = a.submitted_at.date().day
             daily[d]["assessments"] += 1
             daily[d]["focus_seconds"] += int(a.time_taken_seconds or 0)
+            if a.score_percent is not None:
+                score_acc[d].append(float(a.score_percent))
 
-        # VideoProgress doesn't store explicit time spent; use progress updates as "videos" activity,
-        # and completed_at as true completion signal.
-        video_updates = db.query(VideoProgress).filter(
+        # -- Video activity: day (only columns needed) --
+        video_updates = db.query(VideoProgress.updated_at).filter(
             VideoProgress.user_email == user_email,
             VideoProgress.updated_at >= start_dt,
             VideoProgress.updated_at < end_dt,
             VideoProgress.video_watched_percent > 0,
         ).all()
         for v in video_updates:
-            d = v.updated_at.date().day
-            daily[d]["videos"] += 1
+            daily[v.updated_at.date().day]["videos"] += 1
 
-        video_completed = db.query(VideoProgress).filter(
+        video_completed = db.query(VideoProgress.completed_at).filter(
             VideoProgress.user_email == user_email,
             VideoProgress.completed == True,
             VideoProgress.completed_at != None,
@@ -167,19 +194,25 @@ def get_calendar_month(
             VideoProgress.completed_at < end_dt,
         ).all()
         for v in video_completed:
-            d = v.completed_at.date().day
-            daily[d]["videos_completed"] += 1
+            daily[v.completed_at.date().day]["videos_completed"] += 1
 
-        attendance = db.query(AttendanceRecord).filter(
+        # -- Attendance: day, duration_minutes --
+        attendance = db.query(
+            AttendanceRecord.punch_in,
+            AttendanceRecord.duration_minutes,
+        ).filter(
             AttendanceRecord.user_email == user_email,
             AttendanceRecord.punch_in >= start_dt,
             AttendanceRecord.punch_in < end_dt,
         ).all()
         for a in attendance:
-            d = a.punch_in.date().day
-            daily[d]["attendance_minutes"] += int(a.duration_minutes or 0)
+            daily[a.punch_in.date().day]["attendance_minutes"] += int(a.duration_minutes or 0)
 
-        sim_started = db.query(SimulationProgress).filter(
+        # -- Simulations started: day, focus_seconds --
+        sim_started = db.query(
+            SimulationProgress.started_at,
+            SimulationProgress.time_spent_seconds,
+        ).filter(
             SimulationProgress.user_email == user_email,
             SimulationProgress.started_at >= start_dt,
             SimulationProgress.started_at < end_dt,
@@ -189,7 +222,11 @@ def get_calendar_month(
             daily[d]["simulations"] += 1
             daily[d]["focus_seconds"] += int(s.time_spent_seconds or 0)
 
-        sim_completed = db.query(SimulationProgress).filter(
+        # -- Simulations completed: day, score --
+        sim_completed = db.query(
+            SimulationProgress.completed_at,
+            SimulationProgress.score,
+        ).filter(
             SimulationProgress.user_email == user_email,
             SimulationProgress.completed == True,
             SimulationProgress.completed_at != None,
@@ -199,53 +236,31 @@ def get_calendar_month(
         for s in sim_completed:
             d = s.completed_at.date().day
             daily[d]["simulations_completed"] += 1
+            if s.score is not None:
+                score_acc[d].append(float(s.score))
 
-        audits = db.query(AuditSubmission).filter(
+        # -- Audits: day --
+        audits = db.query(AuditSubmission.submitted_at).filter(
             AuditSubmission.user_email == user_email,
             AuditSubmission.submitted_at >= start_dt,
             AuditSubmission.submitted_at < end_dt,
         ).all()
         for a in audits:
             try:
-                day_num = a.submitted_at.date().day
+                daily[a.submitted_at.date().day]["audits"] += 1
             except Exception:
                 continue
-            daily[day_num]["audits"] += 1
+
     except Exception as e:
         logger.error(f"Calendar month fetch failed: {e}")
         return {"days": {}}
 
-    # Compute avg_score and topSkill per day
-    score_acc = defaultdict(list)
-    bucket_acc = defaultdict(list)
-    for c in completions:
-        d = c.completed_at.date().day
-        if c.score_percent is not None:
-            score_acc[d].append(float(c.score_percent))
-        if c.bucket:
-            bucket_acc[d].append(c.bucket)
-    for q in quizzes:
-        d = q.submitted_at.date().day
-        if q.score is not None:
-            score_acc[d].append(float(q.score))
-    for a in assessments:
-        d = a.submitted_at.date().day
-        if a.score_percent is not None:
-            score_acc[d].append(float(a.score_percent))
-
-    for s in sim_completed:
-        if s.completed_at is None:
-            continue
-        d = s.completed_at.date().day
-        if s.score is not None:
-            score_acc[d].append(float(s.score))
-
+    # Compute avg_score and topSkill per day (already accumulated above)
     for d, scores in score_acc.items():
         if scores:
             daily[d]["avg_score"] = round(sum(scores) / len(scores))
     for d, buckets in bucket_acc.items():
         if buckets:
-            # most common
             daily[d]["topSkill"] = max(set(buckets), key=buckets.count)
 
     days_out: Dict[str, Any] = {}

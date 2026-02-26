@@ -18,6 +18,7 @@ from app.core.dependencies import get_current_user, require_admin, require_privi
 from app.core.middleware import limiter
 from app.core.access_filter import get_access_filter_context, should_include_user
 from app.services.user_service import UserService
+from app.services.access_control_service import invalidate_user_cache
 from app.schemas.user import UserCreate, UserResponse, UserUpdate
 from app.models.user import User
 
@@ -42,17 +43,24 @@ def list_filters(
     # Get access control context for filtering
     access_context = get_access_filter_context(db, current_user)
 
-    # Build filtered user query
-    user_query = db.query(User)
+    # Serve from the process-level user cache — avoids a full table scan per request.
+    from app.services._user_cache import user_cache as _user_cache
+
+    cached_users = _user_cache.get()
+    if cached_users is None:
+        cached_users = db.query(User).all()
+        _user_cache.set(cached_users)
+
+    # Filter by accessible emails for non-superadmins
     if not access_context.get('is_superadmin'):
         accessible_emails = access_context.get('accessible_emails', set())
+        viewer_email = access_context.get('viewer_email')
         if accessible_emails:
-            user_query = user_query.filter(User.email.in_(accessible_emails))
+            cached_users = [u for u in cached_users if u.email in accessible_emails]
         else:
-            viewer_email = access_context.get('viewer_email')
-            user_query = user_query.filter(User.email == viewer_email)
+            cached_users = [u for u in cached_users if u.email == viewer_email]
 
-    all_users = user_query.all()
+    all_rows = cached_users
 
     filters = {
         "roles": set(),
@@ -84,15 +92,15 @@ def list_filters(
         s = str(val).strip()
         return None if s.lower() in _INVALID else s
 
-    for user in all_users:
-        r = _clean(user.role)
+    for row in all_rows:
+        r = _clean(row.role)
         if r:
             filters["roles"].add(r)
-        s = _clean(user.store)
+        s = _clean(row.store)
         if s:
             filters["stores"].add(s)
 
-        pd = user.profile_data or {}
+        pd = row.profile_data or {}
 
         def add_if_exists(key_set, *keys):
             for k in keys:
@@ -405,6 +413,7 @@ async def create_user(
     
     try:
         user = service.create_user(user_data)
+        invalidate_user_cache()
         logger.info(f"User created: {user_data['email']}")
         user_dict = user.to_dict() if hasattr(user, 'to_dict') else dict(user)
         user_dict.pop('password', None)
@@ -920,7 +929,8 @@ def process_bulk_upload_task(task_id: str, contents: bytes):
                 errors.append({"email": row_dict.get("Email", "unknown"), "error": str(e)})
                 logger.error(f"Bulk upload row error: {e}")
 
-        # Complete
+        # Complete — flush user cache so next request sees fresh data
+        invalidate_user_cache()
         upload_tasks[task_id]["status"] = "completed"
         upload_tasks[task_id]["results"] = {
             "created": created,
@@ -1361,8 +1371,12 @@ async def validate_employee_codes(
 
         logger.info(f"Validating {len(employee_codes)} employee codes")
 
-        # Get all users
-        all_users = db.query(User).all()
+        # Get all users — serve from the process-level cache
+        from app.services._user_cache import user_cache as _user_cache
+        all_users = _user_cache.get()
+        if all_users is None:
+            all_users = db.query(User).all()
+            _user_cache.set(all_users)
 
         # Match employee codes with users
         # The employee code might be stored in profile_data JSON field or email prefix
@@ -1489,6 +1503,7 @@ async def update_user(
 
     try:
         user = service.update_user(email, updates)
+        invalidate_user_cache()
         logger.info(f"User updated: {email}")
         user_dict = user.to_dict() if hasattr(user, 'to_dict') else dict(user)
         user_dict.pop('password', None)
@@ -1510,6 +1525,7 @@ async def delete_user(
     service = UserService(db)
     try:
         service.delete_user(email)
+        invalidate_user_cache()
         logger.info(f"User deleted: {email}")
         return {"message": f"User {email} deleted successfully"}
     except Exception as e:
@@ -1533,6 +1549,7 @@ async def bulk_delete_users(
     service = UserService(db)
     try:
         result = service.bulk_delete_users(emails)
+        invalidate_user_cache()
         logger.info(f"Bulk deleted {result['deleted']} users by {current_user.get('email')}")
         return result
     except Exception as e:

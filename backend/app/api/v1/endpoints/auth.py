@@ -3,6 +3,7 @@ Authentication Endpoints
 Login, logout, register, token refresh
 """
 
+import asyncio
 import logging
 from typing import Dict, Any, Optional
 
@@ -17,11 +18,23 @@ from app.schemas.user import (
     TokenRefreshRequest, TokenRefreshResponse
 )
 from app.core.exceptions import ValidationError, NotFoundError
-from app.repositories.analytics_repository import AnalyticsRepository
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+
+def _write_login_audit(log_data: dict) -> None:
+    """Write login audit log in a background thread (fire-and-forget)."""
+    from app.config.database import SessionLocal
+    from app.repositories.analytics_repository import AnalyticsRepository
+    db = SessionLocal()
+    try:
+        AnalyticsRepository(db).create_audit_log(log_data)
+    except Exception as e:
+        logger.error(f"Failed to write login audit log: {e}")
+    finally:
+        db.close()
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -40,23 +53,19 @@ async def login(
     try:
         result = service.authenticate(email, password)
         logger.info(f"User logged in: {email}")
-        
-        # Explicit Audit Log for Login to capture User Details
-        try:
-             repo = AnalyticsRepository(db)
-             log_data = {
-                 "user_email": result["user"]["email"],
-                 "user_name": result["user"]["name"],
-                 "action": "USER_LOGIN",
-                 "target": "User logged into the system",
-                 "details": "system signed in successfully",
-                 "ip_address": request.client.host if request.client else "unknown",
-                 "user_agent": request.headers.get("user-agent", "unknown"),
-                 "timestamp": datetime.utcnow()
-             }
-             repo.create_audit_log(log_data)
-        except Exception as log_err:
-             logger.error(f"Failed to create audit log for login: {log_err}")
+
+        # Fire-and-forget audit log — don't block the login response
+        log_data = {
+            "user_email": result["user"]["email"],
+            "user_name": result["user"]["name"],
+            "action": "USER_LOGIN",
+            "target": "User logged into the system",
+            "details": "system signed in successfully",
+            "ip_address": request.client.host if request.client else "unknown",
+            "user_agent": request.headers.get("user-agent", "unknown"),
+            "timestamp": datetime.utcnow()
+        }
+        asyncio.get_event_loop().run_in_executor(None, _write_login_audit, log_data)
 
         return result
     except Exception as e:
@@ -77,27 +86,24 @@ async def login_json(
     """
     email = data.get("email", "")
     password = data.get("password", "")
-    
+
     service = UserService(db)
     try:
         result = service.authenticate(email, password)
         logger.info(f"User logged in: {email}")
 
-        try:
-             repo = AnalyticsRepository(db)
-             log_data = {
-                 "user_email": result["user"]["email"],
-                 "user_name": result["user"]["name"],
-                 "action": "USER_LOGIN",
-                 "target": "User logged into the system",
-                 "details": "system signed in successfully",
-                 "ip_address": request.client.host if request.client else "unknown",
-                 "user_agent": request.headers.get("user-agent", "unknown"),
-                 "timestamp": datetime.utcnow()
-             }
-             repo.create_audit_log(log_data)
-        except Exception as log_err:
-             logger.error(f"Failed to create audit log for login-json: {log_err}")
+        # Fire-and-forget audit log — don't block the login response
+        log_data = {
+            "user_email": result["user"]["email"],
+            "user_name": result["user"]["name"],
+            "action": "USER_LOGIN",
+            "target": "User logged into the system",
+            "details": "system signed in successfully",
+            "ip_address": request.client.host if request.client else "unknown",
+            "user_agent": request.headers.get("user-agent", "unknown"),
+            "timestamp": datetime.utcnow()
+        }
+        asyncio.get_event_loop().run_in_executor(None, _write_login_audit, log_data)
 
         return result
     except Exception as e:

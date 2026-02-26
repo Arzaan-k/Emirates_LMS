@@ -4,6 +4,7 @@ Business logic for access grants, hierarchy management, and user filtering
 """
 
 import logging
+import time
 from typing import Any, Dict, List, Optional, Set
 from datetime import datetime
 from sqlalchemy.orm import Session
@@ -19,6 +20,13 @@ from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
+from app.services._user_cache import user_cache as _user_cache
+
+
+def invalidate_user_cache() -> None:
+    """Call after any user create/update/delete to flush the cache."""
+    _user_cache.invalidate()
+
 
 class AccessControlService:
     """Service for access control operations."""
@@ -28,13 +36,15 @@ class AccessControlService:
         self.hierarchy_repo = OrganizationHierarchyRepository(db)
         self.grant_repo = UserAccessGrantRepository(db)
         self.user_repo = UserRepository(db)
-        self._all_users_cache = None
 
     def _get_all_users(self) -> List[User]:
-        """Cache all users in memory for the lifecycle of this service instance to drastically speed up loops."""
-        if self._all_users_cache is None:
-            self._all_users_cache = self.db.query(User).all()
-        return self._all_users_cache
+        """Return all users, served from a 90-second process-level cache."""
+        cached = _user_cache.get()
+        if cached is not None:
+            return cached
+        users = self.db.query(User).all()
+        _user_cache.set(users)
+        return users
 
     # ===========================================
     # ORGANIZATION HIERARCHY
@@ -495,14 +505,15 @@ class AccessControlService:
         Superadmins bypass all access control and see everyone.
         Users with no grants can only see themselves.
         """
-        # Check if viewer exists and is superadmin
-        viewer = self.db.query(User).filter(User.email == viewer_email).first()
+        # Check if viewer exists and is superadmin — use the cache to avoid a DB hit
+        all_users_cached = self._get_all_users()
+        viewer = next((u for u in all_users_cached if u.email == viewer_email), None)
         if not viewer:
             return []
 
-        # Superadmin bypass
+        # Superadmin bypass — already have full list from cache
         if viewer.is_superadmin:
-            return self.db.query(User).all()
+            return all_users_cached
 
         # Get all grants for this viewer
         grants = self.grant_repo.get_grants_for_user(viewer_email)
@@ -539,11 +550,10 @@ class AccessControlService:
             elif grant.grant_type == 'role':
                 accessible_roles.add(grant.target_value)
 
-        # Build query and filter
-        all_users = self._get_all_users()
+        # Filter from the already-loaded cache
         accessible = []
 
-        for user in all_users:
+        for user in all_users_cached:
             pd = user.profile_data or {}
 
             # Check each filter type (OR logic - match any grant)

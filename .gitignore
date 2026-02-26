@@ -3,6 +3,18 @@ node_modules/
 .DS_Store
 npm-debug.log
 yarn-debug.log
+
+# User data exports — never commit PII/CSV exports
+EXPORT_USERS_*.csv
+*.csv
+
+# Auto-generated codebase dumps and debug files
+codebase.md
+build_output.txt
+traceback.txt
+test.py
+routes.txt
+routes2.txt
 yarn-error.log
 
 # Python

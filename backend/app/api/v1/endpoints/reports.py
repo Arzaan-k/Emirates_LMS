@@ -608,73 +608,54 @@ async def get_report_filters(
         # Get access control context for filtering
         access_context = get_access_filter_context(db, current_user)
 
-        # Build email filter condition for access control
-        email_filter_sql = ""
+        # Serve from the process-level user cache — avoids 7 separate DB round-trips
+        from app.services._user_cache import user_cache as _user_cache
+        all_users_cached = _user_cache.get()
+        if all_users_cached is None:
+            all_users_cached = db.query(User).all()
+            _user_cache.set(all_users_cached)
+
+        # Apply access control: non-superadmins see only their accessible employees
         if not access_context.get('is_superadmin'):
             accessible_emails = access_context.get('accessible_emails', set())
             if accessible_emails:
-                # Create SQL IN clause with emails
-                email_list = "','".join(accessible_emails)
-                email_filter_sql = f" AND email IN ('{email_list}')"
+                all_users_cached = [u for u in all_users_cached if u.email in accessible_emails]
             else:
                 viewer_email = access_context.get('viewer_email')
-                email_filter_sql = f" AND email = '{viewer_email}'" if viewer_email else " AND 1=0"
+                all_users_cached = [u for u in all_users_cached if u.email == viewer_email] if viewer_email else []
 
-        # Build base query with access filter for ORM queries
-        base_user_filter = [User.category != 'Admin']
-        if not access_context.get('is_superadmin'):
-            accessible_emails = access_context.get('accessible_emails', set())
-            if accessible_emails:
-                base_user_filter.append(User.email.in_(accessible_emails))
-            else:
-                viewer_email = access_context.get('viewer_email')
-                base_user_filter.append(User.email == viewer_email)
+        # Exclude admins and extract distinct filter values in a single Python pass
+        _INVALID = {'nan', 'none', 'n/a', 'na', '', 'unassigned'}
 
-        # Efficient DISTINCT queries instead of loading all users
-        roles_raw = db.query(distinct(User.role)).filter(
-            *base_user_filter, User.role.isnot(None), User.role != ''
-        ).all()
-        roles = sorted([r[0] for r in roles_raw if r[0]])
+        def _add(s, val):
+            v = str(val).strip() if val else ''
+            if v and v.lower() not in _INVALID:
+                s.add(v)
 
-        stores_raw = db.query(distinct(User.store)).filter(
-            *base_user_filter, User.store.isnot(None), User.store != ''
-        ).all()
-        stores = sorted([r[0] for r in stores_raw if r[0]])
+        roles_set, stores_set, categories_set = set(), set(), set()
+        states_set, regions_set, cities_set, countries_set = set(), set(), set(), set()
 
-        categories_raw = db.query(distinct(User.category)).filter(
-            *base_user_filter, User.category.isnot(None), User.category != ''
-        ).all()
-        categories = sorted([r[0] for r in categories_raw if r[0]])
+        for u in all_users_cached:
+            if (u.category or '').lower() == 'admin':
+                continue
+            pd = u.profile_data or {}
 
-        # JSON field extraction using raw SQL for PostgreSQL (with access filter)
-        states_raw = db.execute(text(
-            f"SELECT DISTINCT profile_data->>'State' FROM users WHERE category != 'Admin' AND profile_data->>'State' IS NOT NULL AND profile_data->>'State' != ''{email_filter_sql}"
-        )).fetchall()
-        states = sorted([r[0] for r in states_raw if r[0]])
-
-        regions_raw = db.execute(text(
-            f"SELECT DISTINCT profile_data->>'Region' FROM users WHERE category != 'Admin' AND profile_data->>'Region' IS NOT NULL AND profile_data->>'Region' != ''{email_filter_sql}"
-        )).fetchall()
-        regions = sorted([r[0] for r in regions_raw if r[0]])
-
-        cities_raw = db.execute(text(
-            f"SELECT DISTINCT profile_data->>'City' FROM users WHERE category != 'Admin' AND profile_data->>'City' IS NOT NULL AND profile_data->>'City' != ''{email_filter_sql}"
-        )).fetchall()
-        cities = sorted([r[0] for r in cities_raw if r[0]])
-
-        countries_raw = db.execute(text(
-            f"SELECT DISTINCT profile_data->>'Country' FROM users WHERE category != 'Admin' AND profile_data->>'Country' IS NOT NULL AND profile_data->>'Country' != ''{email_filter_sql}"
-        )).fetchall()
-        countries = sorted([r[0] for r in countries_raw if r[0]])
+            _add(roles_set, u.role)
+            _add(stores_set, u.store)
+            _add(categories_set, u.category)
+            _add(states_set, pd.get('State'))
+            _add(regions_set, pd.get('Region'))
+            _add(cities_set, pd.get('City'))
+            _add(countries_set, pd.get('Country'))
 
         return {
-            "roles": roles,
-            "stores": stores,
-            "categories": categories,
-            "states": states,
-            "regions": regions,
-            "cities": cities,
-            "countries": countries,
+            "roles": sorted(roles_set),
+            "stores": sorted(stores_set),
+            "categories": sorted(categories_set),
+            "states": sorted(states_set),
+            "regions": sorted(regions_set),
+            "cities": sorted(cities_set),
+            "countries": sorted(countries_set),
         }
     except Exception as e:
         logger.error(f"Error fetching filters: {e}")
@@ -819,15 +800,23 @@ async def get_user_analytics(
                 func.coalesce(comp_subq.c.avg_course_score, 0) >= min_score
             )
 
+        # Apply access control filter at SQL level — avoids fetching + discarding unauthorized rows
+        if not access_context.get('is_superadmin'):
+            accessible_emails = access_context.get('accessible_emails', set())
+            if accessible_emails:
+                main_query = main_query.filter(User.email.in_(accessible_emails))
+            else:
+                viewer_email = access_context.get('viewer_email')
+                if viewer_email:
+                    main_query = main_query.filter(User.email == viewer_email)
+                else:
+                    main_query = main_query.filter(False)
+
         rows = main_query.all()
 
-        # Apply access control filter
         user_data = []
         for row in rows:
             user = row[0]  # User object
-            # Skip users that the current user doesn't have access to
-            if not should_include_user(access_context, user.email):
-                continue
             courses_completed = int(row[1] or 0)
             avg_course_score = float(row[2] or 0)
             total_time_seconds = int(row[3] or 0)
@@ -1771,6 +1760,18 @@ async def get_attendance_report(
                 )
             )
 
+        # Apply access control filter at SQL level
+        if not access_context.get('is_superadmin'):
+            accessible_emails = access_context.get('accessible_emails', set())
+            if accessible_emails:
+                att_query = att_query.filter(AttendanceRecord.user_email.in_(accessible_emails))
+            else:
+                viewer_email = access_context.get('viewer_email')
+                if viewer_email:
+                    att_query = att_query.filter(AttendanceRecord.user_email == viewer_email)
+                else:
+                    att_query = att_query.filter(False)
+
         att_query = att_query.group_by(
             AttendanceRecord.user_email,
             User.name,
@@ -1782,14 +1783,10 @@ async def get_attendance_report(
 
         rows = att_query.all()
 
-        # Apply access control filter
         attendance_data = []
         total_records_count = 0
         for row in rows:
             user_email = row[0]
-            # Skip users that the current user doesn't have access to
-            if not should_include_user(access_context, user_email):
-                continue
 
             total_sessions = int(row[3] or 0)
             total_minutes = float(row[4] or 0)
@@ -2842,7 +2839,12 @@ async def get_my_subscriptions(
     user_email: str = Query(..., description="Email of the user to get subscriptions for")
 ):
     """Get report subscriptions for a user."""
-    user = db.query(User).filter(User.email == user_email).first()
+    from app.services._user_cache import user_cache as _user_cache
+    cached = _user_cache.get()
+    if cached is not None:
+        user = next((u for u in cached if u.email == user_email), None)
+    else:
+        user = db.query(User).filter(User.email == user_email).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
