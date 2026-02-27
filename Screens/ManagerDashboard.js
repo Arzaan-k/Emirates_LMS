@@ -1472,8 +1472,8 @@ export default function ManagerDashboard({ route, navigation }) {
                             </TouchableOpacity>
                         )}
 
-                        {/* LMS SUPPORT - requires lms_support privilege */}
-                        {hasPrivilege('lms_support') && (
+                        {/* LMS SUPPORT - requires support_library privilege */}
+                        {hasPrivilege('support_library') && (
                             <TouchableOpacity
                                 style={styles.actionBtn}
                                 onPress={() => setSupportModalVisible(true)}
@@ -1486,8 +1486,8 @@ export default function ManagerDashboard({ route, navigation }) {
                         )}
 
 
-                        {/* [PHASE 2] CONTENT LIBRARY - requires content_library privilege */}
-                        {hasPrivilege('content_library') && (
+                        {/* [PHASE 2] CONTENT LIBRARY - requires upload_training_view privilege */}
+                        {hasPrivilege('upload_training_view') && (
                             <TouchableOpacity
                                 style={styles.actionBtn}
                                 onPress={() => setContentLibraryVisible(true)}
@@ -1500,8 +1500,8 @@ export default function ManagerDashboard({ route, navigation }) {
                         )}
 
 
-                        {/* [PHASE 2] AUDIT LOGS - requires audit_logs privilege */}
-                        {hasPrivilege('audit_logs') && (
+                        {/* [PHASE 2] AUDIT LOGS - requires view_audit_logs privilege */}
+                        {hasPrivilege('view_audit_logs') && (
                             <TouchableOpacity
                                 style={styles.actionBtn}
                                 onPress={() => setAuditLogsVisible(true)}

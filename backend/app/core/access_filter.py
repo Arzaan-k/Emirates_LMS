@@ -200,3 +200,32 @@ def should_include_user(
 
     accessible = access_context.get('accessible_emails', set())
     return user_email in accessible
+
+
+def get_email_filter_set(db: Session, current_user: dict):
+    """
+    Convenience helper for report / analytics endpoints.
+
+    Returns:
+        (is_superadmin: bool, accessible_emails: set | None)
+
+    If is_superadmin is True, accessible_emails is None (no filter needed).
+    Otherwise accessible_emails is the set of emails the viewer may see.
+    If the set is empty, the viewer should only see their own data.
+
+    Usage in a report endpoint::
+
+        is_sa, emails = get_email_filter_set(db, current_user)
+        if not is_sa and emails is not None:
+            subq = subq.filter(CourseCompletion.user_email.in_(emails))
+    """
+    ctx = get_access_filter_context(db, current_user)
+    if ctx['is_superadmin']:
+        return True, None
+    emails = ctx.get('accessible_emails') or set()
+    if not emails:
+        # Viewer has no grants — they should only see their own data
+        viewer = ctx.get('viewer_email')
+        emails = {viewer} if viewer else set()
+    return False, emails
+

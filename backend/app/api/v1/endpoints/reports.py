@@ -29,7 +29,7 @@ from app.models.analytics import AuditLog
 from app.models.simulation import SimulationAnalyticsSnapshot
 from app.models.video_progress import VideoProgress
 from app.core.dependencies import PaginationParams, get_pagination, get_current_user
-from app.core.access_filter import get_access_filter_context, should_include_user
+from app.core.access_filter import get_access_filter_context, should_include_user, get_email_filter_set
 
 # PDF Generation imports
 from reportlab.lib import colors
@@ -923,13 +923,15 @@ async def download_user_analytics_csv(
     region: str = Query(None),
     country: str = Query(None),
     category: str = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """Download user analytics as CSV (all data, no pagination)."""
     result = await get_user_analytics(
         role_filter, store_filter, date_from, date_to,
         search, min_score, state, city, region, country, category,
-        page=1, per_page=50, _paginate=False, db=db
+        page=1, per_page=50, _paginate=False, db=db,
+        current_user=current_user
     )
     return generate_csv_response(
         result["users"],
@@ -950,13 +952,15 @@ async def download_user_analytics_pdf(
     region: str = Query(None),
     country: str = Query(None),
     category: str = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """Download user analytics as PDF with insights (all data, no pagination)."""
     result = await get_user_analytics(
         role_filter, store_filter, date_from, date_to,
         search, min_score, state, city, region, country, category,
-        page=1, per_page=50, _paginate=False, db=db
+        page=1, per_page=50, _paginate=False, db=db,
+        current_user=current_user
     )
 
     users = result.get("users", [])
@@ -1030,10 +1034,16 @@ async def get_training_effectiveness(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     _paginate: bool = Query(True),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-    """Get training effectiveness metrics using JOINs with Content, CourseCompletion, and CourseBucket."""
+    """Get training effectiveness metrics using JOINs with Content, CourseCompletion, and CourseBucket.
+    Results are filtered based on the current user's access grants.
+    """
     try:
+        # Access control
+        is_sa, accessible_emails = get_email_filter_set(db, current_user)
+
         date_from_dt = None
         date_to_dt = None
         if date_from:
@@ -1043,6 +1053,8 @@ async def get_training_effectiveness(
 
         # Subquery: aggregate completions per course_id
         comp_filters = []
+        if not is_sa and accessible_emails is not None:
+            comp_filters.append(CourseCompletion.user_email.in_(accessible_emails))
         if date_from_dt:
             comp_filters.append(CourseCompletion.completed_at >= date_from_dt)
         if date_to_dt:
@@ -1160,12 +1172,14 @@ async def download_training_csv(
     date_to: str = Query(None),
     search: str = Query(None),
     min_score: float = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """Download training effectiveness as CSV (all data, no pagination)."""
     result = await get_training_effectiveness(
         bucket_filter, date_from, date_to, search, min_score,
-        page=1, per_page=50, _paginate=False, db=db
+        page=1, per_page=50, _paginate=False, db=db,
+        current_user=current_user
     )
     return generate_csv_response(
         result["courses"],
@@ -1180,12 +1194,14 @@ async def download_training_pdf(
     date_to: str = Query(None),
     search: str = Query(None),
     min_score: float = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """Download training effectiveness as PDF with insights (all data, no pagination)."""
     result = await get_training_effectiveness(
         bucket_filter, date_from, date_to, search, min_score,
-        page=1, per_page=50, _paginate=False, db=db
+        page=1, per_page=50, _paginate=False, db=db,
+        current_user=current_user
     )
 
     courses = result.get("courses", [])
@@ -1250,10 +1266,16 @@ async def get_quiz_performance(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     _paginate: bool = Query(True),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-    """Get quiz performance metrics using JOINs with Quiz and QuizSubmission."""
+    """Get quiz performance metrics using JOINs with Quiz and QuizSubmission.
+    Results are filtered based on the current user's access grants.
+    """
     try:
+        # Access control
+        is_sa, accessible_emails = get_email_filter_set(db, current_user)
+
         date_from_dt = None
         date_to_dt = None
         if date_from:
@@ -1263,6 +1285,8 @@ async def get_quiz_performance(
 
         # Subquery: aggregate submissions per quiz_id
         sub_filters = []
+        if not is_sa and accessible_emails is not None:
+            sub_filters.append(QuizSubmission.user_email.in_(accessible_emails))
         if date_from_dt:
             sub_filters.append(QuizSubmission.submitted_at >= date_from_dt)
         if date_to_dt:
@@ -1397,12 +1421,14 @@ async def download_quiz_csv(
     date_to: str = Query(None),
     search: str = Query(None),
     min_score: float = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """Download quiz performance as CSV (all data, no pagination)."""
     result = await get_quiz_performance(
         date_from, date_to, search, min_score,
-        page=1, per_page=50, _paginate=False, db=db
+        page=1, per_page=50, _paginate=False, db=db,
+        current_user=current_user
     )
     return generate_csv_response(
         result["quizzes"],
@@ -1416,12 +1442,14 @@ async def download_quiz_pdf(
     date_to: str = Query(None),
     search: str = Query(None),
     min_score: float = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """Download quiz performance as PDF with insights (all data, no pagination)."""
     result = await get_quiz_performance(
         date_from, date_to, search, min_score,
-        page=1, per_page=50, _paginate=False, db=db
+        page=1, per_page=50, _paginate=False, db=db,
+        current_user=current_user
     )
 
     quizzes = result.get("quizzes", [])
@@ -1486,10 +1514,16 @@ async def get_assessment_results(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     _paginate: bool = Query(True),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-    """Get proctored assessment results using JOINs with ScheduledExam and AssessmentSubmission."""
+    """Get proctored assessment results using JOINs with ScheduledExam and AssessmentSubmission.
+    Results are filtered based on the current user's access grants.
+    """
     try:
+        # Access control
+        is_sa, accessible_emails = get_email_filter_set(db, current_user)
+
         date_from_dt = None
         date_to_dt = None
         if date_from:
@@ -1499,6 +1533,8 @@ async def get_assessment_results(
 
         # Subquery: aggregate assessment submissions per assessment_id
         asub_filters = []
+        if not is_sa and accessible_emails is not None:
+            asub_filters.append(AssessmentSubmission.user_email.in_(accessible_emails))
         if date_from_dt:
             asub_filters.append(AssessmentSubmission.submitted_at >= date_from_dt)
         if date_to_dt:
@@ -1619,12 +1655,14 @@ async def download_assessments_csv(
     date_to: str = Query(None),
     search: str = Query(None),
     min_score: float = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """Download assessment results as CSV (all data, no pagination)."""
     result = await get_assessment_results(
         date_from, date_to, search, min_score,
-        page=1, per_page=50, _paginate=False, db=db
+        page=1, per_page=50, _paginate=False, db=db,
+        current_user=current_user
     )
     return generate_csv_response(
         result["assessments"],
@@ -1638,12 +1676,14 @@ async def download_assessments_pdf(
     date_to: str = Query(None),
     search: str = Query(None),
     min_score: float = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """Download assessment results as PDF with insights (all data, no pagination)."""
     result = await get_assessment_results(
         date_from, date_to, search, min_score,
-        page=1, per_page=50, _paginate=False, db=db
+        page=1, per_page=50, _paginate=False, db=db,
+        current_user=current_user
     )
 
     assessments = result.get("assessments", [])
@@ -1843,7 +1883,8 @@ async def download_attendance_csv(
     date_to: str = Query(None),
     store_filter: str = Query(None),
     search: str = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """Download attendance as CSV (all data, no pagination)."""
     result = await get_attendance_report(
@@ -1862,7 +1903,8 @@ async def download_attendance_pdf(
     date_to: str = Query(None),
     store_filter: str = Query(None),
     search: str = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """Download attendance as PDF with insights (all data, no pagination)."""
     result = await get_attendance_report(
@@ -2067,7 +2109,8 @@ async def download_stores_csv(
     store_filter: str = Query(None),
     date_from: str = Query(None),
     date_to: str = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """Download store performance as CSV (all data, no pagination)."""
     result = await get_store_performance(
@@ -2085,7 +2128,8 @@ async def download_stores_pdf(
     store_filter: str = Query(None),
     date_from: str = Query(None),
     date_to: str = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """Download store performance as PDF with insights (all data, no pagination)."""
     result = await get_store_performance(
@@ -2150,9 +2194,12 @@ async def get_simulation_progress(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     _paginate: bool = Query(True),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-    """Get simulation progress metrics using SimulationAnalyticsSnapshot for instant reads."""
+    """Get simulation progress metrics using SimulationAnalyticsSnapshot for instant reads.
+    Results are filtered based on the current user's access grants.
+    """
     try:
         # Use pre-computed analytics snapshot for efficiency
         main_query = db.query(
@@ -2315,7 +2362,8 @@ async def download_simulations_csv(
     date_from: str = Query(None),
     date_to: str = Query(None),
     search: str = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """Download simulation progress as CSV (all data, no pagination)."""
     result = await get_simulation_progress(
@@ -2333,7 +2381,8 @@ async def download_simulations_pdf(
     date_from: str = Query(None),
     date_to: str = Query(None),
     search: str = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """Download simulation progress as PDF with insights (all data, no pagination)."""
     result = await get_simulation_progress(
@@ -2403,9 +2452,12 @@ async def get_content_engagement(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     _paginate: bool = Query(True),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-    """Get content engagement metrics using subqueries for views, video progress, and completions."""
+    """Get content engagement metrics using subqueries for views, video progress, and completions.
+    Results are filtered based on the current user's access grants.
+    """
     try:
         date_from_dt = None
         date_to_dt = None
@@ -2550,7 +2602,8 @@ async def download_content_csv(
     date_from: str = Query(None),
     date_to: str = Query(None),
     search: str = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """Download content engagement as CSV (all data, no pagination)."""
     result = await get_content_engagement(
@@ -2569,7 +2622,8 @@ async def download_content_pdf(
     date_from: str = Query(None),
     date_to: str = Query(None),
     search: str = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """Download content engagement as PDF with insights (all data, no pagination)."""
     result = await get_content_engagement(
@@ -2634,11 +2688,15 @@ async def download_content_pdf(
 async def get_executive_summary(
     date_from: str = Query(None),
     date_to: str = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """Get AI-powered executive summary with recommendations and optional date filtering.
     Optimized with batch queries."""
     try:
+        # Access control
+        is_sa, accessible_emails = get_email_filter_set(db, current_user)
+
         # Determine date range
         if date_from:
             start_date = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
@@ -2650,11 +2708,14 @@ async def get_executive_summary(
         else:
             end_date = datetime.utcnow()
 
-        # Batch query 1: User stats
-        user_stats = db.query(
+        # Batch query 1: User stats (filtered by access)
+        user_query = db.query(
             func.count(User.id).label('total_users'),
             func.count(case((and_(User.last_active >= start_date, User.last_active <= end_date), User.id))).label('active_users'),
-        ).first()
+        )
+        if not is_sa and accessible_emails is not None:
+            user_query = user_query.filter(User.email.in_(accessible_emails))
+        user_stats = user_query.first()
 
         total_users = user_stats.total_users or 0
         active_users = user_stats.active_users or 0
@@ -2664,7 +2725,7 @@ async def get_executive_summary(
         half_period = period_days // 2
         mid_date = start_date + timedelta(days=half_period)
 
-        comp_stats = db.query(
+        comp_query = db.query(
             func.count(CourseCompletion.id).label('total_completions'),
             func.count(case((CourseCompletion.completed_at >= mid_date, CourseCompletion.id))).label('second_half'),
             func.count(case((CourseCompletion.completed_at < mid_date, CourseCompletion.id))).label('first_half'),
@@ -2672,7 +2733,10 @@ async def get_executive_summary(
         ).filter(
             CourseCompletion.completed_at >= start_date,
             CourseCompletion.completed_at <= end_date,
-        ).first()
+        )
+        if not is_sa and accessible_emails is not None:
+            comp_query = comp_query.filter(CourseCompletion.user_email.in_(accessible_emails))
+        comp_stats = comp_query.first()
 
         total_completions = comp_stats.total_completions or 0
         weekly_completions = comp_stats.second_half or 0
@@ -2680,23 +2744,32 @@ async def get_executive_summary(
         avg_score = float(comp_stats.avg_score or 0)
 
         # Batch query 3: Quiz and assessment counts in date range
-        total_quizzes = db.query(func.count(QuizSubmission.id)).filter(
+        quiz_q = db.query(func.count(QuizSubmission.id)).filter(
             QuizSubmission.submitted_at >= start_date,
             QuizSubmission.submitted_at <= end_date
-        ).scalar() or 0
+        )
+        if not is_sa and accessible_emails is not None:
+            quiz_q = quiz_q.filter(QuizSubmission.user_email.in_(accessible_emails))
+        total_quizzes = quiz_q.scalar() or 0
 
-        total_assessments = db.query(func.count(AssessmentSubmission.id)).filter(
+        assess_q = db.query(func.count(AssessmentSubmission.id)).filter(
             AssessmentSubmission.submitted_at >= start_date,
             AssessmentSubmission.submitted_at <= end_date
-        ).scalar() or 0
+        )
+        if not is_sa and accessible_emails is not None:
+            assess_q = assess_q.filter(AssessmentSubmission.user_email.in_(accessible_emails))
+        total_assessments = assess_q.scalar() or 0
 
-        avg_quiz_score = db.query(func.coalesce(func.avg(QuizSubmission.score), 0)).filter(
+        quiz_score_q = db.query(func.coalesce(func.avg(QuizSubmission.score), 0)).filter(
             QuizSubmission.submitted_at >= start_date,
             QuizSubmission.submitted_at <= end_date
-        ).scalar() or 0
+        )
+        if not is_sa and accessible_emails is not None:
+            quiz_score_q = quiz_score_q.filter(QuizSubmission.user_email.in_(accessible_emails))
+        avg_quiz_score = quiz_score_q.scalar() or 0
 
         # Top performers in date range (single efficient query)
-        top_performers = db.query(
+        top_q = db.query(
             User.name,
             User.store,
             func.count(CourseCompletion.id).label('completions')
@@ -2705,7 +2778,10 @@ async def get_executive_summary(
         ).filter(
             CourseCompletion.completed_at >= start_date,
             CourseCompletion.completed_at <= end_date
-        ).group_by(User.name, User.store).order_by(
+        )
+        if not is_sa and accessible_emails is not None:
+            top_q = top_q.filter(User.email.in_(accessible_emails))
+        top_performers = top_q.group_by(User.name, User.store).order_by(
             desc('completions')
         ).limit(5).all()
 
@@ -2767,7 +2843,8 @@ async def get_executive_summary(
 async def download_executive_summary_csv(
     date_from: str = Query(None),
     date_to: str = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """Download executive summary as CSV."""
     result = await get_executive_summary(date_from, date_to, db)
@@ -2785,7 +2862,8 @@ async def download_executive_summary_csv(
 async def download_executive_summary_pdf(
     date_from: str = Query(None),
     date_to: str = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """Download executive summary as PDF with all insights and recommendations."""
     result = await get_executive_summary(date_from, date_to, db)

@@ -93,6 +93,7 @@ const TeamListScreen = ({ navigation, route }) => {
     const [levelColorMap, setLevelColorMap] = useState({});
 
     const [isExporting, setIsExporting] = useState(false);
+    const [accessInfo, setAccessInfo] = useState(null);
 
     useEffect(() => {
         fetchLevels();
@@ -194,6 +195,10 @@ const TeamListScreen = ({ navigation, route }) => {
                 setTotalPages(data.total_pages);
                 setHasMore(pageNum < data.total_pages);
                 setPage(pageNum);
+            }
+            // Capture access control info for diagnostic display
+            if (data.access_info) {
+                setAccessInfo(data.access_info);
             }
         } catch (error) {
             console.error('Failed to fetch users:', error);
@@ -721,9 +726,11 @@ const TeamListScreen = ({ navigation, route }) => {
 
                     <View style={styles.actionsColumn}>
                         <View style={[styles.statusDot, {
-                            backgroundColor: (user.profile_data?.['User Status'] || '').toLowerCase() === 'active'
+                            backgroundColor: (user.profile_data?.['User Status'] || '').toLowerCase().trim() === 'active'
                                 ? '#10B981'   // green = ACTIVE
-                                : '#D1D5DB'   // grey = inactive / unset
+                                : (user.profile_data?.['User Status'] || '').trim() !== ''
+                                    ? '#EF4444'   // red = INACTIVE / OTHER STATUS
+                                    : '#D1D5DB'   // grey = unset
                         }]} />
                     </View>
                 </Animated.View>
@@ -1120,6 +1127,31 @@ const TeamListScreen = ({ navigation, route }) => {
                 </TouchableOpacity>
             </View>
 
+            {/* Access Control Info Banner */}
+            {accessInfo && (
+                <View style={{
+                    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                    paddingVertical: 4, paddingHorizontal: 12,
+                    backgroundColor: accessInfo.is_superadmin ? '#DBEAFE' : '#D1FAE5',
+                }}>
+                    <Feather
+                        name={accessInfo.is_superadmin ? 'unlock' : 'shield'}
+                        size={12}
+                        color={accessInfo.is_superadmin ? '#2563EB' : '#059669'}
+                        style={{ marginRight: 6 }}
+                    />
+                    <Text style={{
+                        fontSize: 11, fontWeight: '600',
+                        color: accessInfo.is_superadmin ? '#2563EB' : '#059669',
+                    }}>
+                        {accessInfo.is_superadmin
+                            ? `Full access (${accessInfo.viewer_email}) — Showing all ${totalUsers} members`
+                            : `Filtered view (${accessInfo.viewer_email}) — Showing ${totalUsers} accessible members`
+                        }
+                    </Text>
+                </View>
+            )}
+
             {/* Search & Filter Bar */}
             <View style={styles.searchContainer}>
                 <View style={styles.searchBar}>
@@ -1469,9 +1501,9 @@ const styles = StyleSheet.create({
         paddingLeft: 8,
     },
     statusDot: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
+        width: 10,
+        height: 10,
+        borderRadius: 5,
     },
     emptyState: {
         alignItems: 'center',

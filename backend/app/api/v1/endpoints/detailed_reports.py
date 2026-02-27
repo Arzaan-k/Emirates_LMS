@@ -430,8 +430,8 @@ async def learning_history_excel(db: Session = Depends(get_db), current_user: di
     return _excel(r["data"], "learning_history.xlsx", "Learning History")
 
 @router.get("/learning/course-status")
-async def course_status_report(db: Session = Depends(get_db)):
-    """Status of all courses - completions, active learners."""
+async def course_status_report(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    """Status of all courses - completions, active learners. Auth required."""
     comp_sub = db.query(
         CourseCompletion.course_id,
         func.count(CourseCompletion.id).label('completed_users')
@@ -466,8 +466,8 @@ async def course_status_report(db: Session = Depends(get_db)):
     return {"report_name": "Course Status Report", "data": data, "total": len(data)}
 
 @router.get("/learning/course-status/excel")
-async def course_status_excel(db: Session = Depends(get_db)):
-    r = await course_status_report(db)
+async def course_status_excel(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    r = await course_status_report(db, current_user)
     return _excel(r["data"], "course_status.xlsx", "Course Status")
 
 @router.get("/learning/course-completion")
@@ -497,8 +497,8 @@ async def course_completion_excel(db: Session = Depends(get_db), current_user: d
     return _excel(r["data"], "course_completion.xlsx", "Course Completion")
 
 @router.get("/learning/course-structure")
-async def course_structure_report(db: Session = Depends(get_db)):
-    """Course catalog structure with buckets and content types."""
+async def course_structure_report(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    """Course catalog structure with buckets and content types. Auth required."""
     contents = db.query(Content).order_by(Content.bucket, Content.order_index).all()
     data = [{
         "course_title": c.title, "course_id": str(c.id), "bucket": c.bucket or "N/A",
@@ -511,13 +511,13 @@ async def course_structure_report(db: Session = Depends(get_db)):
     return {"report_name": "Course Structure Report", "data": data, "total": len(data)}
 
 @router.get("/learning/course-structure/excel")
-async def course_structure_excel(db: Session = Depends(get_db)):
-    r = await course_structure_report(db)
+async def course_structure_excel(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    r = await course_structure_report(db, current_user)
     return _excel(r["data"], "course_structure.xlsx", "Course Structure")
 
 @router.get("/learning/course-details")
-async def course_details_report(db: Session = Depends(get_db)):
-    """Detailed course info with settings."""
+async def course_details_report(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    """Detailed course info with settings. Auth required."""
     contents = db.query(Content).all()
     data = [{
         "title": c.title, "id": str(c.id), "bucket": c.bucket or "N/A",
@@ -531,8 +531,8 @@ async def course_details_report(db: Session = Depends(get_db)):
     return {"report_name": "Course Details Report", "data": data, "total": len(data)}
 
 @router.get("/learning/course-details/excel")
-async def course_details_excel(db: Session = Depends(get_db)):
-    r = await course_details_report(db)
+async def course_details_excel(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    r = await course_details_report(db, current_user)
     return _excel(r["data"], "course_details.xlsx", "Course Details")
 
 
@@ -665,8 +665,8 @@ async def training_master_excel(db: Session = Depends(get_db), current_user: dic
     return _excel(r["data"], "training_master.xlsx", "Training Master")
 
 @router.get("/training/ilt-report")
-async def ilt_report(db: Session = Depends(get_db)):
-    """Instructor-Led Training (scheduled exams as ILT proxy)."""
+async def ilt_report(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    """Instructor-Led Training (scheduled exams as ILT proxy). Auth required."""
     att_sub = db.query(
         ExamAttendance.exam_id,
         func.count(ExamAttendance.id).label('attended')
@@ -695,8 +695,8 @@ async def ilt_report(db: Session = Depends(get_db)):
     return {"report_name": "ILT Report", "data": data, "total": len(data)}
 
 @router.get("/training/ilt-report/excel")
-async def ilt_report_excel(db: Session = Depends(get_db)):
-    r = await ilt_report(db)
+async def ilt_report_excel(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    r = await ilt_report(db, current_user)
     return _excel(r["data"], "ilt_report.xlsx", "ILT Report")
 
 
@@ -753,8 +753,8 @@ async def career_summary_excel(db: Session = Depends(get_db), current_user: dict
     return _excel(r["data"], "career_summary.xlsx", "Career Summary")
 
 @router.get("/career/module-report")
-async def module_report(db: Session = Depends(get_db)):
-    """Career progression by module/bucket."""
+async def module_report(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    """Career progression by module/bucket. Auth required."""
     # Single query: CourseBucket LEFT JOIN Content on bucket_id, LEFT JOIN CourseCompletion on course_id
     # GROUP BY bucket fields
     content_sub = db.query(
@@ -794,8 +794,8 @@ async def module_report(db: Session = Depends(get_db)):
     return {"report_name": "Module Report", "data": data, "total": len(data)}
 
 @router.get("/career/module-report/excel")
-async def module_report_excel(db: Session = Depends(get_db)):
-    r = await module_report(db)
+async def module_report_excel(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    r = await module_report(db, current_user)
     return _excel(r["data"], "module_report.xlsx", "Modules")
 
 @router.get("/career/node-progress")
@@ -830,8 +830,8 @@ async def node_progress_excel(db: Session = Depends(get_db), current_user: dict 
 # ============================================================
 
 @router.get("/exams/overview")
-async def exams_overview(db: Session = Depends(get_db)):
-    """All scheduled exams with stats."""
+async def exams_overview(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    """All scheduled exams with stats. Auth required."""
     sub_stats = db.query(
         AssessmentSubmission.assessment_id,
         func.count(AssessmentSubmission.id).label('total_submissions'),
@@ -863,8 +863,8 @@ async def exams_overview(db: Session = Depends(get_db)):
     return {"report_name": "Exams Overview", "data": data, "total": len(data)}
 
 @router.get("/exams/overview/excel")
-async def exams_overview_excel(db: Session = Depends(get_db)):
-    r = await exams_overview(db)
+async def exams_overview_excel(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    r = await exams_overview(db, current_user)
     return _excel(r["data"], "exams_overview.xlsx", "Exams Overview")
 
 @router.get("/exams/quiz-results")

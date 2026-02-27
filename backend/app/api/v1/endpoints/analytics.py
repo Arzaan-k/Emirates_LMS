@@ -639,7 +639,10 @@ async def get_employee_detail(
 
 
 @router.get("/training-effectiveness")
-async def get_training_effectiveness(db: Session = Depends(get_db)):
+async def get_training_effectiveness(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Course-wise effectiveness analytics.
     """
@@ -656,7 +659,10 @@ async def get_training_effectiveness(db: Session = Depends(get_db)):
 
 
 @router.get("/hygiene-compliance")
-async def get_hygiene_compliance(db: Session = Depends(get_db)):
+async def get_hygiene_compliance(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Hygiene and compliance analytics.
     """
@@ -673,7 +679,10 @@ async def get_hygiene_compliance(db: Session = Depends(get_db)):
 
 
 @router.get("/customer-experience")
-async def get_customer_experience_impact(db: Session = Depends(get_db)):
+async def get_customer_experience_impact(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Customer experience correlation with training.
     """
@@ -689,7 +698,10 @@ async def get_customer_experience_impact(db: Session = Depends(get_db)):
 
 
 @router.get("/ai-insights")
-async def get_ai_learning_insights(db: Session = Depends(get_db)):
+async def get_ai_learning_insights(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     AI-powered learning insights.
     """
@@ -1052,7 +1064,8 @@ async def generate_analytics_report(
     store_filter: str = Form(""),
     role_filter: str = Form(""),
     format: str = Form("pdf"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Generate analytics report (PDF/Excel).
@@ -1070,7 +1083,10 @@ async def generate_analytics_report(
 
 
 @router.get("/reports/executive-summary")
-async def generate_ai_executive_summary(db: Session = Depends(get_db)):
+async def generate_ai_executive_summary(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Generate AI-powered executive summary.
     """
@@ -1294,7 +1310,8 @@ async def get_audit_logs(
     action: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Get system audit logs with filtering.

@@ -166,6 +166,13 @@ def list_users(
     # Get access control context for filtering
     access_context = get_access_filter_context(db, current_user)
 
+    # DEBUG: Log access control decision
+    viewer = current_user.get('email', 'unknown')
+    is_sa = access_context.get('is_superadmin', False)
+    ae = access_context.get('accessible_emails')
+    ae_count = len(ae) if ae else 'ALL (superadmin)'
+    logger.info(f"[ACCESS-CTRL] list_users called by '{viewer}' | is_superadmin={is_sa} | accessible_emails={ae_count}")
+
     skip = (page - 1) * limit
     service = UserService(db)
 
@@ -262,6 +269,11 @@ def list_users(
         "total": total,
         "page": page,
         "total_pages": (total + limit - 1) // limit if limit > 0 else 1,
+        "access_info": {
+            "viewer_email": current_user.get('email'),
+            "is_superadmin": access_context.get('is_superadmin', False),
+            "filtered": not access_context.get('is_superadmin', False),
+        },
     }
 
 

@@ -333,11 +333,12 @@ class AccessControlService:
         return cascaded
 
     def _get_users_by_geographic_filter(self, filter_type: str, filter_value: str) -> List[User]:
-        """Get users matching a geographic filter using in-memory cached users."""
+        """Get users matching a geographic filter using in-memory cached users (case-insensitive)."""
         all_users = self._get_all_users()
+        filter_lower = str(filter_value).strip().lower()
 
         if filter_type == 'store':
-            return [u for u in all_users if u.store == filter_value]
+            return [u for u in all_users if u.store and str(u.store).strip().lower() == filter_lower]
 
         # For state, region, city - filter by profile_data JSON
         key_map = {'state': 'State', 'region': 'Region', 'city': 'City'}
@@ -346,7 +347,7 @@ class AccessControlService:
         if key:
             return [
                 u for u in all_users
-                if (u.profile_data or {}).get(key) == filter_value
+                if str((u.profile_data or {}).get(key, '')).strip().lower() == filter_lower
             ]
 
         return []
@@ -413,11 +414,13 @@ class AccessControlService:
                     continue
 
                 if p_grant.grant_type == 'store':
-                    users = [u for u in all_users if u.store == p_grant.target_value]
+                    tv_lower = str(p_grant.target_value).strip().lower()
+                    users = [u for u in all_users if u.store and str(u.store).strip().lower() == tv_lower]
                 else:
                     key_map = {'state': 'State', 'region': 'Region', 'city': 'City'}
                     key = key_map.get(p_grant.grant_type)
-                    users = [u for u in all_users if (u.profile_data or {}).get(key) == p_grant.target_value] if key else []
+                    tv_lower = str(p_grant.target_value).strip().lower()
+                    users = [u for u in all_users if str((u.profile_data or {}).get(key, '')).strip().lower() == tv_lower] if key else []
 
                 child_values = {t: set() for t in child_types}
                 for u in users:
@@ -504,6 +507,7 @@ class AccessControlService:
         Get all users that a viewer has access to based on their grants.
         Superadmins bypass all access control and see everyone.
         Users with no grants can only see themselves.
+        All matching is case-insensitive to prevent mismatches.
         """
         # Check if viewer exists and is superadmin — use the cache to avoid a DB hit
         all_users_cached = self._get_all_users()
@@ -522,8 +526,10 @@ class AccessControlService:
             # No grants = can only see self
             return [viewer]
 
-        # Build filter sets
-        accessible_emails = {viewer_email}  # Always include self
+        # Build filter sets — normalise all target values to lowercase for
+        # case-insensitive matching (the most common cause of "grant exists
+        # but users don't show up").
+        accessible_emails = {viewer_email.lower()}  # Always include self
         accessible_stores = set()
         accessible_cities = set()
         accessible_regions = set()
@@ -533,22 +539,25 @@ class AccessControlService:
         accessible_roles = set()
 
         for grant in grants:
+            tv = str(grant.target_value).strip().lower() if grant.target_value else ''
+            if not tv:
+                continue
             if grant.grant_type == 'user':
-                accessible_emails.add(grant.target_value)
+                accessible_emails.add(tv)
             elif grant.grant_type == 'store':
-                accessible_stores.add(grant.target_value)
+                accessible_stores.add(tv)
             elif grant.grant_type == 'city':
-                accessible_cities.add(grant.target_value)
+                accessible_cities.add(tv)
             elif grant.grant_type == 'region':
-                accessible_regions.add(grant.target_value)
+                accessible_regions.add(tv)
             elif grant.grant_type == 'state':
-                accessible_states.add(grant.target_value)
+                accessible_states.add(tv)
             elif grant.grant_type == 'department':
-                accessible_departments.add(grant.target_value)
+                accessible_departments.add(tv)
             elif grant.grant_type == 'designation':
-                accessible_designations.add(grant.target_value)
+                accessible_designations.add(tv)
             elif grant.grant_type == 'role':
-                accessible_roles.add(grant.target_value)
+                accessible_roles.add(tv)
 
         # Filter from the already-loaded cache
         accessible = []
@@ -557,40 +566,40 @@ class AccessControlService:
             pd = user.profile_data or {}
 
             # Check each filter type (OR logic - match any grant)
-            if user.email in accessible_emails:
+            if user.email and user.email.lower() in accessible_emails:
                 accessible.append(user)
                 continue
 
-            if user.store and user.store in accessible_stores:
+            if user.store and str(user.store).strip().lower() in accessible_stores:
                 accessible.append(user)
                 continue
 
             user_city = pd.get('City')
-            if user_city and user_city in accessible_cities:
+            if user_city and str(user_city).strip().lower() in accessible_cities:
                 accessible.append(user)
                 continue
 
             user_region = pd.get('Region')
-            if user_region and user_region in accessible_regions:
+            if user_region and str(user_region).strip().lower() in accessible_regions:
                 accessible.append(user)
                 continue
 
             user_state = pd.get('State')
-            if user_state and user_state in accessible_states:
+            if user_state and str(user_state).strip().lower() in accessible_states:
                 accessible.append(user)
                 continue
 
             user_dept = pd.get('Department')
-            if user_dept and user_dept in accessible_departments:
+            if user_dept and str(user_dept).strip().lower() in accessible_departments:
                 accessible.append(user)
                 continue
 
             user_desig = pd.get('Designation')
-            if user_desig and user_desig in accessible_designations:
+            if user_desig and str(user_desig).strip().lower() in accessible_designations:
                 accessible.append(user)
                 continue
 
-            if user.role and user.role in accessible_roles:
+            if user.role and str(user.role).strip().lower() in accessible_roles:
                 accessible.append(user)
                 continue
 
