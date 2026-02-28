@@ -24,9 +24,10 @@ const NOTIF_ICONS = {
     urgent: { name: 'alert-circle', color: '#EF4444', bg: '#FEE2E2' },
     error: { name: 'x-circle', color: '#EF4444', bg: '#FEE2E2' },
     course: { name: 'book-open', color: '#8B5CF6', bg: '#EDE9FE' },
+    quiz: { name: 'brain', color: '#6366F1', bg: '#EEF2FF' },
 };
 
-export default function NotificationBell({ userEmail }) {
+export default function NotificationBell({ userEmail, onDailyQuizPress }) {
     const [visible, setVisible] = useState(false);
     const [notifications, setNotifications] = useState([]);
     const [unreadCount, setUnreadCount] = useState(0);
@@ -106,8 +107,13 @@ export default function NotificationBell({ userEmail }) {
                 <TouchableOpacity
                     style={[styles.notifItem, !item.is_read && styles.notifUnread]}
                     activeOpacity={0.8}
-                    onPress={() => {
+                                onPress={() => {
                         if (!item.is_read) markAsRead(item.id);
+                        // Deep-link: if it's a daily quiz notification, navigate to daily quiz
+                        if (item.action_type === 'daily_quiz' && onDailyQuizPress) {
+                            setVisible(false);
+                            onDailyQuizPress();
+                        }
                     }}
                 >
                     <View style={[styles.notifIcon, { backgroundColor: iconConfig.bg }]}>

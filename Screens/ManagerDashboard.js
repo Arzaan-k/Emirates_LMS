@@ -50,6 +50,7 @@ import RoleplayHistoryModal from '../Components/RoleplayHistoryModal'; // [NEW] 
 import ModeSwitcher from '../Components/ModeSwitcher'; // [NEW] Mode Switcher
 import ModeIndicator from '../Components/ModeIndicator'; // [NEW] Mode Indicator
 import ImpactUserPickerModal from '../Components/ImpactUserPickerModal';
+import AdminDailyQuizManager from '../Components/AdminDailyQuizManager';
 
 
 
@@ -273,6 +274,7 @@ export default function ManagerDashboard({ route, navigation }) {
     // NEWS & QUIZ CREATION STATE
     const [newsModalVisible, setNewsModalVisible] = useState(false);
     const [quizCreationVisible, setQuizCreationVisible] = useState(false);
+    const [dailyQuizManagerVisible, setDailyQuizManagerVisible] = useState(false);
     const [newsTitle, setNewsTitle] = useState('');
     const [newsContent, setNewsContent] = useState('');
     const [newsAuthor, setNewsAuthor] = useState('');
@@ -1302,6 +1304,16 @@ export default function ManagerDashboard({ route, navigation }) {
                                     <MaterialCommunityIcons name="head-question-outline" size={24} color="#4F46E5" />
                                 </View>
                                 <Text style={styles.actionText}>Post Quiz</Text>
+                            </TouchableOpacity>
+                        )}
+
+                        {/* DAILY QUIZ - requires post_quiz privilege */}
+                        {hasPrivilege('post_quiz') && (
+                            <TouchableOpacity style={styles.actionBtn} onPress={() => setDailyQuizManagerVisible(true)}>
+                                <View style={[styles.actionIcon, { backgroundColor: '#EEF2FF' }]}>
+                                    <MaterialCommunityIcons name="brain" size={24} color="#6366F1" />
+                                </View>
+                                <Text style={styles.actionText}>Daily Quiz</Text>
                             </TouchableOpacity>
                         )}
 
@@ -2543,6 +2555,19 @@ export default function ManagerDashboard({ route, navigation }) {
                         </View>
                     </View>
                 </KeyboardAvoidingView>
+            </Modal>
+            {/* DAILY QUIZ MANAGER MODAL */}
+            <Modal visible={dailyQuizManagerVisible} animationType="slide" transparent={false}>
+                <View style={{ flex: 1, backgroundColor: '#F8FAFC' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 50 : 20, paddingBottom: 12, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0' }}>
+                        <TouchableOpacity onPress={() => setDailyQuizManagerVisible(false)} style={{ marginRight: 12 }}>
+                            <Feather name="x" size={24} color="#1E293B" />
+                        </TouchableOpacity>
+                        <MaterialCommunityIcons name="brain" size={24} color="#6366F1" style={{ marginRight: 8 }} />
+                        <Text style={{ fontSize: 18, fontFamily: 'Poppins_700Bold', color: '#1E293B' }}>Daily Quiz Manager</Text>
+                    </View>
+                    <AdminDailyQuizManager userEmail={userProfile?.email || name} />
+                </View>
             </Modal>
         </View>
     );

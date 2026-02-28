@@ -26,6 +26,7 @@ from app.api.v1.endpoints import (
     self_learning,
     learning_path,
     access_control,
+    daily_quiz,
 )
 
 # Create the main API router
@@ -51,6 +52,7 @@ api_router.include_router(detailed_reports.router)
 api_router.include_router(self_learning.router)
 api_router.include_router(learning_path.router)
 api_router.include_router(access_control.router)
+api_router.include_router(daily_quiz.router)
 
 
 # Health check endpoint at root level

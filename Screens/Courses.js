@@ -19,6 +19,7 @@ import LessonView from "../Components/LessonView";
 import FeedbackFormModal from "../Components/FeedbackFormModal";
 import NotificationBell from "../Components/NotificationBell";
 import QuizSection from "../Components/QuizSection";
+import DailyQuizTab from "../Components/DailyQuizTab";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { Video, ResizeMode } from 'expo-av';
@@ -681,11 +682,16 @@ export default function Courses({ userEmail = "user" }) {
                     <View style={{ flex: 1, marginRight: 10 }}>
                         <Text style={styles.pageTitle} numberOfLines={1} adjustsFontSizeToFit>Employee Learning Path</Text>
                         <Text style={styles.subTitle}>
-                            {learningPathTab === 'self_learning' ? '📚 Self Learning Journey' : '🚀 Career Progression'}
+                            {learningPathTab === 'self_learning' ? '📚 Self Learning Journey'
+                             : learningPathTab === 'career_progression' ? '🚀 Career Progression'
+                             : '🧠 Daily Quiz'}
                         </Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                        <NotificationBell userEmail={userEmail} />
+                        <NotificationBell
+                            userEmail={userEmail}
+                            onDailyQuizPress={() => handlePathTabChange('daily_quiz')}
+                        />
                         <View style={styles.xpContainer}>
                             <MaterialCommunityIcons name="lightning-bolt" size={20} color="#F59E0B" />
                             <Text style={styles.xpText}>1,240 XP</Text>
@@ -744,6 +750,26 @@ export default function Courses({ userEmail = "user" }) {
                             learningPathTab === 'career_progression' && styles.learningPathTabTextActive
                         ]}>Career Progression</Text>
                     </TouchableOpacity>
+
+                    {/* Daily Quiz Tab */}
+                    <TouchableOpacity
+                        style={[
+                            styles.learningPathTab,
+                            learningPathTab === 'daily_quiz' && { backgroundColor: '#6366F1', borderColor: '#6366F1' },
+                            { borderColor: '#6366F1' }
+                        ]}
+                        onPress={() => handlePathTabChange('daily_quiz')}
+                    >
+                        <MaterialCommunityIcons
+                            name="brain"
+                            size={18}
+                            color={learningPathTab === 'daily_quiz' ? '#FFF' : '#6366F1'}
+                        />
+                        <Text style={[
+                            styles.learningPathTabText,
+                            learningPathTab === 'daily_quiz' && styles.learningPathTabTextActive
+                        ]}>Daily Quiz</Text>
+                    </TouchableOpacity>
                 </View>
             )}
 
@@ -765,6 +791,9 @@ export default function Courses({ userEmail = "user" }) {
                         learningPathType="career_progression"
                         onComplete={fetchSelfLearningStatus}
                     />
+                )}
+                {learningPathTab === 'daily_quiz' && (
+                    <DailyQuizTab userEmail={userEmail} />
                 )}
             </View>
 
