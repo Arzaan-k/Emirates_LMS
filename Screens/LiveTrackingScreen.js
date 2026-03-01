@@ -15,6 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import API_URL from '../config';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORE_LOCATIONS = [
     { name: "Chowpatty Seaface", lat: 18.9557, lng: 72.8131, address: "Plot 25B, Fulchand Niwas" },
@@ -75,7 +76,12 @@ export default function LiveTrackingScreen({ navigation }) {
 
     const fetchLocations = async () => {
         try {
-            const res = await fetch(`${API_URL}/api/v1/tracking/location/all`);
+            const token = await AsyncStorage.getItem('userToken');
+            const res = await fetch(`${API_URL}/api/v1/tracking/location/all`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
             const data = await res.json();
 
             // FIX: Map backend `user_name` to frontend `name` and provide fallback
@@ -381,7 +387,9 @@ export default function LiveTrackingScreen({ navigation }) {
                     <Text style={styles.title}>Live Employee Tracking</Text>
                     <View style={styles.activeIndicator}>
                         <View style={styles.pulseDot} />
-                        <Text style={styles.activeText}>{activeCount} active</Text>
+                        <Text style={styles.activeText}>
+                            {activeCount} tracking · {locations.length} total
+                        </Text>
                     </View>
                 </View>
 
@@ -473,7 +481,9 @@ export default function LiveTrackingScreen({ navigation }) {
             {/* EMPLOYEE LIST */}
             {locations.length > 0 && (
                 <View style={styles.listContainer}>
-                    <Text style={styles.listTitle}>Team Locations</Text>
+                    <Text style={styles.listTitle}>
+                        Team Locations · <Text style={{ color: '#10B981' }}>{activeCount}</Text> tracking
+                    </Text>
                     <ScrollView
                         horizontal
                         showsHorizontalScrollIndicator={false}
@@ -482,8 +492,8 @@ export default function LiveTrackingScreen({ navigation }) {
                         {locations.map((loc, index) => (
                             <TouchableOpacity
                                 key={loc.id || loc.user_email}
-                                onPress={() => centerOnEmployee(loc)}
-                                activeOpacity={0.8}
+                                onPress={() => loc.active && centerOnEmployee(loc)}
+                                activeOpacity={loc.active ? 0.8 : 1}
                             >
                                 <View
                                     style={[
@@ -511,19 +521,31 @@ export default function LiveTrackingScreen({ navigation }) {
                                         </Text>
                                         <View style={styles.statusRow}>
                                             <Feather
-                                                name={loc.active ? "radio" : "circle"}
+                                                name={loc.active ? "radio" : "wifi-off"}
                                                 size={10}
-                                                color={loc.active ? "#10B981" : "#9CA3AF"}
+                                                color={loc.active ? "#10B981" : "#EF4444"}
                                             />
                                             <Text style={[
                                                 styles.statusText,
-                                                { color: loc.active ? "#10B981" : "#9CA3AF" }
+                                                { color: loc.active ? "#10B981" : "#EF4444" }
                                             ]}>
-                                                {loc.active ? 'Tracking' : 'Offline'}
+                                                {loc.active ? 'Tracking' : 'Not Tracking'}
                                             </Text>
                                         </View>
-                                        <Text style={styles.timestamp}>
-                                            {new Date(loc.timestamp).toLocaleTimeString()}
+                                        <Text style={[
+                                            styles.timestamp,
+                                            !loc.active && { color: '#9CA3AF' }
+                                        ]}>
+                                            {loc.active
+                                                ? new Date(loc.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                                : loc.last_seen_minutes === null || loc.last_seen_minutes === undefined
+                                                    ? 'Never tracked'
+                                                    : loc.last_seen_minutes < 60
+                                                        ? `${loc.last_seen_minutes}m ago`
+                                                        : loc.last_seen_minutes < 1440
+                                                            ? `${Math.floor(loc.last_seen_minutes / 60)}h ago`
+                                                            : `${Math.floor(loc.last_seen_minutes / 1440)}d ago`
+                                            }
                                         </Text>
                                     </View>
                                 </View>

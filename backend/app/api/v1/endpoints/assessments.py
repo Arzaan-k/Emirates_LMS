@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from app.config.database import get_db
 from app.core.dependencies import get_current_user, require_admin
+from app.core.access_filter import get_access_filter_context
 from app.services.assessment_service import AssessmentService
 from app.services.ai_service import AIService
 
@@ -415,15 +416,30 @@ async def submit_assessment(
 
 
 @router.get("/submissions")
-async def get_all_submissions(db: Session = Depends(get_db)):
+async def get_all_submissions(
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     """
-    Get all assessment submissions (admin).
+    Get all assessment submissions (admin), scoped for the user.
     """
     service = AssessmentService(db)
     submissions = service.get_all_submissions()
     
+    access_context = get_access_filter_context(db, current_user)
+    is_superadmin = access_context.get('is_superadmin', False)
+    accessible_emails = access_context.get('accessible_emails', set())
+    viewer_email = access_context.get('viewer_email')
+
     result = []
     for submission in submissions:
+        if not is_superadmin:
+            if accessible_emails:
+                if submission.user_email not in accessible_emails:
+                    continue
+            elif submission.user_email != viewer_email:
+                continue
+
         submission_dict = submission.to_dict() if hasattr(submission, 'to_dict') else dict(submission)
         result.append(submission_dict)
     
@@ -433,16 +449,29 @@ async def get_all_submissions(db: Session = Depends(get_db)):
 @router.get("/submissions/assessment/{assessment_id}")
 async def get_assessment_submissions(
     assessment_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
-    Get submissions for a specific assessment.
+    Get submissions for a specific assessment, scoped to the user.
     """
     service = AssessmentService(db)
     submissions = service.get_assessment_submissions(assessment_id)
     
+    access_context = get_access_filter_context(db, current_user)
+    is_superadmin = access_context.get('is_superadmin', False)
+    accessible_emails = access_context.get('accessible_emails', set())
+    viewer_email = access_context.get('viewer_email')
+
     result = []
     for submission in submissions:
+        if not is_superadmin:
+            if accessible_emails:
+                if submission.user_email not in accessible_emails:
+                    continue
+            elif submission.user_email != viewer_email:
+                continue
+
         submission_dict = submission.to_dict() if hasattr(submission, 'to_dict') else dict(submission)
         result.append(submission_dict)
     
@@ -758,16 +787,29 @@ async def create_scheduled_exam(
 @router.get("/scheduled/{exam_id}/attendance")
 async def get_exam_attendance(
     exam_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
-    Get attendance list for a scheduled exam.
+    Get attendance list for a scheduled exam, scoped to users the accessor can see.
     """
     service = AssessmentService(db)
     attendance = service.get_exam_attendance(exam_id)
     
+    access_context = get_access_filter_context(db, current_user)
+    is_superadmin = access_context.get('is_superadmin', False)
+    accessible_emails = access_context.get('accessible_emails', set())
+    viewer_email = access_context.get('viewer_email')
+
     result = []
     for record in attendance:
+        if not is_superadmin:
+            if accessible_emails:
+                if record.user_email not in accessible_emails:
+                    continue
+            elif record.user_email != viewer_email:
+                continue
+
         record_dict = record.to_dict() if hasattr(record, 'to_dict') else dict(record)
         result.append(record_dict)
     

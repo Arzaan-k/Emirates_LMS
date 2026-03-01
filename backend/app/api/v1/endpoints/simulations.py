@@ -14,6 +14,8 @@ from fastapi import APIRouter, Depends, Form, File, UploadFile, HTTPException, H
 from sqlalchemy.orm import Session
 
 from app.config.database import get_db
+from app.core.dependencies import get_current_user
+from app.core.access_filter import get_access_filter_context
 from app.repositories.simulation_repository import (
     SimulationRepository,
     SimulationProgressRepository,
@@ -366,16 +368,29 @@ async def complete_simulation(
 @router.get("/{simulation_id}/submissions")
 async def get_simulation_submissions(
     simulation_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
-    Get all submissions for a simulation.
+    Get all submissions for a simulation, scoped to the accessible users.
     """
     progress_repo = SimulationProgressRepository(db)
     submissions = progress_repo.get_by_simulation(simulation_id)
+    
+    access_context = get_access_filter_context(db, current_user)
+    is_superadmin = access_context.get('is_superadmin', False)
+    accessible_emails = access_context.get('accessible_emails', set())
+    viewer_email = access_context.get('viewer_email')
 
     result = []
     for sub in submissions:
+        if not is_superadmin:
+            if accessible_emails:
+                if sub.user_email not in accessible_emails:
+                    continue
+            elif sub.user_email != viewer_email:
+                continue
+
         sub_dict = sub.to_dict() if hasattr(sub, 'to_dict') else {
             "id": sub.id,
             "user_email": sub.user_email,
@@ -587,41 +602,78 @@ Explain what could go wrong. Be specific and educational. Keep it short."""
 @router.get("/analytics/{simulation_id}/detailed")
 async def get_simulation_analytics_detailed(
     simulation_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
-    Detailed analytics for a simulation — reads from pre-computed snapshot table
-    plus the last 50 individual attempts for the admin history view.
-    Falls back to on-the-fly computation if no snapshot exists yet.
+    Detailed analytics for a simulation — scoped to users the accessor is allowed to see.
     """
     snap_repo = SimulationAnalyticsRepository(db)
     progress_repo = SimulationProgressRepository(db)
+    
+    access_context = get_access_filter_context(db, current_user)
+    is_superadmin = access_context.get('is_superadmin', False)
+    accessible_emails = access_context.get('accessible_emails', set())
+    viewer_email = access_context.get('viewer_email')
 
-    snapshot = snap_repo.get_snapshot(simulation_id)
+    all_progress = progress_repo.get_by_simulation(simulation_id)
+    
+    # Filter attempts
+    filtered_progress = []
+    for p in all_progress:
+        if not is_superadmin:
+            if accessible_emails:
+                if p.user_email not in accessible_emails:
+                    continue
+            elif p.user_email != viewer_email:
+                continue
+        filtered_progress.append(p)
+    
+    # Recompute metrics dynamically if filtered, otherwise use snapshot
+    if is_superadmin:
+        snapshot = snap_repo.get_snapshot(simulation_id)
+        if not snapshot:
+            if all_progress:
+                snapshot = snap_repo.upsert_snapshot(simulation_id, all_progress)
+        
+        aggregate = snapshot.to_dict() if snapshot else {
+            "simulation_id": simulation_id,
+            "total_attempts": 0,
+            "total_completed": 0,
+            "total_passed": 0,
+            "total_failed": 0,
+            "avg_score": 0.0,
+            "highest_score": 0.0,
+            "lowest_score": 0.0,
+            "pass_rate": 0.0,
+            "avg_time_seconds": 0.0,
+            "last_attempt_at": None,
+            "last_updated": None,
+        }
+    else:
+        # Recompute aggregate locally based only on allowed users
+        total_attempts = len(filtered_progress)
+        total_completed = sum(1 for p in filtered_progress if p.completed)
+        total_passed = sum(1 for p in filtered_progress if p.passed)
+        avg_score = sum(p.score for p in filtered_progress) / total_attempts if total_attempts > 0 else 0
+        
+        aggregate = {
+            "simulation_id": simulation_id,
+            "total_attempts": total_attempts,
+            "total_completed": total_completed,
+            "total_passed": total_passed,
+            "total_failed": total_attempts - total_passed,
+            "avg_score": round(avg_score, 1),
+            "highest_score": max([p.score for p in filtered_progress], default=0),
+            "lowest_score": min([p.score for p in filtered_progress], default=0),
+            "pass_rate": (total_passed / total_attempts * 100) if total_attempts > 0 else 0,
+            "avg_time_seconds": 0, # Simplify
+            "last_attempt_at": None,
+            "last_updated": None,
+        }
 
-    # If no snapshot yet (simulation never completed), compute on-the-fly and persist
-    if not snapshot:
-        all_progress = progress_repo.get_by_simulation(simulation_id)
-        if all_progress:
-            snapshot = snap_repo.upsert_snapshot(simulation_id, all_progress)
-
-    aggregate = snapshot.to_dict() if snapshot else {
-        "simulation_id": simulation_id,
-        "total_attempts": 0,
-        "total_completed": 0,
-        "total_passed": 0,
-        "total_failed": 0,
-        "avg_score": 0.0,
-        "highest_score": 0.0,
-        "lowest_score": 0.0,
-        "pass_rate": 0.0,
-        "avg_time_seconds": 0.0,
-        "last_attempt_at": None,
-        "last_updated": None,
-    }
-
-    # Return the 50 most recent completed attempts for the attempt history table
-    recent = progress_repo.get_by_simulation(simulation_id)[:50]
+    # Return the recent filtered attempts
+    recent = filtered_progress[:50]
     attempt_history = [
         {
             "id": p.id,
@@ -646,15 +698,31 @@ async def get_simulation_analytics_detailed(
 @router.get("/analytics/{simulation_id}")
 async def get_simulation_analytics(
     simulation_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Get analytics for a simulation.
     """
     repo = SimulationProgressRepository(db)
     submissions = repo.get_by_simulation(simulation_id)
+    
+    access_context = get_access_filter_context(db, current_user)
+    is_superadmin = access_context.get('is_superadmin', False)
+    accessible_emails = access_context.get('accessible_emails', set())
+    viewer_email = access_context.get('viewer_email')
 
-    total_attempts = len(submissions)
+    filtered = []
+    for sub in submissions:
+        if not is_superadmin:
+            if accessible_emails:
+                if sub.user_email not in accessible_emails:
+                    continue
+            elif sub.user_email != viewer_email:
+                continue
+        filtered.append(sub)
+
+    total_attempts = len(filtered)
     if total_attempts == 0:
         return {
             "totalAttempts": 0,
@@ -662,8 +730,8 @@ async def get_simulation_analytics(
             "passRate": 0
         }
 
-    avg_score = sum(s.score for s in submissions) / total_attempts
-    passed_count = sum(1 for s in submissions if s.passed)
+    avg_score = sum(s.score for s in filtered) / total_attempts
+    passed_count = sum(1 for s in filtered if s.passed)
     pass_rate = (passed_count / total_attempts) * 100 if total_attempts > 0 else 0
 
     return {

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.config.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.access_filter import get_access_filter_context
 from app.repositories.tracking_repository import (
     AttendanceRepository,
     LocationTrackingRepository,
@@ -164,16 +165,34 @@ async def get_attendance_records(
 
 
 @router.get("/attendance/all")
-async def get_all_attendance(db: Session = Depends(get_db)):
+async def get_all_attendance(
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     """
-    Get all attendance records (admin).
+    Get all attendance records (admin), filtered by access controls.
     """
     repo = AttendanceRepository(db)
+    access_context = get_access_filter_context(db, current_user)
     
     records = repo.get_all_records()
     
     result = []
+    
+    # Pre-fetch user emails that can be accessed by the current user
+    is_superadmin = access_context.get('is_superadmin', False)
+    accessible_emails = access_context.get('accessible_emails', set())
+    viewer_email = access_context.get('viewer_email')
+    
     for record in records:
+        # Access control
+        if not is_superadmin:
+            if accessible_emails:
+                if record.user_email not in accessible_emails:
+                    continue
+            elif record.user_email != viewer_email:
+                continue
+
         result.append({
             "id": record.id,
             "user_email": record.user_email,
@@ -290,23 +309,97 @@ async def get_user_location(
 
 
 @router.get("/location/all")
-async def get_all_locations(db: Session = Depends(get_db)):
+async def get_all_locations(
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     """
-    Get all active locations (for live tracking).
+    Get all location records for live tracking, filtered by access controls.
+
+    A user is considered "actively tracking" only when:
+      1. Their latest LocationTracking record has active == True, AND
+      2. That record's timestamp is within the last 30 minutes.
+
+    If either condition fails the record is returned with active=False and
+    a last_seen_minutes field so the frontend can display "Last seen X min ago".
+    Lat/lng are hidden (None) for inactive users so they don't appear as map pins.
     """
-    repo = LocationTrackingRepository(db)
-    
-    locations = repo.get_active_locations()
-    
+    from app.models.user import User
+    from app.models.tracking import LocationTracking
+    from sqlalchemy import func
+
+    access_context = get_access_filter_context(db, current_user)
+    is_superadmin = access_context.get('is_superadmin', False)
+    accessible_emails = access_context.get('accessible_emails', set())
+    viewer_email = access_context.get('viewer_email')
+
+    # ------------------------------------------------------------------
+    # Step 1: Get the LATEST location record per user via a subquery
+    # ------------------------------------------------------------------
+    latest_ts_sq = (
+        db.query(
+            LocationTracking.user_email,
+            func.max(LocationTracking.timestamp).label("max_ts")
+        )
+        .group_by(LocationTracking.user_email)
+        .subquery()
+    )
+
+    locations_query = (
+        db.query(LocationTracking, User.name, User.role)
+        .outerjoin(User, LocationTracking.user_email == User.email)
+        .join(
+            latest_ts_sq,
+            (LocationTracking.user_email == latest_ts_sq.c.user_email) &
+            (LocationTracking.timestamp == latest_ts_sq.c.max_ts)
+        )
+    )
+
+    # Apply email-level access control at the DB layer
+    if not is_superadmin:
+        if accessible_emails:
+            locations_query = locations_query.filter(
+                LocationTracking.user_email.in_(accessible_emails)
+            )
+        elif viewer_email:
+            locations_query = locations_query.filter(
+                LocationTracking.user_email == viewer_email
+            )
+        else:
+            return []  # No access at all
+
+    locations = locations_query.order_by(LocationTracking.timestamp.desc()).all()
+
+    # ------------------------------------------------------------------
+    # Step 2: Build result with staleness check and last-seen time
+    # ------------------------------------------------------------------
+    # A record is truly "active" only if it was updated within the last 30 min
+    STALE_MINUTES = 30
+    now = datetime.utcnow()
+
     result = []
-    for loc in locations:
+    for loc, user_name, user_role in locations:
+        last_seen_minutes = None
+        is_truly_active = False
+
+        if loc.timestamp:
+            age_seconds = (now - loc.timestamp).total_seconds()
+            last_seen_minutes = int(age_seconds / 60)
+            # Truly active: user explicitly has active=True AND updated recently
+            is_truly_active = loc.active and (age_seconds <= STALE_MINUTES * 60)
+
         result.append({
             "user_email": loc.user_email,
-            "latitude": loc.latitude,
-            "longitude": loc.longitude,
-            "accuracy": loc.accuracy,
+            "user_name": user_name or loc.user_email,
+            "role": user_role,
+            # Only expose coordinates when actively tracking
+            "latitude": loc.latitude if is_truly_active else None,
+            "longitude": loc.longitude if is_truly_active else None,
+            "accuracy": loc.accuracy if is_truly_active else None,
             "timestamp": loc.timestamp.isoformat() if loc.timestamp else None,
-            "store": loc.store
+            "last_seen_minutes": last_seen_minutes,
+            "store": loc.store,
+            "active": is_truly_active,
         })
-    
+
     return result

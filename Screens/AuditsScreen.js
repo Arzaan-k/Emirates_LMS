@@ -30,6 +30,7 @@ const AuditsScreen = ({ navigation, route }) => {
     const [selectedCategory, setSelectedCategory] = useState('safety');
     const [checkedItems, setCheckedItems] = useState({});
     const [submitting, setSubmitting] = useState(false);
+    const [showConfirm, setShowConfirm] = useState(false); // inline confirm card
 
     // History Modal State (Super Admin only)
     const [historyVisible, setHistoryVisible] = useState(false);
@@ -143,17 +144,21 @@ const AuditsScreen = ({ navigation, route }) => {
         return getCompletionRate(category) === 100;
     };
 
-    const handleSubmit = async () => {
+    const handleSubmit = () => {
         const completion = getCompletionRate(selectedCategory);
-        if (completion !== 100) {
-            Alert.alert(
-                'Incomplete Audit',
-                `Please complete all items (${completion}% done)`,
-                [{ text: 'OK' }]
-            );
+        if (completion === 0) {
+            // still show an alert for 0% — that's fine cross-platform
+            Alert.alert('No Items Checked', 'Please check at least one item before submitting.');
             return;
         }
+        // Show inline confirmation card (works on all platforms)
+        setShowConfirm(true);
+    };
 
+    const doSubmit = async () => {
+        const completion = getCompletionRate(selectedCategory);
+        const isPartial = completion < 100;
+        setShowConfirm(false);
         setSubmitting(true);
         try {
             const formData = new FormData();
@@ -163,6 +168,7 @@ const AuditsScreen = ({ navigation, route }) => {
             formData.append('category', selectedCategory);
             formData.append('checklist_items', JSON.stringify(auditChecklists[selectedCategory]));
             formData.append('checked_items', JSON.stringify(checkedItems));
+            formData.append('audit_status', isPartial ? 'partial' : 'completed');
 
             const response = await fetch(`${API_URL}/api/v1/crm/audits/submit`, {
                 method: 'POST',
@@ -172,13 +178,15 @@ const AuditsScreen = ({ navigation, route }) => {
             const result = await response.json();
 
             if (result.status === 'success') {
+                const catName = auditCategories.find(c => c.id === selectedCategory)?.name;
                 Alert.alert(
-                    'Audit Submitted',
-                    `${auditCategories.find(c => c.id === selectedCategory)?.name} audit completed successfully!`,
+                    isPartial ? 'Partial Audit Submitted ✓' : 'Audit Submitted ✓',
+                    isPartial
+                        ? `${catName} submitted at ${completion}% — marked as partially completed.`
+                        : `${catName} fully completed!`,
                     [{
                         text: 'OK',
                         onPress: () => {
-                            // Reset checklist for this category
                             const newChecked = { ...checkedItems };
                             auditChecklists[selectedCategory].forEach((_, idx) => {
                                 delete newChecked[`${selectedCategory}-${idx}`];
@@ -789,11 +797,15 @@ const AuditsScreen = ({ navigation, route }) => {
                         <Animated.View
                             key={category.id}
                             entering={FadeInDown.delay(index * 50)}
+                            style={styles.categoryCardWrapper}
                         >
                             <TouchableOpacity
                                 style={[
                                     styles.categoryCard,
-                                    selectedCategory === category.id && styles.categoryCardActive,
+                                    selectedCategory === category.id && [
+                                        styles.categoryCardActive,
+                                        { borderColor: category.color }
+                                    ],
                                     { shadowColor: category.color }
                                 ]}
                                 onPress={() => setSelectedCategory(category.id)}
@@ -878,14 +890,84 @@ const AuditsScreen = ({ navigation, route }) => {
                         );
                     })}
 
+                    {/* INLINE CONFIRM CARD */}
+                    {showConfirm && (() => {
+                        const pct = completionRate;
+                        const isPartial = pct < 100;
+                        const catColor = isPartial ? '#F59E0B' : currentCategory.color;
+                        return (
+                            <View style={{
+                                marginTop: 12,
+                                backgroundColor: isPartial ? '#FFFBEB' : '#F0FDF4',
+                                borderRadius: 14,
+                                borderWidth: 1.5,
+                                borderColor: isPartial ? '#FCD34D' : '#86EFAC',
+                                padding: 16,
+                            }}>
+                                <Text style={{
+                                    fontSize: 15,
+                                    fontFamily: 'Poppins_600SemiBold',
+                                    color: '#111827',
+                                    marginBottom: 6,
+                                }}>
+                                    {isPartial ? `⚠️ Submit at ${pct}%?` : '✅ Submit Completed Audit?'}
+                                </Text>
+                                <Text style={{
+                                    fontSize: 13,
+                                    fontFamily: 'Poppins_400Regular',
+                                    color: '#374151',
+                                    marginBottom: 14,
+                                    lineHeight: 20,
+                                }}>
+                                    {isPartial
+                                        ? `You've completed ${pct}% of items. This will be recorded as a partial submission.`
+                                        : `All items checked. This audit will be marked as fully completed.`}
+                                </Text>
+                                <View style={{ flexDirection: 'row', gap: 10 }}>
+                                    <TouchableOpacity
+                                        style={{
+                                            flex: 1, paddingVertical: 10, borderRadius: 10,
+                                            backgroundColor: '#F3F4F6',
+                                            alignItems: 'center',
+                                        }}
+                                        onPress={() => setShowConfirm(false)}
+                                    >
+                                        <Text style={{ fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: '#6B7280' }}>Cancel</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={{
+                                            flex: 1, paddingVertical: 10, borderRadius: 10,
+                                            backgroundColor: catColor,
+                                            alignItems: 'center',
+                                        }}
+                                        onPress={doSubmit}
+                                    >
+                                        <Text style={{ fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: '#FFF' }}>
+                                            {isPartial ? `Confirm (${pct}%)` : 'Confirm'}
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        );
+                    })()}
+
                     {/* SUBMIT BUTTON */}
                     <TouchableOpacity
-                        style={[styles.submitBtn, { opacity: completionRate === 100 ? 1 : 0.5 }]}
+                        style={[
+                            styles.submitBtn,
+                            { opacity: submitting ? 0.5 : 1, marginTop: showConfirm ? 8 : 16 }
+                        ]}
                         onPress={handleSubmit}
-                        disabled={submitting || completionRate !== 100}
+                        disabled={submitting}
                     >
                         <LinearGradient
-                            colors={[currentCategory.color, currentCategory.color + 'DD']}
+                            colors={
+                                completionRate === 100
+                                    ? [currentCategory.color, currentCategory.color + 'DD']
+                                    : completionRate === 0
+                                        ? ['#9CA3AF', '#6B7280']
+                                        : ['#F59E0B', '#D97706']
+                            }
                             start={{ x: 0, y: 0 }}
                             end={{ x: 1, y: 0 }}
                             style={styles.submitGradient}
@@ -894,8 +976,18 @@ const AuditsScreen = ({ navigation, route }) => {
                                 <ActivityIndicator color="#FFF" />
                             ) : (
                                 <>
-                                    <Feather name="send" size={20} color="#FFF" />
-                                    <Text style={styles.submitText}>Submit Audit</Text>
+                                    <Feather
+                                        name={completionRate === 100 ? 'send' : completionRate === 0 ? 'lock' : 'upload'}
+                                        size={20}
+                                        color="#FFF"
+                                    />
+                                    <Text style={styles.submitText}>
+                                        {completionRate === 0
+                                            ? 'Check Items to Submit'
+                                            : completionRate === 100
+                                                ? 'Submit Audit'
+                                                : `Submit Partial (${completionRate}%)`}
+                                    </Text>
                                 </>
                             )}
                         </LinearGradient>
@@ -978,11 +1070,17 @@ const styles = StyleSheet.create({
     categoryContainer: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        padding: 20,
-        gap: 12,
+        paddingHorizontal: 16,
+        paddingTop: 16,
+        paddingBottom: 8,
+        justifyContent: 'space-between',
+    },
+    categoryCardWrapper: {
+        width: '48%',
+        marginBottom: 12,
     },
     categoryCard: {
-        width: (width - 52) / 2,
+        width: '100%',
         backgroundColor: '#FFF',
         borderRadius: 16,
         padding: 16,

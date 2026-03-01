@@ -680,7 +680,8 @@ async def submit_audit(
     category: str = Form(...), # template_id basically
     checklist_items: str = Form(...),
     checked_items: str = Form(...),
-    assignment_id: str = Form(None), # NEW
+    assignment_id: str = Form(None), # Link to assignment if applicable
+    audit_status: str = Form("completed"), # 'completed' or 'partial'
     db: Session = Depends(get_db)
 ):
     """
@@ -715,7 +716,7 @@ async def submit_audit(
         "checked_items": checked_dict,
         "completion_rate": completion_rate,
         "submitted_at": datetime.utcnow(),
-        "status": "completed",
+        "status": audit_status if audit_status in ("completed", "partial") else "completed",
         "assignment_id": assignment_id
     }
 

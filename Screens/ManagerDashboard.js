@@ -614,8 +614,12 @@ export default function ManagerDashboard({ route, navigation }) {
                 }
             }
 
+            const token = await AsyncStorage.getItem('userToken');
             const response = await fetch(`${API_URL}/api/v1/notifications/news`, {
                 method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                },
                 body: formData
             });
 
@@ -1042,9 +1046,13 @@ export default function ManagerDashboard({ route, navigation }) {
                 }
             }
 
+            const token = await AsyncStorage.getItem('userToken');
             // NOTE: Do NOT set Content-Type header manually - FormData sets it automatically with boundary
             const response = await fetch(`${API_URL}/api/v1/notifications/send`, {
                 method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                },
                 body: formData
             });
 
