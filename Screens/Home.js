@@ -1420,7 +1420,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
       fetchProctoredAssessments(),
       fetchMeetings(),
       fetchCrmTasks(),
-    ]).catch(() => {}); // individual functions handle their own errors
+    ]).catch(() => { }); // individual functions handle their own errors
   }, []);
 
   useEffect(() => {

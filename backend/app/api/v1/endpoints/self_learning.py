@@ -1580,7 +1580,7 @@ async def get_affected_users_preview(
 
     if total_courses == 0:
         # No courses yet - all users are "not started"
-        all_users = db.query(User).filter(User.is_active == True).all()
+        all_users = db.query(User.email, User.name, User.role, User.store).filter(User.is_active == True).all()
         return {
             "bucket_id": bucket_id,
             "bucket_name": bucket.name,
@@ -1621,7 +1621,7 @@ async def get_affected_users_preview(
         user_progress[p.user_email][p.node_id] = p.video_watched_percent or 0
 
     # Get all active users
-    all_users = db.query(User).filter(User.is_active == True).all()
+    all_users = db.query(User.email, User.name, User.role, User.store).filter(User.is_active == True).all()
     user_map = {u.email: {"email": u.email, "name": u.name, "role": u.role, "store": u.store} for u in all_users}
 
     # Categorize users
@@ -1717,7 +1717,7 @@ async def get_learning_path_affected_users(
     total_courses = len(courses)
 
     if total_courses == 0:
-        all_users = db.query(User).filter(User.is_active == True).limit(100).all()
+        all_users = db.query(User.email, User.name, User.role, User.store).filter(User.is_active == True).limit(100).all()
         return {
             "learning_path_type": learning_path_type,
             "total_courses": 0,
@@ -1744,19 +1744,22 @@ async def get_learning_path_affected_users(
 
     # Get user info
     all_emails = list(user_completions.keys())
-    users = db.query(User).filter(User.email.in_(all_emails)).all() if all_emails else []
+    users = db.query(
+        User.email, User.name, User.role, User.store, User.category, User.profile_data
+    ).filter(User.email.in_(all_emails)).all() if all_emails else []
+    
     user_map = {
         u.email: {
             "email": u.email,
             "name": u.name,
             "role": u.role,
             "store": u.store,
-            "category": getattr(u, 'category', None),
-            "region": getattr(u, 'region', None),
-            "city": getattr(u, 'city', None),
-            "state": getattr(u, 'state', None),
-            "designation": getattr(u, 'designation', None),
-            "department": getattr(u, 'department', None)
+            "category": u.category,
+            "region": (u.profile_data or {}).get('Region') if u.profile_data else None,
+            "city": (u.profile_data or {}).get('City') if u.profile_data else None,
+            "state": (u.profile_data or {}).get('State') if u.profile_data else None,
+            "designation": (u.profile_data or {}).get('Designation') if u.profile_data else None,
+            "department": (u.profile_data or {}).get('Department') if u.profile_data else None
         } 
         for u in users
     }

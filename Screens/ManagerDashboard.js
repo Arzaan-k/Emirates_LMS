@@ -1821,42 +1821,77 @@ export default function ManagerDashboard({ route, navigation }) {
 
                             {/* [NEW] Course Bucket Selector */}
                             <Text style={styles.inputLabel}>Category (Required)</Text>
-                            <View style={{ marginBottom: 15 }}>
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
-                                    <TouchableOpacity
-                                        onPress={() => setSelectedBucket(null)}
-                                        style={{
-                                            paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginRight: 8,
-                                            backgroundColor: !selectedBucket ? '#6366F1' : '#F3F4F6',
-                                            borderWidth: 1, borderColor: !selectedBucket ? '#6366F1' : '#E5E7EB',
-                                            flexDirection: 'row', alignItems: 'center'
-                                        }}
-                                    >
-                                        <MaterialCommunityIcons name="close-circle" size={14} color={!selectedBucket ? '#FFF' : '#6B7280'} style={{ marginRight: 4 }} />
-                                        <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: !selectedBucket ? '#FFF' : '#4B5563' }}>None</Text>
-                                    </TouchableOpacity>
-                                    {courseBuckets.map((bucket, i) => (
-                                        <TouchableOpacity
-                                            key={bucket.id}
-                                            onPress={() => setSelectedBucket(selectedBucket === bucket.id ? null : bucket.id)}
+                            {(() => {
+                                const pathType = isSelfLearning ? 'self_learning' : 'career_progression';
+                                // Filter buckets by learning path type
+                                const filteredBuckets = courseBuckets.filter(b =>
+                                    !b.learning_path_type ||
+                                    b.learning_path_type === pathType ||
+                                    b.show_in_both_paths
+                                );
+
+                                // Sort by folder_path or name to ensure hierarchical visual order
+                                const sortedBuckets = [...filteredBuckets].sort((a, b) =>
+                                    (a.folder_path || a.name).localeCompare(b.folder_path || b.name)
+                                );
+
+                                return (
+                                    <View style={{ marginBottom: 15 }}>
+                                        <ScrollView
+                                            nestedScrollEnabled={true}
+                                            showsVerticalScrollIndicator={true}
                                             style={{
-                                                paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginRight: 8,
-                                                backgroundColor: selectedBucket === bucket.id ? bucket.color : '#F3F4F6',
-                                                borderWidth: 1, borderColor: selectedBucket === bucket.id ? bucket.color : '#E5E7EB',
-                                                flexDirection: 'row', alignItems: 'center'
+                                                maxHeight: 180,
+                                                borderWidth: 1,
+                                                borderColor: '#E5E7EB',
+                                                borderRadius: 12,
+                                                padding: 8,
+                                                backgroundColor: '#F9FAFB'
                                             }}
+                                            contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}
                                         >
-                                            <MaterialCommunityIcons
-                                                name={bucket.icon || 'folder'}
-                                                size={14}
-                                                color={selectedBucket === bucket.id ? '#FFF' : bucket.color}
-                                                style={{ marginRight: 4 }}
-                                            />
-                                            <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: selectedBucket === bucket.id ? '#FFF' : '#4B5563' }}>{bucket.name}</Text>
-                                        </TouchableOpacity>
-                                    ))}
-                                </ScrollView>
-                            </View>
+                                            <TouchableOpacity
+                                                onPress={() => setSelectedBucket(null)}
+                                                style={{
+                                                    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginBottom: 8,
+                                                    backgroundColor: !selectedBucket ? '#6366F1' : '#FFF',
+                                                    borderWidth: 1, borderColor: !selectedBucket ? '#6366F1' : '#D1D5DB',
+                                                    flexDirection: 'row', alignItems: 'center'
+                                                }}
+                                            >
+                                                <MaterialCommunityIcons name="close-circle" size={14} color={!selectedBucket ? '#FFF' : '#6B7280'} style={{ marginRight: 4 }} />
+                                                <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: !selectedBucket ? '#FFF' : '#4B5563' }}>None</Text>
+                                            </TouchableOpacity>
+                                            {sortedBuckets.map((bucket, i) => {
+                                                const pathParts = bucket.folder_path ? bucket.folder_path.split('/') : [bucket.name];
+                                                const displayName = pathParts.length > 1
+                                                    ? `${pathParts[pathParts.length - 2]} > ${pathParts[pathParts.length - 1]}`
+                                                    : pathParts[0];
+                                                return (
+                                                    <TouchableOpacity
+                                                        key={bucket.id}
+                                                        onPress={() => setSelectedBucket(selectedBucket === bucket.id ? null : bucket.id)}
+                                                        style={{
+                                                            paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginBottom: 8,
+                                                            backgroundColor: selectedBucket === bucket.id ? (bucket.color || '#3B82F6') : '#FFF',
+                                                            borderWidth: 1, borderColor: selectedBucket === bucket.id ? (bucket.color || '#3B82F6') : '#D1D5DB',
+                                                            flexDirection: 'row', alignItems: 'center'
+                                                        }}
+                                                    >
+                                                        <MaterialCommunityIcons
+                                                            name={bucket.icon || 'folder'}
+                                                            size={14}
+                                                            color={selectedBucket === bucket.id ? '#FFF' : (bucket.color || '#6B7280')}
+                                                            style={{ marginRight: 6 }}
+                                                        />
+                                                        <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: selectedBucket === bucket.id ? '#FFF' : '#4B5563' }}>{displayName}</Text>
+                                                    </TouchableOpacity>
+                                                );
+                                            })}
+                                        </ScrollView>
+                                    </View>
+                                );
+                            })()}
 
                             {/* RESTORED: Add to Path Toggle */}
                             <TouchableOpacity

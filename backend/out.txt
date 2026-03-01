@@ -1,0 +1,10 @@
+ID: bucket_2592e6df, Name: Process Manual, Parent: bucket_7089b94e, Path: Process Manual/Process Manual, LPType: self_learning, Both: False
+ID: bucket_372cc4b6, Name: Waffle Verse, Parent: bucket_2592e6df, Path: Process Manual/Process Manual/Waffle Verse, LPType: self_learning, Both: False
+ID: bucket_c96311a3, Name: RHI, Parent: bucket_2592e6df, Path: Process Manual/Process Manual/RHI, LPType: self_learning, Both: False
+ID: bucket_ae71688f, Name: Process Note Ice Gel Pack, Parent: bucket_2592e6df, Path: Process Manual/Process Manual/Process Note Ice Gel Pack, LPType: self_learning, Both: False
+ID: bucket_6148023a, Name: POSist, Parent: bucket_2592e6df, Path: Process Manual/Process Manual/POSist, LPType: self_learning, Both: False
+ID: bucket_c87444af, Name: Cash Pick up Process, Parent: bucket_2592e6df, Path: Process Manual/Process Manual/Cash Pick up Process, LPType: self_learning, Both: False
+ID: bucket_7089b94e, Name: Process Manual, Parent: bucket_1785c3f0, Path: Self Learning/Self Learning/Process Manual, LPType: self_learning, Both: False
+ID: bucket_ce6d34ca, Name: Roleplay Videos, Parent: bucket_2592e6df, Path: Process Manual/Process Manual/Roleplay Videos, LPType: self_learning, Both: False
+ID: bucket_8527d5bf, Name: FMCG Selling Pitch, Parent: bucket_2592e6df, Path: Process Manual/Process Manual/FMCG Selling Pitch, LPType: self_learning, Both: False
+ID: bucket_72bdeb5a, Name: Assembly Station, Parent: bucket_2592e6df, Path: Process Manual/Process Manual/Assembly Station, LPType: self_learning, Both: False

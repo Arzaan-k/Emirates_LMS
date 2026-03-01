@@ -48,9 +48,15 @@ const ActivityCalendar = ({ userEmail }) => {
 
             const y = targetDate.getFullYear();
             const m = targetDate.getMonth() + 1;
+            const token = await AsyncStorage.getItem('userToken');
 
             const res = await fetch(
-                `${API_URL}/api/v1/analytics/calendar/month?user_email=${encodeURIComponent(userEmail)}&year=${y}&month=${m}`
+                `${API_URL}/api/v1/analytics/calendar/month?user_email=${encodeURIComponent(userEmail)}&year=${y}&month=${m}`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                }
             );
             const data = await res.json();
 
@@ -83,8 +89,14 @@ const ActivityCalendar = ({ userEmail }) => {
         try {
             if (!userEmail) return null;
             const isoDay = targetDate.toISOString().slice(0, 10);
+            const token = await AsyncStorage.getItem('userToken');
             const res = await fetch(
-                `${API_URL}/api/v1/analytics/calendar/day?user_email=${encodeURIComponent(userEmail)}&day=${encodeURIComponent(isoDay)}`
+                `${API_URL}/api/v1/analytics/calendar/day?user_email=${encodeURIComponent(userEmail)}&day=${encodeURIComponent(isoDay)}`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                }
             );
             const data = await res.json();
             if (res.ok && data && data.summary) {
@@ -576,11 +588,15 @@ export default function Profile({ navigation, route }) {
                     let location = await Location.getCurrentPositionAsync({});
                     const { latitude, longitude } = location.coords;
                     const timestamp = new Date().toISOString();
+                    const token = await AsyncStorage.getItem('userToken');
 
                     // Send to backend
                     await fetch(`${API_URL}/api/v1/tracking/location/update`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
                         body: JSON.stringify({
                             user_email: userProfile.email,
                             latitude,
@@ -613,9 +629,13 @@ export default function Profile({ navigation, route }) {
 
         // Notify backend
         try {
+            const token = await AsyncStorage.getItem('userToken');
             await fetch(`${API_URL}/api/v1/tracking/location/stop`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
                 body: JSON.stringify({ user_email: userProfile.email })
             });
         } catch (error) {
@@ -640,9 +660,13 @@ export default function Profile({ navigation, route }) {
         setIsPunchedIn(true);
 
         try {
+            const token = await AsyncStorage.getItem('userToken');
             await fetch(`${API_URL}/api/v1/tracking/attendance/punch-in`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
                 body: JSON.stringify({
                     user_email: userProfile.email,
                     timestamp: now.toISOString()
@@ -668,9 +692,13 @@ export default function Profile({ navigation, route }) {
         }
 
         try {
+            const token = await AsyncStorage.getItem('userToken');
             await fetch(`${API_URL}/api/v1/tracking/attendance/punch-out`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
                 body: JSON.stringify({
                     user_email: userProfile.email,
                     timestamp: now.toISOString()

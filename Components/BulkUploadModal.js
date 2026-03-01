@@ -110,7 +110,10 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
     const fetchBuckets = async () => {
         setLoadingBuckets(true);
         try {
-            const res = await fetch(`${API_URL}/api/v1/content/buckets/all`);
+            const token = await AsyncStorage.getItem('userToken');
+            const res = await fetch(`${API_URL}/api/v1/content/buckets/all`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
             const data = await res.json();
             setCourseBuckets(data);
         } catch (e) { console.error('Error fetching buckets:', e); }
@@ -211,9 +214,12 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
 
                     console.log(`[Upload] Attempt ${attempt}/${maxRetries} for ${file.name} to bucket: ${bucketName}`);
 
+                    const token = await AsyncStorage.getItem('userToken');
+
                     // Use universal upload endpoint
                     const response = await fetch(`${API_URL}/api/v1/content/`, {
                         method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}` },
                         body: formData,
                         signal: controller.signal,
                     });
@@ -319,45 +325,80 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                     </TouchableOpacity>
 
                     <Text style={styles.sectionLabel}>Course Bucket (Optional)</Text>
-                    <View style={{ height: 50 }}>
-                        <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            style={styles.bucketScroll}
-                            contentContainerStyle={{ alignItems: 'center', paddingRight: 20 }}
-                        >
-                            <TouchableOpacity
-                                onPress={() => setSelectedBucket(null)}
-                                style={[
-                                    styles.bucketChip,
-                                    !selectedBucket && styles.bucketChipSelected
-                                ]}
-                            >
-                                <MaterialCommunityIcons name="close-circle" size={16} color={!selectedBucket ? '#FFF' : '#6B7280'} />
-                                <Text style={[styles.bucketChipText, !selectedBucket && { color: '#FFF' }]}>None</Text>
-                            </TouchableOpacity>
-                            {courseBuckets.map((bucket) => (
-                                <TouchableOpacity
-                                    key={bucket.id}
-                                    onPress={() => setSelectedBucket(selectedBucket === bucket.id ? null : bucket.id)}
-                                    style={[
-                                        styles.bucketChip,
-                                        selectedBucket === bucket.id && { backgroundColor: bucket.color, borderColor: bucket.color }
-                                    ]}
+                    {(() => {
+                        const pathType = isSelfLearning ? 'self_learning' : 'career_progression';
+                        // Filter buckets by learning path type
+                        const filteredBuckets = courseBuckets.filter(b =>
+                            !b.learning_path_type ||
+                            b.learning_path_type === pathType ||
+                            b.show_in_both_paths
+                        );
+
+                        // Sort by folder_path or name to ensure hierarchical visual order
+                        const sortedBuckets = [...filteredBuckets].sort((a, b) =>
+                            (a.folder_path || a.name).localeCompare(b.folder_path || b.name)
+                        );
+
+                        return (
+                            <View style={{ marginBottom: 15 }}>
+                                <ScrollView
+                                    nestedScrollEnabled={true}
+                                    showsVerticalScrollIndicator={true}
+                                    style={{
+                                        maxHeight: 180,
+                                        borderWidth: 1,
+                                        borderColor: '#E5E7EB',
+                                        borderRadius: 12,
+                                        padding: 8,
+                                        backgroundColor: '#F9FAFB'
+                                    }}
+                                    contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}
                                 >
-                                    <MaterialCommunityIcons
-                                        name={bucket.icon || 'folder'}
-                                        size={16}
-                                        color={selectedBucket === bucket.id ? '#FFF' : bucket.color}
-                                    />
-                                    <Text style={[
-                                        styles.bucketChipText,
-                                        selectedBucket === bucket.id && { color: '#FFF' }
-                                    ]}>{bucket.name}</Text>
-                                </TouchableOpacity>
-                            ))}
-                        </ScrollView>
-                    </View>
+                                    <TouchableOpacity
+                                        onPress={() => setSelectedBucket(null)}
+                                        style={[
+                                            styles.bucketChip,
+                                            !selectedBucket && styles.bucketChipSelected,
+                                            { marginBottom: 8 }
+                                        ]}
+                                    >
+                                        <MaterialCommunityIcons name="close-circle" size={16} color={!selectedBucket ? '#FFF' : '#6B7280'} />
+                                        <Text style={[styles.bucketChipText, !selectedBucket && { color: '#FFF' }]}>None</Text>
+                                    </TouchableOpacity>
+                                    {sortedBuckets.map((bucket) => {
+                                        // Format hierarchy name cleanly (e.g. Operations > Kitchen)
+                                        const pathParts = bucket.folder_path ? bucket.folder_path.split('/') : [bucket.name];
+                                        const displayName = pathParts.length > 1
+                                            ? `${pathParts[pathParts.length - 2]} > ${pathParts[pathParts.length - 1]}`
+                                            : pathParts[0];
+
+                                        return (
+                                            <TouchableOpacity
+                                                key={bucket.id}
+                                                onPress={() => setSelectedBucket(selectedBucket === bucket.id ? null : bucket.id)}
+                                                style={[
+                                                    styles.bucketChip,
+                                                    selectedBucket === bucket.id && { backgroundColor: bucket.color || '#3B82F6', borderColor: bucket.color || '#3B82F6' },
+                                                    { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, marginBottom: 8 }
+                                                ]}
+                                            >
+                                                <MaterialCommunityIcons
+                                                    name={bucket.icon || 'folder'}
+                                                    size={14}
+                                                    color={selectedBucket === bucket.id ? '#FFF' : (bucket.color || '#6B7280')}
+                                                />
+                                                <Text style={[
+                                                    styles.bucketChipText,
+                                                    { fontSize: 13, marginLeft: 6 },
+                                                    selectedBucket === bucket.id && { color: '#FFF' }
+                                                ]}>{displayName}</Text>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </ScrollView>
+                            </View>
+                        );
+                    })()}
 
                     {/* PATH TOGGLE */}
                     <View style={styles.optionRow}>

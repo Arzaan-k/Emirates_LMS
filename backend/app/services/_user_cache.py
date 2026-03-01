@@ -26,6 +26,11 @@ logger = logging.getLogger(__name__)
 _TTL = 90.0  # seconds
 
 
+class CachedUser:
+    """Thread-safe representation of a User object."""
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
 class _UserCache:
     def __init__(self):
         self._lock = threading.Lock()
@@ -42,7 +47,15 @@ class _UserCache:
     def set(self, users: list) -> None:
         """Store the full user list and reset TTL."""
         with self._lock:
-            self._data = users
+            if users and hasattr(users[0], '__table__'):
+                # Convert ORM instances to detached CachedUser objects to prevent cross-thread Session issues
+                safe_users = []
+                for u in users:
+                    d = {c.name: getattr(u, c.name) for c in u.__table__.columns}
+                    safe_users.append(CachedUser(**d))
+                self._data = safe_users
+            else:
+                self._data = users
             self._expires = time.monotonic() + _TTL
         logger.debug(f"[UserCache] Populated with {len(users)} users, TTL={_TTL}s")
 

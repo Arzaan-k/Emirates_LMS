@@ -63,7 +63,10 @@ export default function BucketManagementModal({ visible, onClose, onBucketsChang
     const fetchBuckets = async () => {
         setLoading(true);
         try {
-            const res = await fetch(`${API_URL}/api/v1/content/buckets/all`);
+            const token = await AsyncStorage.getItem('userToken');
+            const res = await fetch(`${API_URL}/api/v1/content/buckets/all`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
             const data = await res.json();
             setBuckets(data);
         } catch (e) {
@@ -156,9 +159,11 @@ export default function BucketManagementModal({ visible, onClose, onBucketsChang
                 : `${API_URL}/api/v1/content/buckets`;
 
             const method = editingBucket ? 'PUT' : 'POST';
+            const token = await AsyncStorage.getItem('userToken');
 
             const res = await fetch(url, {
                 method,
+                headers: { 'Authorization': `Bearer ${token}` },
                 body: formData
             });
 
@@ -186,7 +191,10 @@ export default function BucketManagementModal({ visible, onClose, onBucketsChang
         setDeleteModalVisible(true);
 
         try {
-            const res = await fetch(`${API_URL}/api/v1/content/buckets/${bucket.id}/contents`);
+            const token = await AsyncStorage.getItem('userToken');
+            const res = await fetch(`${API_URL}/api/v1/content/buckets/${bucket.id}/contents`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
             if (res.ok) {
                 const data = await res.json();
                 setBucketContents(data);
@@ -207,8 +215,10 @@ export default function BucketManagementModal({ visible, onClose, onBucketsChang
         setDeleting(true);
         setDeleting(true);
         try {
+            const token = await AsyncStorage.getItem('userToken');
             const res = await fetch(`${API_URL}/api/v1/content/buckets/${bucketToDelete.id}?delete_contents=${deleteContents}`, {
-                method: 'DELETE'
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
             });
             const data = await res.json();
             if (data.status === 'success') {
