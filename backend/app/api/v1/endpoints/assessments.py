@@ -8,7 +8,7 @@ import json
 import logging
 import random
 from typing import Dict, Any, Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from math import radians, cos, sin, asin, sqrt
 
 from fastapi import APIRouter, Depends, Form, File, UploadFile, HTTPException
@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from app.config.database import get_db
 from app.core.dependencies import get_current_user, require_admin
+from app.core.access_filter import get_access_filter_context
 from app.services.assessment_service import AssessmentService
 from app.services.ai_service import AIService
 
@@ -367,6 +368,7 @@ async def submit_assessment(
     assessment_id: str,
     answers: str = Form(...),  # JSON array
     breach_log: str = Form("[]"),
+    time_taken_seconds: Optional[int] = Form(0),
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
@@ -392,6 +394,7 @@ async def submit_assessment(
             user_name=user_name,
             answers=answers_list,
             breach_log=breach_log_list,
+            time_taken_seconds=time_taken_seconds or 0,
         )
         logger.info(f"Assessment submitted: {user_email} - {assessment_id}")
         
@@ -415,15 +418,30 @@ async def submit_assessment(
 
 
 @router.get("/submissions")
-async def get_all_submissions(db: Session = Depends(get_db)):
+async def get_all_submissions(
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     """
-    Get all assessment submissions (admin).
+    Get all assessment submissions (admin), scoped for the user.
     """
     service = AssessmentService(db)
     submissions = service.get_all_submissions()
     
+    access_context = get_access_filter_context(db, current_user)
+    is_superadmin = access_context.get('is_superadmin', False)
+    accessible_emails = access_context.get('accessible_emails', set())
+    viewer_email = access_context.get('viewer_email')
+
     result = []
     for submission in submissions:
+        if not is_superadmin:
+            if accessible_emails:
+                if submission.user_email not in accessible_emails:
+                    continue
+            elif submission.user_email != viewer_email:
+                continue
+
         submission_dict = submission.to_dict() if hasattr(submission, 'to_dict') else dict(submission)
         result.append(submission_dict)
     
@@ -433,16 +451,29 @@ async def get_all_submissions(db: Session = Depends(get_db)):
 @router.get("/submissions/assessment/{assessment_id}")
 async def get_assessment_submissions(
     assessment_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
-    Get submissions for a specific assessment.
+    Get submissions for a specific assessment, scoped to the user.
     """
     service = AssessmentService(db)
     submissions = service.get_assessment_submissions(assessment_id)
     
+    access_context = get_access_filter_context(db, current_user)
+    is_superadmin = access_context.get('is_superadmin', False)
+    accessible_emails = access_context.get('accessible_emails', set())
+    viewer_email = access_context.get('viewer_email')
+
     result = []
     for submission in submissions:
+        if not is_superadmin:
+            if accessible_emails:
+                if submission.user_email not in accessible_emails:
+                    continue
+            elif submission.user_email != viewer_email:
+                continue
+
         submission_dict = submission.to_dict() if hasattr(submission, 'to_dict') else dict(submission)
         result.append(submission_dict)
     
@@ -452,13 +483,18 @@ async def get_assessment_submissions(
 @router.get("/proctored/{assessment_id}/submissions")
 async def get_proctored_assessment_submissions_alias(
     assessment_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Get submissions for a specific proctored assessment.
     Alias to match frontend route structure.
     """
-    return await get_assessment_submissions(assessment_id, db)
+    return await get_assessment_submissions(
+        assessment_id=assessment_id,
+        db=db,
+        current_user=current_user
+    )
 
 
 @router.get("/submissions/user/{user_email}")
@@ -492,17 +528,42 @@ async def get_scheduled_exams(db: Session = Depends(get_db)):
     service = AssessmentService(db)
     exams = service.get_all_scheduled_exams()
     
+    # Pre-fetch all stats to prevent N+1 DB queries
+    exam_ids = [str(exam.id) for exam in exams if exam.id]
+    bulk_stats = service.attendance_repo.get_all_aggregated_stats(exam_ids)
+    
     result = []
     for exam in exams:
         exam_dict = exam.to_dict() if hasattr(exam, 'to_dict') else dict(exam)
         
         # Inject stats for Admin View (ExamHistoryModal)
         try:
-            stats = service.get_exam_stats(exam.id)
-            # Alias present_count to marked_present for frontend compatibility
-            stats["marked_present"] = stats.get("present_count", 0)
-            stats["completed"] = stats.get("completed_count", 0)
-            stats["avg_score"] = stats.get("average_score", 0)
+            agg = bulk_stats.get(str(exam.id), {
+                "total": 0, "present": 0, "absent": 0, 
+                "completed": 0, "passed": 0, "avg_score": 0
+            })
+            total_assigned = len(exam.assigned_users or [])
+            
+            present = agg['present']
+            completed = agg['completed']
+            passed = agg['passed']
+            absent = agg['absent']
+            avg_score = agg['avg_score']
+            
+            stats = {
+                "total_assigned": total_assigned,
+                "present_count": present,
+                "marked_present": present,
+                "marked_absent": absent,
+                "completed_count": completed,
+                "completed": completed,
+                "passed_count": passed,
+                "failed_count": completed - passed,
+                "attendance_rate": round((present / total_assigned * 100) if total_assigned > 0 else 0, 1),
+                "completion_rate": round((completed / present * 100) if present > 0 else 0, 1),
+                "pass_rate": round((passed / completed * 100) if completed > 0 else 0, 1),
+                "average_score": round(avg_score, 1),
+            }
             exam_dict["stats"] = stats
         except Exception:
             # Fallback if stats fail
@@ -551,7 +612,8 @@ async def get_user_scheduled_exams(
     attendance_map = {a.exam_id: a for a in attendances}
 
     result = []
-    current_datetime = datetime.utcnow()
+    current_datetime_utc = datetime.now(timezone.utc)
+    current_datetime_local = datetime.now()
 
     for exam in exams:
         exam_dict = exam.to_dict() if hasattr(exam, 'to_dict') else dict(exam)
@@ -570,8 +632,14 @@ async def get_user_scheduled_exams(
                 except:
                     pass  # If parsing fails, show the exam
             if isinstance(scheduled_publish_at, datetime):
-                if current_datetime < scheduled_publish_at:
-                    continue  # Skip exams not yet published
+                # If datetime is timezone-aware, compare in UTC.
+                # If it's naive (common DB storage), compare in local server time.
+                if scheduled_publish_at.tzinfo is not None:
+                    if current_datetime_utc < scheduled_publish_at.astimezone(timezone.utc):
+                        continue  # Skip exams not yet published
+                else:
+                    if current_datetime_local < scheduled_publish_at:
+                        continue  # Skip exams not yet published
 
         # Check if exam has batch assignments
         batch_assignments = exam_dict.get('batch_assignments') or exam_dict.get('batchAssignments') or []
@@ -581,8 +649,12 @@ async def get_user_scheduled_exams(
             user_batch = None
             for batch in batch_assignments:
                 batch_users = batch.get('users', [])
-                if user_email in batch_users:
-                    user_batch = batch
+                for u in batch_users:
+                    candidate_email = u.get('email') if isinstance(u, dict) else u
+                    if str(candidate_email or '').strip().lower() == str(user_email or '').strip().lower():
+                        user_batch = batch
+                        break
+                if user_batch:
                     break
 
             if user_batch:
@@ -758,16 +830,29 @@ async def create_scheduled_exam(
 @router.get("/scheduled/{exam_id}/attendance")
 async def get_exam_attendance(
     exam_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
-    Get attendance list for a scheduled exam.
+    Get attendance list for a scheduled exam, scoped to users the accessor can see.
     """
     service = AssessmentService(db)
     attendance = service.get_exam_attendance(exam_id)
     
+    access_context = get_access_filter_context(db, current_user)
+    is_superadmin = access_context.get('is_superadmin', False)
+    accessible_emails = access_context.get('accessible_emails', set())
+    viewer_email = access_context.get('viewer_email')
+
     result = []
     for record in attendance:
+        if not is_superadmin:
+            if accessible_emails:
+                if record.user_email not in accessible_emails:
+                    continue
+            elif record.user_email != viewer_email:
+                continue
+
         record_dict = record.to_dict() if hasattr(record, 'to_dict') else dict(record)
         result.append(record_dict)
     

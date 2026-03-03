@@ -21,8 +21,10 @@ from groq import Groq
 
 from app.config.database import get_db
 from app.config.settings import settings
+from app.core.dependencies import get_current_user_optional
 from app.services.ai_service import AIService
 from app.services.content_service import ContentService
+from app.services.admin_chatbot_service import AdminChatbotService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai", tags=["AI"])
@@ -1047,11 +1049,12 @@ def _fetch_privilege_based_data(db: Session, privileges: List[str], is_superadmi
 @router.post("/admin-copilot")
 async def admin_copilot(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user_token: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
 ):
     """
-    Admin Copilot - Privilege-aware AI assistant for admins.
-    Answers questions based only on data the admin has access to.
+    Admin Copilot - Access-controlled AI assistant for admins.
+    Answers questions based only on data the admin has access to, based on grants.
     """
     try:
         # Parse request body
@@ -1059,89 +1062,106 @@ async def admin_copilot(
         if "application/json" in content_type:
             data = await request.json()
         else:
-            form = await request.form()
-            data = dict(form)
+            try:
+                form = await request.form()
+                data = dict(form)
+            except:
+                data = {}
         
         question = data.get("question", "")
-        privileges = data.get("privileges", [])
-        is_superadmin = data.get("is_superadmin", False)
-        admin_name = data.get("admin_name", "Admin")
-        admin_role = data.get("admin_role", "Manager")
-        
+        if not question:
+            # Maybe it sent 'message'
+            question = data.get("message", "")
+            
+        chat_history = data.get("history", [])
+        if isinstance(chat_history, str):
+            try:
+                chat_history = json.loads(chat_history)
+            except:
+                chat_history = []
+                
         if not question:
             return {"answer": "Please ask me a question!", "status": "error"}
+            
+        # Determine Admin Identity
+        admin_email = None
+        admin_name = "Admin"
+        is_superadmin = False
         
-        # Parse privileges if it's a string
-        if isinstance(privileges, str):
-            try:
-                privileges = json.loads(privileges)
-            except:
-                privileges = []
+        if user_token:
+            admin_email = user_token.get("email")
+            admin_name = user_token.get("name", "Admin")
+            is_superadmin = user_token.get("is_superadmin", False)
         
-        # Fetch data based on privileges
-        accessible_data = _fetch_privilege_based_data(db, privileges, is_superadmin)
+        # Fallback to body params if no token (legacy support)
+        if not admin_email:
+            admin_email = data.get("admin_email")
+            admin_name = data.get("admin_name", "Admin")
+            is_superadmin = data.get("is_superadmin", False)
+            
+        if not admin_email:
+            return {
+                "answer": "Unauthorized. Could not identify admin user.",
+                "status": "error"
+            }
+            
+        # Ensure superadmin flag matches reality, if checking token
+        if user_token and not is_superadmin:
+            is_superadmin = user_token.get("role", "").lower() == "superadmin"
+
+        # Fetch Access-Controlled Data Context
+        chatbot_service = AdminChatbotService(db)
+        # If superadmin, AccessControlService handles it internally (returns all users)
+        accessible_data_dict = chatbot_service.get_context_for_admin(admin_email)
+        accessible_count = accessible_data_dict.get("accessible_count", 0)
         
-        # Build context based on accessible data
-        context_parts = []
-        
-        if not accessible_data and not is_superadmin:
-            context_parts.append("Note: This admin has limited access. They can only view general information.")
-        
-        for data_type, data_value in accessible_data.items():
-            if isinstance(data_value, dict):
-                context_parts.append(f"\n{data_type.upper().replace('_', ' ')} DATA:")
-                for key, value in data_value.items():
-                    if isinstance(value, (list, dict)):
-                        context_parts.append(f"  - {key}: {json.dumps(value, default=str)[:500]}")
-                    else:
-                        context_parts.append(f"  - {key}: {value}")
-        
-        context_text = "\n".join(context_parts)
-        
-        # Build privilege description for system prompt
-        privilege_descriptions = []
-        for priv in privileges:
-            priv_name = priv.replace("_", " ").title()
-            privilege_descriptions.append(priv_name)
-        
-        if is_superadmin:
-            access_level = "SUPERADMIN (Full access to all data)"
-        elif privilege_descriptions:
-            access_level = f"Admin with access to: {', '.join(privilege_descriptions)}"
-        else:
-            access_level = "Limited access admin"
+        context_text = chatbot_service.build_context_string(accessible_data_dict)
         
         # Build system prompt
+        access_level = "SUPERADMIN (Full access to all data)" if is_superadmin else f"Admin (Access to {accessible_count} users)"
+        
         system_prompt = f"""You are the Admin Copilot AI for Belgian Waffle Co.'s Learning Management System (BW LMS).
-You are assisting {admin_name} ({admin_role}).
+You are assisting {admin_name}.
 
 ACCESS LEVEL: {access_level}
+ACCESSIBLE USERS COUNT: {accessible_count}
 
-IMPORTANT RULES:
-1. ONLY answer questions based on the data provided below
-2. If the admin asks about data they don't have access to, politely inform them they need additional privileges
-3. Be helpful, professional, and concise
-4. Use numbers and statistics when available
-5. Format your response with bullet points and clear sections where appropriate
-6. Use relevant emojis sparingly (📊, 👥, 📚, ✅, 🎯)
+IMPORTANT STRICT RULES:
+1. ONLY answer questions using the data provided below. Do NOT hallucinate data or users.
+2. If asked about a specific user, check if they exist in your data. If they don't, clearly state: "I don't have access to data for this user" or "This user is not in our records."
+3. Quote exact numbers and statistics from the data when possible.
+4. Search by name or email when asked about specific users.
+5. Format your response with bullet points and clear sections where appropriate.
+6. Use relevant emojis sparingly (📊, 👥, 📚, ✅, 🎯).
+7. Be concise, factual, and data-grounded.
 
-ACCESSIBLE DATA:
-{context_text if context_text else "Limited data available based on current privileges."}
-
-PRIVILEGES THIS ADMIN HAS ACCESS TO:
-{', '.join(privilege_descriptions) if privilege_descriptions else 'Basic access only'}
+--- START OF ACCESSIBLE DATA ---
+{context_text}
+--- END OF ACCESSIBLE DATA ---
 """
 
-        # Call Groq API
+        # Build conversation history
+        messages = [{"role": "system", "content": system_prompt}]
+        
+        # Add chat history (last 10 messages max)
+        for msg in chat_history[-10:]:
+            # Frontend might send { "sender": "user" } or { "role": "user" }
+            # and { "text": "..." } or { "content": "..." }
+            role = "user" if msg.get("sender") == "user" else "assistant"
+            content = msg.get("text") or msg.get("content") or ""
+            if content:
+                messages.append({"role": role, "content": content})
+                
+        # Add current question
+        messages.append({"role": "user", "content": question})
+
+        # Call Groq API with lower temperature for factual answers
         client = Groq(api_key=settings.GROQ_API_KEY)
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": question}
-            ],
-            temperature=0.7,
-            max_tokens=1000
+            messages=messages,
+            temperature=0.4,
+            max_tokens=1500
         )
         
         answer = response.choices[0].message.content.strip()
@@ -1149,8 +1169,8 @@ PRIVILEGES THIS ADMIN HAS ACCESS TO:
         return {
             "answer": answer,
             "status": "success",
-            "privileges_used": privileges,
-            "data_sources": list(accessible_data.keys()),
+            "accessible_users_count": accessible_count,
+            "data_sources": ["user_data", "learning_progress", "quiz_data", "daily_quiz_data", "assessment_data"] if accessible_count > 0 else ["content_overview"],
         }
         
     except Exception as e:

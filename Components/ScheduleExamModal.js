@@ -21,6 +21,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as XLSX from 'xlsx';
 import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
 
@@ -97,6 +98,15 @@ export default function ScheduleExamModal({ visible, onClose, userProfile, editi
     const [allStores, setAllStores] = useState([]); // NEW
     const [submitting, setSubmitting] = useState(false);
 
+    const normalizeUserEmail = (value) => {
+        if (!value) return '';
+        if (typeof value === 'string') return value.trim();
+        if (typeof value === 'object') {
+            return String(value.email || value.user_email || value.userEmail || '').trim();
+        }
+        return '';
+    };
+
     useEffect(() => {
         if (visible) {
             fetchUsers();
@@ -135,18 +145,26 @@ export default function ScheduleExamModal({ visible, onClose, userProfile, editi
 
                 // Users
                 if (editingExam.assigned_users && Array.isArray(editingExam.assigned_users)) {
-                    setSelectedUsers(editingExam.assigned_users);
+                    const normalizedUsers = editingExam.assigned_users
+                        .map(normalizeUserEmail)
+                        .filter(Boolean);
+                    setSelectedUsers([...new Set(normalizedUsers)]);
                 }
 
                 // Randomization
                 setRandomizeQuestions(editingExam.randomize_question_order || editingExam.randomizeQuestionOrder || false);
                 setRandomizeOptions(editingExam.randomize_option_order || editingExam.randomizeOptionOrder || false);
-                setAllowDifferentQuestions(editingExam.allow_different_questions_per_batch || false);
+                setAllowDifferentQuestions(
+                    editingExam.allow_different_questions_per_batch ||
+                    editingExam.allowDifferentQuestionsPerBatch ||
+                    false
+                );
 
                 // Status
-                setExamStatus(editingExam.exam_status || 'published');
-                if (editingExam.scheduled_publish_at) {
-                    setScheduledPublishAt(new Date(editingExam.scheduled_publish_at));
+                setExamStatus(editingExam.exam_status || editingExam.examStatus || 'published');
+                const publishAt = editingExam.scheduled_publish_at || editingExam.scheduledPublishAt;
+                if (publishAt) {
+                    setScheduledPublishAt(new Date(publishAt));
                 }
 
                 // PIN Settings
@@ -159,9 +177,14 @@ export default function ScheduleExamModal({ visible, onClose, userProfile, editi
                 setGeofencingRadius(String(editingExam.geofencing_radius || editingExam.geofencingRadius || 100));
 
                 // Batch Data (if exists)
-                if (editingExam.batch_data && Array.isArray(editingExam.batch_data)) {
-                    setNumberOfBatches(editingExam.batch_data.length);
-                    setBatchAssignments(editingExam.batch_data);
+                const existingBatches =
+                    editingExam.batch_assignments ||
+                    editingExam.batchAssignments ||
+                    editingExam.batch_data ||
+                    [];
+                if (Array.isArray(existingBatches) && existingBatches.length > 0) {
+                    setNumberOfBatches(existingBatches.length);
+                    setBatchAssignments(existingBatches);
                 }
             } else {
                 // Create Mode: Default supervisor to self only if empty
@@ -331,7 +354,10 @@ export default function ScheduleExamModal({ visible, onClose, userProfile, editi
 
     const fetchStores = async () => {
         try {
-            const res = await fetch(`${API_URL}/api/v1/analytics/stores`);
+            const token = await AsyncStorage.getItem('userToken');
+            const res = await fetch(`${API_URL}/api/v1/analytics/stores`, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
             const data = await res.json();
             if (Array.isArray(data)) setAllStores(data);
         } catch (e) {
@@ -343,7 +369,10 @@ export default function ScheduleExamModal({ visible, onClose, userProfile, editi
         setLoadingUsers(true);
         try {
             console.log("Fetching users for exam scheduling...");
-            const res = await fetch(`${API_URL}/api/v1/users/list?limit=1000`);
+            const token = await AsyncStorage.getItem('userToken');
+            const res = await fetch(`${API_URL}/api/v1/users/list?limit=1000`, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
             const data = await res.json();
 
             if (data && data.users) {
@@ -365,7 +394,10 @@ export default function ScheduleExamModal({ visible, onClose, userProfile, editi
         setLoadingCategories(true);
         try {
             console.log("Fetching smart user categories...");
-            const res = await fetch(`${API_URL}/api/v1/users/smart-categories`);
+            const token = await AsyncStorage.getItem('userToken');
+            const res = await fetch(`${API_URL}/api/v1/users/smart-categories`, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
             const data = await res.json();
 
             if (data && data.categories) {
@@ -620,7 +652,10 @@ export default function ScheduleExamModal({ visible, onClose, userProfile, editi
             formData.append('number_of_batches', numberOfBatches.toString());
             formData.append('supervisor_email', supervisorEmail);
             formData.append('supervisor_name', supervisorName);
-            formData.append('assigned_users', JSON.stringify(selectedUsers));
+            const normalizedSelectedUsers = [...new Set(
+                selectedUsers.map(normalizeUserEmail).filter(Boolean)
+            )];
+            formData.append('assigned_users', JSON.stringify(normalizedSelectedUsers));
             formData.append('questions', JSON.stringify(questions));
             formData.append('time_limit_minutes', timeLimit);
             formData.append('passing_score', passingScore);

@@ -3,6 +3,7 @@ Database Configuration and Session Management
 Optimized for Neon PostgreSQL + FastAPI
 """
 
+import time
 import logging
 from typing import Generator
 from contextlib import contextmanager
@@ -15,6 +16,9 @@ from app.config.settings import settings
 from app.models.base import Base
 
 logger = logging.getLogger(__name__)
+
+# Queries slower than this threshold (seconds) will be logged as warnings
+SLOW_QUERY_THRESHOLD = 0.5
 
 # ===========================================
 # DATABASE ENGINE CONFIGURATION
@@ -35,11 +39,14 @@ def get_engine_args():
 
     return {
         "poolclass": QueuePool,
-        "pool_size": settings.DB_POOL_SIZE or 5,
-        "max_overflow": settings.DB_MAX_OVERFLOW or 5,
-        "pool_timeout": settings.DB_POOL_TIMEOUT or 30,
+        # 2 workers × pool_size=5 = 10 total connections (Neon free tier limit)
+        "pool_size": settings.DB_POOL_SIZE,
+        "max_overflow": settings.DB_MAX_OVERFLOW,
+        "pool_timeout": settings.DB_POOL_TIMEOUT,
+        # pool_pre_ping: test connection before each use — avoids stale connection errors
         "pool_pre_ping": True,
-        "pool_recycle": 120,  # Neon aggressively closes idle connections - recycle faster
+        # Neon closes idle connections after ~30s; recycle before that to avoid errors
+        "pool_recycle": 25,
         "connect_args": connect_args,
         "echo": settings.DEBUG,
     }
@@ -75,6 +82,26 @@ def set_connection_options(dbapi_connection, connection_record):
     cursor.execute("SET search_path TO public")
     cursor.execute("SET statement_timeout = '30s'")  # Allow for Neon cold-start latency
     cursor.close()
+
+
+# ===========================================
+# SLOW QUERY LOGGING
+# ===========================================
+
+@event.listens_for(engine, "before_cursor_execute")
+def _before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    """Record query start time on the connection."""
+    conn.info.setdefault("query_start_time", []).append(time.monotonic())
+
+
+@event.listens_for(engine, "after_cursor_execute")
+def _after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    """Log queries that exceed the slow query threshold."""
+    elapsed = time.monotonic() - conn.info["query_start_time"].pop()
+    if elapsed >= SLOW_QUERY_THRESHOLD:
+        logger.warning(
+            f"SLOW QUERY ({elapsed:.3f}s): {statement[:300].replace(chr(10), ' ')}"
+        )
 
 
 # ===========================================
@@ -175,6 +202,8 @@ def init_db():
         tracking,
         simulation,
         analytics,
+        daily_quiz,
+        system,
     )
 
     logger.info("Creating database tables...")

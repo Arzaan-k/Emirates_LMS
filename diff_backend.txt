@@ -1,0 +1,874 @@
+﻿diff --git a/backend/app/api/v1/endpoints/analytics.py b/backend/app/api/v1/endpoints/analytics.py
+index e05169c..dca0a50 100644
+--- a/backend/app/api/v1/endpoints/analytics.py
++++ b/backend/app/api/v1/endpoints/analytics.py
+@@ -639,7 +639,10 @@ async def get_employee_detail(
+ 
+ 
+ @router.get("/training-effectiveness")
+-async def get_training_effectiveness(db: Session = Depends(get_db)):
++async def get_training_effectiveness(
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
++):
+     """
+     Course-wise effectiveness analytics.
+     """
+@@ -656,7 +659,10 @@ async def get_training_effectiveness(db: Session = Depends(get_db)):
+ 
+ 
+ @router.get("/hygiene-compliance")
+-async def get_hygiene_compliance(db: Session = Depends(get_db)):
++async def get_hygiene_compliance(
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
++):
+     """
+     Hygiene and compliance analytics.
+     """
+@@ -673,7 +679,10 @@ async def get_hygiene_compliance(db: Session = Depends(get_db)):
+ 
+ 
+ @router.get("/customer-experience")
+-async def get_customer_experience_impact(db: Session = Depends(get_db)):
++async def get_customer_experience_impact(
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
++):
+     """
+     Customer experience correlation with training.
+     """
+@@ -689,7 +698,10 @@ async def get_customer_experience_impact(db: Session = Depends(get_db)):
+ 
+ 
+ @router.get("/ai-insights")
+-async def get_ai_learning_insights(db: Session = Depends(get_db)):
++async def get_ai_learning_insights(
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
++):
+     """
+     AI-powered learning insights.
+     """
+@@ -1052,7 +1064,8 @@ async def generate_analytics_report(
+     store_filter: str = Form(""),
+     role_filter: str = Form(""),
+     format: str = Form("pdf"),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+     """
+     Generate analytics report (PDF/Excel).
+@@ -1070,7 +1083,10 @@ async def generate_analytics_report(
+ 
+ 
+ @router.get("/reports/executive-summary")
+-async def generate_ai_executive_summary(db: Session = Depends(get_db)):
++async def generate_ai_executive_summary(
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
++):
+     """
+     Generate AI-powered executive summary.
+     """
+@@ -1294,7 +1310,8 @@ async def get_audit_logs(
+     action: Optional[str] = None,
+     start_date: Optional[str] = None,
+     end_date: Optional[str] = None,
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+     """
+     Get system audit logs with filtering.
+diff --git a/backend/app/api/v1/endpoints/detailed_reports.py b/backend/app/api/v1/endpoints/detailed_reports.py
+index 6e9f45d..e78a1f3 100644
+--- a/backend/app/api/v1/endpoints/detailed_reports.py
++++ b/backend/app/api/v1/endpoints/detailed_reports.py
+@@ -430,8 +430,8 @@ async def learning_history_excel(db: Session = Depends(get_db), current_user: di
+     return _excel(r["data"], "learning_history.xlsx", "Learning History")
+ 
+ @router.get("/learning/course-status")
+-async def course_status_report(db: Session = Depends(get_db)):
+-    """Status of all courses - completions, active learners."""
++async def course_status_report(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
++    """Status of all courses - completions, active learners. Auth required."""
+     comp_sub = db.query(
+         CourseCompletion.course_id,
+         func.count(CourseCompletion.id).label('completed_users')
+@@ -466,8 +466,8 @@ async def course_status_report(db: Session = Depends(get_db)):
+     return {"report_name": "Course Status Report", "data": data, "total": len(data)}
+ 
+ @router.get("/learning/course-status/excel")
+-async def course_status_excel(db: Session = Depends(get_db)):
+-    r = await course_status_report(db)
++async def course_status_excel(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
++    r = await course_status_report(db, current_user)
+     return _excel(r["data"], "course_status.xlsx", "Course Status")
+ 
+ @router.get("/learning/course-completion")
+@@ -497,8 +497,8 @@ async def course_completion_excel(db: Session = Depends(get_db), current_user: d
+     return _excel(r["data"], "course_completion.xlsx", "Course Completion")
+ 
+ @router.get("/learning/course-structure")
+-async def course_structure_report(db: Session = Depends(get_db)):
+-    """Course catalog structure with buckets and content types."""
++async def course_structure_report(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
++    """Course catalog structure with buckets and content types. Auth required."""
+     contents = db.query(Content).order_by(Content.bucket, Content.order_index).all()
+     data = [{
+         "course_title": c.title, "course_id": str(c.id), "bucket": c.bucket or "N/A",
+@@ -511,13 +511,13 @@ async def course_structure_report(db: Session = Depends(get_db)):
+     return {"report_name": "Course Structure Report", "data": data, "total": len(data)}
+ 
+ @router.get("/learning/course-structure/excel")
+-async def course_structure_excel(db: Session = Depends(get_db)):
+-    r = await course_structure_report(db)
++async def course_structure_excel(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
++    r = await course_structure_report(db, current_user)
+     return _excel(r["data"], "course_structure.xlsx", "Course Structure")
+ 
+ @router.get("/learning/course-details")
+-async def course_details_report(db: Session = Depends(get_db)):
+-    """Detailed course info with settings."""
++async def course_details_report(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
++    """Detailed course info with settings. Auth required."""
+     contents = db.query(Content).all()
+     data = [{
+         "title": c.title, "id": str(c.id), "bucket": c.bucket or "N/A",
+@@ -531,8 +531,8 @@ async def course_details_report(db: Session = Depends(get_db)):
+     return {"report_name": "Course Details Report", "data": data, "total": len(data)}
+ 
+ @router.get("/learning/course-details/excel")
+-async def course_details_excel(db: Session = Depends(get_db)):
+-    r = await course_details_report(db)
++async def course_details_excel(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
++    r = await course_details_report(db, current_user)
+     return _excel(r["data"], "course_details.xlsx", "Course Details")
+ 
+ 
+@@ -665,8 +665,8 @@ async def training_master_excel(db: Session = Depends(get_db), current_user: dic
+     return _excel(r["data"], "training_master.xlsx", "Training Master")
+ 
+ @router.get("/training/ilt-report")
+-async def ilt_report(db: Session = Depends(get_db)):
+-    """Instructor-Led Training (scheduled exams as ILT proxy)."""
++async def ilt_report(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
++    """Instructor-Led Training (scheduled exams as ILT proxy). Auth required."""
+     att_sub = db.query(
+         ExamAttendance.exam_id,
+         func.count(ExamAttendance.id).label('attended')
+@@ -695,8 +695,8 @@ async def ilt_report(db: Session = Depends(get_db)):
+     return {"report_name": "ILT Report", "data": data, "total": len(data)}
+ 
+ @router.get("/training/ilt-report/excel")
+-async def ilt_report_excel(db: Session = Depends(get_db)):
+-    r = await ilt_report(db)
++async def ilt_report_excel(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
++    r = await ilt_report(db, current_user)
+     return _excel(r["data"], "ilt_report.xlsx", "ILT Report")
+ 
+ 
+@@ -753,8 +753,8 @@ async def career_summary_excel(db: Session = Depends(get_db), current_user: dict
+     return _excel(r["data"], "career_summary.xlsx", "Career Summary")
+ 
+ @router.get("/career/module-report")
+-async def module_report(db: Session = Depends(get_db)):
+-    """Career progression by module/bucket."""
++async def module_report(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
++    """Career progression by module/bucket. Auth required."""
+     # Single query: CourseBucket LEFT JOIN Content on bucket_id, LEFT JOIN CourseCompletion on course_id
+     # GROUP BY bucket fields
+     content_sub = db.query(
+@@ -794,8 +794,8 @@ async def module_report(db: Session = Depends(get_db)):
+     return {"report_name": "Module Report", "data": data, "total": len(data)}
+ 
+ @router.get("/career/module-report/excel")
+-async def module_report_excel(db: Session = Depends(get_db)):
+-    r = await module_report(db)
++async def module_report_excel(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
++    r = await module_report(db, current_user)
+     return _excel(r["data"], "module_report.xlsx", "Modules")
+ 
+ @router.get("/career/node-progress")
+@@ -830,8 +830,8 @@ async def node_progress_excel(db: Session = Depends(get_db), current_user: dict
+ # ============================================================
+ 
+ @router.get("/exams/overview")
+-async def exams_overview(db: Session = Depends(get_db)):
+-    """All scheduled exams with stats."""
++async def exams_overview(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
++    """All scheduled exams with stats. Auth required."""
+     sub_stats = db.query(
+         AssessmentSubmission.assessment_id,
+         func.count(AssessmentSubmission.id).label('total_submissions'),
+@@ -863,8 +863,8 @@ async def exams_overview(db: Session = Depends(get_db)):
+     return {"report_name": "Exams Overview", "data": data, "total": len(data)}
+ 
+ @router.get("/exams/overview/excel")
+-async def exams_overview_excel(db: Session = Depends(get_db)):
+-    r = await exams_overview(db)
++async def exams_overview_excel(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
++    r = await exams_overview(db, current_user)
+     return _excel(r["data"], "exams_overview.xlsx", "Exams Overview")
+ 
+ @router.get("/exams/quiz-results")
+diff --git a/backend/app/api/v1/endpoints/reports.py b/backend/app/api/v1/endpoints/reports.py
+index 811e12a..e5e9da5 100644
+--- a/backend/app/api/v1/endpoints/reports.py
++++ b/backend/app/api/v1/endpoints/reports.py
+@@ -29,7 +29,7 @@ from app.models.analytics import AuditLog
+ from app.models.simulation import SimulationAnalyticsSnapshot
+ from app.models.video_progress import VideoProgress
+ from app.core.dependencies import PaginationParams, get_pagination, get_current_user
+-from app.core.access_filter import get_access_filter_context, should_include_user
++from app.core.access_filter import get_access_filter_context, should_include_user, get_email_filter_set
+ 
+ # PDF Generation imports
+ from reportlab.lib import colors
+@@ -923,13 +923,15 @@ async def download_user_analytics_csv(
+     region: str = Query(None),
+     country: str = Query(None),
+     category: str = Query(None),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+     """Download user analytics as CSV (all data, no pagination)."""
+     result = await get_user_analytics(
+         role_filter, store_filter, date_from, date_to,
+         search, min_score, state, city, region, country, category,
+-        page=1, per_page=50, _paginate=False, db=db
++        page=1, per_page=50, _paginate=False, db=db,
++        current_user=current_user
+     )
+     return generate_csv_response(
+         result["users"],
+@@ -950,13 +952,15 @@ async def download_user_analytics_pdf(
+     region: str = Query(None),
+     country: str = Query(None),
+     category: str = Query(None),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+     """Download user analytics as PDF with insights (all data, no pagination)."""
+     result = await get_user_analytics(
+         role_filter, store_filter, date_from, date_to,
+         search, min_score, state, city, region, country, category,
+-        page=1, per_page=50, _paginate=False, db=db
++        page=1, per_page=50, _paginate=False, db=db,
++        current_user=current_user
+     )
+ 
+     users = result.get("users", [])
+@@ -1030,10 +1034,16 @@ async def get_training_effectiveness(
+     page: int = Query(1, ge=1),
+     per_page: int = Query(50, ge=1, le=200),
+     _paginate: bool = Query(True),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+-    """Get training effectiveness metrics using JOINs with Content, CourseCompletion, and CourseBucket."""
++    """Get training effectiveness metrics using JOINs with Content, CourseCompletion, and CourseBucket.
++    Results are filtered based on the current user's access grants.
++    """
+     try:
++        # Access control
++        is_sa, accessible_emails = get_email_filter_set(db, current_user)
++
+         date_from_dt = None
+         date_to_dt = None
+         if date_from:
+@@ -1043,6 +1053,8 @@ async def get_training_effectiveness(
+ 
+         # Subquery: aggregate completions per course_id
+         comp_filters = []
++        if not is_sa and accessible_emails is not None:
++            comp_filters.append(CourseCompletion.user_email.in_(accessible_emails))
+         if date_from_dt:
+             comp_filters.append(CourseCompletion.completed_at >= date_from_dt)
+         if date_to_dt:
+@@ -1160,12 +1172,14 @@ async def download_training_csv(
+     date_to: str = Query(None),
+     search: str = Query(None),
+     min_score: float = Query(None),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+     """Download training effectiveness as CSV (all data, no pagination)."""
+     result = await get_training_effectiveness(
+         bucket_filter, date_from, date_to, search, min_score,
+-        page=1, per_page=50, _paginate=False, db=db
++        page=1, per_page=50, _paginate=False, db=db,
++        current_user=current_user
+     )
+     return generate_csv_response(
+         result["courses"],
+@@ -1180,12 +1194,14 @@ async def download_training_pdf(
+     date_to: str = Query(None),
+     search: str = Query(None),
+     min_score: float = Query(None),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+     """Download training effectiveness as PDF with insights (all data, no pagination)."""
+     result = await get_training_effectiveness(
+         bucket_filter, date_from, date_to, search, min_score,
+-        page=1, per_page=50, _paginate=False, db=db
++        page=1, per_page=50, _paginate=False, db=db,
++        current_user=current_user
+     )
+ 
+     courses = result.get("courses", [])
+@@ -1250,10 +1266,16 @@ async def get_quiz_performance(
+     page: int = Query(1, ge=1),
+     per_page: int = Query(50, ge=1, le=200),
+     _paginate: bool = Query(True),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+-    """Get quiz performance metrics using JOINs with Quiz and QuizSubmission."""
++    """Get quiz performance metrics using JOINs with Quiz and QuizSubmission.
++    Results are filtered based on the current user's access grants.
++    """
+     try:
++        # Access control
++        is_sa, accessible_emails = get_email_filter_set(db, current_user)
++
+         date_from_dt = None
+         date_to_dt = None
+         if date_from:
+@@ -1263,6 +1285,8 @@ async def get_quiz_performance(
+ 
+         # Subquery: aggregate submissions per quiz_id
+         sub_filters = []
++        if not is_sa and accessible_emails is not None:
++            sub_filters.append(QuizSubmission.user_email.in_(accessible_emails))
+         if date_from_dt:
+             sub_filters.append(QuizSubmission.submitted_at >= date_from_dt)
+         if date_to_dt:
+@@ -1397,12 +1421,14 @@ async def download_quiz_csv(
+     date_to: str = Query(None),
+     search: str = Query(None),
+     min_score: float = Query(None),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+     """Download quiz performance as CSV (all data, no pagination)."""
+     result = await get_quiz_performance(
+         date_from, date_to, search, min_score,
+-        page=1, per_page=50, _paginate=False, db=db
++        page=1, per_page=50, _paginate=False, db=db,
++        current_user=current_user
+     )
+     return generate_csv_response(
+         result["quizzes"],
+@@ -1416,12 +1442,14 @@ async def download_quiz_pdf(
+     date_to: str = Query(None),
+     search: str = Query(None),
+     min_score: float = Query(None),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+     """Download quiz performance as PDF with insights (all data, no pagination)."""
+     result = await get_quiz_performance(
+         date_from, date_to, search, min_score,
+-        page=1, per_page=50, _paginate=False, db=db
++        page=1, per_page=50, _paginate=False, db=db,
++        current_user=current_user
+     )
+ 
+     quizzes = result.get("quizzes", [])
+@@ -1486,10 +1514,16 @@ async def get_assessment_results(
+     page: int = Query(1, ge=1),
+     per_page: int = Query(50, ge=1, le=200),
+     _paginate: bool = Query(True),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+-    """Get proctored assessment results using JOINs with ScheduledExam and AssessmentSubmission."""
++    """Get proctored assessment results using JOINs with ScheduledExam and AssessmentSubmission.
++    Results are filtered based on the current user's access grants.
++    """
+     try:
++        # Access control
++        is_sa, accessible_emails = get_email_filter_set(db, current_user)
++
+         date_from_dt = None
+         date_to_dt = None
+         if date_from:
+@@ -1499,6 +1533,8 @@ async def get_assessment_results(
+ 
+         # Subquery: aggregate assessment submissions per assessment_id
+         asub_filters = []
++        if not is_sa and accessible_emails is not None:
++            asub_filters.append(AssessmentSubmission.user_email.in_(accessible_emails))
+         if date_from_dt:
+             asub_filters.append(AssessmentSubmission.submitted_at >= date_from_dt)
+         if date_to_dt:
+@@ -1619,12 +1655,14 @@ async def download_assessments_csv(
+     date_to: str = Query(None),
+     search: str = Query(None),
+     min_score: float = Query(None),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+     """Download assessment results as CSV (all data, no pagination)."""
+     result = await get_assessment_results(
+         date_from, date_to, search, min_score,
+-        page=1, per_page=50, _paginate=False, db=db
++        page=1, per_page=50, _paginate=False, db=db,
++        current_user=current_user
+     )
+     return generate_csv_response(
+         result["assessments"],
+@@ -1638,12 +1676,14 @@ async def download_assessments_pdf(
+     date_to: str = Query(None),
+     search: str = Query(None),
+     min_score: float = Query(None),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+     """Download assessment results as PDF with insights (all data, no pagination)."""
+     result = await get_assessment_results(
+         date_from, date_to, search, min_score,
+-        page=1, per_page=50, _paginate=False, db=db
++        page=1, per_page=50, _paginate=False, db=db,
++        current_user=current_user
+     )
+ 
+     assessments = result.get("assessments", [])
+@@ -1843,7 +1883,8 @@ async def download_attendance_csv(
+     date_to: str = Query(None),
+     store_filter: str = Query(None),
+     search: str = Query(None),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+     """Download attendance as CSV (all data, no pagination)."""
+     result = await get_attendance_report(
+@@ -1862,7 +1903,8 @@ async def download_attendance_pdf(
+     date_to: str = Query(None),
+     store_filter: str = Query(None),
+     search: str = Query(None),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+     """Download attendance as PDF with insights (all data, no pagination)."""
+     result = await get_attendance_report(
+@@ -2067,7 +2109,8 @@ async def download_stores_csv(
+     store_filter: str = Query(None),
+     date_from: str = Query(None),
+     date_to: str = Query(None),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+     """Download store performance as CSV (all data, no pagination)."""
+     result = await get_store_performance(
+@@ -2085,7 +2128,8 @@ async def download_stores_pdf(
+     store_filter: str = Query(None),
+     date_from: str = Query(None),
+     date_to: str = Query(None),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+     """Download store performance as PDF with insights (all data, no pagination)."""
+     result = await get_store_performance(
+@@ -2150,9 +2194,12 @@ async def get_simulation_progress(
+     page: int = Query(1, ge=1),
+     per_page: int = Query(50, ge=1, le=200),
+     _paginate: bool = Query(True),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+-    """Get simulation progress metrics using SimulationAnalyticsSnapshot for instant reads."""
++    """Get simulation progress metrics using SimulationAnalyticsSnapshot for instant reads.
++    Results are filtered based on the current user's access grants.
++    """
+     try:
+         # Use pre-computed analytics snapshot for efficiency
+         main_query = db.query(
+@@ -2315,7 +2362,8 @@ async def download_simulations_csv(
+     date_from: str = Query(None),
+     date_to: str = Query(None),
+     search: str = Query(None),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+     """Download simulation progress as CSV (all data, no pagination)."""
+     result = await get_simulation_progress(
+@@ -2333,7 +2381,8 @@ async def download_simulations_pdf(
+     date_from: str = Query(None),
+     date_to: str = Query(None),
+     search: str = Query(None),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+     """Download simulation progress as PDF with insights (all data, no pagination)."""
+     result = await get_simulation_progress(
+@@ -2403,9 +2452,12 @@ async def get_content_engagement(
+     page: int = Query(1, ge=1),
+     per_page: int = Query(50, ge=1, le=200),
+     _paginate: bool = Query(True),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+-    """Get content engagement metrics using subqueries for views, video progress, and completions."""
++    """Get content engagement metrics using subqueries for views, video progress, and completions.
++    Results are filtered based on the current user's access grants.
++    """
+     try:
+         date_from_dt = None
+         date_to_dt = None
+@@ -2550,7 +2602,8 @@ async def download_content_csv(
+     date_from: str = Query(None),
+     date_to: str = Query(None),
+     search: str = Query(None),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+     """Download content engagement as CSV (all data, no pagination)."""
+     result = await get_content_engagement(
+@@ -2569,7 +2622,8 @@ async def download_content_pdf(
+     date_from: str = Query(None),
+     date_to: str = Query(None),
+     search: str = Query(None),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+     """Download content engagement as PDF with insights (all data, no pagination)."""
+     result = await get_content_engagement(
+@@ -2634,11 +2688,15 @@ async def download_content_pdf(
+ async def get_executive_summary(
+     date_from: str = Query(None),
+     date_to: str = Query(None),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+     """Get AI-powered executive summary with recommendations and optional date filtering.
+     Optimized with batch queries."""
+     try:
++        # Access control
++        is_sa, accessible_emails = get_email_filter_set(db, current_user)
++
+         # Determine date range
+         if date_from:
+             start_date = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+@@ -2650,11 +2708,14 @@ async def get_executive_summary(
+         else:
+             end_date = datetime.utcnow()
+ 
+-        # Batch query 1: User stats
+-        user_stats = db.query(
++        # Batch query 1: User stats (filtered by access)
++        user_query = db.query(
+             func.count(User.id).label('total_users'),
+             func.count(case((and_(User.last_active >= start_date, User.last_active <= end_date), User.id))).label('active_users'),
+-        ).first()
++        )
++        if not is_sa and accessible_emails is not None:
++            user_query = user_query.filter(User.email.in_(accessible_emails))
++        user_stats = user_query.first()
+ 
+         total_users = user_stats.total_users or 0
+         active_users = user_stats.active_users or 0
+@@ -2664,7 +2725,7 @@ async def get_executive_summary(
+         half_period = period_days // 2
+         mid_date = start_date + timedelta(days=half_period)
+ 
+-        comp_stats = db.query(
++        comp_query = db.query(
+             func.count(CourseCompletion.id).label('total_completions'),
+             func.count(case((CourseCompletion.completed_at >= mid_date, CourseCompletion.id))).label('second_half'),
+             func.count(case((CourseCompletion.completed_at < mid_date, CourseCompletion.id))).label('first_half'),
+@@ -2672,7 +2733,10 @@ async def get_executive_summary(
+         ).filter(
+             CourseCompletion.completed_at >= start_date,
+             CourseCompletion.completed_at <= end_date,
+-        ).first()
++        )
++        if not is_sa and accessible_emails is not None:
++            comp_query = comp_query.filter(CourseCompletion.user_email.in_(accessible_emails))
++        comp_stats = comp_query.first()
+ 
+         total_completions = comp_stats.total_completions or 0
+         weekly_completions = comp_stats.second_half or 0
+@@ -2680,23 +2744,32 @@ async def get_executive_summary(
+         avg_score = float(comp_stats.avg_score or 0)
+ 
+         # Batch query 3: Quiz and assessment counts in date range
+-        total_quizzes = db.query(func.count(QuizSubmission.id)).filter(
++        quiz_q = db.query(func.count(QuizSubmission.id)).filter(
+             QuizSubmission.submitted_at >= start_date,
+             QuizSubmission.submitted_at <= end_date
+-        ).scalar() or 0
++        )
++        if not is_sa and accessible_emails is not None:
++            quiz_q = quiz_q.filter(QuizSubmission.user_email.in_(accessible_emails))
++        total_quizzes = quiz_q.scalar() or 0
+ 
+-        total_assessments = db.query(func.count(AssessmentSubmission.id)).filter(
++        assess_q = db.query(func.count(AssessmentSubmission.id)).filter(
+             AssessmentSubmission.submitted_at >= start_date,
+             AssessmentSubmission.submitted_at <= end_date
+-        ).scalar() or 0
++        )
++        if not is_sa and accessible_emails is not None:
++            assess_q = assess_q.filter(AssessmentSubmission.user_email.in_(accessible_emails))
++        total_assessments = assess_q.scalar() or 0
+ 
+-        avg_quiz_score = db.query(func.coalesce(func.avg(QuizSubmission.score), 0)).filter(
++        quiz_score_q = db.query(func.coalesce(func.avg(QuizSubmission.score), 0)).filter(
+             QuizSubmission.submitted_at >= start_date,
+             QuizSubmission.submitted_at <= end_date
+-        ).scalar() or 0
++        )
++        if not is_sa and accessible_emails is not None:
++            quiz_score_q = quiz_score_q.filter(QuizSubmission.user_email.in_(accessible_emails))
++        avg_quiz_score = quiz_score_q.scalar() or 0
+ 
+         # Top performers in date range (single efficient query)
+-        top_performers = db.query(
++        top_q = db.query(
+             User.name,
+             User.store,
+             func.count(CourseCompletion.id).label('completions')
+@@ -2705,7 +2778,10 @@ async def get_executive_summary(
+         ).filter(
+             CourseCompletion.completed_at >= start_date,
+             CourseCompletion.completed_at <= end_date
+-        ).group_by(User.name, User.store).order_by(
++        )
++        if not is_sa and accessible_emails is not None:
++            top_q = top_q.filter(User.email.in_(accessible_emails))
++        top_performers = top_q.group_by(User.name, User.store).order_by(
+             desc('completions')
+         ).limit(5).all()
+ 
+@@ -2767,7 +2843,8 @@ async def get_executive_summary(
+ async def download_executive_summary_csv(
+     date_from: str = Query(None),
+     date_to: str = Query(None),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+     """Download executive summary as CSV."""
+     result = await get_executive_summary(date_from, date_to, db)
+@@ -2785,7 +2862,8 @@ async def download_executive_summary_csv(
+ async def download_executive_summary_pdf(
+     date_from: str = Query(None),
+     date_to: str = Query(None),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
++    current_user: dict = Depends(get_current_user)
+ ):
+     """Download executive summary as PDF with all insights and recommendations."""
+     result = await get_executive_summary(date_from, date_to, db)
+diff --git a/backend/app/core/access_filter.py b/backend/app/core/access_filter.py
+index f09d7bd..19c3cbb 100644
+--- a/backend/app/core/access_filter.py
++++ b/backend/app/core/access_filter.py
+@@ -200,3 +200,32 @@ def should_include_user(
+ 
+     accessible = access_context.get('accessible_emails', set())
+     return user_email in accessible
++
++
++def get_email_filter_set(db: Session, current_user: dict):
++    """
++    Convenience helper for report / analytics endpoints.
++
++    Returns:
++        (is_superadmin: bool, accessible_emails: set | None)
++
++    If is_superadmin is True, accessible_emails is None (no filter needed).
++    Otherwise accessible_emails is the set of emails the viewer may see.
++    If the set is empty, the viewer should only see their own data.
++
++    Usage in a report endpoint::
++
++        is_sa, emails = get_email_filter_set(db, current_user)
++        if not is_sa and emails is not None:
++            subq = subq.filter(CourseCompletion.user_email.in_(emails))
++    """
++    ctx = get_access_filter_context(db, current_user)
++    if ctx['is_superadmin']:
++        return True, None
++    emails = ctx.get('accessible_emails') or set()
++    if not emails:
++        # Viewer has no grants ΓÇö they should only see their own data
++        viewer = ctx.get('viewer_email')
++        emails = {viewer} if viewer else set()
++    return False, emails
++
+diff --git a/backend/app/services/access_control_service.py b/backend/app/services/access_control_service.py
+index 8e06d15..c061850 100644
+--- a/backend/app/services/access_control_service.py
++++ b/backend/app/services/access_control_service.py
+@@ -333,11 +333,12 @@ class AccessControlService:
+         return cascaded
+ 
+     def _get_users_by_geographic_filter(self, filter_type: str, filter_value: str) -> List[User]:
+-        """Get users matching a geographic filter using in-memory cached users."""
++        """Get users matching a geographic filter using in-memory cached users (case-insensitive)."""
+         all_users = self._get_all_users()
++        filter_lower = str(filter_value).strip().lower()
+ 
+         if filter_type == 'store':
+-            return [u for u in all_users if u.store == filter_value]
++            return [u for u in all_users if u.store and str(u.store).strip().lower() == filter_lower]
+ 
+         # For state, region, city - filter by profile_data JSON
+         key_map = {'state': 'State', 'region': 'Region', 'city': 'City'}
+@@ -346,7 +347,7 @@ class AccessControlService:
+         if key:
+             return [
+                 u for u in all_users
+-                if (u.profile_data or {}).get(key) == filter_value
++                if str((u.profile_data or {}).get(key, '')).strip().lower() == filter_lower
+             ]
+ 
+         return []
+@@ -413,11 +414,13 @@ class AccessControlService:
+                     continue
+ 
+                 if p_grant.grant_type == 'store':
+-                    users = [u for u in all_users if u.store == p_grant.target_value]
++                    tv_lower = str(p_grant.target_value).strip().lower()
++                    users = [u for u in all_users if u.store and str(u.store).strip().lower() == tv_lower]
+                 else:
+                     key_map = {'state': 'State', 'region': 'Region', 'city': 'City'}
+                     key = key_map.get(p_grant.grant_type)
+-                    users = [u for u in all_users if (u.profile_data or {}).get(key) == p_grant.target_value] if key else []
++                    tv_lower = str(p_grant.target_value).strip().lower()
++                    users = [u for u in all_users if str((u.profile_data or {}).get(key, '')).strip().lower() == tv_lower] if key else []
+ 
+                 child_values = {t: set() for t in child_types}
+                 for u in users:
+@@ -504,6 +507,7 @@ class AccessControlService:
+         Get all users that a viewer has access to based on their grants.
+         Superadmins bypass all access control and see everyone.
+         Users with no grants can only see themselves.
++        All matching is case-insensitive to prevent mismatches.
+         """
+         # Check if viewer exists and is superadmin ΓÇö use the cache to avoid a DB hit
+         all_users_cached = self._get_all_users()
+@@ -522,8 +526,10 @@ class AccessControlService:
+             # No grants = can only see self
+             return [viewer]
+ 
+-        # Build filter sets
+-        accessible_emails = {viewer_email}  # Always include self
++        # Build filter sets ΓÇö normalise all target values to lowercase for
++        # case-insensitive matching (the most common cause of "grant exists
++        # but users don't show up").
++        accessible_emails = {viewer_email.lower()}  # Always include self
+         accessible_stores = set()
+         accessible_cities = set()
+         accessible_regions = set()
+@@ -533,22 +539,25 @@ class AccessControlService:
+         accessible_roles = set()
+ 
+         for grant in grants:
++            tv = str(grant.target_value).strip().lower() if grant.target_value else ''
++            if not tv:
++                continue
+             if grant.grant_type == 'user':
+-                accessible_emails.add(grant.target_value)
++                accessible_emails.add(tv)
+             elif grant.grant_type == 'store':
+-                accessible_stores.add(grant.target_value)
++                accessible_stores.add(tv)
+             elif grant.grant_type == 'city':
+-                accessible_cities.add(grant.target_value)
++                accessible_cities.add(tv)
+             elif grant.grant_type == 'region':
+-                accessible_regions.add(grant.target_value)
++                accessible_regions.add(tv)
+             elif grant.grant_type == 'state':
+-                accessible_states.add(grant.target_value)
++                accessible_states.add(tv)
+             elif grant.grant_type == 'department':
+-                accessible_departments.add(grant.target_value)
++                accessible_departments.add(tv)
+             elif grant.grant_type == 'designation':
+-                accessible_designations.add(grant.target_value)
++                accessible_designations.add(tv)
+             elif grant.grant_type == 'role':
+-                accessible_roles.add(grant.target_value)
++                accessible_roles.add(tv)
+ 
+         # Filter from the already-loaded cache
+         accessible = []
+@@ -557,40 +566,40 @@ class AccessControlService:
+             pd = user.profile_data or {}
+ 
+             # Check each filter type (OR logic - match any grant)
+-            if user.email in accessible_emails:
++            if user.email and user.email.lower() in accessible_emails:
+                 accessible.append(user)
+                 continue
+ 
+-            if user.store and user.store in accessible_stores:
++            if user.store and str(user.store).strip().lower() in accessible_stores:
+                 accessible.append(user)
+                 continue
+ 
+             user_city = pd.get('City')
+-            if user_city and user_city in accessible_cities:
++            if user_city and str(user_city).strip().lower() in accessible_cities:
+                 accessible.append(user)
+                 continue
+ 
+             user_region = pd.get('Region')
+-            if user_region and user_region in accessible_regions:
++            if user_region and str(user_region).strip().lower() in accessible_regions:
+                 accessible.append(user)
+                 continue
+ 
+             user_state = pd.get('State')
+-            if user_state and user_state in accessible_states:
++            if user_state and str(user_state).strip().lower() in accessible_states:
+                 accessible.append(user)
+                 continue
+ 
+             user_dept = pd.get('Department')
+-            if user_dept and user_dept in accessible_departments:
++            if user_dept and str(user_dept).strip().lower() in accessible_departments:
+                 accessible.append(user)
+                 continue
+ 
+             user_desig = pd.get('Designation')
+-            if user_desig and user_desig in accessible_designations:
++            if user_desig and str(user_desig).strip().lower() in accessible_designations:
+                 accessible.append(user)
+                 continue
+ 
+-            if user.role and user.role in accessible_roles:
++            if user.role and str(user.role).strip().lower() in accessible_roles:
+                 accessible.append(user)
+                 continue
+ 

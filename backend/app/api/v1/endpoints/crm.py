@@ -680,7 +680,8 @@ async def submit_audit(
     category: str = Form(...), # template_id basically
     checklist_items: str = Form(...),
     checked_items: str = Form(...),
-    assignment_id: str = Form(None), # NEW
+    assignment_id: str = Form(None), # Link to assignment if applicable
+    audit_status: str = Form("completed"), # 'completed' or 'partial'
     db: Session = Depends(get_db)
 ):
     """
@@ -715,7 +716,7 @@ async def submit_audit(
         "checked_items": checked_dict,
         "completion_rate": completion_rate,
         "submitted_at": datetime.utcnow(),
-        "status": "completed",
+        "status": audit_status if audit_status in ("completed", "partial") else "completed",
         "assignment_id": assignment_id
     }
 
@@ -739,27 +740,91 @@ async def submit_audit(
         raise
 
 
+from fastapi import Query
+
 @router.get("/audits/submissions")
 async def get_audit_submissions(
-    store: str = None,
-    user_email: str = None, # Added filter
-    category: str = None, # Added filter
+    store: List[str] = Query(default=None, alias="stores"),
+    user_email: List[str] = Query(default=None, alias="employees"),
+    category: List[str] = Query(default=None, alias="categories"),
+    role: List[str] = Query(default=None, alias="roles"),
+    department: List[str] = Query(default=None, alias="departments"),
+    sub_department: List[str] = Query(default=None, alias="sub_departments"),
+    designation: List[str] = Query(default=None, alias="designations"),
+    region: List[str] = Query(default=None, alias="regions"),
+    city: List[str] = Query(default=None, alias="cities"),
+    state: List[str] = Query(default=None, alias="states"),
+    grade: List[str] = Query(default=None, alias="grades"),
+    user_status: List[str] = Query(default=None, alias="statuses"),
+    qualification: List[str] = Query(default=None, alias="qualifications"),
+    gender: List[str] = Query(default=None, alias="genders"),
+    franchise: List[str] = Query(default=None, alias="franchises"),
+    concept: List[str] = Query(default=None, alias="concepts"),
+    function: List[str] = Query(default=None, alias="functions"),
+    sub_function: List[str] = Query(default=None, alias="sub_functions"),
+    job_role: List[str] = Query(default=None, alias="job_roles"),
+    marital_status: List[str] = Query(default=None, alias="marital_statuses"),
+    blood_group: List[str] = Query(default=None, alias="blood_groups"),
     current_user: Dict[str, Any] = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Get audit submissions, filtered by store, user, or category.
+    Get audit submissions, filtered by detailed user attributes, stores, and categories.
     """
     from app.models.crm import AuditSubmission
+    from app.services.user_service import UserService
     
     query = db.query(AuditSubmission)
     
     if store:
-        query = query.filter(AuditSubmission.store == store)
-    if user_email:
-        query = query.filter(AuditSubmission.user_email == user_email)
+        query = query.filter(AuditSubmission.store.in_(store))
     if category:
-        query = query.filter(AuditSubmission.category == category)
+        query = query.filter(AuditSubmission.category.in_(category))
+    
+    # Check if we have user-specific detailed filters active
+    user_filters_active = any([
+        role, department, sub_department, designation, region, city, state, grade, 
+        user_status, qualification, gender, franchise, concept, function, sub_function, 
+        job_role, marital_status, blood_group
+    ])
+    
+    if user_filters_active or user_email:
+        filters = {}
+        if department:     filters["Department"] = department
+        if sub_department: filters["Sub Department"] = sub_department
+        if designation:    filters["Designation"] = designation
+        if region:         filters["Region"] = region
+        if city:           filters["City"] = city
+        if state:          filters["State"] = state
+        if grade:          filters["Grade"] = grade
+        if user_status:    filters["User Status"] = user_status
+        if qualification:  filters["Qualification"] = qualification
+        if gender:         filters["Gender"] = gender
+        if franchise:      filters["Franchise"] = franchise
+        if concept:        filters["Concept"] = concept
+        if function:       filters["Function"] = function
+        if sub_function:   filters["Sub Function"] = sub_function
+        if job_role:       filters["Job Role"] = job_role
+        if marital_status: filters["Marital Status"] = marital_status
+        if blood_group:    filters["Blood Group"] = blood_group
+        if role:           filters["role"] = role
+        if user_email:     filters["email"] = user_email
+        
+        service = UserService(db)
+        # Get users matching the detailed profile criteria
+        matching_users, _ = service.get_users_with_count(skip=0, limit=100000, filters=filters)
+        matching_emails = [u.email for u in matching_users]
+        
+        if not matching_emails:
+            # Filters applied but no users match - return empty list early
+            return {
+                "audits": [],
+                "total_count": 0,
+                "avg_completion_rate": 0,
+                "category_stats": {}
+            }
+            
+        query = query.filter(AuditSubmission.user_email.in_(matching_emails))
         
     audits = query.order_by(AuditSubmission.submitted_at.desc()).limit(100).all()
     

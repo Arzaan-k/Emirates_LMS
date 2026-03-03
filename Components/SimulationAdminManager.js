@@ -10,10 +10,12 @@ import {
     ActivityIndicator,
     Modal,
     Dimensions,
+    Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeIn, FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import API_URL from '../config';
 import SimulationFlowBuilder from './SimulationFlowBuilder';
 
@@ -34,6 +36,11 @@ export default function SimulationAdminManager({ onClose }) {
     useEffect(() => {
         fetchSimulations();
     }, []);
+
+    const getAuthHeaders = async () => {
+        const token = await AsyncStorage.getItem('userToken');
+        return token ? { Authorization: `Bearer ${token}` } : {};
+    };
 
     const fetchSimulations = async () => {
         setIsLoading(true);
@@ -56,7 +63,8 @@ export default function SimulationAdminManager({ onClose }) {
                 Promise.all(
                     simList.map(async (sim) => {
                         try {
-                            const analyticsRes = await fetch(`${API_URL}/api/v1/simulations/analytics/${sim.id}`);
+                            const headers = await getAuthHeaders();
+                            const analyticsRes = await fetch(`${API_URL}/api/v1/simulations/analytics/${sim.id}`, { headers });
                             const analyticsData = await analyticsRes.json();
                             setAnalytics(prev => ({ ...prev, [sim.id]: analyticsData }));
                         } catch (e) {
@@ -91,26 +99,32 @@ export default function SimulationAdminManager({ onClose }) {
     };
 
     const handleDelete = async (simulationId, title) => {
+        const executeDelete = async () => {
+            try {
+                const headers = await getAuthHeaders();
+                await fetch(`${API_URL}/api/v1/simulations/${simulationId}`, {
+                    method: 'DELETE',
+                    headers,
+                });
+                fetchSimulations();
+                Alert.alert('Deleted', 'Simulation deleted successfully');
+            } catch (e) {
+                Alert.alert('Error', 'Failed to delete simulation');
+            }
+        };
+
+        if (Platform.OS === 'web') {
+            // Some RN-web runtimes block native confirm dialogs; execute directly on web.
+            executeDelete();
+            return;
+        }
+
         Alert.alert(
             'Delete Simulation',
             `Are you sure you want to delete "${title}"?`,
             [
                 { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Delete',
-                    style: 'destructive',
-                    onPress: async () => {
-                        try {
-                            await fetch(`${API_URL}/api/v1/simulations/${simulationId}`, {
-                                method: 'DELETE',
-                            });
-                            fetchSimulations();
-                            Alert.alert('Deleted', 'Simulation deleted successfully');
-                        } catch (e) {
-                            Alert.alert('Error', 'Failed to delete simulation');
-                        }
-                    },
-                },
+                { text: 'Delete', style: 'destructive', onPress: executeDelete },
             ]
         );
     };
@@ -136,7 +150,8 @@ export default function SimulationAdminManager({ onClose }) {
         setShowAnalyticsModal(true);
 
         try {
-            const res = await fetch(`${API_URL}/api/v1/simulations/analytics/${simulation.id}/detailed`);
+            const headers = await getAuthHeaders();
+            const res = await fetch(`${API_URL}/api/v1/simulations/analytics/${simulation.id}/detailed`, { headers });
             if (!res.ok) throw new Error('fetch failed');
             const json = await res.json();
             setSelectedAnalytics({

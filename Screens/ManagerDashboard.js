@@ -28,7 +28,8 @@ import EditNodeModal from '../Components/EditNodeModal';
 import BulkUploadModal from '../Components/BulkUploadModal'; // [NEW]
 import FolderUploadModal from '../Components/FolderUploadModal'; // [NEW] Folder hierarchy upload
 import BucketManagementModal from '../Components/BucketManagementModal'; // [NEW] Bucket management
-import AccessControlModal from '../Components/AccessControlModal'; // [NEW] Hierarchy & Access Control
+import CurriculumHierarchyModal from '../Components/CurriculumHierarchyModal'; // Curriculum hierarchy (level-to-course mapping)
+import DataAccessControlModal from '../Components/DataAccessControlModal'; // [NEW] Granular user data access control
 import CreateUser from '../Screens/CreateUser';
 import API_URL from '../config';
 import * as SecureStore from 'expo-secure-store';
@@ -48,6 +49,9 @@ import ExamHistoryModal from '../Components/ExamHistoryModal'; // [NEW] Exam His
 import RoleplayHistoryModal from '../Components/RoleplayHistoryModal'; // [NEW] Roleplay History
 import ModeSwitcher from '../Components/ModeSwitcher'; // [NEW] Mode Switcher
 import ModeIndicator from '../Components/ModeIndicator'; // [NEW] Mode Indicator
+import ImpactUserPickerModal from '../Components/ImpactUserPickerModal';
+import AdminDailyQuizManager from '../Components/AdminDailyQuizManager';
+import SystemSettingsModal from '../Components/SystemSettingsModal'; // [NEW] System Settings
 
 
 
@@ -175,6 +179,7 @@ export default function ManagerDashboard({ route, navigation }) {
     // [PHASE 2] New Feature Modals
     const [auditLogsVisible, setAuditLogsVisible] = useState(false);
     const [contentLibraryVisible, setContentLibraryVisible] = useState(false);
+    const [systemSettingsVisible, setSystemSettingsVisible] = useState(false); // [NEW]
 
     // User Mode State
     const [userMode, setUserMode] = useState('admin');
@@ -183,6 +188,7 @@ export default function ManagerDashboard({ route, navigation }) {
     const role = userProfile?.role || "Manager";
     const name = userProfile?.name || "User";
     const data = getDashboardData(role);
+    const showAdminOverviewSections = false;
 
     // Privilege checking for role-based access control
     const isSuperAdmin = userProfile?.is_superadmin || userProfile?.role === 'Super Admin';
@@ -271,6 +277,7 @@ export default function ManagerDashboard({ route, navigation }) {
     // NEWS & QUIZ CREATION STATE
     const [newsModalVisible, setNewsModalVisible] = useState(false);
     const [quizCreationVisible, setQuizCreationVisible] = useState(false);
+    const [dailyQuizManagerVisible, setDailyQuizManagerVisible] = useState(false);
     const [newsTitle, setNewsTitle] = useState('');
     const [newsContent, setNewsContent] = useState('');
     const [newsAuthor, setNewsAuthor] = useState('');
@@ -304,8 +311,10 @@ export default function ManagerDashboard({ route, navigation }) {
     const [courseBuckets, setCourseBuckets] = useState([]);
     const [selectedBucket, setSelectedBucket] = useState(null);
 
-    // [NEW] Access Control Modal State
-    const [accessControlVisible, setAccessControlVisible] = useState(false);
+    // Curriculum Hierarchy Modal State (formerly Access Control)
+    const [curriculumHierarchyVisible, setCurriculumHierarchyVisible] = useState(false);
+    // [NEW] Data Access Control Modal State
+    const [dataAccessControlVisible, setDataAccessControlVisible] = useState(false);
     const [loadingBuckets, setLoadingBuckets] = useState(false);
 
     // [NEW] Simulation Flow Builder State
@@ -323,7 +332,7 @@ export default function ManagerDashboard({ route, navigation }) {
 
     // [NEW] Admin AI Analyst State
     const [adminChatVisible, setAdminChatVisible] = useState(false);
-    const [chatMessages, setChatMessages] = useState([{ role: 'ai', content: "Hello! I'm your AI Analyst. Ask me anything about users, quizzes, or system performance." }]);
+    const [chatMessages, setChatMessages] = useState([{ role: 'ai', content: "Hello! I'm your AI Analyst. I can help answer questions based on your specific user access.\n\nTry asking:\n- How many users have completed the Store Manager path?\n- What are the quiz scores for my team?\n- Which users are active today?" }]);
     const [chatInput, setChatInput] = useState('');
     const [isChatLoading, setIsChatLoading] = useState(false);
 
@@ -332,30 +341,42 @@ export default function ManagerDashboard({ route, navigation }) {
         const query = chatInput;
         setChatInput('');
 
-        // Add user message
+        // Prepare history excluding the first greeting
+        const historyToSend = chatMessages.slice(1).map(m => ({
+            role: m.role,
+            content: m.content
+        }));
+
+        // Add user message to UI
         const newMsgs = [...chatMessages, { role: 'user', content: query }];
         setChatMessages(newMsgs);
         setIsChatLoading(true);
 
         try {
-            // Send request to privilege-aware admin copilot endpoint
+            const token = await AsyncStorage.getItem('userToken');
+
+            // Send request to access-controlled admin copilot endpoint
             const res = await fetch(`${API_URL}/api/v1/ai/admin-copilot`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
                 body: JSON.stringify({
                     question: query,
-                    privileges: userPrivileges,
-                    is_superadmin: isSuperAdmin,
+                    history: historyToSend,
+                    admin_email: userProfile?.email || '',
                     admin_name: name,
-                    admin_role: role
+                    is_superadmin: isSuperAdmin
                 })
             });
             const data = await res.json();
 
             // Add AI response with data sources info
-            let responseContent = data.answer;
+            let responseContent = data.answer || "Sorry, I couldn't generate an answer.";
             if (data.data_sources && data.data_sources.length > 0) {
-                responseContent += `\n\n📊 *Data sources: ${data.data_sources.join(', ')}*`;
+                const uCount = data.accessible_users_count !== undefined ? data.accessible_users_count : 0;
+                responseContent += `\n\n📊 *Data sources: ${data.data_sources.join(', ')} | Accessible Users: ${uCount}*`;
             }
             setChatMessages(prev => [...prev, { role: 'ai', content: responseContent }]);
         } catch (error) {
@@ -608,8 +629,12 @@ export default function ManagerDashboard({ route, navigation }) {
                 }
             }
 
+            const token = await AsyncStorage.getItem('userToken');
             const response = await fetch(`${API_URL}/api/v1/notifications/news`, {
                 method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                },
                 body: formData
             });
 
@@ -1036,9 +1061,13 @@ export default function ManagerDashboard({ route, navigation }) {
                 }
             }
 
+            const token = await AsyncStorage.getItem('userToken');
             // NOTE: Do NOT set Content-Type header manually - FormData sets it automatically with boundary
             const response = await fetch(`${API_URL}/api/v1/notifications/send`, {
                 method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                },
                 body: formData
             });
 
@@ -1183,21 +1212,25 @@ export default function ManagerDashboard({ route, navigation }) {
                         />
                     </Animated.View>
 
-                    {/* STATS GRID */}
-                    <Text style={styles.sectionTitle}>Key Performance Indicators</Text>
-                    <View style={styles.statsGrid}>
-                        {data.stats.map((item, index) => (
-                            <StatCard key={index} item={item} index={index} />
-                        ))}
-                    </View>
+                    {showAdminOverviewSections && (
+                        <>
+                            {/* STATS GRID */}
+                            <Text style={styles.sectionTitle}>Key Performance Indicators</Text>
+                            <View style={styles.statsGrid}>
+                                {data.stats.map((item, index) => (
+                                    <StatCard key={index} item={item} index={index} />
+                                ))}
+                            </View>
 
-                    {/* ACTIVITY FEED */}
-                    <View style={styles.feedSection}>
-                        <Text style={styles.sectionTitle}>Live Activity</Text>
-                        {data.feed.map((item, index) => (
-                            <FeedItem key={index} item={item} index={index} />
-                        ))}
-                    </View>
+                            {/* ACTIVITY FEED */}
+                            <View style={styles.feedSection}>
+                                <Text style={styles.sectionTitle}>Live Activity</Text>
+                                {data.feed.map((item, index) => (
+                                    <FeedItem key={index} item={item} index={index} />
+                                ))}
+                            </View>
+                        </>
+                    )}
 
                     {/* QUICK ACTIONS */}
                     <Text style={styles.sectionTitle}>Quick Actions</Text>
@@ -1301,6 +1334,16 @@ export default function ManagerDashboard({ route, navigation }) {
                             </TouchableOpacity>
                         )}
 
+                        {/* DAILY QUIZ - requires post_quiz privilege */}
+                        {hasPrivilege('post_quiz') && (
+                            <TouchableOpacity style={styles.actionBtn} onPress={() => setDailyQuizManagerVisible(true)}>
+                                <View style={[styles.actionIcon, { backgroundColor: '#EEF2FF' }]}>
+                                    <MaterialCommunityIcons name="brain" size={24} color="#6366F1" />
+                                </View>
+                                <Text style={styles.actionText}>Daily Quiz</Text>
+                            </TouchableOpacity>
+                        )}
+
                         {/* CREATE USER - requires create_user privilege */}
                         {hasPrivilege('create_user') && (
                             <TouchableOpacity style={styles.actionBtn} onPress={() => setCreateUserVisible(true)}>
@@ -1364,14 +1407,27 @@ export default function ManagerDashboard({ route, navigation }) {
                             </TouchableOpacity>
                         )}
 
-                        {/* ACCESS CONTROL - requires access_control privilege */}
+                        {/* CURRICULUM HIERARCHY - requires access_control privilege */}
                         {hasPrivilege('access_control') && (
                             <TouchableOpacity
                                 style={styles.actionBtn}
-                                onPress={() => setAccessControlVisible(true)}
+                                onPress={() => setCurriculumHierarchyVisible(true)}
                             >
                                 <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
-                                    <MaterialCommunityIcons name="shield-lock-outline" size={24} color="#D97706" />
+                                    <MaterialCommunityIcons name="sitemap" size={24} color="#D97706" />
+                                </View>
+                                <Text style={styles.actionText}>Curriculum</Text>
+                            </TouchableOpacity>
+                        )}
+
+                        {/* DATA ACCESS CONTROL - requires data_access_control privilege */}
+                        {hasPrivilege('data_access_control') && (
+                            <TouchableOpacity
+                                style={styles.actionBtn}
+                                onPress={() => setDataAccessControlVisible(true)}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#DBEAFE' }]}>
+                                    <MaterialCommunityIcons name="account-key-outline" size={24} color="#3B82F6" />
                                 </View>
                                 <Text style={styles.actionText}>Access Control</Text>
                             </TouchableOpacity>
@@ -1455,8 +1511,8 @@ export default function ManagerDashboard({ route, navigation }) {
                             </TouchableOpacity>
                         )}
 
-                        {/* LMS SUPPORT - requires lms_support privilege */}
-                        {hasPrivilege('lms_support') && (
+                        {/* LMS SUPPORT - requires support_library privilege */}
+                        {hasPrivilege('support_library') && (
                             <TouchableOpacity
                                 style={styles.actionBtn}
                                 onPress={() => setSupportModalVisible(true)}
@@ -1469,8 +1525,8 @@ export default function ManagerDashboard({ route, navigation }) {
                         )}
 
 
-                        {/* [PHASE 2] CONTENT LIBRARY - requires content_library privilege */}
-                        {hasPrivilege('content_library') && (
+                        {/* [PHASE 2] CONTENT LIBRARY - requires upload_training_view privilege */}
+                        {hasPrivilege('upload_training_view') && (
                             <TouchableOpacity
                                 style={styles.actionBtn}
                                 onPress={() => setContentLibraryVisible(true)}
@@ -1483,8 +1539,8 @@ export default function ManagerDashboard({ route, navigation }) {
                         )}
 
 
-                        {/* [PHASE 2] AUDIT LOGS - requires audit_logs privilege */}
-                        {hasPrivilege('audit_logs') && (
+                        {/* [PHASE 2] AUDIT LOGS - requires view_audit_logs privilege */}
+                        {hasPrivilege('view_audit_logs') && (
                             <TouchableOpacity
                                 style={styles.actionBtn}
                                 onPress={() => setAuditLogsVisible(true)}
@@ -1493,6 +1549,19 @@ export default function ManagerDashboard({ route, navigation }) {
                                     <MaterialCommunityIcons name="history" size={24} color="#6366F1" />
                                 </View>
                                 <Text style={styles.actionText}>Audit Logs</Text>
+                            </TouchableOpacity>
+                        )}
+
+                        {/* SYSTEM SETTINGS - SuperAdmin Only */}
+                        {isSuperAdmin && (
+                            <TouchableOpacity
+                                style={styles.actionBtn}
+                                onPress={() => setSystemSettingsVisible(true)}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#F3E8FF' }]}>
+                                    <MaterialCommunityIcons name="cog-outline" size={24} color="#9333EA" />
+                                </View>
+                                <Text style={styles.actionText}>App Settings</Text>
                             </TouchableOpacity>
                         )}
                     </View>
@@ -1784,42 +1853,77 @@ export default function ManagerDashboard({ route, navigation }) {
 
                             {/* [NEW] Course Bucket Selector */}
                             <Text style={styles.inputLabel}>Category (Required)</Text>
-                            <View style={{ marginBottom: 15 }}>
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
-                                    <TouchableOpacity
-                                        onPress={() => setSelectedBucket(null)}
-                                        style={{
-                                            paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginRight: 8,
-                                            backgroundColor: !selectedBucket ? '#6366F1' : '#F3F4F6',
-                                            borderWidth: 1, borderColor: !selectedBucket ? '#6366F1' : '#E5E7EB',
-                                            flexDirection: 'row', alignItems: 'center'
-                                        }}
-                                    >
-                                        <MaterialCommunityIcons name="close-circle" size={14} color={!selectedBucket ? '#FFF' : '#6B7280'} style={{ marginRight: 4 }} />
-                                        <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: !selectedBucket ? '#FFF' : '#4B5563' }}>None</Text>
-                                    </TouchableOpacity>
-                                    {courseBuckets.map((bucket, i) => (
-                                        <TouchableOpacity
-                                            key={bucket.id}
-                                            onPress={() => setSelectedBucket(selectedBucket === bucket.id ? null : bucket.id)}
+                            {(() => {
+                                const pathType = isSelfLearning ? 'self_learning' : 'career_progression';
+                                // Filter buckets by learning path type
+                                const filteredBuckets = courseBuckets.filter(b =>
+                                    !b.learning_path_type ||
+                                    b.learning_path_type === pathType ||
+                                    b.show_in_both_paths
+                                );
+
+                                // Sort by folder_path or name to ensure hierarchical visual order
+                                const sortedBuckets = [...filteredBuckets].sort((a, b) =>
+                                    (a.folder_path || a.name).localeCompare(b.folder_path || b.name)
+                                );
+
+                                return (
+                                    <View style={{ marginBottom: 15 }}>
+                                        <ScrollView
+                                            nestedScrollEnabled={true}
+                                            showsVerticalScrollIndicator={true}
                                             style={{
-                                                paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginRight: 8,
-                                                backgroundColor: selectedBucket === bucket.id ? bucket.color : '#F3F4F6',
-                                                borderWidth: 1, borderColor: selectedBucket === bucket.id ? bucket.color : '#E5E7EB',
-                                                flexDirection: 'row', alignItems: 'center'
+                                                maxHeight: 180,
+                                                borderWidth: 1,
+                                                borderColor: '#E5E7EB',
+                                                borderRadius: 12,
+                                                padding: 8,
+                                                backgroundColor: '#F9FAFB'
                                             }}
+                                            contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}
                                         >
-                                            <MaterialCommunityIcons
-                                                name={bucket.icon || 'folder'}
-                                                size={14}
-                                                color={selectedBucket === bucket.id ? '#FFF' : bucket.color}
-                                                style={{ marginRight: 4 }}
-                                            />
-                                            <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: selectedBucket === bucket.id ? '#FFF' : '#4B5563' }}>{bucket.name}</Text>
-                                        </TouchableOpacity>
-                                    ))}
-                                </ScrollView>
-                            </View>
+                                            <TouchableOpacity
+                                                onPress={() => setSelectedBucket(null)}
+                                                style={{
+                                                    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginBottom: 8,
+                                                    backgroundColor: !selectedBucket ? '#6366F1' : '#FFF',
+                                                    borderWidth: 1, borderColor: !selectedBucket ? '#6366F1' : '#D1D5DB',
+                                                    flexDirection: 'row', alignItems: 'center'
+                                                }}
+                                            >
+                                                <MaterialCommunityIcons name="close-circle" size={14} color={!selectedBucket ? '#FFF' : '#6B7280'} style={{ marginRight: 4 }} />
+                                                <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: !selectedBucket ? '#FFF' : '#4B5563' }}>None</Text>
+                                            </TouchableOpacity>
+                                            {sortedBuckets.map((bucket, i) => {
+                                                const pathParts = bucket.folder_path ? bucket.folder_path.split('/') : [bucket.name];
+                                                const displayName = pathParts.length > 1
+                                                    ? `${pathParts[pathParts.length - 2]} > ${pathParts[pathParts.length - 1]}`
+                                                    : pathParts[0];
+                                                return (
+                                                    <TouchableOpacity
+                                                        key={bucket.id}
+                                                        onPress={() => setSelectedBucket(selectedBucket === bucket.id ? null : bucket.id)}
+                                                        style={{
+                                                            paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginBottom: 8,
+                                                            backgroundColor: selectedBucket === bucket.id ? (bucket.color || '#3B82F6') : '#FFF',
+                                                            borderWidth: 1, borderColor: selectedBucket === bucket.id ? (bucket.color || '#3B82F6') : '#D1D5DB',
+                                                            flexDirection: 'row', alignItems: 'center'
+                                                        }}
+                                                    >
+                                                        <MaterialCommunityIcons
+                                                            name={bucket.icon || 'folder'}
+                                                            size={14}
+                                                            color={selectedBucket === bucket.id ? '#FFF' : (bucket.color || '#6B7280')}
+                                                            style={{ marginRight: 6 }}
+                                                        />
+                                                        <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: selectedBucket === bucket.id ? '#FFF' : '#4B5563' }}>{displayName}</Text>
+                                                    </TouchableOpacity>
+                                                );
+                                            })}
+                                        </ScrollView>
+                                    </View>
+                                );
+                            })()}
 
                             {/* RESTORED: Add to Path Toggle */}
                             <TouchableOpacity
@@ -2026,178 +2130,14 @@ export default function ManagerDashboard({ route, navigation }) {
             </Modal >
 
             {/* AFFECTED USERS MODAL - for selecting users to impact */}
-            <Modal visible={showAffectedUsersModal} animationType="slide" transparent={true}>
-                <View style={styles.affectedUsersModalOverlay}>
-                    <View style={styles.affectedUsersModalContent}>
-                        {/* Header */}
-                        <View style={styles.affectedUsersModalHeader}>
-                            <View style={styles.affectedUsersModalTitleRow}>
-                                <MaterialIcons name="people" size={24} color="#3B82F6" />
-                                <Text style={styles.affectedUsersModalTitle}>Select Users to Impact</Text>
-                            </View>
-                            <TouchableOpacity onPress={() => setShowAffectedUsersModal(false)}>
-                                <MaterialIcons name="close" size={24} color="#6B7280" />
-                            </TouchableOpacity>
-                        </View>
-
-                        {/* Impact Mode Indicator */}
-                        <View style={[
-                            styles.impactModeIndicator,
-                            impactExisting ? styles.impactModeOn : styles.impactModeOff
-                        ]}>
-                            <MaterialIcons
-                                name={impactExisting ? 'warning' : 'check-circle'}
-                                size={18}
-                                color={impactExisting ? '#DC2626' : '#10B981'}
-                            />
-                            <Text style={[
-                                styles.impactModeText,
-                                impactExisting ? styles.impactModeTextOn : styles.impactModeTextOff
-                            ]}>
-                                {impactExisting
-                                    ? `${selectedImpactedUsers.size} users selected to be impacted`
-                                    : 'No users will be affected'}
-                            </Text>
-                        </View>
-
-                        {/* Select All / None Buttons */}
-                        {impactExisting && affectedUsers?.completed_users?.length > 0 && (
-                            <View style={styles.selectAllContainer}>
-                                <TouchableOpacity style={styles.selectAllBtn} onPress={selectAllCompletedUsers}>
-                                    <MaterialIcons name="select-all" size={16} color="#3B82F6" />
-                                    <Text style={styles.selectAllBtnText}>Select All</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity style={styles.selectNoneBtn} onPress={deselectAllUsers}>
-                                    <MaterialIcons name="deselect" size={16} color="#6B7280" />
-                                    <Text style={styles.selectNoneBtnText}>Select None</Text>
-                                </TouchableOpacity>
-                            </View>
-                        )}
-
-                        <ScrollView style={styles.affectedUsersScrollView}>
-                            {/* Completed Users Section */}
-                            {affectedUsers?.completed_users?.length > 0 && (
-                                <View style={styles.affectedUsersSection}>
-                                    <View style={styles.affectedUsersSectionHeader}>
-                                        <View style={[styles.sectionIconBadge, { backgroundColor: impactExisting ? '#FEE2E2' : '#D1FAE5' }]}>
-                                            <MaterialIcons
-                                                name={impactExisting ? 'warning' : 'check-circle'}
-                                                size={16}
-                                                color={impactExisting ? '#DC2626' : '#10B981'}
-                                            />
-                                        </View>
-                                        <View style={{ flex: 1 }}>
-                                            <Text style={styles.affectedUsersSectionTitle}>
-                                                Users at 100% ({affectedUsers.completed_users.length})
-                                            </Text>
-                                            <Text style={styles.affectedUsersSectionSubtitle}>
-                                                {impactExisting ? 'Select users who must complete' : 'These users will NOT be affected'}
-                                            </Text>
-                                        </View>
-                                    </View>
-                                    {affectedUsers.completed_users.slice(0, 50).map((user, index) => (
-                                        <TouchableOpacity
-                                            key={user.email || index}
-                                            style={styles.affectedUserItem}
-                                            onPress={() => impactExisting && toggleUserImpact(user.email)}
-                                            disabled={!impactExisting}
-                                        >
-                                            {impactExisting && (
-                                                <MaterialIcons
-                                                    name={selectedImpactedUsers.has(user.email) ? 'check-box' : 'check-box-outline-blank'}
-                                                    size={22}
-                                                    color={selectedImpactedUsers.has(user.email) ? '#3B82F6' : '#9CA3AF'}
-                                                />
-                                            )}
-                                            <View style={styles.affectedUserAvatar}>
-                                                <Text style={styles.affectedUserAvatarText}>
-                                                    {(user.name || user.email || '?').charAt(0).toUpperCase()}
-                                                </Text>
-                                            </View>
-                                            <View style={styles.affectedUserDetails}>
-                                                <Text style={styles.affectedUserName}>{user.name || user.email}</Text>
-                                                <Text style={styles.affectedUserMeta}>
-                                                    {user.role || 'No Role'} • {user.store || 'No Store'}
-                                                </Text>
-                                            </View>
-                                            <View style={[
-                                                styles.affectedUserBadge,
-                                                { backgroundColor: (impactExisting && selectedImpactedUsers.has(user.email)) ? '#FEE2E2' : '#D1FAE5' }
-                                            ]}>
-                                                <Text style={[
-                                                    styles.affectedUserBadgeText,
-                                                    { color: (impactExisting && selectedImpactedUsers.has(user.email)) ? '#DC2626' : '#10B981' }
-                                                ]}>
-                                                    {(impactExisting && selectedImpactedUsers.has(user.email)) ? 'Impacted' : 'Safe'}
-                                                </Text>
-                                            </View>
-                                        </TouchableOpacity>
-                                    ))}
-                                </View>
-                            )}
-
-                            {/* In Progress Users Section */}
-                            {affectedUsers?.in_progress_users?.length > 0 && (
-                                <View style={styles.affectedUsersSection}>
-                                    <View style={styles.affectedUsersSectionHeader}>
-                                        <View style={[styles.sectionIconBadge, { backgroundColor: '#FEF3C7' }]}>
-                                            <MaterialIcons name="schedule" size={16} color="#D97706" />
-                                        </View>
-                                        <View>
-                                            <Text style={styles.affectedUsersSectionTitle}>
-                                                In Progress ({affectedUsers.in_progress_users.length})
-                                            </Text>
-                                            <Text style={styles.affectedUsersSectionSubtitle}>
-                                                These users will always need to complete new courses
-                                            </Text>
-                                        </View>
-                                    </View>
-                                    {affectedUsers.in_progress_users.slice(0, 20).map((user, index) => (
-                                        <View key={user.email || index} style={styles.affectedUserItem}>
-                                            <View style={styles.affectedUserAvatar}>
-                                                <Text style={styles.affectedUserAvatarText}>
-                                                    {(user.name || user.email || '?').charAt(0).toUpperCase()}
-                                                </Text>
-                                            </View>
-                                            <View style={styles.affectedUserDetails}>
-                                                <Text style={styles.affectedUserName}>{user.name || user.email}</Text>
-                                                <Text style={styles.affectedUserMeta}>
-                                                    {user.role || 'No Role'} • {user.store || 'No Store'}
-                                                </Text>
-                                            </View>
-                                            <View style={styles.progressBadge}>
-                                                <Text style={styles.progressBadgeText}>
-                                                    {user.progress_percent || 0}%
-                                                </Text>
-                                            </View>
-                                        </View>
-                                    ))}
-                                </View>
-                            )}
-
-                            {/* Empty State */}
-                            {(!affectedUsers?.completed_users?.length && !affectedUsers?.in_progress_users?.length) && (
-                                <View style={styles.emptyAffectedUsers}>
-                                    <MaterialIcons name="info-outline" size={48} color="#D1D5DB" />
-                                    <Text style={styles.emptyAffectedUsersText}>
-                                        No users have started this learning path yet
-                                    </Text>
-                                </View>
-                            )}
-                        </ScrollView>
-
-                        {/* Footer */}
-                        <View style={styles.affectedUsersModalFooter}>
-                            <TouchableOpacity
-                                style={styles.affectedUsersCloseBtn}
-                                onPress={() => setShowAffectedUsersModal(false)}
-                            >
-                                <Text style={styles.affectedUsersCloseBtnText}>Close</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
+            <ImpactUserPickerModal
+                visible={showAffectedUsersModal}
+                onClose={() => setShowAffectedUsersModal(false)}
+                completedUsers={affectedUsers?.completed_users || []}
+                inProgressUsers={affectedUsers?.in_progress_users || []}
+                preSelectedEmails={selectedImpactedUsers}
+                onSave={(emailsSet) => setSelectedImpactedUsers(emailsSet)}
+            />
 
             {/* QUIZ CREATION MODAL */}
             <QuizCreationModal
@@ -2510,10 +2450,22 @@ export default function ManagerDashboard({ route, navigation }) {
                 </View>
             </Modal>
 
-            {/* ACCESS CONTROL MODAL */}
-            <AccessControlModal
-                visible={accessControlVisible}
-                onClose={() => setAccessControlVisible(false)}
+            {/* SYSTEM SETTINGS MODAL */}
+            <SystemSettingsModal
+                visible={systemSettingsVisible}
+                onClose={() => setSystemSettingsVisible(false)}
+            />
+
+            {/* CURRICULUM HIERARCHY MODAL */}
+            <CurriculumHierarchyModal
+                visible={curriculumHierarchyVisible}
+                onClose={() => setCurriculumHierarchyVisible(false)}
+            />
+
+            {/* DATA ACCESS CONTROL MODAL */}
+            <DataAccessControlModal
+                visible={dataAccessControlVisible}
+                onClose={() => setDataAccessControlVisible(false)}
             />
 
             {/* CRM TICKET MODAL */}
@@ -2595,7 +2547,7 @@ export default function ManagerDashboard({ route, navigation }) {
             />
 
             {/* ADMIN AI ANALYST FLOATING BUTTON */}
-            {isSuperAdmin && (
+            {(isSuperAdmin || userProfile?.has_admin_access) && (
                 <TouchableOpacity
                     style={{
                         position: 'absolute', bottom: 30, right: 30,
@@ -2684,6 +2636,19 @@ export default function ManagerDashboard({ route, navigation }) {
                         </View>
                     </View>
                 </KeyboardAvoidingView>
+            </Modal>
+            {/* DAILY QUIZ MANAGER MODAL */}
+            <Modal visible={dailyQuizManagerVisible} animationType="slide" transparent={false}>
+                <View style={{ flex: 1, backgroundColor: '#F8FAFC' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 50 : 20, paddingBottom: 12, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0' }}>
+                        <TouchableOpacity onPress={() => setDailyQuizManagerVisible(false)} style={{ marginRight: 12 }}>
+                            <Feather name="x" size={24} color="#1E293B" />
+                        </TouchableOpacity>
+                        <MaterialCommunityIcons name="brain" size={24} color="#6366F1" style={{ marginRight: 8 }} />
+                        <Text style={{ fontSize: 18, fontFamily: 'Poppins_700Bold', color: '#1E293B' }}>Daily Quiz Manager</Text>
+                    </View>
+                    <AdminDailyQuizManager userEmail={userProfile?.email || name} />
+                </View>
             </Modal>
         </View>
     );

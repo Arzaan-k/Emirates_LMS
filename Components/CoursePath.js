@@ -678,9 +678,15 @@ export default function CoursePath(props) {
                     if (isCompleted) levelCompletedCount++;
 
                     let status = "locked";
-                    if (isCompleted) status = "completed";
-                    else if (isPastLevel) status = "completed";
-                    else if (isCurrentLevel) {
+                    if (isCompleted) {
+                        // Truly completed by this user — always show gold
+                        status = "completed";
+                    } else if (isPastLevel) {
+                        // Past level but NOT actually completed by this user.
+                        // Show as locked so they can still do these courses,
+                        // but don't fake a completion they never earned.
+                        status = "locked";
+                    } else if (isCurrentLevel) {
                         if (!foundFirstIncomplete) {
                             status = "active";
                             foundFirstIncomplete = true;

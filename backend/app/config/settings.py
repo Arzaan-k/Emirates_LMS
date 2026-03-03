@@ -35,8 +35,8 @@ class Settings(BaseSettings):
     # DATABASE
     # ===========================================
     DATABASE_URL: str = Field(..., env="DATABASE_URL")
-    DB_POOL_SIZE: int = Field(default=10, env="DB_POOL_SIZE")
-    DB_MAX_OVERFLOW: int = Field(default=20, env="DB_MAX_OVERFLOW")
+    DB_POOL_SIZE: int = Field(default=5, env="DB_POOL_SIZE")
+    DB_MAX_OVERFLOW: int = Field(default=5, env="DB_MAX_OVERFLOW")
     DB_POOL_TIMEOUT: int = Field(default=30, env="DB_POOL_TIMEOUT")
     USE_SERVERLESS: bool = Field(default=False, env="USE_SERVERLESS")
 

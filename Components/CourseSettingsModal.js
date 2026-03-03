@@ -951,7 +951,7 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
                                 </TouchableOpacity>
                                 <TouchableOpacity
                                     style={[styles.surveySubTab, surveyTab === 'responses' && styles.surveySubTabActive]}
-                                    onPress={() => { setSurveyTab('responses'); fetchSurveyResponses(); }}
+                                    onPress={() => { setSurveyTab('responses'); fetchSurveyResponses(); fetchFeedback(); }}
                                 >
                                     <Feather name="bar-chart-2" size={13} color={surveyTab === 'responses' ? '#FFF' : THEME.primaryDark} />
                                     <Text style={[styles.surveySubTabText, surveyTab === 'responses' && { color: '#FFF' }]}>Responses</Text>
@@ -1239,11 +1239,52 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
                                         )}
 
                                         {surveyResponses.total === 0 && (
-                                            <Text style={styles.emptyText}>No responses yet</Text>
+                                            <Text style={styles.emptyText}>No survey responses yet</Text>
                                         )}
+
+                                        {/* Legacy Feedback */}
+                                        {feedbackData && feedbackData.feedbacks && feedbackData.feedbacks.length > 0 && (
+                                            <>
+                                                <Text style={[styles.inputLabel, { marginTop: 24, marginBottom: 8 }]}>Legacy Feedback (Ratings & Comments)</Text>
+                                                <View style={styles.feedbackSummary}>
+                                                    <Text style={styles.feedbackAvg}>
+                                                        {feedbackData.average_rating || 0}
+                                                        <Text style={{ fontSize: 18, color: '#9CA3AF' }}>/5</Text>
+                                                    </Text>
+                                                    <View style={{ flexDirection: 'row', gap: 2, marginVertical: 4 }}>
+                                                        {[1, 2, 3, 4, 5].map((s) => (
+                                                            <MaterialCommunityIcons
+                                                                key={s}
+                                                                name={s <= Math.round(feedbackData.average_rating || 0) ? 'star' : 'star-outline'}
+                                                                size={20}
+                                                                color="#F59E0B"
+                                                            />
+                                                        ))}
+                                                    </View>
+                                                    <Text style={styles.feedbackCount}>Based on {feedbackData.total} ratings</Text>
+                                                </View>
+                                                {feedbackData.feedbacks.map((f, i) => (
+                                                    <View key={f.id} style={styles.feedbackItem}>
+                                                        <Text style={styles.feedbackUser}>{f.user_email}</Text>
+                                                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, marginBottom: 4 }}>
+                                                            {[1, 2, 3, 4, 5].map(s => (
+                                                                <MaterialCommunityIcons
+                                                                    key={s}
+                                                                    name={s <= f.rating ? 'star' : 'star-outline'}
+                                                                    size={14}
+                                                                    color="#F59E0B"
+                                                                />
+                                                            ))}
+                                                        </View>
+                                                        <Text style={styles.feedbackComment}>{f.comment || 'No comment provided'}</Text>
+                                                    </View>
+                                                ))}
+                                            </>
+                                        )}
+
                                     </View>
                                 ) : (
-                                    <TouchableOpacity style={styles.loadBtn} onPress={fetchSurveyResponses}>
+                                    <TouchableOpacity style={styles.loadBtn} onPress={() => { fetchSurveyResponses(); fetchFeedback(); }}>
                                         <Feather name="refresh-cw" size={16} color={THEME.primaryDark} />
                                         <Text style={styles.loadBtnText}>Load Responses</Text>
                                     </TouchableOpacity>

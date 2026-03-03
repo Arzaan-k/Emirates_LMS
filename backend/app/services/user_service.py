@@ -115,11 +115,12 @@ PRIVILEGE_GROUPS = [
         "group": "Operations",
         "icon": "settings",
         "items": [
-            {"id": "access_control",     "label": "Access Control", "access": "manage", "description": "Manage user access & permissions"},
-            {"id": "schedule_meeting",   "label": "Meetings",       "access": "manage", "description": "Schedule & manage meetings"},
-            {"id": "crm_tickets",        "label": "CRM Tickets",    "access": "manage", "description": "Handle CRM support tickets"},
-            {"id": "manage_simulations", "label": "Simulations",    "access": "manage", "description": "Manage roleplay simulations"},
-            {"id": "support_library",    "label": "Support Library","access": "manage", "description": "Manage support library content"},
+            {"id": "access_control",      "label": "Curriculum Hierarchy", "access": "manage", "description": "Manage curriculum hierarchy & course access by level"},
+            {"id": "data_access_control", "label": "Data Access Control",  "access": "manage", "description": "Manage who can view which users' data (reports, analytics)"},
+            {"id": "schedule_meeting",    "label": "Meetings",             "access": "manage", "description": "Schedule & manage meetings"},
+            {"id": "crm_tickets",         "label": "CRM Tickets",          "access": "manage", "description": "Handle CRM support tickets"},
+            {"id": "manage_simulations",  "label": "Simulations",          "access": "manage", "description": "Manage roleplay simulations"},
+            {"id": "support_library",     "label": "Support Library",      "access": "manage", "description": "Manage support library content"},
         ]
     },
 ]
@@ -160,38 +161,51 @@ class UserService:
         search: str | None,
         filters: Optional[Dict[str, Any]] = None,
     ):
-        query = self.db.query(User).order_by(User.id)
+        # ---------------------------------------------------------------
+        # Serve from the process-level user cache when available.
+        # The cache is populated by AccessControlService._get_all_users()
+        # and is valid for 90 seconds. This eliminates the repeated full
+        # SELECT users.* on every /users/list and /users/ call.
+        # All filtering is done in Python against the cached list.
+        # ---------------------------------------------------------------
+        from app.services._user_cache import user_cache as _user_cache
 
-        if store:
-            query = query.filter(User.store == store)
+        cached = _user_cache.get()
+        if cached is not None:
+            all_users = list(cached)
+        else:
+            fetched = self.db.query(User).all()
+            _user_cache.set(fetched)
+            all_users = list(fetched)
 
-        if role:
-            query = query.filter(User.role == role)
-
-        # Apply direct-column filters in SQL; collect JSON filter keys for Python-level filtering
+        # ------ Direct-column filters (store, role, email, is_external, …) ------
+        DIRECT_COLS = {col for col in vars(User) if not col.startswith('_')}
         json_filters: Dict[str, Any] = {}
 
+        combined: Dict[str, Any] = {}
+        if store:
+            combined["store"] = store
+        if role:
+            combined["role"] = role
         if filters:
-            for key, value in filters.items():
-                if not value:
-                    continue
+            combined.update(filters)
 
-                # Direct column on User model — apply in SQL
-                if hasattr(User, key):
-                    col = getattr(User, key)
-                    if isinstance(value, list):
-                        query = query.filter(col.in_(value))
-                    else:
-                        query = query.filter(col == value)
-
-                # profile_data JSON fields — defer to Python filtering
+        for key, value in combined.items():
+            if not value and value is not False:
+                continue
+            if key in DIRECT_COLS or hasattr(User, key):
+                # Apply as Python filter against cached objects
+                if isinstance(value, list):
+                    value_set = {str(v).lower() for v in value}
+                    attr = key
+                    all_users = [u for u in all_users if str(getattr(u, attr, '') or '').lower() in value_set]
                 else:
-                    json_filters[key] = value
+                    attr = key
+                    all_users = [u for u in all_users if getattr(u, attr, None) == value]
+            else:
+                json_filters[key] = value
 
-        # Fetch all users that pass SQL filters
-        all_users = query.all()
-
-        # Apply profile_data JSON filters in Python (avoids SQLAlchemy .astext issues)
+        # ------ profile_data JSON filters ------
         if json_filters:
             def matches_filters(user: User) -> bool:
                 pd = user.profile_data or {}
@@ -210,13 +224,11 @@ class UserService:
 
             all_users = [u for u in all_users if matches_filters(u)]
 
-        # Full-text search: name, email + all profile_data fields
-        # Token-based: each whitespace-separated word must hit at least one field (AND across tokens, OR across fields)
+        # ------ Full-text search ------
         if search:
             tokens = [t for t in search.lower().strip().split() if t]
 
             def matches_search(user: User) -> bool:
-                # Build a flat list of all searchable text values for this user
                 pd = user.profile_data or {}
                 haystack = [
                     (user.name or '').lower(),
@@ -228,8 +240,6 @@ class UserService:
                     v = pd.get(k)
                     if v:
                         haystack.append(str(v).lower())
-
-                # Every token must match at least one haystack entry
                 for token in tokens:
                     if not any(token in field for field in haystack):
                         return False
@@ -237,6 +247,8 @@ class UserService:
 
             all_users = [u for u in all_users if matches_search(u)]
 
+        # Sort by id for consistent pagination
+        all_users.sort(key=lambda u: u.id or '')
         total = len(all_users)
         users = all_users[skip: skip + limit]
 

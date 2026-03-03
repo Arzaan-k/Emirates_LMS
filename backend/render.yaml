@@ -8,7 +8,7 @@ services:
     region: oregon  # or singapore for closer to India
     plan: free  # Change to 'starter' ($7/mo) for production
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.4"

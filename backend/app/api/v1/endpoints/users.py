@@ -16,7 +16,9 @@ import uuid
 from app.config.database import get_db
 from app.core.dependencies import get_current_user, require_admin, require_privilege
 from app.core.middleware import limiter
+from app.core.access_filter import get_access_filter_context, should_include_user
 from app.services.user_service import UserService
+from app.services.access_control_service import invalidate_user_cache
 from app.schemas.user import UserCreate, UserResponse, UserUpdate
 from app.models.user import User
 
@@ -29,12 +31,36 @@ router = APIRouter(prefix="/users", tags=["Users"])
 # ==========================================
 
 @router.get("/filters")
-def list_filters(db: Session = Depends(get_db)):
+def list_filters(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
     """
     Get all available filter options for users.
     Returns distinct values for roles, stores, and profile fields.
+    Options are filtered based on the current user's access grants.
     """
-    all_users = db.query(User).all()
+    # Get access control context for filtering
+    access_context = get_access_filter_context(db, current_user)
+
+    # Serve from the process-level user cache — avoids a full table scan per request.
+    from app.services._user_cache import user_cache as _user_cache
+
+    cached_users = _user_cache.get()
+    if cached_users is None:
+        cached_users = db.query(User).all()
+        _user_cache.set(cached_users)
+
+    # Filter by accessible emails for non-superadmins
+    if not access_context.get('is_superadmin'):
+        accessible_emails = access_context.get('accessible_emails', set())
+        viewer_email = access_context.get('viewer_email')
+        if accessible_emails:
+            cached_users = [u for u in cached_users if u.email in accessible_emails]
+        else:
+            cached_users = [u for u in cached_users if u.email == viewer_email]
+
+    all_rows = cached_users
 
     filters = {
         "roles": set(),
@@ -66,15 +92,15 @@ def list_filters(db: Session = Depends(get_db)):
         s = str(val).strip()
         return None if s.lower() in _INVALID else s
 
-    for user in all_users:
-        r = _clean(user.role)
+    for row in all_rows:
+        r = _clean(row.role)
         if r:
             filters["roles"].add(r)
-        s = _clean(user.store)
+        s = _clean(row.store)
         if s:
             filters["stores"].add(s)
 
-        pd = user.profile_data or {}
+        pd = row.profile_data or {}
 
         def add_if_exists(key_set, *keys):
             for k in keys:
@@ -131,10 +157,21 @@ def list_users(
     marital_status: List[str] = Query(None),
     blood_group: List[str] = Query(None),
     db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Optimized users list with pagination and filtering.
+    Results are filtered based on the current user's access grants.
     """
+    # Get access control context for filtering
+    access_context = get_access_filter_context(db, current_user)
+
+    # DEBUG: Log access control decision
+    viewer = current_user.get('email', 'unknown')
+    is_sa = access_context.get('is_superadmin', False)
+    ae = access_context.get('accessible_emails')
+    ae_count = len(ae) if ae else 'ALL (superadmin)'
+    logger.info(f"[ACCESS-CTRL] list_users called by '{viewer}' | is_superadmin={is_sa} | accessible_emails={ae_count}")
 
     skip = (page - 1) * limit
     service = UserService(db)
@@ -181,6 +218,22 @@ def list_users(
     if store: filters["store"] = store
     if role: filters["role"] = role
 
+    # For access control filtering, we need to get accessible emails first
+    # then pass them as an additional filter for efficiency
+    accessible_emails_filter = None
+    if not access_context.get('is_superadmin'):
+        accessible_emails = access_context.get('accessible_emails', set())
+        if accessible_emails:
+            accessible_emails_filter = list(accessible_emails)
+        else:
+            # No grants - user can only see themselves
+            viewer_email = access_context.get('viewer_email')
+            accessible_emails_filter = [viewer_email] if viewer_email else []
+
+    # Add access filter to the filters dict
+    if accessible_emails_filter is not None:
+        filters["email"] = accessible_emails_filter
+
     users, total = service.get_users_with_count(
         skip=skip,
         limit=limit,
@@ -216,6 +269,11 @@ def list_users(
         "total": total,
         "page": page,
         "total_pages": (total + limit - 1) // limit if limit > 0 else 1,
+        "access_info": {
+            "viewer_email": current_user.get('email'),
+            "is_superadmin": access_context.get('is_superadmin', False),
+            "filtered": not access_context.get('is_superadmin', False),
+        },
     }
 
 
@@ -249,9 +307,11 @@ def list_users_alias(
     marital_status: List[str] = Query(None),
     blood_group: List[str] = Query(None),
     db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Alias for /users/ - backward compatibility with frontend.
+    Results are filtered based on the current user's access grants.
     """
     return list_users(
         page=page, limit=limit, search=search,
@@ -263,7 +323,7 @@ def list_users_alias(
         franchise=franchise, concept=concept, function=function,
         sub_function=sub_function, job_role=job_role,
         marital_status=marital_status, blood_group=blood_group,
-        db=db,
+        db=db, current_user=current_user,
     )
 
 
@@ -365,6 +425,7 @@ async def create_user(
     
     try:
         user = service.create_user(user_data)
+        invalidate_user_cache()
         logger.info(f"User created: {user_data['email']}")
         user_dict = user.to_dict() if hasattr(user, 'to_dict') else dict(user)
         user_dict.pop('password', None)
@@ -880,7 +941,8 @@ def process_bulk_upload_task(task_id: str, contents: bytes):
                 errors.append({"email": row_dict.get("Email", "unknown"), "error": str(e)})
                 logger.error(f"Bulk upload row error: {e}")
 
-        # Complete
+        # Complete — flush user cache so next request sees fresh data
+        invalidate_user_cache()
         upload_tasks[task_id]["status"] = "completed"
         upload_tasks[task_id]["results"] = {
             "created": created,
@@ -1061,10 +1123,14 @@ async def bulk_toggle_external(
 # ==========================================
 
 @router.get("/smart-categories")
-async def get_smart_user_categories(db: Session = Depends(get_db)):
+async def get_smart_user_categories(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Get smart user categories based on learning progress, roles, and stores.
     Used for intelligent user selection in Schedule Exams feature.
+    Results are filtered based on the current user's access grants.
 
     Returns categories like:
     - Completed All Waffler Courses
@@ -1080,9 +1146,21 @@ async def get_smart_user_categories(db: Session = Depends(get_db)):
     service = UserService(db)
     categories = []
 
+    # Get access control context for filtering
+    access_context = get_access_filter_context(db, current_user)
+
     try:
-        # Get all users
-        all_users = db.query(User).all()
+        # Get users filtered by access control
+        user_query = db.query(User)
+        if not access_context.get('is_superadmin'):
+            accessible_emails = access_context.get('accessible_emails', set())
+            if accessible_emails:
+                user_query = user_query.filter(User.email.in_(accessible_emails))
+            else:
+                # No grants - user can only see themselves
+                viewer_email = access_context.get('viewer_email')
+                user_query = user_query.filter(User.email == viewer_email)
+        all_users = user_query.all()
 
         # Category 1: By Current Role
         role_counts = {}
@@ -1305,8 +1383,12 @@ async def validate_employee_codes(
 
         logger.info(f"Validating {len(employee_codes)} employee codes")
 
-        # Get all users
-        all_users = db.query(User).all()
+        # Get all users — serve from the process-level cache
+        from app.services._user_cache import user_cache as _user_cache
+        all_users = _user_cache.get()
+        if all_users is None:
+            all_users = db.query(User).all()
+            _user_cache.set(all_users)
 
         # Match employee codes with users
         # The employee code might be stored in profile_data JSON field or email prefix
@@ -1433,6 +1515,7 @@ async def update_user(
 
     try:
         user = service.update_user(email, updates)
+        invalidate_user_cache()
         logger.info(f"User updated: {email}")
         user_dict = user.to_dict() if hasattr(user, 'to_dict') else dict(user)
         user_dict.pop('password', None)
@@ -1454,6 +1537,7 @@ async def delete_user(
     service = UserService(db)
     try:
         service.delete_user(email)
+        invalidate_user_cache()
         logger.info(f"User deleted: {email}")
         return {"message": f"User {email} deleted successfully"}
     except Exception as e:
@@ -1477,6 +1561,7 @@ async def bulk_delete_users(
     service = UserService(db)
     try:
         result = service.bulk_delete_users(emails)
+        invalidate_user_cache()
         logger.info(f"Bulk deleted {result['deleted']} users by {current_user.get('email')}")
         return result
     except Exception as e:

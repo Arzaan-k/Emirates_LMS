@@ -25,6 +25,9 @@ from app.api.v1.endpoints import (
     detailed_reports,
     self_learning,
     learning_path,
+    access_control,
+    daily_quiz,
+    system,
 )
 
 # Create the main API router
@@ -49,7 +52,9 @@ api_router.include_router(reports.router)
 api_router.include_router(detailed_reports.router)
 api_router.include_router(self_learning.router)
 api_router.include_router(learning_path.router)
-
+api_router.include_router(access_control.router)
+api_router.include_router(daily_quiz.router)
+api_router.include_router(system.router)
 
 # Health check endpoint at root level
 @api_router.get("/health")
@@ -1257,6 +1262,98 @@ BELGIAN WAFFLE CO. SPECIFIC INFO:
             "user_text": "",
             "ai_response": "I'm having trouble processing your voice request. Please try again. 🔄"
         }
+
+
+
+@ai_compat_router.post("/hygiene/analyze")
+async def hygiene_analyze(
+    section: str = Form(...),
+    file: UploadFile = File(None),
+    file_b64: str = Form(None),
+    db: Session = Depends(__import__("app.config.database", fromlist=["get_db"]).get_db),
+):
+    """
+    Image-based hygiene scan endpoint used by AIScanner.
+    Uses Groq Vision (llama-3.2-11b-vision-preview) to analyze the uploaded image
+    for hygiene, safety, and product compliance.
+    """
+    import os
+    import base64
+    import json
+    import re
+    import logging
+    from groq import Groq
+    from app.config.settings import settings
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        if file_b64:
+            base64_img = file_b64.split(",")[1] if "," in file_b64 else file_b64
+            fmt = "image/jpeg"
+        elif file:
+            content = await file.read()
+            filename = (file.filename or "image.jpg").lower()
+            fmt = "image/jpeg"
+            if filename.endswith(".png"):
+                fmt = "image/png"
+            elif filename.endswith(".webp"):
+                fmt = "image/webp"
+            base64_img = base64.b64encode(content).decode("utf-8")
+        else:
+            raise Exception("No image provided. Please provide either 'file' or 'file_b64'.")
+
+        prompt = f"""Analyze this image for hygiene, safety, and product compliance in a "{section}" area.
+
+Return ONLY a valid JSON object with this exact structure (no markdown, no extra text):
+{{"score": <0-100>, "tips": ["tip1", "tip2", "tip3"]}}
+
+Scoring: 90-100 = excellent (clean, organized, compliant), 70-89 = good (minor improvements), below 70 = needs attention (visible issues).
+Tips: 3-5 specific, actionable improvement tips based on what you actually see in the image (surfaces, organization, cleanliness, signage, PPE, food handling, etc.). Be concrete and relevant to the section."""
+
+        client = Groq(api_key=settings.GROQ_API_KEY)
+        vision_res = client.chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:{fmt};base64,{base64_img}"}}
+                ]
+            }],
+            temperature=0.2,
+            max_tokens=800
+        )
+
+        raw = (vision_res.choices[0].message.content or "").strip()
+
+        # Extract JSON from response (handle markdown code blocks if present)
+        json_match = re.search(r"\{[\s\S]*\}", raw)
+        if json_match:
+            parsed = json.loads(json_match.group())
+            score = int(parsed.get("score", 75))
+            score = max(0, min(100, score))
+            tips = parsed.get("tips", [])
+            if not isinstance(tips, list):
+                tips = [str(t) for t in tips] if tips else []
+            tips = [str(t).strip() for t in tips if t][:6]
+        else:
+            score = 75
+            tips = ["Review the image for cleanliness and organization.", "Ensure surfaces are sanitized.", "Check signage and PPE usage."]
+
+        if not tips:
+            tips = ["Maintain current hygiene standards and follow SOPs."]
+
+        return {
+            "status": "success",
+            "section": section,
+            "score": score,
+            "tips": tips,
+        }
+    except Exception as e:
+        logger.error(f"Hygiene analyze failed: {e}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail="Hygiene analysis failed")
 
 
 # Include the AI compat router in the main API router  

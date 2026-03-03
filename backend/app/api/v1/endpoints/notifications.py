@@ -81,7 +81,8 @@ async def send_notification(
     message: str = Form(...),
     type: str = Form("info"),
     file: Optional[UploadFile] = File(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Broadcasts a system-wide notification AND stores it.
@@ -112,6 +113,21 @@ async def send_notification(
         except Exception as e:
             logger.error(f"Media upload failed: {e}")
 
+    # Access control: filter targets based on manager scope
+    from app.core.access_filter import get_access_filter_context
+    access_context = get_access_filter_context(db, current_user)
+    target_users_list = []
+    
+    # If not a superadmin, target all accessible emails
+    if not access_context.get("is_superadmin"):
+        accessible_emails = access_context.get("accessible_emails", set())
+        target_users_list = list(accessible_emails)
+        
+        # If the manager has no accessible emails and is not superadmin, they shouldn't be sending broadcasts to everyone
+        if not target_users_list:
+            logger.warning(f"Manager {current_user.get('email')} has no accessible users. Sending to just themselves.")
+            target_users_list = [current_user.get('email')]
+
     notification_data = {
         "id": f"notif_{uuid.uuid4().hex[:8]}",
         "title": title,
@@ -120,7 +136,7 @@ async def send_notification(
         "is_crucial": type == "crucial",
         "created_at": datetime.utcnow(),
         "read_by": [],
-        "target_users": [],
+        "target_users": target_users_list,
         "target_stores": [],
         "target_roles": [],
         "extra_data": {"media_url": media_url} if media_url else {},
@@ -158,12 +174,13 @@ async def send_notification_alias(
     message: str = Form(...),
     type: str = Form("info"),
     file: Optional[UploadFile] = File(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Alias for POST /notifications/ - backward compatibility with frontend.
     """
-    return await send_notification(title, message, type, file, db)
+    return await send_notification(title, message, type, file, db, current_user)
 
 
 @router.put("/{notif_id}/read")
@@ -254,7 +271,8 @@ async def create_news(
     content: str = Form(...),
     author: str = Form(...),
     image: Optional[UploadFile] = File(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Create a new news article and broadcast to all users.

@@ -6,7 +6,7 @@ Business logic for proctored assessments and scheduled exams
 import uuid
 import logging
 from typing import Any, Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -251,7 +251,8 @@ class AssessmentService:
         user_email: str,
         user_name: str,
         answers: List[int],
-        breach_log: List[Dict] = None
+        breach_log: List[Dict] = None,
+        time_taken_seconds: int = 0
     ) -> AssessmentSubmission:
         """Submit an assessment and calculate score."""
         # Validate user exists (FK constraint on assessment_submissions.user_email)
@@ -319,6 +320,9 @@ class AssessmentService:
         else:
             integrity_status = "clean"
 
+        submitted_at = datetime.utcnow()
+        safe_duration_seconds = max(0, int(time_taken_seconds or 0))
+
         submission_data = {
             "id": str(uuid.uuid4()),
             "assessment_id": assessment_id,
@@ -338,7 +342,10 @@ class AssessmentService:
             "warning_breaches": warning_breaches,
             "integrity_status": integrity_status,
             "integrity_score": integrity_score,
-            "submitted_at": datetime.utcnow(),
+            "submitted_at": submitted_at,
+            # Persist enough data to reconstruct duration on read even if
+            # time_taken_seconds column is unavailable in production DB.
+            "started_at": submitted_at - timedelta(seconds=safe_duration_seconds) if safe_duration_seconds > 0 else None,
             # attempt_number is commented out in model (missing from prod DB)
         }
 

@@ -145,6 +145,32 @@ def get_self_learning_buckets(
                 "completed": row[2] or False
             }
 
+    # --- N+1 FIX: batch last_attended lookup BEFORE the loop ---
+    # Fetch max(completed_at) per course and max(updated_at) per node in ONE query each.
+    # Replaces 2 DB queries per bucket with 2 total queries for ALL buckets.
+    last_completion_by_course: dict = {}
+    last_progress_by_node: dict = {}
+    if user_email != "user":
+        all_visible_ids = [c.id for c in visible_courses]
+        if all_visible_ids:
+            completion_rows = db.query(
+                CourseCompletion.course_id,
+                func.max(CourseCompletion.completed_at).label("max_completed_at")
+            ).filter(
+                CourseCompletion.user_email == user_email,
+                CourseCompletion.course_id.in_(all_visible_ids)
+            ).group_by(CourseCompletion.course_id).all()
+            last_completion_by_course = {r.course_id: r.max_completed_at for r in completion_rows}
+
+            progress_rows_dates = db.query(
+                VideoProgress.node_id,
+                func.max(VideoProgress.updated_at).label("max_updated_at")
+            ).filter(
+                VideoProgress.user_email == user_email,
+                VideoProgress.node_id.in_(all_visible_ids)
+            ).group_by(VideoProgress.node_id).all()
+            last_progress_by_node = {r.node_id: r.max_updated_at for r in progress_rows_dates}
+
     result = []
     for bucket in buckets:
         # Access control: check if user is assigned
@@ -173,56 +199,65 @@ def get_self_learning_buckets(
         all_mandatory_done = len(mandatory_courses) > 0 and mandatory_completed == len(mandatory_courses)
 
         # If all mandatory done, progress = 100% (optional courses don't affect)
-        if all_mandatory_done:
+        if all_mandatory_done and len(mandatory_courses) > 0:
             courses_for_progress = mandatory_courses
+            total_progress = 100 * len(mandatory_courses)
+            avg_progress = 100
+            
+            # Calculate duration based on all courses for display purposes
+            total_duration = 0
+            remaining_duration = 0
+            for c in bucket_courses:
+                total_duration += _estimate_duration(c)
+            
         else:
             courses_for_progress = bucket_courses
+            
+            # Calculate total duration for all courses (for display)
+            total_duration = 0
+            for c in bucket_courses:
+                total_duration += _estimate_duration(c)
 
-        total = len(bucket_courses)  # Show total including optional
-        completed = sum(1 for c in bucket_courses if c.id in completed_ids)
+            # Calculate average watch progress and remaining time using courses_for_progress
+            total_progress = 0
+            remaining_duration = 0
+            for c in courses_for_progress:
+                course_dur = _estimate_duration(c)
+                p = progress_map.get(c.id, {})
+                if p.get("completed"):
+                    total_progress += 100
+                else:
+                    watched = p.get("watched_percent", 0)
+                    total_progress += watched
+                    remaining_duration += int(course_dur * (1 - watched / 100))
+            # Empty folders (0 courses) are considered 100% complete
+            progress_count = len(courses_for_progress)
+            avg_progress = round(total_progress / progress_count, 1) if progress_count > 0 else 100
 
-        # Calculate total duration for all courses (for display)
-        total_duration = 0
-        for c in bucket_courses:
-            total_duration += _estimate_duration(c)
-
-        # Calculate average watch progress and remaining time using courses_for_progress
-        total_progress = 0
-        remaining_duration = 0
-        for c in courses_for_progress:
-            course_dur = _estimate_duration(c)
-            p = progress_map.get(c.id, {})
-            if p.get("completed"):
-                total_progress += 100
-            else:
-                watched = p.get("watched_percent", 0)
-                total_progress += watched
-                remaining_duration += int(course_dur * (1 - watched / 100))
-        # Empty folders (0 courses) are considered 100% complete
-        progress_count = len(courses_for_progress)
-        avg_progress = round(total_progress / progress_count, 1) if progress_count > 0 else 100
-
-        # Last attended date
+        # Last attended date — O(1) dict lookup, no DB query per bucket
         last_attended = None
         if user_email != "user":
-            last_completion = db.query(func.max(CourseCompletion.completed_at)).filter(
-                CourseCompletion.user_email == user_email,
-                CourseCompletion.course_id.in_([c.id for c in bucket_courses])
-            ).scalar()
+            bucket_course_ids = [c.id for c in bucket_courses]
+            # Find the most recent completion timestamp across this bucket's courses
+            last_completion = max(
+                (last_completion_by_course[cid] for cid in bucket_course_ids if cid in last_completion_by_course),
+                default=None
+            )
             if last_completion:
                 last_attended = last_completion.isoformat()
             else:
-                last_progress = db.query(func.max(VideoProgress.updated_at)).filter(
-                    VideoProgress.user_email == user_email,
-                    VideoProgress.node_id.in_([c.id for c in bucket_courses])
-                ).scalar()
+                # Fall back to most recent watch progress
+                last_progress = max(
+                    (last_progress_by_node[cid] for cid in bucket_course_ids if cid in last_progress_by_node),
+                    default=None
+                )
                 if last_progress:
                     last_attended = last_progress.isoformat()
 
         result.append({
             **bucket.to_dict(),
-            "total_courses": total,
-            "completed_courses": completed,
+            "total_courses": len(bucket_courses),
+            "completed_courses": sum(1 for c in bucket_courses if c.id in completed_ids),
             "progress_percent": avg_progress,
             "total_duration_seconds": total_duration,
             "remaining_duration_seconds": remaining_duration,
@@ -302,6 +337,10 @@ def get_self_learning_hierarchy(
         now = datetime.utcnow()
         visible_courses = [c for c in all_courses if not c.scheduled_at or c.scheduled_at <= now]
 
+        # Filter per-course access control (if course has assigned_users set)
+        if user_email != "user" and user:
+            visible_courses = [c for c in visible_courses if _user_has_course_access(user, c)]
+
         # Query user-specific data: completions and progress
         completed_ids = set()
         progress_map = {}
@@ -355,32 +394,40 @@ def get_self_learning_hierarchy(
 
             # If all mandatory courses are done, use only mandatory for progress (stays 100%)
             # Otherwise, include optional courses that were added before user started
-            if all_mandatory_done:
+            if all_mandatory_done and len(mandatory_courses) > 0:
                 courses_for_progress = mandatory_courses
+                total_progress = 100 * len(mandatory_courses)
+                avg_progress = 100
+                
+                # Calculate duration based on all courses for display purposes
+                total_duration = 0
+                remaining_duration = 0
+                for c in bucket_courses:
+                    total_duration += _estimate_duration(c)
+                
             else:
                 courses_for_progress = bucket_courses
+                # Calculate total duration for all courses
+                total_duration = 0
+                for c in bucket_courses:
+                    total_duration += _estimate_duration(c)
 
-            # Calculate total duration for all courses
-            total_duration = 0
-            for c in bucket_courses:
-                total_duration += _estimate_duration(c)
+                # Calculate progress and remaining time using courses_for_progress
+                total_progress = 0
+                remaining_duration = 0
+                for c in courses_for_progress:
+                    course_dur = _estimate_duration(c)
+                    p = progress_map.get(c.id, {})
+                    if p.get("completed") or c.id in completed_ids:
+                        total_progress += 100
+                    else:
+                        watched = p.get("watched_percent", 0)
+                        total_progress += watched
+                        remaining_duration += int(course_dur * (1 - watched / 100))
 
-            # Calculate progress and remaining time using courses_for_progress
-            total_progress = 0
-            remaining_duration = 0
-            for c in courses_for_progress:
-                course_dur = _estimate_duration(c)
-                p = progress_map.get(c.id, {})
-                if p.get("completed") or c.id in completed_ids:
-                    total_progress += 100
-                else:
-                    watched = p.get("watched_percent", 0)
-                    total_progress += watched
-                    remaining_duration += int(course_dur * (1 - watched / 100))
-
-            # Empty folders (0 courses) are considered 100% complete
-            progress_count = len(courses_for_progress)
-            avg_progress = round(total_progress / progress_count, 1) if progress_count > 0 else 100
+                # Empty folders (0 courses) are considered 100% complete
+                progress_count = len(courses_for_progress)
+                avg_progress = round(total_progress / progress_count, 1) if progress_count > 0 else 100
 
             return {
                 "total_courses": len(bucket_courses),  # Show total including optional
@@ -1551,7 +1598,7 @@ async def get_affected_users_preview(
 
     if total_courses == 0:
         # No courses yet - all users are "not started"
-        all_users = db.query(User).filter(User.is_active == True).all()
+        all_users = db.query(User.email, User.name, User.role, User.store).filter(User.is_active == True).all()
         return {
             "bucket_id": bucket_id,
             "bucket_name": bucket.name,
@@ -1592,7 +1639,7 @@ async def get_affected_users_preview(
         user_progress[p.user_email][p.node_id] = p.video_watched_percent or 0
 
     # Get all active users
-    all_users = db.query(User).filter(User.is_active == True).all()
+    all_users = db.query(User.email, User.name, User.role, User.store).filter(User.is_active == True).all()
     user_map = {u.email: {"email": u.email, "name": u.name, "role": u.role, "store": u.store} for u in all_users}
 
     # Categorize users
@@ -1688,7 +1735,7 @@ async def get_learning_path_affected_users(
     total_courses = len(courses)
 
     if total_courses == 0:
-        all_users = db.query(User).filter(User.is_active == True).limit(100).all()
+        all_users = db.query(User.email, User.name, User.role, User.store).filter(User.is_active == True).limit(100).all()
         return {
             "learning_path_type": learning_path_type,
             "total_courses": 0,
@@ -1715,8 +1762,25 @@ async def get_learning_path_affected_users(
 
     # Get user info
     all_emails = list(user_completions.keys())
-    users = db.query(User).filter(User.email.in_(all_emails)).all() if all_emails else []
-    user_map = {u.email: {"email": u.email, "name": u.name, "role": u.role, "store": u.store} for u in users}
+    users = db.query(
+        User.email, User.name, User.role, User.store, User.category, User.profile_data
+    ).filter(User.email.in_(all_emails)).all() if all_emails else []
+    
+    user_map = {
+        u.email: {
+            "email": u.email,
+            "name": u.name,
+            "role": u.role,
+            "store": u.store,
+            "category": u.category,
+            "region": (u.profile_data or {}).get('Region') if u.profile_data else None,
+            "city": (u.profile_data or {}).get('City') if u.profile_data else None,
+            "state": (u.profile_data or {}).get('State') if u.profile_data else None,
+            "designation": (u.profile_data or {}).get('Designation') if u.profile_data else None,
+            "department": (u.profile_data or {}).get('Department') if u.profile_data else None
+        } 
+        for u in users
+    }
 
     completed_users = []
     in_progress_users = []

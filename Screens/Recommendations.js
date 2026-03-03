@@ -338,6 +338,11 @@ export default function Recommendations({ navigation }) {
     const insets = useSafeAreaInsets();
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+
+    const getAuthHeaders = async () => {
+        const token = await AsyncStorage.getItem('userToken');
+        return token ? { Authorization: `Bearer ${token}` } : {};
+    };
     const [recommendations, setRecommendations] = useState([]);
     const [profile, setProfile] = useState(null);
     const [skillGaps, setSkillGaps] = useState([]);
@@ -387,7 +392,11 @@ export default function Recommendations({ navigation }) {
         try {
             setError(null);
             console.log(`[Recommendations] Fetching for user: ${userEmail}`);
-            const response = await fetch(`${API_URL}/api/v1/analytics/recommendations/${encodeURIComponent(userEmail)}?limit=5`);
+            const headers = await getAuthHeaders();
+            const response = await fetch(
+                `${API_URL}/api/v1/analytics/recommendations/${encodeURIComponent(userEmail)}?limit=5`,
+                { headers }
+            );
             const data = await response.json();
 
             if (data.status === "success") {
@@ -409,7 +418,11 @@ export default function Recommendations({ navigation }) {
         if (!userEmail) return;
 
         try {
-            const response = await fetch(`${API_URL}/api/v1/analytics/profile/${encodeURIComponent(userEmail)}`);
+            const headers = await getAuthHeaders();
+            const response = await fetch(
+                `${API_URL}/api/v1/analytics/profile/${encodeURIComponent(userEmail)}`,
+                { headers }
+            );
             const data = await response.json();
 
             if (data.status === "success") {
@@ -445,6 +458,7 @@ export default function Recommendations({ navigation }) {
     const handleStartCourse = async (course) => {
         // Track interaction
         try {
+            const headers = await getAuthHeaders();
             const formData = new FormData();
             formData.append("user_email", userEmail);
             formData.append("interaction_type", "start");
@@ -454,6 +468,7 @@ export default function Recommendations({ navigation }) {
 
             await fetch(`${API_URL}/api/v1/analytics/track/interaction`, {
                 method: "POST",
+                headers,
                 body: formData,
             });
         } catch (err) {

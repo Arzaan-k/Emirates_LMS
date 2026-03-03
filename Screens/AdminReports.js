@@ -28,6 +28,7 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import API_URL from '../config';
+import { cachedFetch } from '../utils/requestCache';
 
 const { width } = Dimensions.get('window');
 const isWeb = Platform.OS === 'web';
@@ -260,10 +261,13 @@ const AdminReports = ({ navigation }) => {
     const [subsLoading, setSubsLoading] = useState(false);
     const [subscriptions, setSubscriptions] = useState({});
     const [userEmail, setUserEmail] = useState('');
+    const [authToken, setAuthToken] = useState('');
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
     const [paginationInfo, setPaginationInfo] = useState(null);
+    const [pageSize, setPageSize] = useState(25); // rows per page
+    const [detailPage, setDetailPage] = useState(1); // for Detailed Reports preview
 
     // Detailed Reports State
     const [expandedDetailCategory, setExpandedDetailCategory] = useState(null);
@@ -275,26 +279,29 @@ const AdminReports = ({ navigation }) => {
     useEffect(() => {
         const init = async () => {
             try {
-                const email = await AsyncStorage.getItem('userEmail');
+                const [email, token] = await Promise.all([
+                    AsyncStorage.getItem('userEmail'),
+                    AsyncStorage.getItem('userToken'),
+                ]);
+                if (token) setAuthToken(token);
                 if (email) {
                     setUserEmail(email);
                     fetchSubscriptions(email);
                 }
+                // Load filters and overview only after we have the token
+                loadFilterOptions(token);
+                fetchOverviewData(token);
             } catch (e) { console.error(e); }
         };
         init();
     }, []);
 
-    useEffect(() => {
-        loadFilterOptions();
-        fetchOverviewData();
-    }, []);
-
-    const loadFilterOptions = async () => {
+    const loadFilterOptions = async (token) => {
         try {
-            // Fetch comprehensive filter options
-            const response = await fetch(`${API_URL}/api/v1/reports/filters`);
-            const data = await response.json();
+            const t = token || authToken;
+            const headers = t ? { 'Authorization': `Bearer ${t}` } : {};
+            // Fetch comprehensive filter options — cached for 5 minutes (rarely changes)
+            const data = await cachedFetch(`${API_URL}/api/v1/reports/filters`, headers, { ttl: 300000 });
 
             if (data) {
                 // Formatting for picker (needs id/name)
@@ -315,13 +322,17 @@ const AdminReports = ({ navigation }) => {
 
     const fetchSubscriptions = async (email) => {
         try {
-            const response = await fetch(`${API_URL}/api/v1/reports/subscriptions?user_email=${email}`);
-            if (response.ok) {
-                const data = await response.json();
+            // Cache for 2 minutes — subscriptions rarely change mid-session
+            const data = await cachedFetch(
+                `${API_URL}/api/v1/reports/subscriptions?user_email=${email}`,
+                {},
+                { ttl: 120000 }
+            );
+            if (data && Array.isArray(data)) {
                 const divMap = {};
                 data.forEach(sub => {
                     divMap[sub.report_type] = {
-                        isActive: true, // Only active ones returned or check sub.is_active
+                        isActive: true,
                         day: sub.day_of_week || 'Monday',
                         time: sub.time_of_day || '09:00'
                     };
@@ -381,7 +392,10 @@ const AdminReports = ({ navigation }) => {
 
             const response = await fetch(`${API_URL}/api/v1/reports/subscriptions?user_email=${userEmail}`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+                },
                 body: JSON.stringify({ subscriptions: subList })
             });
 
@@ -399,25 +413,28 @@ const AdminReports = ({ navigation }) => {
         }
     };
 
+    // Fetch report data when category or page changes — only after token is loaded
     useEffect(() => {
-        loadFilterOptions();
-        fetchOverviewData();
-    }, []);
+        if (selectedCategory && authToken) {
+            fetchReportData(selectedCategory, 1);
+            setCurrentPage(1); // reset page on tab change
+            setDetailPage(1);
+        }
+    }, [selectedCategory, authToken]);
 
-    // Fetch report data when category or page changes
+    // Re-fetch on manual page change (backend pagination)
     useEffect(() => {
-        if (selectedCategory) {
+        if (selectedCategory && authToken && paginationInfo) {
             fetchReportData(selectedCategory, currentPage);
         }
-    }, [selectedCategory, currentPage]);
+    }, [currentPage]);
 
-    const fetchOverviewData = async () => {
+    const fetchOverviewData = async (token) => {
         try {
-            const response = await fetch(`${API_URL}/api/v1/reports/overview`);
-            if (response.ok) {
-                const data = await response.json();
-                setOverviewData(data);
-            }
+            const t = token || authToken;
+            const headers = t ? { 'Authorization': `Bearer ${t}` } : {};
+            const data = await cachedFetch(`${API_URL}/api/v1/reports/overview`, headers, { ttl: 60000 });
+            if (data) setOverviewData(data);
         } catch (error) {
             console.error('Error fetching overview:', error);
         }
@@ -451,11 +468,11 @@ const AdminReports = ({ navigation }) => {
             params.append('per_page', '50');
 
             const url = `${API_URL}${categoryInfo.endpoint}?${params.toString()}`;
-            const response = await fetch(url);
+            const headers = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
+            const response = await fetch(url, { headers });
             if (response.ok) {
                 const data = await response.json();
                 setReportData(data);
-                // Extract pagination info from response
                 if (data.pagination) {
                     setPaginationInfo(data.pagination);
                 } else {
@@ -503,10 +520,12 @@ const AdminReports = ({ navigation }) => {
 
             const downloadUrl = `${API_URL}${categoryInfo.downloadEndpoint}${params.toString() ? '?' + params.toString() : ''}`;
 
+            const authHeaders = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
+
             if (isWeb) {
                 // On web, use fetch and blob to trigger actual file download
                 try {
-                    const response = await fetch(downloadUrl);
+                    const response = await fetch(downloadUrl, { headers: authHeaders });
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
                     }
@@ -576,11 +595,12 @@ const AdminReports = ({ navigation }) => {
             if (categoryFilter) params.append('category', categoryFilter);
 
             const downloadUrl = `${API_URL}${categoryInfo.pdfEndpoint}${params.toString() ? '?' + params.toString() : ''}`;
+            const authHeadersPdf = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
 
             if (isWeb) {
                 // On web, use fetch and blob to trigger actual file download
                 try {
-                    const response = await fetch(downloadUrl);
+                    const response = await fetch(downloadUrl, { headers: authHeadersPdf });
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
                     }
@@ -1442,17 +1462,63 @@ const AdminReports = ({ navigation }) => {
             );
         }
 
-        const totalRecords = paginationInfo?.total || data.length;
-        const totalPages = paginationInfo?.total_pages || 1;
+        const totalRecords = data.length;
+        // ------------------------------------------------------------------
+        // Client-side pagination (backend may not paginate; we do it here)
+        // ------------------------------------------------------------------
+        const totalPages = Math.ceil(totalRecords / pageSize);
+        const safeCurrentPage = Math.min(Math.max(currentPage, 1), totalPages || 1);
+        const startIdx = (safeCurrentPage - 1) * pageSize;
+        const pageData = data.slice(startIdx, startIdx + pageSize);
+
+        // page-number pills: show up to 5 around the current page
+        const makePagePills = () => {
+            const pills = [];
+            const WINDOW = 2;
+            const start = Math.max(1, safeCurrentPage - WINDOW);
+            const end = Math.min(totalPages, safeCurrentPage + WINDOW);
+            if (start > 1) pills.push(1);
+            if (start > 2) pills.push('...');
+            for (let p = start; p <= end; p++) pills.push(p);
+            if (end < totalPages - 1) pills.push('...');
+            if (end < totalPages) pills.push(totalPages);
+            return pills;
+        };
 
         return (
             <View style={styles.tableContainer}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text style={styles.sectionTitle}>Detailed Data</Text>
-                    <Text style={{ fontSize: 11, fontFamily: 'Poppins_400Regular', color: '#9CA3AF' }}>
-                        {totalRecords} records
-                    </Text>
+                {/* Header row: title + record count + rows-per-page */}
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <View>
+                        <Text style={styles.sectionTitle}>Detailed Data</Text>
+                        <Text style={{ fontSize: 11, fontFamily: 'Poppins_400Regular', color: '#9CA3AF', marginTop: 2 }}>
+                            {totalRecords} records · showing {startIdx + 1}–{Math.min(startIdx + pageSize, totalRecords)}
+                        </Text>
+                    </View>
+                    {/* Rows-per-page selector */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Text style={{ fontSize: 11, fontFamily: 'Poppins_400Regular', color: '#6B7280' }}>Per page:</Text>
+                        {[10, 25, 50, 100].map(size => (
+                            <TouchableOpacity
+                                key={size}
+                                style={[
+                                    {
+                                        paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, marginLeft: 4,
+                                        backgroundColor: pageSize === size ? '#F59E0B' : '#F3F4F6',
+                                        borderWidth: 1, borderColor: pageSize === size ? '#D97706' : '#E5E7EB'
+                                    }
+                                ]}
+                                onPress={() => { setPageSize(size); setCurrentPage(1); }}
+                            >
+                                <Text style={{
+                                    fontSize: 11, fontFamily: 'Poppins_600SemiBold',
+                                    color: pageSize === size ? '#FFF' : '#374151'
+                                }}>{size}</Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
                 </View>
+
                 <ScrollView horizontal showsHorizontalScrollIndicator={true}>
                     <View>
                         {/* Table Header */}
@@ -1466,10 +1532,10 @@ const AdminReports = ({ navigation }) => {
                                 </Text>
                             ))}
                         </View>
-                        {/* Table Body */}
-                        {data.slice(0, 50).map((row, rowIndex) => (
+                        {/* Table Body — only current page rows */}
+                        {pageData.map((row, rowIndex) => (
                             <View
-                                key={rowIndex}
+                                key={startIdx + rowIndex}
                                 style={[
                                     styles.tableRow,
                                     rowIndex % 2 === 0 && styles.tableRowAlt
@@ -1477,7 +1543,6 @@ const AdminReports = ({ navigation }) => {
                             >
                                 {columns.map((col) => {
                                     let cellVal = row[col.key];
-                                    // Format values for display
                                     if (cellVal === null || cellVal === undefined || cellVal === '') {
                                         cellVal = '-';
                                     } else if (typeof cellVal === 'number') {
@@ -1485,7 +1550,6 @@ const AdminReports = ({ navigation }) => {
                                     } else if (typeof cellVal === 'boolean') {
                                         cellVal = cellVal ? 'Yes' : 'No';
                                     } else if (typeof cellVal === 'string' && cellVal.match(/^\d{4}-\d{2}-\d{2}T/)) {
-                                        // Format ISO dates to readable short date
                                         try {
                                             const d = new Date(cellVal);
                                             cellVal = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
@@ -1515,32 +1579,52 @@ const AdminReports = ({ navigation }) => {
                 {/* Pagination Controls */}
                 {totalPages > 1 && (
                     <View style={styles.paginationContainer}>
+                        {/* Prev */}
                         <TouchableOpacity
-                            style={[styles.pageBtn, currentPage <= 1 && styles.pageBtnDisabled]}
-                            onPress={() => { if (currentPage > 1) setCurrentPage(currentPage - 1); }}
-                            disabled={currentPage <= 1}
+                            style={[styles.pageBtn, safeCurrentPage <= 1 && styles.pageBtnDisabled]}
+                            onPress={() => { if (safeCurrentPage > 1) setCurrentPage(safeCurrentPage - 1); }}
+                            disabled={safeCurrentPage <= 1}
                         >
-                            <Feather name="chevron-left" size={16} color={currentPage <= 1 ? '#D1D5DB' : '#F59E0B'} />
-                            <Text style={[styles.pageBtnText, currentPage <= 1 && { color: '#D1D5DB' }]}>Prev</Text>
+                            <Feather name="chevron-left" size={16} color={safeCurrentPage <= 1 ? '#D1D5DB' : '#F59E0B'} />
+                            <Text style={[styles.pageBtnText, safeCurrentPage <= 1 && { color: '#D1D5DB' }]}>Prev</Text>
                         </TouchableOpacity>
-                        <Text style={styles.pageText}>
-                            Page {currentPage} of {totalPages}
-                        </Text>
+
+                        {/* Page pills */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'nowrap' }}>
+                            {makePagePills().map((pill, idx) =>
+                                pill === '...' ? (
+                                    <Text key={`dots-${idx}`} style={{ color: '#9CA3AF', marginHorizontal: 4, fontFamily: 'Poppins_400Regular', fontSize: 13 }}>…</Text>
+                                ) : (
+                                    <TouchableOpacity
+                                        key={pill}
+                                        style={[
+                                            {
+                                                width: 32, height: 32, borderRadius: 8, justifyContent: 'center', alignItems: 'center',
+                                                marginHorizontal: 3, backgroundColor: pill === safeCurrentPage ? '#F59E0B' : '#F9FAFB',
+                                                borderWidth: 1, borderColor: pill === safeCurrentPage ? '#D97706' : '#E5E7EB'
+                                            }
+                                        ]}
+                                        onPress={() => setCurrentPage(pill)}
+                                    >
+                                        <Text style={{
+                                            fontSize: 12, fontFamily: 'Poppins_600SemiBold',
+                                            color: pill === safeCurrentPage ? '#FFF' : '#374151'
+                                        }}>{pill}</Text>
+                                    </TouchableOpacity>
+                                )
+                            )}
+                        </View>
+
+                        {/* Next */}
                         <TouchableOpacity
-                            style={[styles.pageBtn, currentPage >= totalPages && styles.pageBtnDisabled]}
-                            onPress={() => { if (currentPage < totalPages) setCurrentPage(currentPage + 1); }}
-                            disabled={currentPage >= totalPages}
+                            style={[styles.pageBtn, safeCurrentPage >= totalPages && styles.pageBtnDisabled]}
+                            onPress={() => { if (safeCurrentPage < totalPages) setCurrentPage(safeCurrentPage + 1); }}
+                            disabled={safeCurrentPage >= totalPages}
                         >
-                            <Text style={[styles.pageBtnText, currentPage >= totalPages && { color: '#D1D5DB' }]}>Next</Text>
-                            <Feather name="chevron-right" size={16} color={currentPage >= totalPages ? '#D1D5DB' : '#F59E0B'} />
+                            <Text style={[styles.pageBtnText, safeCurrentPage >= totalPages && { color: '#D1D5DB' }]}>Next</Text>
+                            <Feather name="chevron-right" size={16} color={safeCurrentPage >= totalPages ? '#D1D5DB' : '#F59E0B'} />
                         </TouchableOpacity>
                     </View>
-                )}
-
-                {data.length > 50 && !paginationInfo && (
-                    <Text style={styles.tableFooter}>
-                        Showing 50 of {data.length} records. Download for full data.
-                    </Text>
                 )}
             </View>
         );
@@ -1677,9 +1761,10 @@ const AdminReports = ({ navigation }) => {
         setExcelDownloading(report.id);
         try {
             const downloadUrl = `${API_URL}${report.endpoint}/excel`;
+            const authHdrs = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
             if (isWeb) {
                 try {
-                    const response = await fetch(downloadUrl);
+                    const response = await fetch(downloadUrl, { headers: authHdrs });
                     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                     const blob = await response.blob();
                     const url = window.URL.createObjectURL(blob);
@@ -1719,7 +1804,8 @@ const AdminReports = ({ navigation }) => {
         setDetailedLoading(true);
         setSelectedDetailReport(report.id);
         try {
-            const response = await fetch(`${API_URL}${report.endpoint}`);
+            const headers = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
+            const response = await fetch(`${API_URL}${report.endpoint}`, { headers });
             const data = await response.json();
             setDetailedReportData(data);
         } catch (error) {

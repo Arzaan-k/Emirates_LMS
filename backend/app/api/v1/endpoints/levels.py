@@ -3,6 +3,7 @@ Levels & Access Control Endpoints
 Organization hierarchy, user levels, access rules
 """
 
+import time
 import uuid
 import json
 import logging
@@ -17,6 +18,10 @@ from app.core.dependencies import get_current_user, require_admin
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/levels", tags=["Levels & Access"])
+
+# Process-level cache for GET /levels/ — this almost never changes
+_LEVELS_CACHE: dict = {"data": None, "expires": 0.0}
+_LEVELS_CACHE_TTL = 300.0  # 5 minutes
 
 
 # Default hierarchy configuration
@@ -38,22 +43,30 @@ DEFAULT_HIERARCHY = [
 async def get_levels(db: Session = Depends(get_db)):
     """
     Get all levels in the hierarchy (ordered).
+    Cached for 5 minutes — levels almost never change.
     """
+    now = time.monotonic()
+    if _LEVELS_CACHE["data"] is not None and now < _LEVELS_CACHE["expires"]:
+        return _LEVELS_CACHE["data"]
+
     from app.repositories.content_repository import ProgressionLevelRepository
-    
+
     try:
         repo = ProgressionLevelRepository(db)
         levels = repo.get_all_levels()
-        
+
         if not levels:
-            return {"levels": DEFAULT_HIERARCHY}
-        
-        result = []
-        for level in levels:
-            level_dict = level.to_dict() if hasattr(level, 'to_dict') else dict(level)
-            result.append(level_dict)
-        
-        return {"levels": sorted(result, key=lambda x: x.get("order", 0))}
+            response = {"levels": DEFAULT_HIERARCHY}
+        else:
+            result = []
+            for level in levels:
+                level_dict = level.to_dict() if hasattr(level, 'to_dict') else dict(level)
+                result.append(level_dict)
+            response = {"levels": sorted(result, key=lambda x: x.get("order", 0))}
+
+        _LEVELS_CACHE["data"] = response
+        _LEVELS_CACHE["expires"] = now + _LEVELS_CACHE_TTL
+        return response
     except Exception as e:
         logger.error(f"Levels fetch failed: {e}")
         return {"levels": DEFAULT_HIERARCHY}
@@ -87,6 +100,7 @@ async def create_level(
     
     try:
         level = repo.create_level(level_data)
+        _LEVELS_CACHE["data"] = None  # invalidate
         logger.info(f"Level created: {level_data['id']}")
         return level.to_dict() if hasattr(level, 'to_dict') else level_data
     except Exception as e:
@@ -131,6 +145,7 @@ async def update_level(
     
     try:
         level = repo.update_level(level_id, updates)
+        _LEVELS_CACHE["data"] = None  # invalidate
         logger.info(f"Level updated: {level_id}")
         return level.to_dict() if hasattr(level, 'to_dict') else dict(level)
     except Exception as e:
@@ -149,6 +164,7 @@ async def delete_level(level_id: str, db: Session = Depends(get_db)):
     
     try:
         repo.delete_level(level_id)
+        _LEVELS_CACHE["data"] = None  # invalidate
         logger.info(f"Level deleted: {level_id}")
         return {"message": f"Level {level_id} deleted"}
     except Exception as e:

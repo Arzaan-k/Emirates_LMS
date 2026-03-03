@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect, Depends
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
 
@@ -114,6 +115,9 @@ app = FastAPI(
 # ==========================================
 # MIDDLEWARE
 # ==========================================
+
+# Gzip compression: compresses responses > 500 bytes — reduces payload by 60-80% for JSON
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # Security middleware (rate limiting, headers, logging, CORS)
 setup_middleware(app)

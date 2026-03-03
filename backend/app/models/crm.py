@@ -199,6 +199,7 @@ class AuditAssignment(Base):
     due_date = Column(DateTime)
     assigned_at = Column(DateTime, default=datetime.utcnow)
     assigned_by = Column(String(255))
+    completed_at = Column(DateTime, nullable=True)  # Set when auditor submits
     
     # Relationships
     template = relationship("AuditTemplate", back_populates="assignments")
@@ -213,6 +214,7 @@ class AuditAssignment(Base):
             "status": self.status,
             "due_date": self.due_date.isoformat() if self.due_date else None,
             "assigned_at": self.assigned_at.isoformat() if self.assigned_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
         }
 
 
@@ -233,9 +235,7 @@ class AuditSubmission(Base):
     completion_rate = Column(Integer, default=0)
     submitted_at = Column(DateTime, default=datetime.utcnow)
     status = Column(String(50), default="completed")
-    
-    # Link to assignment if applicable
-    # assignment_id = Column(String(255), nullable=True)
+    assignment_id = Column(String(255), nullable=True)  # Link to AuditAssignment if applicable
 
     __table_args__ = (
         Index('idx_audit_user', 'user_email'),
@@ -255,11 +255,11 @@ class AuditSubmission(Base):
             "user_name": self.user_name,
             "store": self.store,
             "category": self.category,
-            "category_name": self.category.title() if self.category else "", 
+            "category_name": self.category.title() if self.category else "",
             "checklist_items": self.checklist_items or [],
             "checked_items": self.checked_items or {},
             "completion_rate": self.completion_rate,
             "submitted_at": (self.submitted_at.isoformat() + "Z") if self.submitted_at else None,
             "status": self.status,
-            # "assignment_id": self.assignment_id
+            "assignment_id": self.assignment_id,
         }

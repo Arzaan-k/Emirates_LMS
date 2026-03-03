@@ -11,12 +11,15 @@ import {
     ActivityIndicator,
     FlatList,
     TextInput,
+    Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import API_URL from '../config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import UserAssignmentPicker from '../Components/UserAssignmentPicker';
@@ -30,16 +33,53 @@ const AuditsScreen = ({ navigation, route }) => {
     const [selectedCategory, setSelectedCategory] = useState('safety');
     const [checkedItems, setCheckedItems] = useState({});
     const [submitting, setSubmitting] = useState(false);
+    const [showConfirm, setShowConfirm] = useState(false); // inline confirm card
 
     // History Modal State (Super Admin only)
     const [historyVisible, setHistoryVisible] = useState(false);
     const [historyData, setHistoryData] = useState([]);
     const [historyLoading, setHistoryLoading] = useState(false);
-    const [filters, setFilters] = useState({ stores: [], employees: [], categories: [] });
-    const [selectedStore, setSelectedStore] = useState(null);
-    const [selectedEmployee, setSelectedEmployee] = useState(null);
-    const [selectedHistoryCategory, setSelectedHistoryCategory] = useState(null);
     const [historyStats, setHistoryStats] = useState({});
+    const [expandedHistoryId, setExpandedHistoryId] = useState(null);
+
+    // Filter Picker States
+    const [filterModalVisible, setFilterModalVisible] = useState(false);
+    const [filterOptions, setFilterOptions] = useState({});
+    const [activeFilters, setActiveFilters] = useState({});
+    const [tempFilters, setTempFilters] = useState({});
+    const [expandedFilterSection, setExpandedFilterSection] = useState(null);
+
+    // Filter Logic
+    const toggleFilter = (category, value) => {
+        setTempFilters(prev => {
+            const current = prev[category] || [];
+            if (current.includes(value)) {
+                return { ...prev, [category]: current.filter(item => item !== value) };
+            } else {
+                return { ...prev, [category]: [...current, value] };
+            }
+        });
+    };
+
+    const applyFilters = () => {
+        setActiveFilters(tempFilters);
+        setFilterModalVisible(false);
+    };
+
+    const clearFilters = () => {
+        setTempFilters({});
+        setActiveFilters({});
+        setFilterModalVisible(false);
+    };
+
+    const getActiveFilterCount = () => {
+        let count = 0;
+        Object.values(activeFilters).forEach(val => {
+            if (Array.isArray(val)) count += val.length;
+            else if (val) count++;
+        });
+        return count;
+    };
 
     // Create Audit State
     const [createModalVisible, setCreateModalVisible] = useState(false);
@@ -143,17 +183,21 @@ const AuditsScreen = ({ navigation, route }) => {
         return getCompletionRate(category) === 100;
     };
 
-    const handleSubmit = async () => {
+    const handleSubmit = () => {
         const completion = getCompletionRate(selectedCategory);
-        if (completion !== 100) {
-            Alert.alert(
-                'Incomplete Audit',
-                `Please complete all items (${completion}% done)`,
-                [{ text: 'OK' }]
-            );
+        if (completion === 0) {
+            // still show an alert for 0% — that's fine cross-platform
+            Alert.alert('No Items Checked', 'Please check at least one item before submitting.');
             return;
         }
+        // Show inline confirmation card (works on all platforms)
+        setShowConfirm(true);
+    };
 
+    const doSubmit = async () => {
+        const completion = getCompletionRate(selectedCategory);
+        const isPartial = completion < 100;
+        setShowConfirm(false);
         setSubmitting(true);
         try {
             const formData = new FormData();
@@ -163,6 +207,7 @@ const AuditsScreen = ({ navigation, route }) => {
             formData.append('category', selectedCategory);
             formData.append('checklist_items', JSON.stringify(auditChecklists[selectedCategory]));
             formData.append('checked_items', JSON.stringify(checkedItems));
+            formData.append('audit_status', isPartial ? 'partial' : 'completed');
 
             const response = await fetch(`${API_URL}/api/v1/crm/audits/submit`, {
                 method: 'POST',
@@ -172,13 +217,15 @@ const AuditsScreen = ({ navigation, route }) => {
             const result = await response.json();
 
             if (result.status === 'success') {
+                const catName = auditCategories.find(c => c.id === selectedCategory)?.name;
                 Alert.alert(
-                    'Audit Submitted',
-                    `${auditCategories.find(c => c.id === selectedCategory)?.name} audit completed successfully!`,
+                    isPartial ? 'Partial Audit Submitted ✓' : 'Audit Submitted ✓',
+                    isPartial
+                        ? `${catName} submitted at ${completion}% — marked as partially completed.`
+                        : `${catName} fully completed!`,
                     [{
                         text: 'OK',
                         onPress: () => {
-                            // Reset checklist for this category
                             const newChecked = { ...checkedItems };
                             auditChecklists[selectedCategory].forEach((_, idx) => {
                                 delete newChecked[`${selectedCategory}-${idx}`];
@@ -201,9 +248,20 @@ const AuditsScreen = ({ navigation, route }) => {
     // Fetch Filters for History
     const fetchFilters = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/v1/crm/audits/checklists`);
-            const data = await response.json();
-            setFilters(data);
+            const token = await AsyncStorage.getItem('userToken');
+            const [userFiltersRes, auditFiltersRes] = await Promise.all([
+                fetch(`${API_URL}/api/v1/users/filters`, { headers: { 'Authorization': `Bearer ${token}` } }),
+                fetch(`${API_URL}/api/v1/crm/audits/checklists`)
+            ]);
+
+            const userFilters = await userFiltersRes.json();
+            const auditFilters = await auditFiltersRes.json();
+
+            setFilterOptions({
+                ...userFilters,
+                categories: auditFilters.categories || [],
+                employees: auditFilters.employees || [] // Kept for exact matching if needed
+            });
         } catch (error) {
             console.error('Fetch Filters Error:', error);
         }
@@ -213,28 +271,96 @@ const AuditsScreen = ({ navigation, route }) => {
     const fetchHistory = async () => {
         setHistoryLoading(true);
         try {
-            let url = `${API_URL}/api/v1/crm/audits/submissions?limit=100`;
-            if (selectedStore) url += `&store=${encodeURIComponent(selectedStore)}`;
-            if (selectedEmployee) url += `&user_email=${encodeURIComponent(selectedEmployee)}`;
-            if (selectedHistoryCategory) url += `&category=${encodeURIComponent(selectedHistoryCategory)}`;
+            // Check if URLSearchParams is available (web vs native)
+            // React Native provides URLSearchParams via Polyfill usually, but we can build string manually just in case
+            let queryParts = ['limit=100'];
+
+            Object.keys(activeFilters).forEach(key => {
+                const val = activeFilters[key];
+                if (Array.isArray(val) && val.length > 0) {
+                    val.forEach(v => queryParts.push(`${encodeURIComponent(key)}=${encodeURIComponent(v)}`));
+                } else if (val && !Array.isArray(val)) {
+                    queryParts.push(`${encodeURIComponent(key)}=${encodeURIComponent(val)}`);
+                }
+            });
+
+            const url = `${API_URL}/api/v1/crm/audits/submissions?${queryParts.join('&')}`;
 
             const token = await AsyncStorage.getItem('userToken');
             const response = await fetch(url, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
+                headers: { 'Authorization': `Bearer ${token}` }
             });
             const data = await response.json();
-            setHistoryData(data.audits || []);
-            setHistoryStats({
-                total: data.total_count,
-                avgCompletion: data.avg_completion_rate,
-                categoryStats: data.category_stats
-            });
+
+            if (response.ok) {
+                setHistoryData(data.audits || []);
+                setHistoryStats({
+                    total: data.total_count || 0,
+                    avgCompletion: data.avg_completion_rate || 0
+                });
+            }
         } catch (error) {
             console.error('Fetch History Error:', error);
         } finally {
             setHistoryLoading(false);
+        }
+    };
+
+    // Export CSV from current historyData
+    const handleExportCSV = async () => {
+        if (!historyData || historyData.length === 0) {
+            Alert.alert('No Data', 'No audit history available to export.');
+            return;
+        }
+
+        const headers = ['Audit ID', 'Category', 'Store/Location', 'Submitted By', 'Passed Items', 'Total Items', 'Completion Rate %', 'Status', 'Submitted At'];
+
+        const rows = historyData.map(item => {
+            const total = item.checklist_items?.length || 0;
+            const passed = Object.values(item.checked_items || {}).filter(Boolean).length;
+            const dateStr = new Date(item.submitted_at).toLocaleString();
+
+            return [
+                item.id,
+                `"${(item.category_name || item.category || '').replace(/"/g, '""')}"`,
+                `"${(item.store || '').replace(/"/g, '""')}"`,
+                `"${(item.user_name || item.user_email || '').replace(/"/g, '""')}"`,
+                passed,
+                total,
+                item.completion_rate,
+                item.status || 'completed',
+                `"${dateStr}"`
+            ].join(',');
+        });
+
+        const csvContent = [headers.join(','), ...rows].join('\n');
+        const filename = `audit_history_${new Date().toISOString().split('T')[0]}.csv`;
+
+        if (Platform.OS === 'web') {
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        } else {
+            try {
+                const path = FileSystem.documentDirectory + filename;
+                await FileSystem.writeAsStringAsync(path, csvContent, { encoding: FileSystem.EncodingType.UTF8 });
+
+                if (await Sharing.isAvailableAsync()) {
+                    await Sharing.shareAsync(path);
+                } else {
+                    Alert.alert('Error', 'Sharing not supported on this device');
+                }
+            } catch (err) {
+                console.error('Mobile export failed', err);
+                Alert.alert('Error', 'Failed to export CSV locally.');
+            }
         }
     };
 
@@ -249,7 +375,7 @@ const AuditsScreen = ({ navigation, route }) => {
         if (historyVisible) {
             fetchHistory();
         }
-    }, [selectedStore, selectedEmployee, selectedHistoryCategory]);
+    }, [activeFilters]);
 
     const currentCategory = auditCategories.find(c => c.id === selectedCategory);
     const currentChecklist = auditChecklists[selectedCategory] || [];
@@ -384,44 +510,215 @@ const AuditsScreen = ({ navigation, route }) => {
     const renderHistoryItem = ({ item, index }) => {
         const catInfo = auditCategories.find(c => c.id === item.category) || {};
         const date = new Date(item.submitted_at);
+        const totalItems = item.checklist_items?.length || 0;
+        const passedItems = Object.values(item.checked_items || {}).filter(Boolean).length;
+        const isExpanded = expandedHistoryId === item.id;
 
         return (
-            <Animated.View entering={FadeInDown.delay(index * 30)} style={styles.historyItem}>
-                <View style={[styles.historyItemIcon, { backgroundColor: catInfo.bg || '#F3F4F6' }]}>
-                    <Feather name={catInfo.icon || 'check'} size={20} color={catInfo.color || '#6B7280'} />
-                </View>
-                <View style={styles.historyItemContent}>
-                    <View style={styles.historyItemHeader}>
-                        <Text style={styles.historyItemCategory}>{item.category_name}</Text>
-                        <View style={[
-                            styles.historyItemBadge,
-                            { backgroundColor: item.completion_rate === 100 ? '#DCFCE7' : '#FEF3C7' }
-                        ]}>
-                            <Text style={[
-                                styles.historyItemBadgeText,
-                                { color: item.completion_rate === 100 ? '#16A34A' : '#D97706' }
+            <Animated.View entering={FadeInDown.delay(index * 30)} style={styles.historyItemWrapper}>
+                <TouchableOpacity
+                    activeOpacity={0.7}
+                    style={styles.historyItem}
+                    onPress={() => setExpandedHistoryId(isExpanded ? null : item.id)}
+                >
+                    <View style={[styles.historyItemIcon, { backgroundColor: catInfo.bg || '#F3F4F6' }]}>
+                        <Feather name={catInfo.icon || 'check'} size={20} color={catInfo.color || '#6B7280'} />
+                    </View>
+                    <View style={styles.historyItemContent}>
+                        <View style={styles.historyItemHeader}>
+                            <Text style={styles.historyItemCategory}>{item.category_name}</Text>
+                            <View style={[
+                                styles.historyItemBadge,
+                                { backgroundColor: item.completion_rate === 100 ? '#DCFCE7' : '#FEF3C7' }
                             ]}>
-                                {item.completion_rate}%
-                            </Text>
+                                <Text style={[
+                                    styles.historyItemBadgeText,
+                                    { color: item.completion_rate === 100 ? '#16A34A' : '#D97706' }
+                                ]}>
+                                    {item.completion_rate}%
+                                </Text>
+                            </View>
+                        </View>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 }}>
+                                <Feather name="map-pin" size={12} color="#A5B4FC" style={{ marginRight: 4 }} />
+                                <Text style={styles.historyItemStore} numberOfLines={1}>{item.store}</Text>
+                            </View>
+                            <View style={{ backgroundColor: 'rgba(255,255,255,0.08)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                                <Text style={{ fontSize: 11, fontFamily: 'Poppins_600SemiBold', color: '#9CA3AF' }}>
+                                    {passedItems}/{totalItems} Passed
+                                </Text>
+                            </View>
+                        </View>
+                        <View style={styles.historyItemFooter}>
+                            <View style={styles.historyItemMeta}>
+                                <Feather name="user" size={12} color="#9CA3AF" />
+                                <Text style={styles.historyItemMetaText}>{item.user_name}</Text>
+                            </View>
+                            <View style={styles.historyItemMeta}>
+                                <Feather name="clock" size={12} color="#9CA3AF" />
+                                <Text style={styles.historyItemMetaText}>
+                                    {date.toLocaleDateString()} {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </Text>
+                            </View>
                         </View>
                     </View>
-                    <Text style={styles.historyItemStore}>{item.store}</Text>
-                    <View style={styles.historyItemFooter}>
-                        <View style={styles.historyItemMeta}>
-                            <Feather name="user" size={12} color="#9CA3AF" />
-                            <Text style={styles.historyItemMetaText}>{item.user_name}</Text>
+                </TouchableOpacity>
+
+                {isExpanded && item.checklist_items && item.checklist_items.length > 0 && (
+                    <View style={styles.expandedChecklist}>
+                        <View style={styles.expandedHeaderRow}>
+                            <Text style={styles.expandedHeaderTitle}>Detailed Breakout</Text>
                         </View>
-                        <View style={styles.historyItemMeta}>
-                            <Feather name="clock" size={12} color="#9CA3AF" />
-                            <Text style={styles.historyItemMetaText}>
-                                {date.toLocaleDateString()} {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </Text>
-                        </View>
+                        {item.checklist_items.map((checkText, idx) => {
+                            const passed = item.checked_items?.[`${item.category}-${idx}`] || item.checked_items?.[idx];
+                            return (
+                                <View key={idx} style={styles.expandedCheckRow}>
+                                    <Feather
+                                        name={passed ? 'check-circle' : 'x-circle'}
+                                        size={16}
+                                        color={passed ? '#10B981' : '#EF4444'}
+                                        style={{ marginTop: 2 }}
+                                    />
+                                    <Text style={[styles.expandedCheckText, !passed && { color: '#9CA3AF' }]}>
+                                        {checkText}
+                                    </Text>
+                                </View>
+                            )
+                        })}
                     </View>
-                </View>
+                )}
             </Animated.View>
         );
     };
+
+    const renderDetailedFilterModal = () => (
+        <Modal
+            animationType="slide"
+            transparent={true}
+            visible={filterModalVisible}
+            onRequestClose={() => setFilterModalVisible(false)}
+        >
+            <View style={styles.historyOverlay}>
+                <BlurView intensity={80} style={StyleSheet.absoluteFill} />
+                <View style={styles.pickerModalContainer}>
+                    <View style={styles.pickerModalHeader}>
+                        <Text style={styles.pickerModalTitle}>Detailed Filters</Text>
+                        <TouchableOpacity onPress={() => setFilterModalVisible(false)}>
+                            <Feather name="x" size={24} color="#FFF" />
+                        </TouchableOpacity>
+                    </View>
+
+                    <ScrollView style={{ flex: 1, padding: 10 }} showsVerticalScrollIndicator={false}>
+                        {Object.keys(filterOptions).map((category) => {
+                            if (!filterOptions[category] || filterOptions[category].length === 0) return null;
+                            const isExpanded = expandedFilterSection === category;
+                            const isActive = tempFilters[category] && tempFilters[category].length > 0;
+
+                            return (
+                                <View key={category} style={{
+                                    backgroundColor: 'rgba(255,255,255,0.05)',
+                                    marginBottom: 8,
+                                    borderRadius: 8,
+                                    overflow: 'hidden'
+                                }}>
+                                    <TouchableOpacity
+                                        style={{
+                                            flexDirection: 'row',
+                                            justifyContent: 'space-between',
+                                            padding: 16,
+                                            alignItems: 'center'
+                                        }}
+                                        onPress={() => setExpandedFilterSection(isExpanded ? null : category)}
+                                    >
+                                        <Text style={{
+                                            color: isActive ? '#10B981' : '#E5E7EB',
+                                            fontSize: 16,
+                                            fontFamily: 'Poppins_600SemiBold',
+                                            textTransform: 'capitalize'
+                                        }}>
+                                            {category.replace(/_/g, ' ')}
+                                            {isActive ? ` (${tempFilters[category].length})` : ''}
+                                        </Text>
+                                        <Feather name={isExpanded ? "chevron-up" : "chevron-down"} size={20} color={isActive ? "#10B981" : "#9CA3AF"} />
+                                    </TouchableOpacity>
+
+                                    {isExpanded && (
+                                        <View style={{
+                                            flexDirection: 'row',
+                                            flexWrap: 'wrap',
+                                            padding: 12,
+                                            paddingTop: 0,
+                                            gap: 8
+                                        }}>
+                                            {filterOptions[category].map((option, idx) => {
+                                                const label = typeof option === 'string' ? option : option.name || option.email;
+                                                const value = typeof option === 'string' ? option : option.email || option.name;
+                                                const selected = tempFilters[category]?.includes(value);
+
+                                                return (
+                                                    <TouchableOpacity
+                                                        key={idx}
+                                                        style={[{
+                                                            paddingHorizontal: 12,
+                                                            paddingVertical: 6,
+                                                            borderRadius: 20,
+                                                            backgroundColor: 'rgba(255,255,255,0.1)',
+                                                            borderWidth: 1,
+                                                            borderColor: 'transparent'
+                                                        }, selected && {
+                                                            backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                                                            borderColor: '#10B981'
+                                                        }]}
+                                                        onPress={() => toggleFilter(category, value)}
+                                                    >
+                                                        <Text style={[{
+                                                            color: '#D1D5DB',
+                                                            fontSize: 14,
+                                                            fontFamily: 'Poppins_400Regular'
+                                                        }, selected && { color: '#10B981' }]}>
+                                                            {label}
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                );
+                                            })}
+                                        </View>
+                                    )}
+                                </View>
+                            );
+                        })}
+                    </ScrollView>
+
+                    <View style={{
+                        flexDirection: 'row',
+                        padding: 16,
+                        borderTopWidth: 1,
+                        borderTopColor: 'rgba(255,255,255,0.1)',
+                        justifyContent: 'flex-end',
+                        gap: 12
+                    }}>
+                        <TouchableOpacity style={{
+                            paddingHorizontal: 20,
+                            paddingVertical: 10,
+                            borderRadius: 8,
+                            justifyContent: 'center'
+                        }} onPress={clearFilters}>
+                            <Text style={{ color: '#9CA3AF', fontFamily: 'Poppins_600SemiBold' }}>Clear All</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={{
+                            backgroundColor: '#10B981',
+                            paddingHorizontal: 20,
+                            paddingVertical: 10,
+                            borderRadius: 8,
+                            justifyContent: 'center'
+                        }} onPress={applyFilters}>
+                            <Text style={{ color: '#FFF', fontFamily: 'Poppins_600SemiBold' }}>Apply Filters</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </View>
+        </Modal>
+    );
 
     // History Modal
     const renderHistoryModal = () => (
@@ -439,61 +736,28 @@ const AuditsScreen = ({ navigation, route }) => {
                                 <MaterialCommunityIcons name="history" size={24} color="#10B981" />
                                 <Text style={styles.historyTitle}>Audit History</Text>
                             </View>
-                            <TouchableOpacity style={styles.historyRefreshBtn} onPress={fetchHistory}>
-                                <Feather name="refresh-cw" size={18} color="#FFF" />
-                            </TouchableOpacity>
+                            <View style={{ flexDirection: 'row', gap: 8 }}>
+                                <TouchableOpacity style={styles.historyRefreshBtn} onPress={handleExportCSV}>
+                                    <Feather name="download" size={18} color="#FFF" />
+                                </TouchableOpacity>
+                                <TouchableOpacity style={styles.historyRefreshBtn} onPress={fetchHistory}>
+                                    <Feather name="refresh-cw" size={18} color="#FFF" />
+                                </TouchableOpacity>
+                            </View>
                         </View>
 
-                        {/* Filter Pills */}
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
-                            {/* Store Filter */}
+                        {/* Modern Filters */}
+                        <View style={styles.modernFiltersContainer}>
                             <TouchableOpacity
-                                style={[styles.filterPill, selectedStore && styles.filterPillActive]}
-                                onPress={() => setSelectedStore(null)}
+                                style={styles.modernFilterBtn}
+                                onPress={() => { setTempFilters(activeFilters); setFilterModalVisible(true); }}
                             >
-                                <Feather name="home" size={14} color={selectedStore ? '#FFF' : '#9CA3AF'} />
-                                <Text style={[styles.filterText, selectedStore && styles.filterTextActive]}>
-                                    {selectedStore || 'All Stores'}
+                                <Feather name="filter" size={16} color={getActiveFilterCount() > 0 ? '#FFF' : '#A5B4FC'} />
+                                <Text style={[styles.modernFilterBtnText, getActiveFilterCount() > 0 && { color: '#FFF' }]} numberOfLines={1}>
+                                    Filters {getActiveFilterCount() > 0 ? `(${getActiveFilterCount()})` : ''}
                                 </Text>
                             </TouchableOpacity>
-
-                            {filters.stores?.map(store => (
-                                <TouchableOpacity
-                                    key={store}
-                                    style={[styles.filterPill, selectedStore === store && styles.filterPillActive]}
-                                    onPress={() => setSelectedStore(store === selectedStore ? null : store)}
-                                >
-                                    <Text style={[styles.filterText, selectedStore === store && styles.filterTextActive]}>
-                                        {store}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </ScrollView>
-
-                        {/* Employee Filter */}
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
-                            <TouchableOpacity
-                                style={[styles.filterPill, !selectedEmployee && styles.filterPillActive]}
-                                onPress={() => setSelectedEmployee(null)}
-                            >
-                                <Feather name="users" size={14} color={!selectedEmployee ? '#FFF' : '#9CA3AF'} />
-                                <Text style={[styles.filterText, !selectedEmployee && styles.filterTextActive]}>
-                                    All Employees
-                                </Text>
-                            </TouchableOpacity>
-
-                            {filters.employees?.map(emp => (
-                                <TouchableOpacity
-                                    key={emp.email}
-                                    style={[styles.filterPill, selectedEmployee === emp.email && styles.filterPillActive]}
-                                    onPress={() => setSelectedEmployee(emp.email === selectedEmployee ? null : emp.email)}
-                                >
-                                    <Text style={[styles.filterText, selectedEmployee === emp.email && styles.filterTextActive]}>
-                                        {emp.name}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </ScrollView>
+                        </View>
 
                         {/* Stats Row */}
                         <View style={styles.historyStatsRow}>
@@ -506,12 +770,6 @@ const AuditsScreen = ({ navigation, route }) => {
                                     {historyStats.avgCompletion || 0}%
                                 </Text>
                                 <Text style={styles.historyStatLabel}>Avg Completion</Text>
-                            </View>
-                            <View style={styles.historyStatCard}>
-                                <Text style={[styles.historyStatValue, { color: '#F59E0B' }]}>
-                                    {filters.stores?.length || 0}
-                                </Text>
-                                <Text style={styles.historyStatLabel}>Stores</Text>
                             </View>
                         </View>
 
@@ -789,11 +1047,15 @@ const AuditsScreen = ({ navigation, route }) => {
                         <Animated.View
                             key={category.id}
                             entering={FadeInDown.delay(index * 50)}
+                            style={styles.categoryCardWrapper}
                         >
                             <TouchableOpacity
                                 style={[
                                     styles.categoryCard,
-                                    selectedCategory === category.id && styles.categoryCardActive,
+                                    selectedCategory === category.id && [
+                                        styles.categoryCardActive,
+                                        { borderColor: category.color }
+                                    ],
                                     { shadowColor: category.color }
                                 ]}
                                 onPress={() => setSelectedCategory(category.id)}
@@ -878,14 +1140,84 @@ const AuditsScreen = ({ navigation, route }) => {
                         );
                     })}
 
+                    {/* INLINE CONFIRM CARD */}
+                    {showConfirm && (() => {
+                        const pct = completionRate;
+                        const isPartial = pct < 100;
+                        const catColor = isPartial ? '#F59E0B' : currentCategory.color;
+                        return (
+                            <View style={{
+                                marginTop: 12,
+                                backgroundColor: isPartial ? '#FFFBEB' : '#F0FDF4',
+                                borderRadius: 14,
+                                borderWidth: 1.5,
+                                borderColor: isPartial ? '#FCD34D' : '#86EFAC',
+                                padding: 16,
+                            }}>
+                                <Text style={{
+                                    fontSize: 15,
+                                    fontFamily: 'Poppins_600SemiBold',
+                                    color: '#111827',
+                                    marginBottom: 6,
+                                }}>
+                                    {isPartial ? `⚠️ Submit at ${pct}%?` : '✅ Submit Completed Audit?'}
+                                </Text>
+                                <Text style={{
+                                    fontSize: 13,
+                                    fontFamily: 'Poppins_400Regular',
+                                    color: '#374151',
+                                    marginBottom: 14,
+                                    lineHeight: 20,
+                                }}>
+                                    {isPartial
+                                        ? `You've completed ${pct}% of items. This will be recorded as a partial submission.`
+                                        : `All items checked. This audit will be marked as fully completed.`}
+                                </Text>
+                                <View style={{ flexDirection: 'row', gap: 10 }}>
+                                    <TouchableOpacity
+                                        style={{
+                                            flex: 1, paddingVertical: 10, borderRadius: 10,
+                                            backgroundColor: '#F3F4F6',
+                                            alignItems: 'center',
+                                        }}
+                                        onPress={() => setShowConfirm(false)}
+                                    >
+                                        <Text style={{ fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: '#6B7280' }}>Cancel</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={{
+                                            flex: 1, paddingVertical: 10, borderRadius: 10,
+                                            backgroundColor: catColor,
+                                            alignItems: 'center',
+                                        }}
+                                        onPress={doSubmit}
+                                    >
+                                        <Text style={{ fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: '#FFF' }}>
+                                            {isPartial ? `Confirm (${pct}%)` : 'Confirm'}
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        );
+                    })()}
+
                     {/* SUBMIT BUTTON */}
                     <TouchableOpacity
-                        style={[styles.submitBtn, { opacity: completionRate === 100 ? 1 : 0.5 }]}
+                        style={[
+                            styles.submitBtn,
+                            { opacity: submitting ? 0.5 : 1, marginTop: showConfirm ? 8 : 16 }
+                        ]}
                         onPress={handleSubmit}
-                        disabled={submitting || completionRate !== 100}
+                        disabled={submitting}
                     >
                         <LinearGradient
-                            colors={[currentCategory.color, currentCategory.color + 'DD']}
+                            colors={
+                                completionRate === 100
+                                    ? [currentCategory.color, currentCategory.color + 'DD']
+                                    : completionRate === 0
+                                        ? ['#9CA3AF', '#6B7280']
+                                        : ['#F59E0B', '#D97706']
+                            }
                             start={{ x: 0, y: 0 }}
                             end={{ x: 1, y: 0 }}
                             style={styles.submitGradient}
@@ -894,8 +1226,18 @@ const AuditsScreen = ({ navigation, route }) => {
                                 <ActivityIndicator color="#FFF" />
                             ) : (
                                 <>
-                                    <Feather name="send" size={20} color="#FFF" />
-                                    <Text style={styles.submitText}>Submit Audit</Text>
+                                    <Feather
+                                        name={completionRate === 100 ? 'send' : completionRate === 0 ? 'lock' : 'upload'}
+                                        size={20}
+                                        color="#FFF"
+                                    />
+                                    <Text style={styles.submitText}>
+                                        {completionRate === 0
+                                            ? 'Check Items to Submit'
+                                            : completionRate === 100
+                                                ? 'Submit Audit'
+                                                : `Submit Partial (${completionRate}%)`}
+                                    </Text>
                                 </>
                             )}
                         </LinearGradient>
@@ -905,6 +1247,7 @@ const AuditsScreen = ({ navigation, route }) => {
 
             {/* History Modal */}
             {renderHistoryModal()}
+            {renderDetailedFilterModal()}
             {renderCreateAuditModal()}
         </SafeAreaView>
     );
@@ -978,11 +1321,17 @@ const styles = StyleSheet.create({
     categoryContainer: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        padding: 20,
-        gap: 12,
+        paddingHorizontal: 16,
+        paddingTop: 16,
+        paddingBottom: 8,
+        justifyContent: 'space-between',
+    },
+    categoryCardWrapper: {
+        width: '48%',
+        marginBottom: 12,
     },
     categoryCard: {
-        width: (width - 52) / 2,
+        width: '100%',
         backgroundColor: '#FFF',
         borderRadius: 16,
         padding: 16,
@@ -1160,17 +1509,42 @@ const styles = StyleSheet.create({
     historyStatLabel: { fontSize: 10, fontFamily: 'Poppins_400Regular', color: '#6B7280', marginTop: 2 },
 
     // HISTORY ITEMS
-    historyItem: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: 14, marginBottom: 10 },
+    historyItemWrapper: { backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 14, marginBottom: 10, overflow: 'hidden' },
+    historyItem: { flexDirection: 'row', padding: 14 },
     historyItemIcon: { width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
     historyItemContent: { flex: 1 },
     historyItemHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
     historyItemCategory: { fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: '#FFF' },
     historyItemBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
     historyItemBadgeText: { fontSize: 11, fontFamily: 'Poppins_700Bold' },
-    historyItemStore: { fontSize: 13, fontFamily: 'Poppins_500Medium', color: '#A5B4FC', marginBottom: 6 },
+    historyItemStore: { fontSize: 13, fontFamily: 'Poppins_500Medium', color: '#A5B4FC' },
     historyItemFooter: { flexDirection: 'row', gap: 16 },
     historyItemMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     historyItemMetaText: { fontSize: 11, fontFamily: 'Poppins_400Regular', color: '#9CA3AF' },
+
+    // EXPANDED HISTORY UI
+    expandedChecklist: { padding: 14, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)', backgroundColor: 'rgba(0,0,0,0.2)' },
+    expandedHeaderRow: { marginBottom: 10 },
+    expandedHeaderTitle: { fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: '#FFF' },
+    expandedCheckRow: { flexDirection: 'row', alignItems: 'flex-start', marginVertical: 4 },
+    expandedCheckText: { flex: 1, fontSize: 13, fontFamily: 'Poppins_400Regular', color: '#E5E7EB', marginLeft: 8 },
+
+    // MODERN FILTERS
+    modernFiltersContainer: { flexDirection: 'row', paddingHorizontal: 16, gap: 10, marginBottom: 16, marginTop: 8 },
+    modernFilterBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+    modernFilterBtnText: { flex: 1, fontSize: 13, fontFamily: 'Poppins_500Medium', color: '#D1D5DB', marginHorizontal: 8 },
+
+    // PICKER MODAL
+    pickerModalContainer: { margin: 20, backgroundColor: '#1F2937', borderRadius: 20, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 20, elevation: 10, maxHeight: height * 0.7 },
+    pickerModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.1)', backgroundColor: '#111827' },
+    pickerModalTitle: { fontSize: 18, fontFamily: 'Poppins_700Bold', color: '#FFF' },
+    pickerModalBody: { padding: 16 },
+    pickerSearchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, paddingHorizontal: 12, height: 44, marginBottom: 16 },
+    pickerSearchInput: { flex: 1, color: '#FFF', fontFamily: 'Poppins_400Regular', fontSize: 14, marginLeft: 8 },
+    pickerItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
+    pickerItemActive: { backgroundColor: 'rgba(16, 185, 129, 0.1)', borderRadius: 8, paddingHorizontal: 12, borderBottomWidth: 0 },
+    pickerItemText: { fontSize: 14, fontFamily: 'Poppins_500Medium', color: '#D1D5DB' },
+    pickerItemTextActive: { color: '#10B981', fontFamily: 'Poppins_600SemiBold' },
 
     emptyState: { alignItems: 'center', paddingVertical: 60 },
     emptyText: { fontSize: 16, fontFamily: 'Poppins_600SemiBold', color: '#9CA3AF', marginTop: 16 },

@@ -84,16 +84,27 @@ const AnalyticsDashboard = ({ onNavigate }) => {
 
     const fetchDashboard = async () => {
         try {
-            const res = await fetch(`${API_URL}/api/v1/analytics/dashboard`);
+            const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+            const token = await AsyncStorage.getItem('userToken');
+
+            const res = await fetch(`${API_URL}/api/v1/analytics/dashboard`, {
+                headers: {
+                    'Authorization': `Bearer ${token || ''}`
+                }
+            });
             const json = await res.json();
 
             if (json.overview && json.trend && json.risk_summary) {
                 setData(json);
             } else {
                 // Fallback logic kept from previous step
-                const usersRes = await fetch(`${API_URL}/api/v1/users/list?limit=1000`);
+                const usersRes = await fetch(`${API_URL}/api/v1/users/list?limit=1000`, {
+                    headers: { 'Authorization': `Bearer ${token || ''}` }
+                });
                 const usersData = await usersRes.json();
-                const storesRes = await fetch(`${API_URL}/api/v1/users/stores/summary`);
+                const storesRes = await fetch(`${API_URL}/api/v1/users/stores/summary`, {
+                    headers: { 'Authorization': `Bearer ${token || ''}` }
+                });
                 const storesData = await storesRes.json();
 
                 setData({

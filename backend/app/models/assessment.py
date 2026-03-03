@@ -77,7 +77,6 @@ class ProcturedAssessment(Base):
             "max_attempts": self.max_attempts,
             "created_by": self.created_by,
             "created_at": safe_iso(self.created_at),
-            "created_at": safe_iso(self.created_at),
             "updated_at": safe_iso(self.updated_at),
             "assigned_users": self.assigned_users or [],
             "assignment_filters": self.assignment_filters or {},
@@ -136,6 +135,20 @@ class AssessmentSubmission(Base):
                 return val.isoformat()
             return val
 
+        # Backward-compatible duration reconstruction:
+        # - Prefer persisted time_taken_seconds when available.
+        # - Otherwise derive from started_at -> submitted_at if both exist.
+        raw_time_taken = getattr(self, 'time_taken_seconds', 0) or 0
+        if raw_time_taken:
+            derived_time_taken_seconds = int(raw_time_taken)
+        elif self.started_at and self.submitted_at:
+            try:
+                derived_time_taken_seconds = max(0, int((self.submitted_at - self.started_at).total_seconds()))
+            except Exception:
+                derived_time_taken_seconds = 0
+        else:
+            derived_time_taken_seconds = 0
+
         return {
             "id": self.id,
             "assessment_id": self.assessment_id,
@@ -146,7 +159,7 @@ class AssessmentSubmission(Base):
             "total_questions": self.total_questions,
             "score_percent": self.score_percent,
             "passed": self.passed,
-            "time_taken_seconds": getattr(self, 'time_taken_seconds', 0) or 0,
+            "time_taken_seconds": derived_time_taken_seconds,
             "violations": self.violations,
             "critical_breaches": self.critical_breaches or 0,
             "warning_breaches": self.warning_breaches or 0,

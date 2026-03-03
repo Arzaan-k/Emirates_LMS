@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.config.database import get_db
 from app.core.dependencies import get_current_user, require_admin
+from app.core.access_filter import get_access_filter_context, should_include_user, check_access
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
@@ -32,21 +33,78 @@ def _day_date_range(d: date) -> Tuple[datetime, datetime]:
     return start, end
 
 
+def _get_duration_seconds(record: Any) -> int:
+    """
+    Safely extract duration across schema variants.
+    Some production tables omit time_taken_seconds in ORM models.
+    """
+    for field in ("time_spent_seconds", "time_taken_seconds", "duration_seconds"):
+        value = getattr(record, field, None)
+        if value is not None:
+            try:
+                return int(value)
+            except Exception:
+                return 0
+    return 0
+
+
+def _get_video_duration_seconds(record: Any) -> int:
+    """
+    Best-effort time estimate for video activity across schema/runtime variants.
+    Uses whichever signal is available in priority order.
+    """
+    # If explicit time exists in any variant, prefer it.
+    explicit = _get_duration_seconds(record)
+    if explicit > 0:
+        return explicit
+
+    try:
+        position_seconds = int(getattr(record, "video_position_seconds", 0) or 0)
+    except Exception:
+        position_seconds = 0
+
+    try:
+        max_position_seconds = int(getattr(record, "max_position_reached", 0) or 0)
+    except Exception:
+        max_position_seconds = 0
+
+    try:
+        watched_percent = float(getattr(record, "video_watched_percent", 0) or 0)
+    except Exception:
+        watched_percent = 0.0
+
+    try:
+        duration_seconds = int(getattr(record, "video_duration_seconds", 0) or 0)
+    except Exception:
+        duration_seconds = 0
+
+    estimated_from_percent = int((duration_seconds * watched_percent) / 100.0) if duration_seconds > 0 and watched_percent > 0 else 0
+    return max(position_seconds, max_position_seconds, estimated_from_percent, 0)
+
+
 # ==========================================
 # DASHBOARD ENDPOINTS
 # ==========================================
 
 @router.get("/dashboard")
-async def get_analytics_dashboard(db: Session = Depends(get_db)):
+async def get_analytics_dashboard(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Main analytics dashboard with overview metrics.
+    Results are filtered based on the current user's access grants.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Get access control context
+    access_context = get_access_filter_context(db, current_user)
+    accessible_emails = None if access_context.get('is_superadmin') else access_context.get('accessible_emails', set())
+
     repo = AnalyticsRepository(db)
-    
+
     try:
-        dashboard = repo.get_dashboard_metrics()
+        dashboard = repo.get_dashboard_metrics(accessible_emails=accessible_emails)
         return dashboard
     except Exception as e:
         logger.error(f"Dashboard fetch failed: {e}")
@@ -72,6 +130,7 @@ def get_calendar_month(
     year: int,
     month: int,
     db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     from collections import defaultdict
 
@@ -81,6 +140,10 @@ def get_calendar_month(
     from app.models.assessment import AssessmentSubmission
     from app.models.simulation import SimulationProgress
     from app.models.crm import AuditSubmission
+
+    # Access control: Verify current user can access the requested user's data
+    if not check_access(db, current_user.get('email'), user_email):
+        raise HTTPException(status_code=403, detail="You don't have access to this user's data")
 
     if month < 1 or month > 12:
         raise HTTPException(status_code=400, detail="Invalid month")
@@ -102,8 +165,19 @@ def get_calendar_month(
         "attendance_minutes": 0,
     })
 
+    # Optimized: select only the columns we need — avoids hydrating full ORM objects.
+    # Each query fetches a narrow projection, drastically reducing data transfer.
+    score_acc = defaultdict(list)
+    bucket_acc = defaultdict(list)
+
     try:
-        completions = db.query(CourseCompletion).filter(
+        # -- Completions: day, focus_seconds, score_percent, bucket --
+        completions = db.query(
+            CourseCompletion.completed_at,
+            CourseCompletion.time_spent_seconds,
+            CourseCompletion.score_percent,
+            CourseCompletion.bucket,
+        ).filter(
             CourseCompletion.user_email == user_email,
             CourseCompletion.completed_at >= start_dt,
             CourseCompletion.completed_at < end_dt,
@@ -112,7 +186,12 @@ def get_calendar_month(
             d = c.completed_at.date().day
             daily[d]["completions"] += 1
             daily[d]["focus_seconds"] += int(c.time_spent_seconds or 0)
+            if c.score_percent is not None:
+                score_acc[d].append(float(c.score_percent))
+            if c.bucket:
+                bucket_acc[d].append(c.bucket)
 
+        # -- Quizzes: day, focus_seconds, score --
         quizzes = db.query(QuizSubmission).filter(
             QuizSubmission.user_email == user_email,
             QuizSubmission.submitted_at >= start_dt,
@@ -121,8 +200,11 @@ def get_calendar_month(
         for q in quizzes:
             d = q.submitted_at.date().day
             daily[d]["quizzes"] += 1
-            daily[d]["focus_seconds"] += int(q.time_taken_seconds or 0)
+            daily[d]["focus_seconds"] += _get_duration_seconds(q)
+            if q.score is not None:
+                score_acc[d].append(float(q.score))
 
+        # -- Assessments: day, focus_seconds, score_percent --
         assessments = db.query(AssessmentSubmission).filter(
             AssessmentSubmission.user_email == user_email,
             AssessmentSubmission.submitted_at >= start_dt,
@@ -131,10 +213,11 @@ def get_calendar_month(
         for a in assessments:
             d = a.submitted_at.date().day
             daily[d]["assessments"] += 1
-            daily[d]["focus_seconds"] += int(a.time_taken_seconds or 0)
+            daily[d]["focus_seconds"] += _get_duration_seconds(a)
+            if a.score_percent is not None:
+                score_acc[d].append(float(a.score_percent))
 
-        # VideoProgress doesn't store explicit time spent; use progress updates as "videos" activity,
-        # and completed_at as true completion signal.
+        # -- Video activity: day --
         video_updates = db.query(VideoProgress).filter(
             VideoProgress.user_email == user_email,
             VideoProgress.updated_at >= start_dt,
@@ -144,8 +227,9 @@ def get_calendar_month(
         for v in video_updates:
             d = v.updated_at.date().day
             daily[d]["videos"] += 1
+            daily[d]["focus_seconds"] += _get_video_duration_seconds(v)
 
-        video_completed = db.query(VideoProgress).filter(
+        video_completed = db.query(VideoProgress.completed_at).filter(
             VideoProgress.user_email == user_email,
             VideoProgress.completed == True,
             VideoProgress.completed_at != None,
@@ -153,19 +237,25 @@ def get_calendar_month(
             VideoProgress.completed_at < end_dt,
         ).all()
         for v in video_completed:
-            d = v.completed_at.date().day
-            daily[d]["videos_completed"] += 1
+            daily[v.completed_at.date().day]["videos_completed"] += 1
 
-        attendance = db.query(AttendanceRecord).filter(
+        # -- Attendance: day, duration_minutes --
+        attendance = db.query(
+            AttendanceRecord.punch_in,
+            AttendanceRecord.duration_minutes,
+        ).filter(
             AttendanceRecord.user_email == user_email,
             AttendanceRecord.punch_in >= start_dt,
             AttendanceRecord.punch_in < end_dt,
         ).all()
         for a in attendance:
-            d = a.punch_in.date().day
-            daily[d]["attendance_minutes"] += int(a.duration_minutes or 0)
+            daily[a.punch_in.date().day]["attendance_minutes"] += int(a.duration_minutes or 0)
 
-        sim_started = db.query(SimulationProgress).filter(
+        # -- Simulations started: day, focus_seconds --
+        sim_started = db.query(
+            SimulationProgress.started_at,
+            SimulationProgress.time_spent_seconds,
+        ).filter(
             SimulationProgress.user_email == user_email,
             SimulationProgress.started_at >= start_dt,
             SimulationProgress.started_at < end_dt,
@@ -175,7 +265,11 @@ def get_calendar_month(
             daily[d]["simulations"] += 1
             daily[d]["focus_seconds"] += int(s.time_spent_seconds or 0)
 
-        sim_completed = db.query(SimulationProgress).filter(
+        # -- Simulations completed: day, score --
+        sim_completed = db.query(
+            SimulationProgress.completed_at,
+            SimulationProgress.score,
+        ).filter(
             SimulationProgress.user_email == user_email,
             SimulationProgress.completed == True,
             SimulationProgress.completed_at != None,
@@ -185,53 +279,31 @@ def get_calendar_month(
         for s in sim_completed:
             d = s.completed_at.date().day
             daily[d]["simulations_completed"] += 1
+            if s.score is not None:
+                score_acc[d].append(float(s.score))
 
-        audits = db.query(AuditSubmission).filter(
+        # -- Audits: day --
+        audits = db.query(AuditSubmission.submitted_at).filter(
             AuditSubmission.user_email == user_email,
             AuditSubmission.submitted_at >= start_dt,
             AuditSubmission.submitted_at < end_dt,
         ).all()
         for a in audits:
             try:
-                day_num = a.submitted_at.date().day
+                daily[a.submitted_at.date().day]["audits"] += 1
             except Exception:
                 continue
-            daily[day_num]["audits"] += 1
+
     except Exception as e:
         logger.error(f"Calendar month fetch failed: {e}")
         return {"days": {}}
 
-    # Compute avg_score and topSkill per day
-    score_acc = defaultdict(list)
-    bucket_acc = defaultdict(list)
-    for c in completions:
-        d = c.completed_at.date().day
-        if c.score_percent is not None:
-            score_acc[d].append(float(c.score_percent))
-        if c.bucket:
-            bucket_acc[d].append(c.bucket)
-    for q in quizzes:
-        d = q.submitted_at.date().day
-        if q.score is not None:
-            score_acc[d].append(float(q.score))
-    for a in assessments:
-        d = a.submitted_at.date().day
-        if a.score_percent is not None:
-            score_acc[d].append(float(a.score_percent))
-
-    for s in sim_completed:
-        if s.completed_at is None:
-            continue
-        d = s.completed_at.date().day
-        if s.score is not None:
-            score_acc[d].append(float(s.score))
-
+    # Compute avg_score and topSkill per day (already accumulated above)
     for d, scores in score_acc.items():
         if scores:
             daily[d]["avg_score"] = round(sum(scores) / len(scores))
     for d, buckets in bucket_acc.items():
         if buckets:
-            # most common
             daily[d]["topSkill"] = max(set(buckets), key=buckets.count)
 
     days_out: Dict[str, Any] = {}
@@ -274,11 +346,19 @@ def get_calendar_day(
     user_email: str,
     day: str,
     db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     from app.models.video_progress import VideoProgress
     from app.models.quiz import QuizSubmission
     from app.models.tracking import CourseCompletion, AttendanceRecord
     from app.models.assessment import AssessmentSubmission
+    from app.models.simulation import SimulationProgress
+    from app.models.crm import AuditSubmission
+    from app.models.content import Content
+
+    # Access control: Verify current user can access the requested user's data
+    if not check_access(db, current_user.get('email'), user_email):
+        raise HTTPException(status_code=403, detail="You don't have access to this user's data")
 
     try:
         d = date.fromisoformat(day)
@@ -369,9 +449,10 @@ def get_calendar_day(
         }
 
     focus_seconds = 0
+    focus_seconds += sum(_get_video_duration_seconds(v) for v in video_updates)
     focus_seconds += sum(int(c.time_spent_seconds or 0) for c in completions)
-    focus_seconds += sum(int(q.time_taken_seconds or 0) for q in quizzes)
-    focus_seconds += sum(int(a.time_taken_seconds or 0) for a in assessments)
+    focus_seconds += sum(_get_duration_seconds(q) for q in quizzes)
+    focus_seconds += sum(_get_duration_seconds(a) for a in assessments)
     focus_seconds += sum(int(s.time_spent_seconds or 0) for s in sim_started)
 
     scores: List[float] = []
@@ -395,27 +476,44 @@ def get_calendar_day(
             except Exception:
                 return None
 
+    # Resolve content titles for video timeline items to avoid showing raw IDs.
+    video_node_ids = list({v.node_id for v in video_updates if getattr(v, "node_id", None)})
+    content_title_map: Dict[str, str] = {}
+    if video_node_ids:
+        try:
+            content_rows = db.query(Content.id, Content.title).filter(Content.id.in_(video_node_ids)).all()
+            content_title_map = {cid: title for cid, title in content_rows if cid and title}
+        except Exception as e:
+            logger.warning(f"Could not resolve content titles for calendar day timeline: {e}")
+
     timeline: List[Dict[str, Any]] = []
     for v in video_updates:
+        resolved_title = content_title_map.get(v.node_id)
         timeline.append({
             "type": "video",
             "ts": _ts(v.updated_at),
-            "title": "Video Progress",
-            "meta": {"node_id": v.node_id, "watched_percent": v.video_watched_percent, "completed": v.completed},
+            "title": resolved_title or "Video Progress",
+            "meta": {
+                "node_id": v.node_id,
+                "content_title": resolved_title,
+                "watched_percent": v.video_watched_percent,
+                "time_spent_seconds": _get_video_duration_seconds(v),
+                "completed": v.completed,
+            },
         })
     for q in quizzes:
         timeline.append({
             "type": "quiz",
             "ts": _ts(q.submitted_at),
             "title": q.quiz_title,
-            "meta": {"score_percent": q.score, "passed": q.passed, "time_taken_seconds": q.time_taken_seconds},
+            "meta": {"score_percent": q.score, "passed": q.passed, "time_taken_seconds": _get_duration_seconds(q)},
         })
     for a in assessments:
         timeline.append({
             "type": "assessment",
             "ts": _ts(a.submitted_at),
             "title": a.assessment_title or "Assessment",
-            "meta": {"score_percent": a.score_percent, "passed": a.passed, "time_taken_seconds": a.time_taken_seconds},
+            "meta": {"score_percent": a.score_percent, "passed": a.passed, "time_taken_seconds": _get_duration_seconds(a)},
         })
     for c in completions:
         timeline.append({
@@ -463,7 +561,8 @@ def get_calendar_day(
     def _sort_key(item: Dict[str, Any]):
         t = item.get("ts")
         return t or ""
-    timeline = sorted(timeline, key=_sort_key)
+    # Show most recent activity first for better per-day history readability.
+    timeline = sorted(timeline, key=_sort_key, reverse=True)
 
     return {
         "day": day,
@@ -503,16 +602,24 @@ def get_calendar_day(
 
 
 @router.get("/store-performance")
-async def get_store_performance(db: Session = Depends(get_db)):
+async def get_store_performance(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Store-wise performance analytics.
+    Results are filtered based on the current user's access grants.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Get access control context
+    access_context = get_access_filter_context(db, current_user)
+    accessible_emails = None if access_context.get('is_superadmin') else access_context.get('accessible_emails', set())
+
     repo = AnalyticsRepository(db)
-    
+
     try:
-        performance = repo.get_store_performance()
+        performance = repo.get_store_performance(accessible_emails=accessible_emails)
         return performance
     except Exception as e:
         logger.error(f"Store performance fetch failed: {e}")
@@ -522,17 +629,23 @@ async def get_store_performance(db: Session = Depends(get_db)):
 @router.get("/store/{store_name}")
 async def get_store_detail(
     store_name: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Detailed store analytics with tabs.
+    Results are filtered based on the current user's access grants.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Get access control context
+    access_context = get_access_filter_context(db, current_user)
+    accessible_emails = None if access_context.get('is_superadmin') else access_context.get('accessible_emails', set())
+
     repo = AnalyticsRepository(db)
-    
+
     try:
-        detail = repo.get_store_detail(store_name)
+        detail = repo.get_store_detail(store_name, accessible_emails=accessible_emails)
         return detail
     except Exception as e:
         logger.error(f"Store detail fetch failed: {e}")
@@ -540,16 +653,24 @@ async def get_store_detail(
 
 
 @router.get("/employee-performance")
-async def get_employee_performance(db: Session = Depends(get_db)):
+async def get_employee_performance(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Employee-wise performance analytics.
+    Results are filtered based on the current user's access grants.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Get access control context
+    access_context = get_access_filter_context(db, current_user)
+    accessible_emails = None if access_context.get('is_superadmin') else access_context.get('accessible_emails', set())
+
     repo = AnalyticsRepository(db)
-    
+
     try:
-        performance = repo.get_employee_performance()
+        performance = repo.get_employee_performance(accessible_emails=accessible_emails)
         return performance
     except Exception as e:
         logger.error(f"Employee performance fetch failed: {e}")
@@ -559,15 +680,21 @@ async def get_employee_performance(db: Session = Depends(get_db)):
 @router.get("/employee/{user_email}")
 async def get_employee_detail(
     user_email: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Detailed employee analytics with tabs.
+    Access control: User must have access to view the requested employee's data.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Access control: Verify current user can access the requested user's data
+    if not check_access(db, current_user.get('email'), user_email):
+        raise HTTPException(status_code=403, detail="You don't have access to this employee's data")
+
     repo = AnalyticsRepository(db)
-    
+
     try:
         detail = repo.get_employee_detail(user_email)
         return detail
@@ -577,7 +704,10 @@ async def get_employee_detail(
 
 
 @router.get("/training-effectiveness")
-async def get_training_effectiveness(db: Session = Depends(get_db)):
+async def get_training_effectiveness(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Course-wise effectiveness analytics.
     """
@@ -594,7 +724,10 @@ async def get_training_effectiveness(db: Session = Depends(get_db)):
 
 
 @router.get("/hygiene-compliance")
-async def get_hygiene_compliance(db: Session = Depends(get_db)):
+async def get_hygiene_compliance(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Hygiene and compliance analytics.
     """
@@ -611,7 +744,10 @@ async def get_hygiene_compliance(db: Session = Depends(get_db)):
 
 
 @router.get("/customer-experience")
-async def get_customer_experience_impact(db: Session = Depends(get_db)):
+async def get_customer_experience_impact(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Customer experience correlation with training.
     """
@@ -627,7 +763,10 @@ async def get_customer_experience_impact(db: Session = Depends(get_db)):
 
 
 @router.get("/ai-insights")
-async def get_ai_learning_insights(db: Session = Depends(get_db)):
+async def get_ai_learning_insights(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     AI-powered learning insights.
     """
@@ -650,16 +789,25 @@ async def get_ai_learning_insights(db: Session = Depends(get_db)):
 # ==========================================
 
 @router.get("/leaderboard")
-async def get_leaderboard(limit: int = 10, db: Session = Depends(get_db)):
+async def get_leaderboard(
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Get top learners leaderboard based on XP and completions.
+    Results are filtered based on the current user's access grants.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Get access control context
+    access_context = get_access_filter_context(db, current_user)
+    accessible_emails = None if access_context.get('is_superadmin') else access_context.get('accessible_emails', set())
+
     repo = AnalyticsRepository(db)
-    
+
     try:
-        leaderboard = repo.get_leaderboard(limit)
+        leaderboard = repo.get_leaderboard(limit, accessible_emails=accessible_emails)
         return leaderboard
     except Exception as e:
         logger.error(f"Leaderboard fetch failed: {e}")
@@ -667,16 +815,25 @@ async def get_leaderboard(limit: int = 10, db: Session = Depends(get_db)):
 
 
 @router.get("/leaderboard/global")
-async def get_global_leaderboard(limit: int = 10, db: Session = Depends(get_db)):
+async def get_global_leaderboard(
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Get company-wide XP leaderboard.
+    Results are filtered based on the current user's access grants.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Get access control context
+    access_context = get_access_filter_context(db, current_user)
+    accessible_emails = None if access_context.get('is_superadmin') else access_context.get('accessible_emails', set())
+
     repo = AnalyticsRepository(db)
-    
+
     try:
-        leaderboard = repo.get_leaderboard(limit)
+        leaderboard = repo.get_leaderboard(limit, accessible_emails=accessible_emails)
         return leaderboard
     except Exception as e:
         logger.error(f"Global leaderboard fetch failed: {e}")
@@ -687,17 +844,23 @@ async def get_global_leaderboard(limit: int = 10, db: Session = Depends(get_db))
 async def get_store_leaderboard(
     store_id: str,
     limit: int = 10,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Get store-specific leaderboard.
+    Results are filtered based on the current user's access grants.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Get access control context
+    access_context = get_access_filter_context(db, current_user)
+    accessible_emails = None if access_context.get('is_superadmin') else access_context.get('accessible_emails', set())
+
     repo = AnalyticsRepository(db)
-    
+
     try:
-        leaderboard = repo.get_store_leaderboard(store_id, limit)
+        leaderboard = repo.get_store_leaderboard(store_id, limit, accessible_emails=accessible_emails)
         return leaderboard
     except Exception as e:
         logger.error(f"Store leaderboard fetch failed: {e}")
@@ -711,15 +874,21 @@ async def get_store_leaderboard(
 @router.get("/profile/{user_email}")
 async def get_learning_profile(
     user_email: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Get a user's complete learning profile including skill scores and gaps.
+    Access control: User must have access to view the requested user's data.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Access control: Verify current user can access the requested user's data
+    if not check_access(db, current_user.get('email'), user_email):
+        raise HTTPException(status_code=403, detail="You don't have access to this user's data")
+
     repo = AnalyticsRepository(db)
-    
+
     try:
         profile = repo.get_user_learning_profile(user_email)
         skill_gaps_data = repo.get_skill_gaps(user_email)
@@ -749,15 +918,21 @@ async def get_learning_profile(
 @router.get("/skill-gaps/{user_email}")
 async def get_skill_gaps(
     user_email: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Get detailed skill gap analysis for a user.
+    Access control: User must have access to view the requested user's data.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Access control: Verify current user can access the requested user's data
+    if not check_access(db, current_user.get('email'), user_email):
+        raise HTTPException(status_code=403, detail="You don't have access to this user's data")
+
     repo = AnalyticsRepository(db)
-    
+
     try:
         gaps = repo.get_skill_gaps(user_email)
         return gaps
@@ -770,15 +945,21 @@ async def get_skill_gaps(
 async def get_recommendations(
     user_email: str,
     limit: int = 5,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Generate AI-powered personalized course recommendations.
+    Access control: User must have access to view the requested user's data.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Access control: Verify current user can access the requested user's data
+    if not check_access(db, current_user.get('email'), user_email):
+        raise HTTPException(status_code=403, detail="You don't have access to this user's data")
+
     repo = AnalyticsRepository(db)
-    
+
     try:
         recommendations = repo.get_recommendations(user_email, limit)
         return recommendations
@@ -948,7 +1129,8 @@ async def generate_analytics_report(
     store_filter: str = Form(""),
     role_filter: str = Form(""),
     format: str = Form("pdf"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Generate analytics report (PDF/Excel).
@@ -966,7 +1148,10 @@ async def generate_analytics_report(
 
 
 @router.get("/reports/executive-summary")
-async def generate_ai_executive_summary(db: Session = Depends(get_db)):
+async def generate_ai_executive_summary(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Generate AI-powered executive summary.
     """
@@ -1007,16 +1192,24 @@ async def get_all_skills():
 
 
 @router.get("/competency-matrix")
-async def get_competency_matrix(db: Session = Depends(get_db)):
+async def get_competency_matrix(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Get full competency matrix for all users.
+    Results are filtered based on the current user's access grants.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
-    
+
+    # Get access control context
+    access_context = get_access_filter_context(db, current_user)
+    accessible_emails = None if access_context.get('is_superadmin') else access_context.get('accessible_emails', set())
+
     repo = AnalyticsRepository(db)
-    
+
     try:
-        matrix = repo.get_competency_matrix()
+        matrix = repo.get_competency_matrix(accessible_emails=accessible_emails)
         return matrix
     except Exception as e:
         logger.error(f"Competency matrix fetch failed: {e}")
@@ -1024,16 +1217,24 @@ async def get_competency_matrix(db: Session = Depends(get_db)):
 
 
 @router.get("/skill-gaps-analysis")
-async def get_skill_gaps_analysis(db: Session = Depends(get_db)):
+async def get_skill_gaps_analysis(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Get company-wide skill gap analysis.
+    Results are filtered based on the current user's access grants.
     """
     from app.repositories.analytics_repository import AnalyticsRepository
+
+    # Get access control context
+    access_context = get_access_filter_context(db, current_user)
+    accessible_emails = None if access_context.get('is_superadmin') else access_context.get('accessible_emails', set())
 
     repo = AnalyticsRepository(db)
 
     try:
-        analysis = repo.get_company_skill_gaps()
+        analysis = repo.get_company_skill_gaps(accessible_emails=accessible_emails)
         return analysis
     except Exception as e:
         logger.error(f"Skill gaps analysis fetch failed: {e}")
@@ -1043,14 +1244,20 @@ async def get_skill_gaps_analysis(db: Session = Depends(get_db)):
 @router.get("/detailed-report/{user_email}")
 async def get_user_detailed_report(
     user_email: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Get aggregated data for detailed employee report.
     Includes profile, activity log, completions, quizzes, and attendance.
+    Access control: User must have access to view the requested user's data.
     """
     from app.repositories.user_repository import UserRepository
     from app.repositories.analytics_repository import AnalyticsRepository
+
+    # Access control: Verify current user can access the requested user's data
+    if not check_access(db, current_user.get('email'), user_email):
+        raise HTTPException(status_code=403, detail="You don't have access to this user's data")
 
     user_repo = UserRepository(db)
     analytics_repo = AnalyticsRepository(db)
@@ -1168,7 +1375,8 @@ async def get_audit_logs(
     action: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Get system audit logs with filtering.

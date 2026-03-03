@@ -4,7 +4,7 @@ Data access layer for simulation operations
 """
 
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -52,8 +52,26 @@ class SimulationRepository(BaseRepository[Simulation]):
         return simulation
 
     def delete_simulation(self, simulation_id: str) -> bool:
-        """Delete a simulation."""
-        return self.delete(simulation_id)
+        """
+        Delete a simulation and dependent analytics/progress rows first.
+        Prevents FK violations when attempts exist.
+        """
+        simulation = self.get_by_id(simulation_id)
+        if not simulation:
+            return False
+
+        # Manual cascade to satisfy foreign-key constraints in production DB.
+        self.db.query(SimulationProgress).filter(
+            SimulationProgress.simulation_id == simulation_id
+        ).delete(synchronize_session=False)
+
+        self.db.query(SimulationAnalyticsSnapshot).filter(
+            SimulationAnalyticsSnapshot.simulation_id == simulation_id
+        ).delete(synchronize_session=False)
+
+        self.db.delete(simulation)
+        self.db.commit()
+        return True
 
 
 class SimulationProgressRepository(BaseRepository[SimulationProgress]):
@@ -119,17 +137,22 @@ class SimulationProgressRepository(BaseRepository[SimulationProgress]):
         score: float,
         passed: bool,
         choices_made: List[Dict] = None,
-        time_spent_seconds: int = 0
+        time_spent_seconds: int = 0,
+        completed_at: Optional[datetime] = None
     ) -> SimulationProgress:
         """Mark a simulation as completed."""
         progress = self.get_by_user_and_simulation(user_email, simulation_id)
+        final_completed_at = completed_at or datetime.utcnow()
+        safe_duration = max(0, int(time_spent_seconds or 0))
 
         if progress:
             progress.completed = True
             progress.score = score
             progress.passed = passed
-            progress.completed_at = datetime.utcnow()
-            progress.time_spent_seconds = time_spent_seconds
+            progress.completed_at = final_completed_at
+            progress.time_spent_seconds = safe_duration
+            if not progress.started_at and safe_duration > 0:
+                progress.started_at = final_completed_at - timedelta(seconds=safe_duration)
             if choices_made:
                 progress.choices_made = choices_made
             self.db.commit()
@@ -143,9 +166,10 @@ class SimulationProgressRepository(BaseRepository[SimulationProgress]):
                 "completed": True,
                 "score": score,
                 "passed": passed,
-                "completed_at": datetime.utcnow(),
+                "completed_at": final_completed_at,
+                "started_at": final_completed_at - timedelta(seconds=safe_duration) if safe_duration > 0 else final_completed_at,
                 "choices_made": choices_made or [],
-                "time_spent_seconds": time_spent_seconds,
+                "time_spent_seconds": safe_duration,
             })
 
 

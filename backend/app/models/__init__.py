@@ -78,6 +78,12 @@ from app.models.report import (
     ReportSubscription,
 )
 
+# Access Control domain
+from app.models.access_control import (
+    OrganizationHierarchy,
+    UserAccessGrant,
+)
+
 __all__ = [
     # Base
     "Base",
@@ -122,4 +128,7 @@ __all__ = [
     "AuditLog",
     # Report
     "ReportSubscription",
+    # Access Control
+    "OrganizationHierarchy",
+    "UserAccessGrant",
 ]

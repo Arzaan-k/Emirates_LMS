@@ -265,76 +265,108 @@ class AnalyticsRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def get_dashboard_stats(self) -> Dict[str, Any]:
-        """Get main dashboard statistics."""
+    def get_dashboard_stats(self, accessible_emails: set = None) -> Dict[str, Any]:
+        """Get main dashboard statistics. Filters by accessible_emails if provided."""
         stats = {}
 
-        # User stats
-        stats['total_users'] = self.db.query(func.count(User.id)).filter(
+        # User stats - apply access filter
+        user_query = self.db.query(func.count(User.id)).filter(
             User.is_superadmin == False
-        ).scalar() or 0
+        )
+        if accessible_emails is not None:
+            user_query = user_query.filter(User.email.in_(accessible_emails))
+        stats['total_users'] = user_query.scalar() or 0
 
-        stats['total_stores'] = self.db.query(func.count(func.distinct(User.store))).filter(
+        # Store stats - apply access filter
+        store_query = self.db.query(func.count(func.distinct(User.store))).filter(
             User.is_superadmin == False
-        ).scalar() or 0
+        )
+        if accessible_emails is not None:
+            store_query = store_query.filter(User.email.in_(accessible_emails))
+        stats['total_stores'] = store_query.scalar() or 0
 
-        # Completion stats
-        stats['total_completions'] = self.db.query(func.count(CourseCompletion.id)).scalar() or 0
+        # Completion stats - apply access filter
+        completion_query = self.db.query(func.count(CourseCompletion.id))
+        if accessible_emails is not None:
+            completion_query = completion_query.filter(CourseCompletion.user_email.in_(accessible_emails))
+        stats['total_completions'] = completion_query.scalar() or 0
 
-        # Quiz stats
-        stats['total_quiz_submissions'] = self.db.query(func.count(QuizSubmission.id)).scalar() or 0
-        avg_score = self.db.query(func.avg(QuizSubmission.score)).scalar()
+        # Quiz stats - apply access filter
+        quiz_count_query = self.db.query(func.count(QuizSubmission.id))
+        quiz_avg_query = self.db.query(func.avg(QuizSubmission.score))
+        if accessible_emails is not None:
+            quiz_count_query = quiz_count_query.filter(QuizSubmission.user_email.in_(accessible_emails))
+            quiz_avg_query = quiz_avg_query.filter(QuizSubmission.user_email.in_(accessible_emails))
+        stats['total_quiz_submissions'] = quiz_count_query.scalar() or 0
+        avg_score = quiz_avg_query.scalar()
         stats['avg_quiz_score'] = round(float(avg_score), 1) if avg_score else 0
 
-        # Assessment stats
-        stats['total_assessments'] = self.db.query(func.count(AssessmentSubmission.id)).scalar() or 0
-        stats['passed_assessments'] = self.db.query(func.count(AssessmentSubmission.id)).filter(
+        # Assessment stats - apply access filter
+        assessment_query = self.db.query(func.count(AssessmentSubmission.id))
+        passed_query = self.db.query(func.count(AssessmentSubmission.id)).filter(
             AssessmentSubmission.passed == True
-        ).scalar() or 0
+        )
+        if accessible_emails is not None:
+            assessment_query = assessment_query.filter(AssessmentSubmission.user_email.in_(accessible_emails))
+            passed_query = passed_query.filter(AssessmentSubmission.user_email.in_(accessible_emails))
+        stats['total_assessments'] = assessment_query.scalar() or 0
+        stats['passed_assessments'] = passed_query.scalar() or 0
 
-        # Content stats
+        # Content stats (not filtered by user access - courses are the same for all)
         stats['total_courses'] = self.db.query(func.count(Content.id)).scalar() or 0
 
-        # Today's stats
+        # Today's stats - apply access filter
         today = datetime.utcnow().date()
-        stats['completions_today'] = self.db.query(func.count(CourseCompletion.id)).filter(
+        today_query = self.db.query(func.count(CourseCompletion.id)).filter(
             func.date(CourseCompletion.completed_at) == today
-        ).scalar() or 0
+        )
+        if accessible_emails is not None:
+            today_query = today_query.filter(CourseCompletion.user_email.in_(accessible_emails))
+        stats['completions_today'] = today_query.scalar() or 0
 
         return stats
 
-    def get_store_analytics(self) -> List[Dict[str, Any]]:
-        """Get analytics grouped by store."""
+    def get_store_analytics(self, accessible_emails: set = None) -> List[Dict[str, Any]]:
+        """Get analytics grouped by store. Filters by accessible_emails if provided."""
         total_courses = self.db.query(func.count(Content.id)).scalar() or 0
 
-        # Get user counts per store
-        user_counts = self.db.query(
+        # Get user counts per store - apply access filter
+        user_query = self.db.query(
             User.store,
             func.count(User.id).label('user_count')
         ).filter(
             User.is_superadmin == False,
             User.store != None,
             User.store != ''
-        ).group_by(User.store).all()
+        )
+        if accessible_emails is not None:
+            user_query = user_query.filter(User.email.in_(accessible_emails))
+        user_counts = user_query.group_by(User.store).all()
 
         stores_list = []
 
         for store, user_count in user_counts:
-            # Get completion count for this store
-            completion_count = self.db.query(func.count(CourseCompletion.id)).join(
+            # Get completion count for this store - apply access filter
+            completion_query = self.db.query(func.count(CourseCompletion.id)).join(
                 User, CourseCompletion.user_email == User.email
             ).filter(
                 User.store == store,
                 User.is_superadmin == False
-            ).scalar() or 0
+            )
+            if accessible_emails is not None:
+                completion_query = completion_query.filter(User.email.in_(accessible_emails))
+            completion_count = completion_query.scalar() or 0
 
-            # Get average quiz score for this store
-            avg_score = self.db.query(func.avg(QuizSubmission.score)).join(
+            # Get average quiz score for this store - apply access filter
+            quiz_query = self.db.query(func.avg(QuizSubmission.score)).join(
                 User, QuizSubmission.user_email == User.email
             ).filter(
                 User.store == store,
                 User.is_superadmin == False
-            ).scalar()
+            )
+            if accessible_emails is not None:
+                quiz_query = quiz_query.filter(User.email.in_(accessible_emails))
+            avg_score = quiz_query.scalar()
 
             avg_quiz_score = round(float(avg_score), 1) if avg_score else 0
 
@@ -428,9 +460,9 @@ class AnalyticsRepository:
 
         return [{'date': str(r.date), 'count': r.count} for r in results]
 
-    def get_leaderboard(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """Get leaderboard by completions."""
-        results = self.db.query(
+    def get_leaderboard(self, limit: int = 10, accessible_emails: set = None) -> List[Dict[str, Any]]:
+        """Get leaderboard by completions. Filters by accessible_emails if provided."""
+        query = self.db.query(
             User.email,
             User.name,
             User.store,
@@ -439,7 +471,13 @@ class AnalyticsRepository:
             CourseCompletion, CourseCompletion.user_email == User.email
         ).filter(
             User.is_superadmin == False
-        ).group_by(
+        )
+
+        # Apply access filter if provided
+        if accessible_emails is not None:
+            query = query.filter(User.email.in_(accessible_emails))
+
+        results = query.group_by(
             User.email, User.name, User.store
         ).order_by(
             func.count(CourseCompletion.id).desc()
@@ -456,24 +494,40 @@ class AnalyticsRepository:
             for idx, r in enumerate(results)
         ]
 
-    def get_dashboard_metrics(self) -> Dict[str, Any]:
-        """Get dashboard metrics (alias for get_dashboard_stats)."""
-        return self.get_dashboard_stats()
+    def get_dashboard_metrics(self, accessible_emails: set = None) -> Dict[str, Any]:
+        """Get dashboard metrics (alias for get_dashboard_stats). Filters by accessible_emails if provided."""
+        return self.get_dashboard_stats(accessible_emails=accessible_emails)
 
-    def get_store_performance(self) -> List[Dict[str, Any]]:
-        """Get store performance analytics."""
-        return self.get_store_analytics()
+    def get_store_performance(self, accessible_emails: set = None) -> List[Dict[str, Any]]:
+        """Get store performance analytics. Filters by accessible_emails if provided."""
+        return self.get_store_analytics(accessible_emails=accessible_emails)
 
-    def get_store_detail(self, store_name: str) -> Dict[str, Any]:
-        """Get detailed analytics for a specific store."""
+    def get_store_detail(self, store_name: str, accessible_emails: set = None) -> Dict[str, Any]:
+        """Get detailed analytics for a specific store. Filters by accessible_emails if provided."""
         # Get users in store
-        users = self.db.query(User).filter(
+        query = self.db.query(User).filter(
             User.store == store_name,
             User.is_superadmin == False
-        ).all()
+        )
+
+        # Apply access filter if provided
+        if accessible_emails is not None:
+            query = query.filter(User.email.in_(accessible_emails))
+
+        users = query.all()
 
         user_count = len(users)
         user_emails = [u.email for u in users]
+
+        if not user_emails:
+            return {
+                "store_name": store_name,
+                "employee_count": 0,
+                "total_completions": 0,
+                "total_quizzes": 0,
+                "avg_quiz_score": 0,
+                "employees": [],
+            }
 
         # Get completions
         completion_count = self.db.query(func.count(CourseCompletion.id)).filter(
@@ -500,9 +554,9 @@ class AnalyticsRepository:
             "employees": [{"email": u.email, "name": u.name, "role": u.role} for u in users[:10]],
         }
 
-    def get_employee_performance(self) -> List[Dict[str, Any]]:
-        """Get employee performance list."""
-        results = self.db.query(
+    def get_employee_performance(self, accessible_emails: set = None) -> List[Dict[str, Any]]:
+        """Get employee performance list. Filters by accessible_emails if provided."""
+        query = self.db.query(
             User.email,
             User.name,
             User.role,
@@ -512,7 +566,13 @@ class AnalyticsRepository:
             CourseCompletion, CourseCompletion.user_email == User.email
         ).filter(
             User.is_superadmin == False
-        ).group_by(
+        )
+
+        # Apply access filter if provided
+        if accessible_emails is not None:
+            query = query.filter(User.email.in_(accessible_emails))
+
+        results = query.group_by(
             User.email, User.name, User.role, User.store
         ).order_by(
             func.count(CourseCompletion.id).desc()
@@ -553,9 +613,9 @@ class AnalyticsRepository:
 
         return results
 
-    def get_store_leaderboard(self, store_id: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """Get leaderboard for a specific store."""
-        results = self.db.query(
+    def get_store_leaderboard(self, store_id: str, limit: int = 10, accessible_emails: set = None) -> List[Dict[str, Any]]:
+        """Get leaderboard for a specific store. Filters by accessible_emails if provided."""
+        query = self.db.query(
             User.email,
             User.name,
             func.count(CourseCompletion.id).label('completions')
@@ -564,7 +624,13 @@ class AnalyticsRepository:
         ).filter(
             User.store == store_id,
             User.is_superadmin == False
-        ).group_by(
+        )
+
+        # Apply access filter if provided
+        if accessible_emails is not None:
+            query = query.filter(User.email.in_(accessible_emails))
+
+        results = query.group_by(
             User.email, User.name
         ).order_by(
             func.count(CourseCompletion.id).desc()
@@ -896,9 +962,15 @@ class AnalyticsRepository:
             "profile_summary": profile
         }
 
-    def get_competency_matrix(self) -> List[Dict[str, Any]]:
-        """Get competency matrix for all users."""
-        users = self.db.query(User).filter(User.is_superadmin == False).limit(50).all()
+    def get_competency_matrix(self, accessible_emails: set = None) -> List[Dict[str, Any]]:
+        """Get competency matrix for all users. Filters by accessible_emails if provided."""
+        query = self.db.query(User).filter(User.is_superadmin == False)
+
+        # Apply access filter if provided
+        if accessible_emails is not None:
+            query = query.filter(User.email.in_(accessible_emails))
+
+        users = query.limit(50).all()
 
         matrix = []
         for user in users:
@@ -914,8 +986,8 @@ class AnalyticsRepository:
 
         return matrix
 
-    def get_company_skill_gaps(self) -> Dict[str, Any]:
-        """Get company-wide skill gap analysis."""
+    def get_company_skill_gaps(self, accessible_emails: set = None) -> Dict[str, Any]:
+        """Get company-wide skill gap analysis. Filters by accessible_emails if provided."""
         return {
             "overall_completion_rate": 0,
             "skill_areas": [],
