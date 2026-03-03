@@ -322,6 +322,7 @@ async def complete_simulation(
     choices: str = Form("[]"),
     outcome: str = Form(""),
     score: int = Form(0),
+    time_spent_seconds: int = Form(0),
     db: Session = Depends(get_db)
 ):
     """
@@ -345,6 +346,7 @@ async def complete_simulation(
         score=float(score),
         passed=passed,
         choices_made=choices_list,
+        time_spent_seconds=time_spent_seconds or 0,
     )
 
     # Persist analytics snapshot so admin reads are instant
@@ -656,6 +658,10 @@ async def get_simulation_analytics_detailed(
         total_completed = sum(1 for p in filtered_progress if p.completed)
         total_passed = sum(1 for p in filtered_progress if p.passed)
         avg_score = sum(p.score for p in filtered_progress) / total_attempts if total_attempts > 0 else 0
+        times = [int(p.time_spent_seconds or 0) for p in filtered_progress if int(p.time_spent_seconds or 0) > 0]
+        avg_time_seconds = round(sum(times) / len(times), 1) if times else 0
+        attempt_dates = [p.completed_at or p.started_at for p in filtered_progress if (p.completed_at or p.started_at)]
+        last_attempt_at = max(attempt_dates) if attempt_dates else None
         
         aggregate = {
             "simulation_id": simulation_id,
@@ -667,8 +673,8 @@ async def get_simulation_analytics_detailed(
             "highest_score": max([p.score for p in filtered_progress], default=0),
             "lowest_score": min([p.score for p in filtered_progress], default=0),
             "pass_rate": (total_passed / total_attempts * 100) if total_attempts > 0 else 0,
-            "avg_time_seconds": 0, # Simplify
-            "last_attempt_at": None,
+            "avg_time_seconds": avg_time_seconds,
+            "last_attempt_at": last_attempt_at.isoformat() if last_attempt_at else None,
             "last_updated": None,
         }
 
@@ -769,9 +775,9 @@ async def get_user_history(
             "score": sub.score,
             "passed": sub.passed,
             "completedAt": sub.completed_at.isoformat() if sub.completed_at else None,
-            "totalSteps": 10, # Mock/Estimate if not stored
-            "wrongAttempts": 0, # Not currently stored in simple model, would need field update
-            "timeSpentSeconds": 300, # Mock
+            "totalSteps": len(sim.nodes) if sim and isinstance(sim.nodes, list) else (sim.total_branches if sim else 0),
+            "wrongAttempts": 0, # Not currently stored in model
+            "timeSpentSeconds": int(sub.time_spent_seconds or 0),
         })
         
     return result
@@ -791,20 +797,23 @@ async def complete_simulation_json(
     passing_score = simulation.passing_score if simulation else 70.0
     passed = data.score >= passing_score
 
-    # We use the repository's complete_simulation or create a new one if it doesn't exist
-    # Since frontend might not have started it via /start endpoint, we just create a record here
-    
-    # Ideally logic should check if attempt exists, but for simplicity/robustness:
-    progress = progress_repo.create_progress({
-        "user_email": data.userId,
-        "simulation_id": data.simulationId,
-        "current_node_id": "end",
-        "completed": True,
-        "started_at": datetime.utcnow(), # Approximate if not tracked
-        "score": data.score,
-        "passed": passed,
-        "choices_made": data.attemptHistory
-    })
+    # Persist using canonical completion path so time_spent_seconds is always stored.
+    completed_at = None
+    if data.completedAt:
+        try:
+            completed_at = datetime.fromisoformat(data.completedAt.replace("Z", "+00:00")).replace(tzinfo=None)
+        except Exception:
+            completed_at = None
+
+    progress = progress_repo.complete_simulation(
+        user_email=data.userId,
+        simulation_id=data.simulationId,
+        score=float(data.score),
+        passed=passed,
+        choices_made=data.attemptHistory or data.choices or [],
+        time_spent_seconds=max(0, int(data.timeSpentSeconds or 0)),
+        completed_at=completed_at,
+    )
 
     # Persist analytics snapshot so admin reads are instant
     _refresh_analytics_snapshot(data.simulationId, db)
@@ -815,7 +824,8 @@ async def complete_simulation_json(
         "id": f"sub_{progress.id}",
         "success": True,
         "passed": passed,
-        "score": data.score
+        "score": data.score,
+        "time_spent_seconds": progress.time_spent_seconds or 0,
     }
 
 

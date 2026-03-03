@@ -33,6 +33,55 @@ def _day_date_range(d: date) -> Tuple[datetime, datetime]:
     return start, end
 
 
+def _get_duration_seconds(record: Any) -> int:
+    """
+    Safely extract duration across schema variants.
+    Some production tables omit time_taken_seconds in ORM models.
+    """
+    for field in ("time_spent_seconds", "time_taken_seconds", "duration_seconds"):
+        value = getattr(record, field, None)
+        if value is not None:
+            try:
+                return int(value)
+            except Exception:
+                return 0
+    return 0
+
+
+def _get_video_duration_seconds(record: Any) -> int:
+    """
+    Best-effort time estimate for video activity across schema/runtime variants.
+    Uses whichever signal is available in priority order.
+    """
+    # If explicit time exists in any variant, prefer it.
+    explicit = _get_duration_seconds(record)
+    if explicit > 0:
+        return explicit
+
+    try:
+        position_seconds = int(getattr(record, "video_position_seconds", 0) or 0)
+    except Exception:
+        position_seconds = 0
+
+    try:
+        max_position_seconds = int(getattr(record, "max_position_reached", 0) or 0)
+    except Exception:
+        max_position_seconds = 0
+
+    try:
+        watched_percent = float(getattr(record, "video_watched_percent", 0) or 0)
+    except Exception:
+        watched_percent = 0.0
+
+    try:
+        duration_seconds = int(getattr(record, "video_duration_seconds", 0) or 0)
+    except Exception:
+        duration_seconds = 0
+
+    estimated_from_percent = int((duration_seconds * watched_percent) / 100.0) if duration_seconds > 0 and watched_percent > 0 else 0
+    return max(position_seconds, max_position_seconds, estimated_from_percent, 0)
+
+
 # ==========================================
 # DASHBOARD ENDPOINTS
 # ==========================================
@@ -143,11 +192,7 @@ def get_calendar_month(
                 bucket_acc[d].append(c.bucket)
 
         # -- Quizzes: day, focus_seconds, score --
-        quizzes = db.query(
-            QuizSubmission.submitted_at,
-            QuizSubmission.time_taken_seconds,
-            QuizSubmission.score,
-        ).filter(
+        quizzes = db.query(QuizSubmission).filter(
             QuizSubmission.user_email == user_email,
             QuizSubmission.submitted_at >= start_dt,
             QuizSubmission.submitted_at < end_dt,
@@ -155,16 +200,12 @@ def get_calendar_month(
         for q in quizzes:
             d = q.submitted_at.date().day
             daily[d]["quizzes"] += 1
-            daily[d]["focus_seconds"] += int(q.time_taken_seconds or 0)
+            daily[d]["focus_seconds"] += _get_duration_seconds(q)
             if q.score is not None:
                 score_acc[d].append(float(q.score))
 
         # -- Assessments: day, focus_seconds, score_percent --
-        assessments = db.query(
-            AssessmentSubmission.submitted_at,
-            AssessmentSubmission.time_taken_seconds,
-            AssessmentSubmission.score_percent,
-        ).filter(
+        assessments = db.query(AssessmentSubmission).filter(
             AssessmentSubmission.user_email == user_email,
             AssessmentSubmission.submitted_at >= start_dt,
             AssessmentSubmission.submitted_at < end_dt,
@@ -172,19 +213,21 @@ def get_calendar_month(
         for a in assessments:
             d = a.submitted_at.date().day
             daily[d]["assessments"] += 1
-            daily[d]["focus_seconds"] += int(a.time_taken_seconds or 0)
+            daily[d]["focus_seconds"] += _get_duration_seconds(a)
             if a.score_percent is not None:
                 score_acc[d].append(float(a.score_percent))
 
-        # -- Video activity: day (only columns needed) --
-        video_updates = db.query(VideoProgress.updated_at).filter(
+        # -- Video activity: day --
+        video_updates = db.query(VideoProgress).filter(
             VideoProgress.user_email == user_email,
             VideoProgress.updated_at >= start_dt,
             VideoProgress.updated_at < end_dt,
             VideoProgress.video_watched_percent > 0,
         ).all()
         for v in video_updates:
-            daily[v.updated_at.date().day]["videos"] += 1
+            d = v.updated_at.date().day
+            daily[d]["videos"] += 1
+            daily[d]["focus_seconds"] += _get_video_duration_seconds(v)
 
         video_completed = db.query(VideoProgress.completed_at).filter(
             VideoProgress.user_email == user_email,
@@ -309,6 +352,9 @@ def get_calendar_day(
     from app.models.quiz import QuizSubmission
     from app.models.tracking import CourseCompletion, AttendanceRecord
     from app.models.assessment import AssessmentSubmission
+    from app.models.simulation import SimulationProgress
+    from app.models.crm import AuditSubmission
+    from app.models.content import Content
 
     # Access control: Verify current user can access the requested user's data
     if not check_access(db, current_user.get('email'), user_email):
@@ -403,9 +449,10 @@ def get_calendar_day(
         }
 
     focus_seconds = 0
+    focus_seconds += sum(_get_video_duration_seconds(v) for v in video_updates)
     focus_seconds += sum(int(c.time_spent_seconds or 0) for c in completions)
-    focus_seconds += sum(int(q.time_taken_seconds or 0) for q in quizzes)
-    focus_seconds += sum(int(a.time_taken_seconds or 0) for a in assessments)
+    focus_seconds += sum(_get_duration_seconds(q) for q in quizzes)
+    focus_seconds += sum(_get_duration_seconds(a) for a in assessments)
     focus_seconds += sum(int(s.time_spent_seconds or 0) for s in sim_started)
 
     scores: List[float] = []
@@ -429,27 +476,44 @@ def get_calendar_day(
             except Exception:
                 return None
 
+    # Resolve content titles for video timeline items to avoid showing raw IDs.
+    video_node_ids = list({v.node_id for v in video_updates if getattr(v, "node_id", None)})
+    content_title_map: Dict[str, str] = {}
+    if video_node_ids:
+        try:
+            content_rows = db.query(Content.id, Content.title).filter(Content.id.in_(video_node_ids)).all()
+            content_title_map = {cid: title for cid, title in content_rows if cid and title}
+        except Exception as e:
+            logger.warning(f"Could not resolve content titles for calendar day timeline: {e}")
+
     timeline: List[Dict[str, Any]] = []
     for v in video_updates:
+        resolved_title = content_title_map.get(v.node_id)
         timeline.append({
             "type": "video",
             "ts": _ts(v.updated_at),
-            "title": "Video Progress",
-            "meta": {"node_id": v.node_id, "watched_percent": v.video_watched_percent, "completed": v.completed},
+            "title": resolved_title or "Video Progress",
+            "meta": {
+                "node_id": v.node_id,
+                "content_title": resolved_title,
+                "watched_percent": v.video_watched_percent,
+                "time_spent_seconds": _get_video_duration_seconds(v),
+                "completed": v.completed,
+            },
         })
     for q in quizzes:
         timeline.append({
             "type": "quiz",
             "ts": _ts(q.submitted_at),
             "title": q.quiz_title,
-            "meta": {"score_percent": q.score, "passed": q.passed, "time_taken_seconds": q.time_taken_seconds},
+            "meta": {"score_percent": q.score, "passed": q.passed, "time_taken_seconds": _get_duration_seconds(q)},
         })
     for a in assessments:
         timeline.append({
             "type": "assessment",
             "ts": _ts(a.submitted_at),
             "title": a.assessment_title or "Assessment",
-            "meta": {"score_percent": a.score_percent, "passed": a.passed, "time_taken_seconds": a.time_taken_seconds},
+            "meta": {"score_percent": a.score_percent, "passed": a.passed, "time_taken_seconds": _get_duration_seconds(a)},
         })
     for c in completions:
         timeline.append({
@@ -497,7 +561,8 @@ def get_calendar_day(
     def _sort_key(item: Dict[str, Any]):
         t = item.get("ts")
         return t or ""
-    timeline = sorted(timeline, key=_sort_key)
+    # Show most recent activity first for better per-day history readability.
+    timeline = sorted(timeline, key=_sort_key, reverse=True)
 
     return {
         "day": day,

@@ -1195,6 +1195,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
   const [assignedProctoring, setAssignedProctoring] = useState([]);
   const [pathNodes, setPathNodes] = useState([]);
   const [hasRealWatchHistory, setHasRealWatchHistory] = useState(false);
+  const [authHeaders, setAuthHeaders] = useState({});
   const [crucialNotif, setCrucialNotif] = useState(null);
   const acknowledgedNotifIds = useRef(new Set()); // Track acknowledged notifications locally
   const [goalModalVisible, setGoalModalVisible] = useState(false);
@@ -1219,6 +1220,18 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
       setExamRefreshKey(prev => prev + 1);
     }, [])
   );
+
+  useEffect(() => {
+    const loadAuthHeaders = async () => {
+      try {
+        const token = await AsyncStorage.getItem('userToken');
+        setAuthHeaders(token ? { Authorization: `Bearer ${token}` } : {});
+      } catch {
+        setAuthHeaders({});
+      }
+    };
+    loadAuthHeaders();
+  }, []);
 
   const handleAcknowledge = async (id) => {
     try {
@@ -1403,10 +1416,11 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
   };
 
   // Prefetch adjacent tab data 2 seconds after mount to make tab switches instant
-  useTabPrefetch([
+  const prefetchTargets = React.useMemo(() => ([
     { url: `${API_URL}/api/v1/self-learning/buckets?user_email=${userEmail || ''}`, ttl: 120000 },
     { url: `${API_URL}/api/v1/analytics/dashboard`, ttl: 60000 },
-  ]);
+  ]), [userEmail]);
+  useTabPrefetch(prefetchTargets, authHeaders);
 
   useEffect(() => {
     // CRITICAL: Fetch crucial notifications FIRST to block app if needed
@@ -1690,7 +1704,8 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
           setQuizModalVisible(false);
           setActiveQuiz(null);
         }}
-        userName="John Doe"
+        userName={userProfile?.name || "User"}
+        userEmail={userEmail}
       />
 
       <NotificationsModal

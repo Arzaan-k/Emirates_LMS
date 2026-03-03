@@ -51,6 +51,7 @@ import ModeSwitcher from '../Components/ModeSwitcher'; // [NEW] Mode Switcher
 import ModeIndicator from '../Components/ModeIndicator'; // [NEW] Mode Indicator
 import ImpactUserPickerModal from '../Components/ImpactUserPickerModal';
 import AdminDailyQuizManager from '../Components/AdminDailyQuizManager';
+import SystemSettingsModal from '../Components/SystemSettingsModal'; // [NEW] System Settings
 
 
 
@@ -178,6 +179,7 @@ export default function ManagerDashboard({ route, navigation }) {
     // [PHASE 2] New Feature Modals
     const [auditLogsVisible, setAuditLogsVisible] = useState(false);
     const [contentLibraryVisible, setContentLibraryVisible] = useState(false);
+    const [systemSettingsVisible, setSystemSettingsVisible] = useState(false); // [NEW]
 
     // User Mode State
     const [userMode, setUserMode] = useState('admin');
@@ -186,6 +188,7 @@ export default function ManagerDashboard({ route, navigation }) {
     const role = userProfile?.role || "Manager";
     const name = userProfile?.name || "User";
     const data = getDashboardData(role);
+    const showAdminOverviewSections = false;
 
     // Privilege checking for role-based access control
     const isSuperAdmin = userProfile?.is_superadmin || userProfile?.role === 'Super Admin';
@@ -329,7 +332,7 @@ export default function ManagerDashboard({ route, navigation }) {
 
     // [NEW] Admin AI Analyst State
     const [adminChatVisible, setAdminChatVisible] = useState(false);
-    const [chatMessages, setChatMessages] = useState([{ role: 'ai', content: "Hello! I'm your AI Analyst. Ask me anything about users, quizzes, or system performance." }]);
+    const [chatMessages, setChatMessages] = useState([{ role: 'ai', content: "Hello! I'm your AI Analyst. I can help answer questions based on your specific user access.\n\nTry asking:\n- How many users have completed the Store Manager path?\n- What are the quiz scores for my team?\n- Which users are active today?" }]);
     const [chatInput, setChatInput] = useState('');
     const [isChatLoading, setIsChatLoading] = useState(false);
 
@@ -338,30 +341,42 @@ export default function ManagerDashboard({ route, navigation }) {
         const query = chatInput;
         setChatInput('');
 
-        // Add user message
+        // Prepare history excluding the first greeting
+        const historyToSend = chatMessages.slice(1).map(m => ({
+            role: m.role,
+            content: m.content
+        }));
+
+        // Add user message to UI
         const newMsgs = [...chatMessages, { role: 'user', content: query }];
         setChatMessages(newMsgs);
         setIsChatLoading(true);
 
         try {
-            // Send request to privilege-aware admin copilot endpoint
+            const token = await AsyncStorage.getItem('userToken');
+
+            // Send request to access-controlled admin copilot endpoint
             const res = await fetch(`${API_URL}/api/v1/ai/admin-copilot`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
                 body: JSON.stringify({
                     question: query,
-                    privileges: userPrivileges,
-                    is_superadmin: isSuperAdmin,
+                    history: historyToSend,
+                    admin_email: userProfile?.email || '',
                     admin_name: name,
-                    admin_role: role
+                    is_superadmin: isSuperAdmin
                 })
             });
             const data = await res.json();
 
             // Add AI response with data sources info
-            let responseContent = data.answer;
+            let responseContent = data.answer || "Sorry, I couldn't generate an answer.";
             if (data.data_sources && data.data_sources.length > 0) {
-                responseContent += `\n\n📊 *Data sources: ${data.data_sources.join(', ')}*`;
+                const uCount = data.accessible_users_count !== undefined ? data.accessible_users_count : 0;
+                responseContent += `\n\n📊 *Data sources: ${data.data_sources.join(', ')} | Accessible Users: ${uCount}*`;
             }
             setChatMessages(prev => [...prev, { role: 'ai', content: responseContent }]);
         } catch (error) {
@@ -1197,21 +1212,25 @@ export default function ManagerDashboard({ route, navigation }) {
                         />
                     </Animated.View>
 
-                    {/* STATS GRID */}
-                    <Text style={styles.sectionTitle}>Key Performance Indicators</Text>
-                    <View style={styles.statsGrid}>
-                        {data.stats.map((item, index) => (
-                            <StatCard key={index} item={item} index={index} />
-                        ))}
-                    </View>
+                    {showAdminOverviewSections && (
+                        <>
+                            {/* STATS GRID */}
+                            <Text style={styles.sectionTitle}>Key Performance Indicators</Text>
+                            <View style={styles.statsGrid}>
+                                {data.stats.map((item, index) => (
+                                    <StatCard key={index} item={item} index={index} />
+                                ))}
+                            </View>
 
-                    {/* ACTIVITY FEED */}
-                    <View style={styles.feedSection}>
-                        <Text style={styles.sectionTitle}>Live Activity</Text>
-                        {data.feed.map((item, index) => (
-                            <FeedItem key={index} item={item} index={index} />
-                        ))}
-                    </View>
+                            {/* ACTIVITY FEED */}
+                            <View style={styles.feedSection}>
+                                <Text style={styles.sectionTitle}>Live Activity</Text>
+                                {data.feed.map((item, index) => (
+                                    <FeedItem key={index} item={item} index={index} />
+                                ))}
+                            </View>
+                        </>
+                    )}
 
                     {/* QUICK ACTIONS */}
                     <Text style={styles.sectionTitle}>Quick Actions</Text>
@@ -1530,6 +1549,19 @@ export default function ManagerDashboard({ route, navigation }) {
                                     <MaterialCommunityIcons name="history" size={24} color="#6366F1" />
                                 </View>
                                 <Text style={styles.actionText}>Audit Logs</Text>
+                            </TouchableOpacity>
+                        )}
+
+                        {/* SYSTEM SETTINGS - SuperAdmin Only */}
+                        {isSuperAdmin && (
+                            <TouchableOpacity
+                                style={styles.actionBtn}
+                                onPress={() => setSystemSettingsVisible(true)}
+                            >
+                                <View style={[styles.actionIcon, { backgroundColor: '#F3E8FF' }]}>
+                                    <MaterialCommunityIcons name="cog-outline" size={24} color="#9333EA" />
+                                </View>
+                                <Text style={styles.actionText}>App Settings</Text>
                             </TouchableOpacity>
                         )}
                     </View>
@@ -2418,6 +2450,12 @@ export default function ManagerDashboard({ route, navigation }) {
                 </View>
             </Modal>
 
+            {/* SYSTEM SETTINGS MODAL */}
+            <SystemSettingsModal
+                visible={systemSettingsVisible}
+                onClose={() => setSystemSettingsVisible(false)}
+            />
+
             {/* CURRICULUM HIERARCHY MODAL */}
             <CurriculumHierarchyModal
                 visible={curriculumHierarchyVisible}
@@ -2509,7 +2547,7 @@ export default function ManagerDashboard({ route, navigation }) {
             />
 
             {/* ADMIN AI ANALYST FLOATING BUTTON */}
-            {isSuperAdmin && (
+            {(isSuperAdmin || userProfile?.has_admin_access) && (
                 <TouchableOpacity
                     style={{
                         position: 'absolute', bottom: 30, right: 30,

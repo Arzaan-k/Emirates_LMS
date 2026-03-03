@@ -720,6 +720,7 @@ export default function ProctoredAssessment({ route, navigation }) {
             const formData = new FormData();
             formData.append('answers', JSON.stringify(userAnswers));
             formData.append('breach_log', JSON.stringify(breachLog));
+            formData.append('time_taken_seconds', String(recordingTime || 0));
 
             // Use correct /api/v1/ endpoints for both scheduled and proctored exams
             const submitUrl = isScheduledExam

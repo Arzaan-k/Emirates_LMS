@@ -90,7 +90,7 @@ const CircularProgress = ({ size = 36, strokeWidth = 3, progress = 0, color = TH
     );
 };
 
-export default function SelfLearningView({ userEmail = 'user', onOpenCourse, refreshKey = 0 }) {
+export default function SelfLearningView({ userEmail = 'user', onOpenCourse, refreshKey = 0, activeCourseUpdate = null }) {
     const [allBuckets, setAllBuckets] = useState([]); // Flat list of all buckets
     const [hierarchy, setHierarchy] = useState([]); // Root level buckets
     const [loading, setLoading] = useState(false); // Start false — only true while actively fetching
@@ -215,6 +215,17 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
     // Refresh data when a lesson is closed (refreshKey incremented by parent)
     useEffect(() => {
         if (refreshKey > 0 && isValidUserEmail(userEmail)) {
+            // Optimistic instant UI update
+            if (activeCourseUpdate && courses.length > 0) {
+                setCourses(prev => prev.map(c =>
+                    c.id === activeCourseUpdate.id ? {
+                        ...c,
+                        watched_percent: activeCourseUpdate.finalPercent,
+                        status: activeCourseUpdate.completed ? 'completed' : c.status
+                    } : c
+                ));
+            }
+
             // Always background refresh hierarchy after lesson close
             fetchDataBackground();
 
@@ -223,12 +234,8 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
                 const currentFolderId = currentPath[currentPath.length - 1].id;
                 const cacheKey = `sl_courses_${currentFolderId}`;
 
-                // On mobile, the async fetch can take a tiny fraction of a second, so we slightly delay the fetch
-                // to make absolutely sure the track-video-progress backend route finishes.
-                setTimeout(() => {
-                    // Try to fetch background explicitly 
-                    fetchCoursesBackground(currentFolderId, cacheKey);
-                }, 1000);
+                // Fetch background explicitly without delay
+                fetchCoursesBackground(currentFolderId, cacheKey);
             }
         }
     }, [refreshKey, userEmail, currentPath]);

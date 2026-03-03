@@ -32,7 +32,14 @@ const Analytics = ({ navigation }) => {
     const fetchUserActivity = async () => {
         try {
             setLoading(true);
-            const response = await fetch(`${API_URL}/api/v1/analytics/dashboard`);
+            const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+            const token = await AsyncStorage.getItem('userToken');
+
+            const response = await fetch(`${API_URL}/api/v1/analytics/dashboard`, {
+                headers: {
+                    'Authorization': `Bearer ${token || ''}`
+                }
+            });
             const data = await response.json();
             setUserActivity(data);
         } catch (error) {

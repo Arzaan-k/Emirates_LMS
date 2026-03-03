@@ -71,11 +71,15 @@ export default function AIScanner({ onClose }) {
         try {
             const formData = new FormData();
             formData.append('section', section.label);
-            formData.append('file', {
-                uri: photo.uri,
-                name: 'hygiene.jpg',
-                type: 'image/jpeg'
-            });
+            if (photo.base64) {
+                formData.append('file_b64', photo.base64);
+            } else {
+                formData.append('file', {
+                    uri: photo.uri,
+                    name: 'hygiene.jpg',
+                    type: 'image/jpeg'
+                });
+            }
 
             const controller = new AbortController();
             const timeoutId = setTimeout(() => {

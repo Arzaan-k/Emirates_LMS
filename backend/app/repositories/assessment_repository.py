@@ -129,12 +129,35 @@ class ScheduledExamRepository(BaseRepository[ScheduledExam]):
 
     def get_user_assigned_exams(self, user_email: str) -> List[ScheduledExam]:
         """Get exams assigned to a specific user."""
-        # This uses JSON contains - might need adjustment based on DB
-        exams = self.db.query(ScheduledExam).all()
-        return [
-            exam for exam in exams
-            if user_email in (exam.assigned_users or [])
-        ]
+        def extract_email(entry: Any) -> str:
+            if isinstance(entry, str):
+                return entry.strip().lower()
+            if isinstance(entry, dict):
+                return str(
+                    entry.get("email")
+                    or entry.get("user_email")
+                    or entry.get("userEmail")
+                    or ""
+                ).strip().lower()
+            return ""
+
+        target = (user_email or "").strip().lower()
+        if not target:
+            return []
+
+        from sqlalchemy import cast, String
+        # Pre-filter at the DB level to dramatically reduce loaded rows
+        exams = self.db.query(ScheduledExam).filter(
+            cast(ScheduledExam.assigned_users, String).ilike(f"%{target}%")
+        ).all()
+        
+        matched: List[ScheduledExam] = []
+        for exam in exams:
+            assigned = exam.assigned_users or []
+            normalized_assigned = [extract_email(v) for v in assigned]
+            if target in normalized_assigned:
+                matched.append(exam)
+        return matched
 
     def update_status(self, exam_id: str, status: str) -> Optional[ScheduledExam]:
         """Update exam status."""
@@ -274,6 +297,33 @@ class ExamAttendanceRepository(BaseRepository[ExamAttendance]):
             "passed": stats.passed or 0,
             "avg_score": float(stats.avg_score or 0)
         }
+
+    def get_all_aggregated_stats(self, exam_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Get aggregated stats for multiple exams in a single DB query."""
+        if not exam_ids:
+            return {}
+
+        stats_list = self.db.query(
+            ExamAttendance.exam_id,
+            func.count(ExamAttendance.id).label('total'),
+            func.sum(case((ExamAttendance.marked_present == True, 1), else_=0)).label('present'),
+            func.sum(case((and_(ExamAttendance.marked_present == False, ExamAttendance.marked_by != None), 1), else_=0)).label('absent'),
+            func.sum(case((ExamAttendance.completed == True, 1), else_=0)).label('completed'),
+            func.sum(case((and_(ExamAttendance.completed == True, ExamAttendance.passed == True), 1), else_=0)).label('passed'),
+            func.avg(case((ExamAttendance.completed == True, ExamAttendance.score), else_=None)).label('avg_score')
+        ).filter(ExamAttendance.exam_id.in_(exam_ids)).group_by(ExamAttendance.exam_id).all()
+
+        results = {}
+        for stats in stats_list:
+            results[stats.exam_id] = {
+                "total": stats.total or 0,
+                "present": stats.present or 0,
+                "absent": stats.absent or 0,
+                "completed": stats.completed or 0,
+                "passed": stats.passed or 0,
+                "avg_score": float(stats.avg_score or 0)
+            }
+        return results
 
     def get_completed_count(self, exam_id: str) -> int:
         """Get count of users who completed the exam."""

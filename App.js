@@ -5,8 +5,9 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as SecureStore from "expo-secure-store";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { usePreventScreenCapture } from "expo-screen-capture";
+import * as ScreenCapture from "expo-screen-capture";
 import Intro from "./Screens/Intro";
+import API_URL from "./config";
 import {
   useFonts,
   Poppins_600SemiBold,
@@ -93,8 +94,35 @@ function AuthGate({ navigation }) {
 }
 
 function App() {
-  // Prevent screenshots and screen recordings on all screens (native only)
-  usePreventScreenCapture();
+  // Fetch system settings to determine screenshot allowance
+  useEffect(() => {
+    const fetchScreenshotSetting = async () => {
+      if (Platform.OS === 'web') return; // Not supported on web
+
+      try {
+        const response = await fetch(`${API_URL}/api/v1/system/settings`);
+        if (response.ok) {
+          const data = await response.json();
+          const allowScreenshot = data?.settings?.allow_screenshots?.value_bool;
+
+          if (allowScreenshot) {
+            await ScreenCapture.allowScreenCaptureAsync();
+          } else {
+            await ScreenCapture.preventScreenCaptureAsync();
+          }
+        }
+      } catch (error) {
+        console.log("Failed to fetch screenshot setting:", error);
+        // Default to secure if fetch fails
+        await ScreenCapture.preventScreenCaptureAsync();
+      }
+    };
+
+    fetchScreenshotSetting();
+    // Re-check periodically or simply on mount
+    const interval = setInterval(fetchScreenshotSetting, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   const [fontsLoaded] = useFonts({
     Poppins_600SemiBold,

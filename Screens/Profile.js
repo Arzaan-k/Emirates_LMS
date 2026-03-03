@@ -32,6 +32,7 @@ const ActivityCalendar = ({ userEmail }) => {
     const [modalVisible, setModalVisible] = useState(false);
 
     const [calendarLoading, setCalendarLoading] = useState(false);
+    const [dayDetailsLoading, setDayDetailsLoading] = useState(false);
 
     const today = new Date();
     const year = currentDate.getFullYear();
@@ -40,6 +41,13 @@ const ActivityCalendar = ({ userEmail }) => {
 
     const [activityData, setActivityData] = useState({});
     const [selectedTimeline, setSelectedTimeline] = useState([]);
+
+    const toLocalDateKey = (targetDate) => {
+        const y = targetDate.getFullYear();
+        const m = String(targetDate.getMonth() + 1).padStart(2, '0');
+        const d = String(targetDate.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    };
 
     const fetchMonthData = async (targetDate) => {
         try {
@@ -88,7 +96,8 @@ const ActivityCalendar = ({ userEmail }) => {
     const fetchDayData = async (targetDate) => {
         try {
             if (!userEmail) return null;
-            const isoDay = targetDate.toISOString().slice(0, 10);
+            // Use local calendar date; toISOString can shift the day in some timezones.
+            const isoDay = toLocalDateKey(targetDate);
             const token = await AsyncStorage.getItem('userToken');
             const res = await fetch(
                 `${API_URL}/api/v1/analytics/calendar/day?user_email=${encodeURIComponent(userEmail)}&day=${encodeURIComponent(isoDay)}`,
@@ -118,8 +127,11 @@ const ActivityCalendar = ({ userEmail }) => {
     }, [year, month]);
 
     const changeMonth = (increment) => {
-        const newDate = new Date(currentDate.setMonth(currentDate.getMonth() + increment));
-        setCurrentDate(new Date(newDate));
+        setCurrentDate((prev) => {
+            const next = new Date(prev);
+            next.setMonth(next.getMonth() + increment);
+            return next;
+        });
     };
 
     const getDaysArray = () => {
@@ -141,6 +153,7 @@ const ActivityCalendar = ({ userEmail }) => {
         setSelectedDay({ day, ...(local || {}), year, month });
         setSelectedTimeline([]);
         setModalVisible(true);
+        setDayDetailsLoading(true);
 
         const target = new Date(year, month, day);
         fetchDayData(target).then((detail) => {
@@ -163,6 +176,8 @@ const ActivityCalendar = ({ userEmail }) => {
                 focusTime: `${summary.focus_minutes || 0}m`,
                 topSkill: summary.topSkill || 'General',
             }));
+        }).finally(() => {
+            setDayDetailsLoading(false);
         });
     };
 
@@ -211,7 +226,13 @@ const ActivityCalendar = ({ userEmail }) => {
                     let cellBorder = 'transparent';
 
                     if (hasActivity) {
-                        const totalActs = hasActivity.videos + hasActivity.quizzes;
+                        const totalActs =
+                            (hasActivity.videos || 0) +
+                            (hasActivity.quizzes || 0) +
+                            (hasActivity.assessments || 0) +
+                            (hasActivity.simulations || 0) +
+                            (hasActivity.completions || 0) +
+                            (hasActivity.audits || 0);
                         if (totalActs > 4) {
                             cellBg = '#F59E0B'; // Deep Gold
                             cellText = '#FFF';
@@ -321,7 +342,11 @@ const ActivityCalendar = ({ userEmail }) => {
                                             Activity Timeline
                                         </Text>
 
-                                        {selectedTimeline.length === 0 ? (
+                                        {dayDetailsLoading ? (
+                                            <View style={{ paddingVertical: 10 }}>
+                                                <ActivityIndicator size="small" color="#F59E0B" />
+                                            </View>
+                                        ) : selectedTimeline.length === 0 ? (
                                             <View style={{ paddingVertical: 10 }}>
                                                 <Text style={{ color: '#6B7280' }}>
                                                     No detailed activity items found for this date.
@@ -334,6 +359,20 @@ const ActivityCalendar = ({ userEmail }) => {
                                                     const title = item?.title || 'Activity';
                                                     const ts = item?.ts ? new Date(item.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
                                                     const meta = item?.meta || {};
+                                                    const detailParts = [
+                                                        t.toUpperCase(),
+                                                        meta?.store,
+                                                        meta?.category,
+                                                        meta?.simulation_id,
+                                                        (!meta?.content_title && meta?.node_id) ? meta.node_id : null
+                                                    ].filter(Boolean);
+                                                    const hasMetrics =
+                                                        meta?.time_spent_seconds !== undefined ||
+                                                        meta?.time_taken_seconds !== undefined ||
+                                                        meta?.duration_minutes !== undefined ||
+                                                        meta?.score_percent !== undefined ||
+                                                        meta?.completion_rate !== undefined ||
+                                                        meta?.score !== undefined;
 
                                                     const iconName =
                                                         t === 'quiz' ? 'note-text-outline' :
@@ -372,14 +411,14 @@ const ActivityCalendar = ({ userEmail }) => {
                                                                             {title}
                                                                         </Text>
                                                                         <Text style={{ color: '#6B7280', marginTop: 2 }} numberOfLines={2}>
-                                                                            {t.toUpperCase()}{meta?.store ? ` • ${meta.store}` : ''}{meta?.category ? ` • ${meta.category}` : ''}{meta?.simulation_id ? ` • ${meta.simulation_id}` : ''}{meta?.node_id ? ` • ${meta.node_id}` : ''}
+                                                                            {detailParts.join(' • ')}
                                                                         </Text>
                                                                     </View>
                                                                 </View>
                                                                 <Text style={{ color: '#6B7280', fontWeight: '600' }}>{ts}</Text>
                                                             </View>
 
-                                                            {(meta?.time_spent_seconds || meta?.time_taken_seconds || meta?.duration_minutes || meta?.score_percent || meta?.completion_rate || meta?.score) !== undefined && (
+                                                            {hasMetrics && (
                                                                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 8 }}>
                                                                     {meta?.time_spent_seconds ? (
                                                                         <Text style={{ color: '#374151', marginRight: 10 }}>

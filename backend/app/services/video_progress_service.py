@@ -32,6 +32,8 @@ DEFAULT_REQUIREMENTS = {
 # In-memory cache for frequently accessed progress (improves performance)
 _progress_cache: Dict[str, Dict[str, Any]] = {}
 _quiz_cache: Dict[str, List[Dict]] = {}
+_node_has_quiz_cache: Dict[str, bool] = {}
+_feedback_cache: Dict[str, bool] = {}
 
 
 class VideoProgressService:
@@ -181,7 +183,11 @@ class VideoProgressService:
 
         if include_requirements:
             # Check if this content has a transcript/quiz
-            has_quiz = self._content_has_quiz(node_id)
+            if node_id in _node_has_quiz_cache:
+                has_quiz = _node_has_quiz_cache[node_id]
+            else:
+                has_quiz = self._content_has_quiz(node_id)
+                _node_has_quiz_cache[node_id] = has_quiz
             
             # Add completion validation
             requirements = DEFAULT_REQUIREMENTS.copy()
@@ -195,20 +201,26 @@ class VideoProgressService:
             result["has_quiz"] = has_quiz
             
             # Check feedback
-            from app.models.notification import CourseSurvey, SurveyResponse, CourseFeedback
-            feedback_submitted = False
-            
-            survey = self.db.query(CourseSurvey).filter(CourseSurvey.course_id == node_id, CourseSurvey.is_active == True).first()
-            if survey:
-                existing = self.db.query(SurveyResponse).filter(SurveyResponse.survey_id == survey.id, SurveyResponse.user_email == user_email).first()
-                if existing:
-                    feedback_submitted = True
-            
-            if not feedback_submitted:
-                legacy = self.db.query(CourseFeedback).filter(CourseFeedback.course_id == node_id, CourseFeedback.user_email == user_email).first()
-                if legacy:
-                    feedback_submitted = True
-                    
+            if cache_key in _feedback_cache:
+                feedback_submitted = _feedback_cache[cache_key]
+            else:
+                from app.models.notification import CourseSurvey, SurveyResponse, CourseFeedback
+                feedback_submitted = False
+                
+                survey = self.db.query(CourseSurvey).filter(CourseSurvey.course_id == node_id, CourseSurvey.is_active == True).first()
+                if survey:
+                    existing = self.db.query(SurveyResponse).filter(SurveyResponse.survey_id == survey.id, SurveyResponse.user_email == user_email).first()
+                    if existing:
+                        feedback_submitted = True
+                
+                if not feedback_submitted:
+                    legacy = self.db.query(CourseFeedback).filter(CourseFeedback.course_id == node_id, CourseFeedback.user_email == user_email).first()
+                    if legacy:
+                        feedback_submitted = True
+                
+                if feedback_submitted:
+                    _feedback_cache[cache_key] = True
+                        
             result["feedback_submitted"] = feedback_submitted
 
         return result

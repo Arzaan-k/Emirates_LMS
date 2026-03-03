@@ -203,6 +203,7 @@ def init_db():
         simulation,
         analytics,
         daily_quiz,
+        system,
     )
 
     logger.info("Creating database tables...")

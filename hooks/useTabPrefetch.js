@@ -38,5 +38,5 @@ export default function useTabPrefetch(urls = [], headers = {}, delayMs = 2000) 
     }, delayMs);
 
     return () => clearTimeout(timer);
-  }, []);  // Run once on mount — intentional
+  }, [delayMs, urls, headers?.Authorization]);
 }

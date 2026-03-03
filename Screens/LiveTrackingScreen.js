@@ -63,6 +63,7 @@ export default function LiveTrackingScreen({ navigation }) {
                 try {
                     const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
                     if (data?.type === 'mapReady') {
+                        console.log('[React Web] Map ready signal received from iframe');
                         setMapReady(true);
                     }
                 } catch (e) {
@@ -74,6 +75,14 @@ export default function LiveTrackingScreen({ navigation }) {
         }
     }, []);
 
+    // Add markers whenever map becomes ready AND we have locations
+    useEffect(() => {
+        if (mapReady && locations.length > 0 && webViewRef.current) {
+            console.log('[React] Map is ready and we have', locations.length, 'locations - updating markers');
+            updateMarkersInWebView(locations);
+        }
+    }, [mapReady, locations]);
+
     const fetchLocations = async () => {
         try {
             const token = await AsyncStorage.getItem('userToken');
@@ -83,6 +92,17 @@ export default function LiveTrackingScreen({ navigation }) {
                 }
             });
             const data = await res.json();
+
+            console.log('=== TRACKING DATA FROM BACKEND ===');
+            console.log('Total locations:', data.length);
+            data.forEach((loc, idx) => {
+                console.log(`\n[${idx}] ${loc.user_name || loc.user_email}:`);
+                console.log(`  - Active: ${loc.active}`);
+                console.log(`  - Has GPS: ${loc.latitude ? 'YES' : 'NO'} (lat: ${loc.latitude}, lng: ${loc.longitude})`);
+                console.log(`  - Last seen: ${loc.last_seen_minutes} min ago`);
+                console.log(`  - Timestamp: ${loc.timestamp}`);
+            });
+            console.log('===================================\n');
 
             // FIX: Map backend `user_name` to frontend `name` and provide fallback
             // This prevents "Cannot read property 'split' of undefined"
@@ -100,10 +120,14 @@ export default function LiveTrackingScreen({ navigation }) {
                     longitude: safeData[0].longitude,
                     zoom: 13,
                 });
-                // Update markers in WebView if map is ready
-                if (mapReady && webViewRef.current) {
-                    updateMarkersInWebView(safeData);
-                }
+            }
+
+            // ALWAYS update markers if map is ready, regardless of whether we're centering
+            if (mapReady && webViewRef.current) {
+                console.log('Updating markers in WebView, count:', safeData.length);
+                updateMarkersInWebView(safeData);
+            } else {
+                console.warn('Cannot update markers - Map ready:', mapReady, 'WebView ref:', !!webViewRef.current);
             }
         } catch (err) {
             console.error('Failed to fetch locations:', err);
@@ -113,13 +137,27 @@ export default function LiveTrackingScreen({ navigation }) {
     };
 
     const updateMarkersInWebView = (data) => {
+        console.log('updateMarkersInWebView called with', data.length, 'locations');
+        console.log('Platform:', Platform.OS);
+
         if (Platform.OS === 'web') {
-            webViewRef.current?.contentWindow?.postMessage(JSON.stringify({ type: 'updateMarkers', data }), '*');
+            console.log('Sending updateMarkers message to iframe...');
+            try {
+                webViewRef.current?.contentWindow?.postMessage(
+                    JSON.stringify({ type: 'updateMarkers', data }),
+                    '*'
+                );
+                console.log('Message sent to iframe');
+            } catch (e) {
+                console.error('Error sending message to iframe:', e);
+            }
         } else {
             const markersJS = `
+                console.log('Received updateMarkers call from React Native');
                 updateMarkers(${JSON.stringify(data)});
                 true;
             `;
+            console.log('Injecting JavaScript into WebView...');
             webViewRef.current?.injectJavaScript(markersJS);
         }
     };
@@ -269,33 +307,45 @@ export default function LiveTrackingScreen({ navigation }) {
 
             // Update all markers (Employees)
             function updateMarkers(locations) {
+                console.log('[MAP] updateMarkers called with', locations.length, 'locations');
+
                 // Clear existing employee markers
+                var removedCount = Object.values(markers).length;
                 Object.values(markers).forEach(m => map.removeLayer(m));
                 markers = {};
+                console.log('[MAP] Removed', removedCount, 'existing employee markers');
 
                 // Add new markers
-                locations.forEach(function(loc) {
+                var addedCount = 0;
+                var skippedCount = 0;
+
+                locations.forEach(function(loc, idx) {
+                    console.log('[MAP] Processing location', idx, ':', loc.name, '- Active:', loc.active, '- GPS:', loc.latitude, loc.longitude);
+
                     if (loc.latitude && loc.longitude) {
                         var initials = getInitials(loc.name);
                         var icon = createIcon(initials, loc.active);
-                        
+
                         var popup = '<div class="popup-name">' + loc.name + '</div>' +
                                    '<div class="popup-status" style="color: ' + (loc.active ? '#10B981' : '#9CA3AF') + '">' +
                                    (loc.active ? '● Tracking Active' : '○ Offline') + '</div>' +
                                    '<div class="popup-time">Last updated: ' + new Date(loc.timestamp).toLocaleTimeString() + '</div>';
-                        
+
                         var marker = L.marker([loc.latitude, loc.longitude], { icon: icon })
                             .bindPopup(popup)
                             .addTo(map);
-                        
+
                         markers[loc.user_email] = marker;
+                        addedCount++;
+                        console.log('[MAP] ✓ Added marker for', loc.name, 'at', loc.latitude, loc.longitude);
+                    } else {
+                        skippedCount++;
+                        console.warn('[MAP] ✗ Skipped', loc.name, '- No GPS coordinates (lat:', loc.latitude, 'lng:', loc.longitude + ')');
                     }
                 });
 
-                // Do NOT autofit bounds if only stores are present to avoid zooming out too much or jumping
-                // Only fit bounds if we have specific employee locations to show, otherwise default view is fine
-                // But user might want to see everything. 
-                // Let's stick to default view unless specific employee is selected or updated.
+                console.log('[MAP] Markers update complete: Added', addedCount, 'Skipped', skippedCount);
+                console.log('[MAP] Total employee markers now:', Object.keys(markers).length);
             }
 
             // Center map on coordinates
@@ -325,13 +375,16 @@ export default function LiveTrackingScreen({ navigation }) {
             }
 
             // Notify React Native that map is ready
+            // Reduced timeout to 500ms for faster marker display
             setTimeout(function() {
+                console.log('[MAP] Sending mapReady signal to parent');
                 if (window.ReactNativeWebView) {
                     window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'mapReady' }));
                 } else {
                     window.parent.postMessage(JSON.stringify({ type: 'mapReady' }), '*');
                 }
-            }, 1000);
+                console.log('[MAP] Map ready signal sent!');
+            }, 500);
 
             // [NEW] Listen for messages from Parent (Web & Native)
             window.addEventListener('message', function(event) {
@@ -356,8 +409,11 @@ export default function LiveTrackingScreen({ navigation }) {
         try {
             const data = JSON.parse(event.nativeEvent.data);
             if (data.type === 'mapReady') {
+                console.log('[React] Map is now ready! Updating markers...');
                 setMapReady(true);
+                // Important: Add markers as soon as map is ready
                 if (locations.length > 0) {
+                    console.log('[React] Map just became ready, adding', locations.length, 'markers now');
                     updateMarkersInWebView(locations);
                 }
             }

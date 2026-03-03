@@ -643,6 +643,7 @@ export default function Courses({ userEmail = "user" }) {
     const [activeLesson, setActiveLesson] = useState(null);
     const [activeLessonWasComplete, setActiveLessonWasComplete] = useState(false);
     const [slRefreshKey, setSlRefreshKey] = useState(0);
+    const [slCourseUpdate, setSlCourseUpdate] = useState(null); // Tracks instant progress updates
     const [slCongratsVisible, setSlCongratsVisible] = useState(false);
     const [slCongratsInfo, setSlCongratsInfo] = useState(null);
     const [feedbackVisible, setFeedbackVisible] = useState(false);
@@ -683,8 +684,8 @@ export default function Courses({ userEmail = "user" }) {
                         <Text style={styles.pageTitle} numberOfLines={1} adjustsFontSizeToFit>Employee Learning Path</Text>
                         <Text style={styles.subTitle}>
                             {learningPathTab === 'self_learning' ? '📚 Self Learning Journey'
-                             : learningPathTab === 'career_progression' ? '🚀 Career Progression'
-                             : '🧠 Daily Quiz'}
+                                : learningPathTab === 'career_progression' ? '🚀 Career Progression'
+                                    : '🧠 Daily Quiz'}
                         </Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -713,18 +714,24 @@ export default function Courses({ userEmail = "user" }) {
                         ]}
                         onPress={() => handlePathTabChange('self_learning')}
                     >
-                        <MaterialCommunityIcons
-                            name="school"
-                            size={18}
-                            color={learningPathTab === 'self_learning' ? '#FFF' : '#10B981'}
-                        />
-                        <Text style={[
-                            styles.learningPathTabText,
-                            learningPathTab === 'self_learning' && styles.learningPathTabTextActive
-                        ]}>Self Learning</Text>
+                        <View style={styles.tabContentRow}>
+                            <MaterialCommunityIcons
+                                name="school"
+                                size={18}
+                                color={learningPathTab === 'self_learning' ? '#FFF' : '#10B981'}
+                            />
+                            <Text style={[
+                                styles.learningPathTabText,
+                                learningPathTab === 'self_learning' && styles.learningPathTabTextActive
+                            ]}>Self Learning</Text>
+                        </View>
                         {/* Progress Badge */}
                         {selfLearningStatus.total_courses > 0 && (
-                            <View style={[styles.progressBadge, { backgroundColor: learningPathTab === 'self_learning' ? 'rgba(255,255,255,0.3)' : '#D1FAE5' }]}>
+                            <View style={[
+                                styles.progressBadge,
+                                styles.progressBadgeFloating,
+                                { backgroundColor: learningPathTab === 'self_learning' ? 'rgba(255,255,255,0.3)' : '#D1FAE5' }
+                            ]}>
                                 <Text style={[styles.progressBadgeText, { color: learningPathTab === 'self_learning' ? '#FFF' : '#059669' }]}>
                                     {selfLearningStatus.completed_courses}/{selfLearningStatus.total_courses}
                                 </Text>
@@ -779,6 +786,7 @@ export default function Courses({ userEmail = "user" }) {
                     <SelfLearningView
                         userEmail={userEmail}
                         refreshKey={slRefreshKey}
+                        activeCourseUpdate={slCourseUpdate}
                         onOpenCourse={(course) => {
                             setActiveLessonWasComplete(!!(course.status === 'completed' || course.completed));
                             setActiveLesson(course);
@@ -801,11 +809,21 @@ export default function Courses({ userEmail = "user" }) {
             {activeLesson && (
                 <LessonView
                     lesson={activeLesson}
-                    onClose={(completionResult) => {
+                    onClose={(completionResult, finalPercent) => {
                         const justCompleted = !activeLessonWasComplete && !!(completionResult);
                         const lessonTitle = activeLesson.title || 'Module';
                         const lessonId = activeLesson.id;
                         const lessonBucket = activeLesson.bucket;
+
+                        // Optimistic immediate UI update
+                        if (finalPercent !== undefined) {
+                            setSlCourseUpdate({
+                                id: lessonId,
+                                finalPercent: finalPercent,
+                                completed: !!completionResult || activeLessonWasComplete
+                            });
+                        }
+
                         setActiveLesson(null);
                         setSlRefreshKey(k => k + 1);
 
@@ -1071,6 +1089,16 @@ const styles = StyleSheet.create({
         borderWidth: 1.5,
         borderColor: '#E5E7EB',
         gap: 6,
+        minHeight: 54,
+        position: 'relative',
+        overflow: 'hidden',
+    },
+    tabContentRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        flexShrink: 1,
     },
     learningPathTabActive: {
         backgroundColor: '#10B981',
@@ -1086,9 +1114,11 @@ const styles = StyleSheet.create({
         opacity: 0.7,
     },
     learningPathTabText: {
-        fontSize: 13,
+        fontSize: 12,
         fontFamily: 'Poppins_600SemiBold',
         color: '#374151',
+        textAlign: 'center',
+        flexShrink: 1,
     },
     learningPathTabTextActive: {
         color: '#FFF',
@@ -1100,6 +1130,11 @@ const styles = StyleSheet.create({
         paddingHorizontal: 8,
         paddingVertical: 2,
         borderRadius: 10,
+    },
+    progressBadgeFloating: {
+        position: 'absolute',
+        top: 4,
+        right: 4,
     },
     progressBadgeText: {
         fontSize: 11,

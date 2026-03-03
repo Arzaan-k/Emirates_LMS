@@ -97,9 +97,10 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
 
     // Select all completed users for impact
     const selectAllCompletedUsers = () => {
-        if (affectedUsers?.completed_users) {
-            setSelectedImpactedUsers(new Set(affectedUsers.completed_users.map(u => u.email)));
-        }
+        let allUsers = [];
+        if (affectedUsers?.completed_users) allUsers = [...allUsers, ...affectedUsers.completed_users.map(u => u.email)];
+        if (affectedUsers?.in_progress_users) allUsers = [...allUsers, ...affectedUsers.in_progress_users.map(u => u.email)];
+        setSelectedImpactedUsers(new Set(allUsers));
     };
 
     // Deselect all users (no one will be impacted)
@@ -318,257 +319,261 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                 {/* CONTENT */}
                 <View style={styles.content}>
 
-                    {/* ADD FILES BTN */}
-                    <TouchableOpacity style={styles.addBtn} onPress={pickFiles}>
-                        <MaterialCommunityIcons name="cloud-upload-outline" size={28} color="#F59E0B" />
-                        <Text style={styles.addBtnText}>Select Files</Text>
-                    </TouchableOpacity>
-
-                    <Text style={styles.sectionLabel}>Course Bucket (Optional)</Text>
-                    {(() => {
-                        const pathType = isSelfLearning ? 'self_learning' : 'career_progression';
-                        // Filter buckets by learning path type
-                        const filteredBuckets = courseBuckets.filter(b =>
-                            !b.learning_path_type ||
-                            b.learning_path_type === pathType ||
-                            b.show_in_both_paths
-                        );
-
-                        // Sort by folder_path or name to ensure hierarchical visual order
-                        const sortedBuckets = [...filteredBuckets].sort((a, b) =>
-                            (a.folder_path || a.name).localeCompare(b.folder_path || b.name)
-                        );
-
-                        return (
-                            <View style={{ marginBottom: 15 }}>
-                                <ScrollView
-                                    nestedScrollEnabled={true}
-                                    showsVerticalScrollIndicator={true}
-                                    style={{
-                                        maxHeight: 180,
-                                        borderWidth: 1,
-                                        borderColor: '#E5E7EB',
-                                        borderRadius: 12,
-                                        padding: 8,
-                                        backgroundColor: '#F9FAFB'
-                                    }}
-                                    contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}
-                                >
-                                    <TouchableOpacity
-                                        onPress={() => setSelectedBucket(null)}
-                                        style={[
-                                            styles.bucketChip,
-                                            !selectedBucket && styles.bucketChipSelected,
-                                            { marginBottom: 8 }
-                                        ]}
-                                    >
-                                        <MaterialCommunityIcons name="close-circle" size={16} color={!selectedBucket ? '#FFF' : '#6B7280'} />
-                                        <Text style={[styles.bucketChipText, !selectedBucket && { color: '#FFF' }]}>None</Text>
-                                    </TouchableOpacity>
-                                    {sortedBuckets.map((bucket) => {
-                                        // Format hierarchy name cleanly (e.g. Operations > Kitchen)
-                                        const pathParts = bucket.folder_path ? bucket.folder_path.split('/') : [bucket.name];
-                                        const displayName = pathParts.length > 1
-                                            ? `${pathParts[pathParts.length - 2]} > ${pathParts[pathParts.length - 1]}`
-                                            : pathParts[0];
-
-                                        return (
-                                            <TouchableOpacity
-                                                key={bucket.id}
-                                                onPress={() => setSelectedBucket(selectedBucket === bucket.id ? null : bucket.id)}
-                                                style={[
-                                                    styles.bucketChip,
-                                                    selectedBucket === bucket.id && { backgroundColor: bucket.color || '#3B82F6', borderColor: bucket.color || '#3B82F6' },
-                                                    { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, marginBottom: 8 }
-                                                ]}
-                                            >
-                                                <MaterialCommunityIcons
-                                                    name={bucket.icon || 'folder'}
-                                                    size={14}
-                                                    color={selectedBucket === bucket.id ? '#FFF' : (bucket.color || '#6B7280')}
-                                                />
-                                                <Text style={[
-                                                    styles.bucketChipText,
-                                                    { fontSize: 13, marginLeft: 6 },
-                                                    selectedBucket === bucket.id && { color: '#FFF' }
-                                                ]}>{displayName}</Text>
-                                            </TouchableOpacity>
-                                        );
-                                    })}
-                                </ScrollView>
-                            </View>
-                        );
-                    })()}
-
-                    {/* PATH TOGGLE */}
-                    <View style={styles.optionRow}>
-                        <View style={{ flex: 1 }}>
-                            <Text style={styles.optionTitle}>Add to Learning Path</Text>
-                            <Text style={styles.optionDesc}>Automatically add these to the user's journey map in this order.</Text>
-                        </View>
-                        <Switch
-                            value={isPathNode}
-                            onValueChange={setIsPathNode}
-                            trackColor={{ false: "#E5E7EB", true: "#F59E0B" }}
-                        />
-                    </View>
-
-                    {/* SELF LEARNING TOGGLE - NEW - Only visible if Path is enabled */}
-                    {isPathNode && (
-                        <View style={[styles.optionRow, { borderColor: isSelfLearning ? '#10B981' : '#E5E7EB', backgroundColor: isSelfLearning ? '#F0FDF4' : '#FFF' }]}>
-                            <View style={{ flex: 1 }}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                    <MaterialCommunityIcons
-                                        name="school"
-                                        size={18}
-                                        color={isSelfLearning ? '#10B981' : '#6B7280'}
-                                        style={{ marginRight: 6 }}
-                                    />
-                                    <Text style={[styles.optionTitle, isSelfLearning && { color: '#047857' }]}>Self Learning Path</Text>
-                                </View>
-                                <Text style={styles.optionDesc}>
-                                    {isSelfLearning
-                                        ? "Courses for mandatory onboarding (Basics, SOPs, Compliance)"
-                                        : "Enable to add to Self Learning path instead of Career Progression"}
-                                </Text>
-                            </View>
-                            <Switch
-                                value={isSelfLearning}
-                                onValueChange={setIsSelfLearning}
-                                trackColor={{ false: "#E5E7EB", true: "#10B981" }}
-                                thumbColor={isSelfLearning ? "#059669" : "#f4f3f4"}
-                            />
-                        </View>
-                    )}
-
-                    {/* PATH TYPE INDICATOR */}
-                    {isPathNode && (
-                        <View style={[styles.pathIndicator, { backgroundColor: isSelfLearning ? '#ECFDF5' : '#FFF7ED', borderColor: isSelfLearning ? '#A7F3D0' : '#FED7AA' }]}>
-                            <MaterialCommunityIcons
-                                name={isSelfLearning ? "book-education" : "trending-up"}
-                                size={20}
-                                color={isSelfLearning ? '#10B981' : '#F59E0B'}
-                            />
-                            <Text style={[styles.pathIndicatorText, { color: isSelfLearning ? '#047857' : '#D97706' }]}>
-                                {isSelfLearning ? '📚 Self Learning Path' : '🚀 Career Progression Path'}
-                            </Text>
-                        </View>
-                    )}
-
-                    {/* IMPACT EXISTING USERS SETTING */}
-                    {isPathNode && (
-                        <View style={styles.impactSettingContainer}>
-                            <View style={styles.impactSettingHeader}>
-                                <MaterialIcons name="info-outline" size={18} color="#3B82F6" />
-                                <Text style={styles.impactSettingTitle}>Impact Existing Users' Progress</Text>
-                            </View>
-                            <Text style={styles.impactSettingDesc}>
-                                Choose whether new courses affect existing users who have already completed this path.
-                            </Text>
-                            <View style={styles.impactButtons}>
-                                <TouchableOpacity
-                                    style={[
-                                        styles.impactButton,
-                                        impactExisting && styles.impactButtonActive
-                                    ]}
-                                    onPress={() => {
-                                        setImpactExisting(true);
-                                        if (affectedUsers?.completed_users) {
-                                            setSelectedImpactedUsers(new Set(affectedUsers.completed_users.map(u => u.email)));
-                                        }
-                                    }}
-                                >
-                                    <MaterialIcons name="group" size={18} color={impactExisting ? '#FFF' : '#6B7280'} />
-                                    <View style={styles.impactButtonTextContainer}>
-                                        <Text style={[styles.impactButtonTitle, impactExisting && styles.impactButtonTitleActive]}>
-                                            Impact All
-                                        </Text>
-                                        <Text style={[styles.impactButtonSubtitle, impactExisting && styles.impactButtonSubtitleActive]}>
-                                            Users must complete new courses
-                                        </Text>
-                                    </View>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={[
-                                        styles.impactButton,
-                                        !impactExisting && styles.impactButtonActiveGreen
-                                    ]}
-                                    onPress={() => {
-                                        setImpactExisting(false);
-                                        setSelectedImpactedUsers(new Set());
-                                    }}
-                                >
-                                    <MaterialIcons name="group-off" size={18} color={!impactExisting ? '#FFF' : '#6B7280'} />
-                                    <View style={styles.impactButtonTextContainer}>
-                                        <Text style={[styles.impactButtonTitle, !impactExisting && styles.impactButtonTitleActive]}>
-                                            No Impact
-                                        </Text>
-                                        <Text style={[styles.impactButtonSubtitle, !impactExisting && styles.impactButtonSubtitleActive]}>
-                                            Users who completed stay at 100%
-                                        </Text>
-                                    </View>
-                                </TouchableOpacity>
-                            </View>
-
-                            {/* Affected Users Preview */}
-                            {loadingAffectedUsers ? (
-                                <View style={styles.affectedUsersLoading}>
-                                    <ActivityIndicator size="small" color="#3B82F6" />
-                                    <Text style={styles.affectedUsersLoadingText}>Loading user data...</Text>
-                                </View>
-                            ) : affectedUsers && (
-                                <View style={styles.affectedUsersPreview}>
-                                    <View style={styles.affectedUsersSummary}>
-                                        <View style={styles.affectedUserBox}>
-                                            <View style={[styles.affectedUserIcon, { backgroundColor: impactExisting ? '#FEE2E2' : '#D1FAE5' }]}>
-                                                <MaterialIcons
-                                                    name={impactExisting ? 'warning' : 'check-circle'}
-                                                    size={20}
-                                                    color={impactExisting ? '#DC2626' : '#10B981'}
-                                                />
-                                            </View>
-                                            <View style={styles.affectedUserInfo}>
-                                                <Text style={styles.affectedUserCount}>
-                                                    {impactExisting ? selectedImpactedUsers.size : 0}
-                                                </Text>
-                                                <Text style={styles.affectedUserLabel}>
-                                                    {impactExisting ? 'Selected to impact' : "Won't be affected"}
-                                                </Text>
-                                                <Text style={styles.affectedUserDesc}>
-                                                    of {affectedUsers.summary?.completed_count || 0} users at 100%
-                                                </Text>
-                                            </View>
-                                        </View>
-                                        <View style={styles.affectedUserBox}>
-                                            <View style={[styles.affectedUserIcon, { backgroundColor: '#FEF3C7' }]}>
-                                                <MaterialIcons name="schedule" size={20} color="#D97706" />
-                                            </View>
-                                            <View style={styles.affectedUserInfo}>
-                                                <Text style={styles.affectedUserCount}>
-                                                    {affectedUsers.summary?.in_progress_count || 0}
-                                                </Text>
-                                                <Text style={styles.affectedUserLabel}>Always affected</Text>
-                                                <Text style={styles.affectedUserDesc}>Users in progress</Text>
-                                            </View>
-                                        </View>
-                                    </View>
-                                    <TouchableOpacity
-                                        style={styles.viewAllUsersBtn}
-                                        onPress={() => setShowAffectedUsersModal(true)}
-                                    >
-                                        <MaterialIcons name="edit" size={16} color="#3B82F6" />
-                                        <Text style={styles.viewAllUsersBtnText}>
-                                            {impactExisting ? 'Select Users to Impact' : 'View Users'} ({affectedUsers.summary?.total_users || 0})
-                                        </Text>
-                                        <MaterialIcons name="chevron-right" size={18} color="#3B82F6" />
-                                    </TouchableOpacity>
-                                </View>
-                            )}
-                        </View>
-                    )}
-
-                    {/* LIST */}
                     <FlatList
+                        ListHeaderComponent={
+                            <View style={{ paddingBottom: 20 }}>
+                                {/* ADD FILES BTN */}
+                                <TouchableOpacity style={styles.addBtn} onPress={pickFiles}>
+                                    <MaterialCommunityIcons name="cloud-upload-outline" size={28} color="#F59E0B" />
+                                    <Text style={styles.addBtnText}>Select Files</Text>
+                                </TouchableOpacity>
+
+                                <Text style={styles.sectionLabel}>Course Bucket (Optional)</Text>
+                                {(() => {
+                                    const pathType = isSelfLearning ? 'self_learning' : 'career_progression';
+                                    // Filter buckets by learning path type
+                                    const filteredBuckets = courseBuckets.filter(b =>
+                                        !b.learning_path_type ||
+                                        b.learning_path_type === pathType ||
+                                        b.show_in_both_paths
+                                    );
+
+                                    // Sort by folder_path or name to ensure hierarchical visual order
+                                    const sortedBuckets = [...filteredBuckets].sort((a, b) =>
+                                        (a.folder_path || a.name).localeCompare(b.folder_path || b.name)
+                                    );
+
+                                    return (
+                                        <View style={{ marginBottom: 15 }}>
+                                            <ScrollView
+                                                nestedScrollEnabled={true}
+                                                showsVerticalScrollIndicator={true}
+                                                style={{
+                                                    maxHeight: 180,
+                                                    borderWidth: 1,
+                                                    borderColor: '#E5E7EB',
+                                                    borderRadius: 12,
+                                                    padding: 8,
+                                                    backgroundColor: '#F9FAFB'
+                                                }}
+                                                contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}
+                                            >
+                                                <TouchableOpacity
+                                                    onPress={() => setSelectedBucket(null)}
+                                                    style={[
+                                                        styles.bucketChip,
+                                                        !selectedBucket && styles.bucketChipSelected,
+                                                        { marginBottom: 8 }
+                                                    ]}
+                                                >
+                                                    <MaterialCommunityIcons name="close-circle" size={16} color={!selectedBucket ? '#FFF' : '#6B7280'} />
+                                                    <Text style={[styles.bucketChipText, !selectedBucket && { color: '#FFF' }]}>None</Text>
+                                                </TouchableOpacity>
+                                                {sortedBuckets.map((bucket) => {
+                                                    // Format hierarchy name cleanly (e.g. Operations > Kitchen)
+                                                    const pathParts = bucket.folder_path ? bucket.folder_path.split('/') : [bucket.name];
+                                                    const displayName = pathParts.length > 1
+                                                        ? `${pathParts[pathParts.length - 2]} > ${pathParts[pathParts.length - 1]}`
+                                                        : pathParts[0];
+
+                                                    return (
+                                                        <TouchableOpacity
+                                                            key={bucket.id}
+                                                            onPress={() => setSelectedBucket(selectedBucket === bucket.id ? null : bucket.id)}
+                                                            style={[
+                                                                styles.bucketChip,
+                                                                selectedBucket === bucket.id && { backgroundColor: bucket.color || '#3B82F6', borderColor: bucket.color || '#3B82F6' },
+                                                                { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, marginBottom: 8 }
+                                                            ]}
+                                                        >
+                                                            <MaterialCommunityIcons
+                                                                name={bucket.icon || 'folder'}
+                                                                size={14}
+                                                                color={selectedBucket === bucket.id ? '#FFF' : (bucket.color || '#6B7280')}
+                                                            />
+                                                            <Text style={[
+                                                                styles.bucketChipText,
+                                                                { fontSize: 13, marginLeft: 6 },
+                                                                selectedBucket === bucket.id && { color: '#FFF' }
+                                                            ]}>{displayName}</Text>
+                                                        </TouchableOpacity>
+                                                    );
+                                                })}
+                                            </ScrollView>
+                                        </View>
+                                    );
+                                })()}
+
+                                {/* PATH TOGGLE */}
+                                <View style={styles.optionRow}>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.optionTitle}>Add to Learning Path</Text>
+                                        <Text style={styles.optionDesc}>Automatically add these to the user's journey map in this order.</Text>
+                                    </View>
+                                    <Switch
+                                        value={isPathNode}
+                                        onValueChange={setIsPathNode}
+                                        trackColor={{ false: "#E5E7EB", true: "#F59E0B" }}
+                                    />
+                                </View>
+
+                                {/* SELF LEARNING TOGGLE - NEW - Only visible if Path is enabled */}
+                                {isPathNode && (
+                                    <View style={[styles.optionRow, { borderColor: isSelfLearning ? '#10B981' : '#E5E7EB', backgroundColor: isSelfLearning ? '#F0FDF4' : '#FFF' }]}>
+                                        <View style={{ flex: 1 }}>
+                                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                                <MaterialCommunityIcons
+                                                    name="school"
+                                                    size={18}
+                                                    color={isSelfLearning ? '#10B981' : '#6B7280'}
+                                                    style={{ marginRight: 6 }}
+                                                />
+                                                <Text style={[styles.optionTitle, isSelfLearning && { color: '#047857' }]}>Self Learning Path</Text>
+                                            </View>
+                                            <Text style={styles.optionDesc}>
+                                                {isSelfLearning
+                                                    ? "Courses for mandatory onboarding (Basics, SOPs, Compliance)"
+                                                    : "Enable to add to Self Learning path instead of Career Progression"}
+                                            </Text>
+                                        </View>
+                                        <Switch
+                                            value={isSelfLearning}
+                                            onValueChange={setIsSelfLearning}
+                                            trackColor={{ false: "#E5E7EB", true: "#10B981" }}
+                                            thumbColor={isSelfLearning ? "#059669" : "#f4f3f4"}
+                                        />
+                                    </View>
+                                )}
+
+                                {/* PATH TYPE INDICATOR */}
+                                {isPathNode && (
+                                    <View style={[styles.pathIndicator, { backgroundColor: isSelfLearning ? '#ECFDF5' : '#FFF7ED', borderColor: isSelfLearning ? '#A7F3D0' : '#FED7AA' }]}>
+                                        <MaterialCommunityIcons
+                                            name={isSelfLearning ? "book-education" : "trending-up"}
+                                            size={20}
+                                            color={isSelfLearning ? '#10B981' : '#F59E0B'}
+                                        />
+                                        <Text style={[styles.pathIndicatorText, { color: isSelfLearning ? '#047857' : '#D97706' }]}>
+                                            {isSelfLearning ? '📚 Self Learning Path' : '🚀 Career Progression Path'}
+                                        </Text>
+                                    </View>
+                                )}
+
+                                {/* IMPACT EXISTING USERS SETTING */}
+                                {isPathNode && (
+                                    <View style={styles.impactSettingContainer}>
+                                        <View style={styles.impactSettingHeader}>
+                                            <MaterialIcons name="info-outline" size={18} color="#3B82F6" />
+                                            <Text style={styles.impactSettingTitle}>Impact Existing Users' Progress</Text>
+                                        </View>
+                                        <Text style={styles.impactSettingDesc}>
+                                            Choose whether new courses affect existing users who have already completed this path.
+                                        </Text>
+                                        <View style={styles.impactButtons}>
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.impactButton,
+                                                    impactExisting && styles.impactButtonActive
+                                                ]}
+                                                onPress={() => {
+                                                    setImpactExisting(true);
+                                                    let allUsers = [];
+                                                    if (affectedUsers?.completed_users) allUsers = [...allUsers, ...affectedUsers.completed_users.map(u => u.email)];
+                                                    if (affectedUsers?.in_progress_users) allUsers = [...allUsers, ...affectedUsers.in_progress_users.map(u => u.email)];
+                                                    setSelectedImpactedUsers(new Set(allUsers));
+                                                }}
+                                            >
+                                                <MaterialIcons name="group" size={18} color={impactExisting ? '#FFF' : '#6B7280'} />
+                                                <View style={styles.impactButtonTextContainer}>
+                                                    <Text style={[styles.impactButtonTitle, impactExisting && styles.impactButtonTitleActive]}>
+                                                        Impact All
+                                                    </Text>
+                                                    <Text style={[styles.impactButtonSubtitle, impactExisting && styles.impactButtonSubtitleActive]}>
+                                                        Users must complete new courses
+                                                    </Text>
+                                                </View>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.impactButton,
+                                                    !impactExisting && styles.impactButtonActiveGreen
+                                                ]}
+                                                onPress={() => {
+                                                    setImpactExisting(false);
+                                                    setSelectedImpactedUsers(new Set());
+                                                }}
+                                            >
+                                                <MaterialIcons name="group-off" size={18} color={!impactExisting ? '#FFF' : '#6B7280'} />
+                                                <View style={styles.impactButtonTextContainer}>
+                                                    <Text style={[styles.impactButtonTitle, !impactExisting && styles.impactButtonTitleActive]}>
+                                                        No Impact
+                                                    </Text>
+                                                    <Text style={[styles.impactButtonSubtitle, !impactExisting && styles.impactButtonSubtitleActive]}>
+                                                        Users who completed stay at 100%
+                                                    </Text>
+                                                </View>
+                                            </TouchableOpacity>
+                                        </View>
+
+                                        {/* Affected Users Preview */}
+                                        {loadingAffectedUsers ? (
+                                            <View style={styles.affectedUsersLoading}>
+                                                <ActivityIndicator size="small" color="#3B82F6" />
+                                                <Text style={styles.affectedUsersLoadingText}>Loading user data...</Text>
+                                            </View>
+                                        ) : affectedUsers && (
+                                            <View style={styles.affectedUsersPreview}>
+                                                <View style={styles.affectedUsersSummary}>
+                                                    <View style={styles.affectedUserBox}>
+                                                        <View style={[styles.affectedUserIcon, { backgroundColor: impactExisting ? '#FEE2E2' : '#D1FAE5' }]}>
+                                                            <MaterialIcons
+                                                                name={impactExisting ? 'warning' : 'check-circle'}
+                                                                size={20}
+                                                                color={impactExisting ? '#DC2626' : '#10B981'}
+                                                            />
+                                                        </View>
+                                                        <View style={styles.affectedUserInfo}>
+                                                            <Text style={styles.affectedUserCount}>
+                                                                {impactExisting ? selectedImpactedUsers.size : 0}
+                                                            </Text>
+                                                            <Text style={styles.affectedUserLabel}>
+                                                                {impactExisting ? 'Selected to impact' : "Won't be affected"}
+                                                            </Text>
+                                                            <Text style={styles.affectedUserDesc}>
+                                                                of {affectedUsers.summary?.completed_count || 0} users at 100%
+                                                            </Text>
+                                                        </View>
+                                                    </View>
+                                                    <View style={styles.affectedUserBox}>
+                                                        <View style={[styles.affectedUserIcon, { backgroundColor: '#FEF3C7' }]}>
+                                                            <MaterialIcons name="schedule" size={20} color="#D97706" />
+                                                        </View>
+                                                        <View style={styles.affectedUserInfo}>
+                                                            <Text style={styles.affectedUserCount}>
+                                                                {affectedUsers.summary?.in_progress_count || 0}
+                                                            </Text>
+                                                            <Text style={styles.affectedUserLabel}>Always affected</Text>
+                                                            <Text style={styles.affectedUserDesc}>Users in progress</Text>
+                                                        </View>
+                                                    </View>
+                                                </View>
+                                                <TouchableOpacity
+                                                    style={styles.viewAllUsersBtn}
+                                                    onPress={() => setShowAffectedUsersModal(true)}
+                                                >
+                                                    <MaterialIcons name="edit" size={16} color="#3B82F6" />
+                                                    <Text style={styles.viewAllUsersBtnText}>
+                                                        {impactExisting ? 'Select Users to Impact' : 'View Users'} ({affectedUsers.summary?.total_users || 0})
+                                                    </Text>
+                                                    <MaterialIcons name="chevron-right" size={18} color="#3B82F6" />
+                                                </TouchableOpacity>
+                                            </View>
+                                        )}
+                                    </View>
+                                )}
+
+                            </View>
+                        }
                         data={files}
                         keyExtractor={item => String(item.tempId)}
                         contentContainerStyle={{ paddingBottom: 100 }}
@@ -761,7 +766,19 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                                         </View>
                                     </View>
                                     {affectedUsers.in_progress_users.slice(0, 20).map((user, index) => (
-                                        <View key={user.email || index} style={styles.affectedUserItem}>
+                                        <TouchableOpacity
+                                            key={user.email || index}
+                                            style={styles.affectedUserItem}
+                                            onPress={() => impactExisting && toggleUserImpact(user.email)}
+                                            disabled={!impactExisting}
+                                        >
+                                            {impactExisting && (
+                                                <MaterialIcons
+                                                    name={selectedImpactedUsers.has(user.email) ? 'check-box' : 'check-box-outline-blank'}
+                                                    size={22}
+                                                    color={selectedImpactedUsers.has(user.email) ? '#3B82F6' : '#9CA3AF'}
+                                                />
+                                            )}
                                             <View style={styles.affectedUserAvatar}>
                                                 <Text style={styles.affectedUserAvatarText}>
                                                     {(user.name || user.email || '?').charAt(0).toUpperCase()}
@@ -778,7 +795,7 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                                                     {user.progress_percent || 0}%
                                                 </Text>
                                             </View>
-                                        </View>
+                                        </TouchableOpacity>
                                     ))}
                                     {affectedUsers.in_progress_users.length > 20 && (
                                         <Text style={styles.affectedUsersMore}>

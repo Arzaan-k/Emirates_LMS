@@ -6,10 +6,12 @@ Quizzes, live quizzes, submissions, AI generation
 import uuid
 import json
 import logging
+import hashlib
+import time
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Form, File, UploadFile, HTTPException
+from fastapi import APIRouter, Depends, Form, File, UploadFile, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.config.database import get_db
@@ -20,11 +22,20 @@ from app.services.ai_service import AIService
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/quizzes", tags=["Quizzes"])
 
+# ===========================================
+# QUIZ TRANSLATION CACHE
+# ===========================================
+# In-memory cache for translated quizzes
+# Key: hash(quiz_id + language) -> {"translated_quiz": {...}, "expires": timestamp}
+_quiz_translation_cache = {}
+TRANSLATION_CACHE_TTL = 3600  # 1 hour cache
+
 
 # ==========================================
 # QUIZ CRUD ENDPOINTS
 # ==========================================
 
+@router.get("")
 @router.get("/")
 async def get_all_quizzes(db: Session = Depends(get_db)):
     """
@@ -90,30 +101,182 @@ def get_live_quizzes_main(db: Session = Depends(get_db)):
 @router.get("/{quiz_id}")
 async def get_quiz(
     quiz_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    language: Optional[str] = Query(None, description="Target language for translation (e.g., 'Hindi', 'Spanish', 'French')")
 ):
     """
-    Get a specific quiz by ID.
+    Get a specific quiz by ID with optional translation.
+    If language parameter is provided, returns translated version.
     """
     service = QuizService(db)
-    
+
     # Check for live quiz
     if quiz_id.startswith("live_"):
         try:
             quiz = service.get_live_quiz_by_id(quiz_id)
-            return quiz.to_dict() if hasattr(quiz, 'to_dict') else dict(quiz)
+            quiz_dict = quiz.to_dict() if hasattr(quiz, 'to_dict') else dict(quiz)
         except Exception:
-            # Fallback to standard lookup if not found (though structure implies live)
-            pass
+            # Fallback to standard lookup if not found
+            quiz = service.get_quiz_by_id(quiz_id)
+            if not quiz:
+                raise HTTPException(status_code=404, detail=f"Quiz with id '{quiz_id}' not found")
+            quiz_dict = quiz.to_dict() if hasattr(quiz, 'to_dict') else dict(quiz)
+    else:
+        quiz = service.get_quiz_by_id(quiz_id)
+        if not quiz:
+            raise HTTPException(status_code=404, detail=f"Quiz with id '{quiz_id}' not found")
+        quiz_dict = quiz.to_dict() if hasattr(quiz, 'to_dict') else dict(quiz)
 
-    quiz = service.get_quiz_by_id(quiz_id)
-    
-    if not quiz:
-        raise HTTPException(status_code=404, detail=f"Quiz with id '{quiz_id}' not found")
-    
-    return quiz.to_dict() if hasattr(quiz, 'to_dict') else dict(quiz)
+    # If language is specified and not English, translate the quiz
+    if language and language.lower() not in ["english", "en"]:
+        quiz_dict = await translate_quiz(quiz_dict, language)
+
+    return quiz_dict
 
 
+@router.get("/{quiz_id}/translate")
+async def get_translated_quiz(
+    quiz_id: str,
+    language: str = Query(..., description="Target language (e.g., 'Hindi', 'Spanish', 'French')"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get a translated version of a quiz.
+    Questions and options are translated, but answers remain in original indices.
+    Translation is cached for 1 hour to avoid repeated API calls.
+    """
+    # Get the original quiz
+    service = QuizService(db)
+
+    # Check for live quiz
+    if quiz_id.startswith("live_"):
+        try:
+            quiz = service.get_live_quiz_by_id(quiz_id)
+            quiz_dict = quiz.to_dict() if hasattr(quiz, 'to_dict') else dict(quiz)
+        except Exception:
+            quiz = service.get_quiz_by_id(quiz_id)
+            if not quiz:
+                raise HTTPException(status_code=404, detail=f"Quiz with id '{quiz_id}' not found")
+            quiz_dict = quiz.to_dict() if hasattr(quiz, 'to_dict') else dict(quiz)
+    else:
+        quiz = service.get_quiz_by_id(quiz_id)
+        if not quiz:
+            raise HTTPException(status_code=404, detail=f"Quiz with id '{quiz_id}' not found")
+        quiz_dict = quiz.to_dict() if hasattr(quiz, 'to_dict') else dict(quiz)
+
+    # Translate the quiz
+    translated_quiz = await translate_quiz(quiz_dict, language)
+
+    return translated_quiz
+
+
+async def translate_quiz(quiz_dict: Dict[str, Any], target_language: str) -> Dict[str, Any]:
+    """
+    Translate quiz questions and options to target language.
+    Uses caching to avoid repeated API calls.
+
+    Args:
+        quiz_dict: Original quiz dictionary
+        target_language: Target language name (e.g., "Hindi", "Spanish")
+
+    Returns:
+        Translated quiz dictionary
+    """
+    global _quiz_translation_cache
+
+    # Check if translation exists in cache
+    cache_key = hashlib.md5(f"{quiz_dict.get('id', '')}-{target_language}".encode()).hexdigest()
+
+    if cache_key in _quiz_translation_cache:
+        cached_entry = _quiz_translation_cache[cache_key]
+        if time.time() < cached_entry["expires"]:
+            logger.info(f"Returning cached translation for quiz {quiz_dict.get('id')} in {target_language}")
+            return cached_entry["translated_quiz"]
+        else:
+            # Cache expired, remove it
+            del _quiz_translation_cache[cache_key]
+
+    # Translate the quiz
+    logger.info(f"Translating quiz {quiz_dict.get('id')} to {target_language}")
+
+    try:
+        ai_service = AIService()
+        translated_quiz = quiz_dict.copy()
+
+        # Translate title and description
+        if quiz_dict.get("title"):
+            translated_quiz["title"] = ai_service.translate_text(quiz_dict["title"], target_language)
+
+        if quiz_dict.get("description"):
+            translated_quiz["description"] = ai_service.translate_text(quiz_dict["description"], target_language)
+
+        # Translate questions and options
+        if quiz_dict.get("questions"):
+            translated_questions = []
+
+            for question in quiz_dict["questions"]:
+                translated_question = question.copy()
+
+                # Translate question text
+                if question.get("question"):
+                    translated_question["question"] = ai_service.translate_text(
+                        question["question"],
+                        target_language
+                    )
+
+                # Translate options
+                if question.get("options"):
+                    translated_options = []
+                    for option in question["options"]:
+                        # Handle both string options and object options {id, text, correct}
+                        if isinstance(option, str):
+                            translated_option = ai_service.translate_text(option, target_language)
+                            translated_options.append(translated_option)
+                        elif isinstance(option, dict):
+                            translated_opt_dict = option.copy()
+                            if option.get("text"):
+                                translated_opt_dict["text"] = ai_service.translate_text(
+                                    option["text"],
+                                    target_language
+                                )
+                            translated_options.append(translated_opt_dict)
+                        else:
+                            translated_options.append(option)
+
+                    translated_question["options"] = translated_options
+
+                # Translate explanation if present
+                if question.get("explanation"):
+                    translated_question["explanation"] = ai_service.translate_text(
+                        question["explanation"],
+                        target_language
+                    )
+
+                translated_questions.append(translated_question)
+
+            translated_quiz["questions"] = translated_questions
+
+        # Add metadata to indicate this is a translation
+        translated_quiz["translated_to"] = target_language
+        translated_quiz["original_language"] = "English"
+
+        # Cache the translation
+        _quiz_translation_cache[cache_key] = {
+            "translated_quiz": translated_quiz,
+            "expires": time.time() + TRANSLATION_CACHE_TTL
+        }
+
+        logger.info(f"Quiz {quiz_dict.get('id')} successfully translated to {target_language}")
+        return translated_quiz
+
+    except Exception as e:
+        logger.error(f"Error translating quiz: {e}")
+        # Return original quiz if translation fails
+        logger.warning(f"Returning original quiz due to translation error")
+        return quiz_dict
+
+
+@router.post("")
 @router.post("/")
 async def create_quiz(
     title: str = Form(...),
@@ -239,7 +402,6 @@ async def submit_quiz(
     if quiz_id.startswith("live_"):
         try:
             answers_list = json.loads(answers)
-            user_email = current_user.email if current_user else None
             return service.submit_live_quiz(quiz_id, user_name, answers_list, user_email)
         except Exception as e:
             logger.error(f"Redirect to live quiz failed: {e}")

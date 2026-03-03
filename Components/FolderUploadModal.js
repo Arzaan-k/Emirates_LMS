@@ -59,9 +59,11 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
       if (response.ok) {
         const data = await response.json();
         setAffectedUsers(data);
-        // By default, select all completed users when Impact mode is on
-        if (data.completed_users && defaultImpactSetting) {
-          setSelectedImpactedUsers(new Set(data.completed_users.map(u => u.email)));
+        if (data && defaultImpactSetting) {
+          let allUsers = [];
+          if (data.completed_users) allUsers = [...allUsers, ...data.completed_users.map(u => u.email)];
+          if (data.in_progress_users) allUsers = [...allUsers, ...data.in_progress_users.map(u => u.email)];
+          setSelectedImpactedUsers(new Set(allUsers));
         }
       }
     } catch (error) {
@@ -86,9 +88,10 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
 
   // Select all completed users for impact
   const selectAllCompletedUsers = () => {
-    if (affectedUsers?.completed_users) {
-      setSelectedImpactedUsers(new Set(affectedUsers.completed_users.map(u => u.email)));
-    }
+    let allUsers = [];
+    if (affectedUsers?.completed_users) allUsers = [...allUsers, ...affectedUsers.completed_users.map(u => u.email)];
+    if (affectedUsers?.in_progress_users) allUsers = [...allUsers, ...affectedUsers.in_progress_users.map(u => u.email)];
+    setSelectedImpactedUsers(new Set(allUsers));
   };
 
   // Deselect all users (no one will be impacted)
@@ -667,117 +670,127 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
                 </Text>
               </View>
 
-              {/* Impact Existing Users Setting */}
-              <View style={styles.impactSettingContainer}>
-                <View style={styles.impactSettingHeader}>
-                  <MaterialIcons name="info-outline" size={18} color="#3B82F6" />
-                  <Text style={styles.impactSettingTitle}>Impact Existing Users' Progress</Text>
-                </View>
-                <Text style={styles.impactSettingDesc}>
-                  Choose whether new courses affect existing users who have already completed this folder.
-                </Text>
-                <View style={styles.impactButtons}>
-                  <TouchableOpacity
-                    style={[
-                      styles.impactButton,
-                      defaultImpactSetting && styles.impactButtonActive
-                    ]}
-                    onPress={() => applyDefaultImpactToAll(true)}
-                  >
-                    <MaterialIcons name="group" size={18} color={defaultImpactSetting ? '#FFF' : '#6B7280'} />
-                    <View style={styles.impactButtonTextContainer}>
-                      <Text style={[styles.impactButtonTitle, defaultImpactSetting && styles.impactButtonTitleActive]}>
-                        Impact All
-                      </Text>
-                      <Text style={[styles.impactButtonSubtitle, defaultImpactSetting && styles.impactButtonSubtitleActive]}>
-                        Users must complete new courses
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.impactButton,
-                      !defaultImpactSetting && styles.impactButtonActiveGreen
-                    ]}
-                    onPress={() => applyDefaultImpactToAll(false)}
-                  >
-                    <MaterialIcons name="group-off" size={18} color={!defaultImpactSetting ? '#FFF' : '#6B7280'} />
-                    <View style={styles.impactButtonTextContainer}>
-                      <Text style={[styles.impactButtonTitle, !defaultImpactSetting && styles.impactButtonTitleActive]}>
-                        No Impact
-                      </Text>
-                      <Text style={[styles.impactButtonSubtitle, !defaultImpactSetting && styles.impactButtonSubtitleActive]}>
-                        Users who completed stay at 100%
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                </View>
-                <Text style={styles.impactHint}>
-                  Tip: Click individual file badges to customize per-file settings
-                </Text>
-
-                {/* Affected Users Preview */}
-                {loadingAffectedUsers ? (
-                  <View style={styles.affectedUsersLoading}>
-                    <ActivityIndicator size="small" color="#3B82F6" />
-                    <Text style={styles.affectedUsersLoadingText}>Loading user data...</Text>
+              <ScrollView style={styles.treeContainer}>
+                {/* Impact Existing Users Setting */}
+                <View style={styles.impactSettingContainer}>
+                  <View style={styles.impactSettingHeader}>
+                    <MaterialIcons name="info-outline" size={18} color="#3B82F6" />
+                    <Text style={styles.impactSettingTitle}>Impact Existing Users' Progress</Text>
                   </View>
-                ) : affectedUsers && (
-                  <View style={styles.affectedUsersPreview}>
-                    <View style={styles.affectedUsersSummary}>
-                      {/* Users who will be affected */}
-                      <View style={styles.affectedUserBox}>
-                        <View style={[styles.affectedUserIcon, { backgroundColor: defaultImpactSetting ? '#FEE2E2' : '#D1FAE5' }]}>
-                          <MaterialIcons
-                            name={defaultImpactSetting ? 'warning' : 'check-circle'}
-                            size={20}
-                            color={defaultImpactSetting ? '#DC2626' : '#10B981'}
-                          />
-                        </View>
-                        <View style={styles.affectedUserInfo}>
-                          <Text style={styles.affectedUserCount}>
-                            {defaultImpactSetting ? selectedImpactedUsers.size : 0}
-                          </Text>
-                          <Text style={styles.affectedUserLabel}>
-                            {defaultImpactSetting ? 'Selected to impact' : 'Won\'t be affected'}
-                          </Text>
-                          <Text style={styles.affectedUserDesc}>
-                            of {affectedUsers.summary?.completed_count || 0} users at 100%
-                          </Text>
-                        </View>
-                      </View>
-
-                      {/* Users in progress */}
-                      <View style={styles.affectedUserBox}>
-                        <View style={[styles.affectedUserIcon, { backgroundColor: '#FEF3C7' }]}>
-                          <MaterialIcons name="schedule" size={20} color="#D97706" />
-                        </View>
-                        <View style={styles.affectedUserInfo}>
-                          <Text style={styles.affectedUserCount}>
-                            {affectedUsers.summary?.in_progress_count || 0}
-                          </Text>
-                          <Text style={styles.affectedUserLabel}>Always affected</Text>
-                          <Text style={styles.affectedUserDesc}>
-                            Users in progress
-                          </Text>
-                        </View>
-                      </View>
-                    </View>
-
+                  <Text style={styles.impactSettingDesc}>
+                    Choose whether new courses affect existing users who have already completed this folder.
+                  </Text>
+                  <View style={styles.impactButtons}>
                     <TouchableOpacity
-                      style={styles.viewAllUsersBtn}
-                      onPress={() => setShowAffectedUsersModal(true)}
+                      style={[
+                        styles.impactButton,
+                        defaultImpactSetting && styles.impactButtonActive
+                      ]}
+                      onPress={() => {
+                        applyDefaultImpactToAll(true);
+                        let allUsers = [];
+                        if (affectedUsers?.completed_users) allUsers = [...allUsers, ...affectedUsers.completed_users.map(u => u.email)];
+                        if (affectedUsers?.in_progress_users) allUsers = [...allUsers, ...affectedUsers.in_progress_users.map(u => u.email)];
+                        setSelectedImpactedUsers(new Set(allUsers));
+                      }}
                     >
-                      <MaterialIcons name="edit" size={16} color="#3B82F6" />
-                      <Text style={styles.viewAllUsersBtnText}>
-                        {defaultImpactSetting ? 'Select Users to Impact' : 'View Users'} ({affectedUsers.summary?.total_users || 0})
-                      </Text>
-                      <MaterialIcons name="chevron-right" size={18} color="#3B82F6" />
+                      <MaterialIcons name="group" size={18} color={defaultImpactSetting ? '#FFF' : '#6B7280'} />
+                      <View style={styles.impactButtonTextContainer}>
+                        <Text style={[styles.impactButtonTitle, defaultImpactSetting && styles.impactButtonTitleActive]}>
+                          Impact All
+                        </Text>
+                        <Text style={[styles.impactButtonSubtitle, defaultImpactSetting && styles.impactButtonSubtitleActive]}>
+                          Users must complete new courses
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.impactButton,
+                        !defaultImpactSetting && styles.impactButtonActiveGreen
+                      ]}
+                      onPress={() => {
+                        applyDefaultImpactToAll(false);
+                        setSelectedImpactedUsers(new Set());
+                      }}
+                    >
+                      <MaterialIcons name="group-off" size={18} color={!defaultImpactSetting ? '#FFF' : '#6B7280'} />
+                      <View style={styles.impactButtonTextContainer}>
+                        <Text style={[styles.impactButtonTitle, !defaultImpactSetting && styles.impactButtonTitleActive]}>
+                          No Impact
+                        </Text>
+                        <Text style={[styles.impactButtonSubtitle, !defaultImpactSetting && styles.impactButtonSubtitleActive]}>
+                          Users who completed stay at 100%
+                        </Text>
+                      </View>
                     </TouchableOpacity>
                   </View>
-                )}
-              </View>
-              <ScrollView style={styles.treeContainer}>
+                  <Text style={styles.impactHint}>
+                    Tip: Click individual file badges to customize per-file settings
+                  </Text>
+
+                  {/* Affected Users Preview */}
+                  {loadingAffectedUsers ? (
+                    <View style={styles.affectedUsersLoading}>
+                      <ActivityIndicator size="small" color="#3B82F6" />
+                      <Text style={styles.affectedUsersLoadingText}>Loading user data...</Text>
+                    </View>
+                  ) : affectedUsers && (
+                    <View style={styles.affectedUsersPreview}>
+                      <View style={styles.affectedUsersSummary}>
+                        {/* Users who will be affected */}
+                        <View style={styles.affectedUserBox}>
+                          <View style={[styles.affectedUserIcon, { backgroundColor: defaultImpactSetting ? '#FEE2E2' : '#D1FAE5' }]}>
+                            <MaterialIcons
+                              name={defaultImpactSetting ? 'warning' : 'check-circle'}
+                              size={20}
+                              color={defaultImpactSetting ? '#DC2626' : '#10B981'}
+                            />
+                          </View>
+                          <View style={styles.affectedUserInfo}>
+                            <Text style={styles.affectedUserCount}>
+                              {defaultImpactSetting ? selectedImpactedUsers.size : 0}
+                            </Text>
+                            <Text style={styles.affectedUserLabel}>
+                              {defaultImpactSetting ? 'Selected to impact' : 'Won\'t be affected'}
+                            </Text>
+                            <Text style={styles.affectedUserDesc}>
+                              of {affectedUsers.summary?.completed_count || 0} users at 100%
+                            </Text>
+                          </View>
+                        </View>
+
+                        {/* Users in progress */}
+                        <View style={styles.affectedUserBox}>
+                          <View style={[styles.affectedUserIcon, { backgroundColor: '#FEF3C7' }]}>
+                            <MaterialIcons name="schedule" size={20} color="#D97706" />
+                          </View>
+                          <View style={styles.affectedUserInfo}>
+                            <Text style={styles.affectedUserCount}>
+                              {affectedUsers.summary?.in_progress_count || 0}
+                            </Text>
+                            <Text style={styles.affectedUserLabel}>Always affected</Text>
+                            <Text style={styles.affectedUserDesc}>
+                              Users in progress
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      <TouchableOpacity
+                        style={styles.viewAllUsersBtn}
+                        onPress={() => setShowAffectedUsersModal(true)}
+                      >
+                        <MaterialIcons name="edit" size={16} color="#3B82F6" />
+                        <Text style={styles.viewAllUsersBtnText}>
+                          {defaultImpactSetting ? 'Select Users to Impact' : 'View Users'} ({affectedUsers.summary?.total_users || 0})
+                        </Text>
+                        <MaterialIcons name="chevron-right" size={18} color="#3B82F6" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+
                 {renderFileTree(fileTree)}
               </ScrollView>
 
@@ -1064,7 +1077,19 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
                     </View>
                   </View>
                   {affectedUsers.in_progress_users.slice(0, 20).map((user, index) => (
-                    <View key={user.email || index} style={styles.affectedUserItem}>
+                    <TouchableOpacity
+                      key={user.email || index}
+                      style={styles.affectedUserItem}
+                      onPress={() => defaultImpactSetting && toggleUserImpact(user.email)}
+                      disabled={!defaultImpactSetting}
+                    >
+                      {defaultImpactSetting && (
+                        <MaterialIcons
+                          name={selectedImpactedUsers.has(user.email) ? 'check-box' : 'check-box-outline-blank'}
+                          size={22}
+                          color={selectedImpactedUsers.has(user.email) ? '#3B82F6' : '#9CA3AF'}
+                        />
+                      )}
                       <View style={styles.affectedUserAvatar}>
                         <Text style={styles.affectedUserAvatarText}>
                           {(user.name || user.email || '?').charAt(0).toUpperCase()}
@@ -1081,7 +1106,7 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
                           {user.progress_percent || 0}%
                         </Text>
                       </View>
-                    </View>
+                    </TouchableOpacity>
                   ))}
                   {affectedUsers.in_progress_users.length > 20 && (
                     <Text style={styles.affectedUsersMore}>

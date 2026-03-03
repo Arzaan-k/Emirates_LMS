@@ -202,6 +202,17 @@ const NodeEditor = React.memo(({ node, index, nodes, onUpdate, onDelete, onUploa
     }, [node.id, node.options, onUpdate]);
 
     const deleteOption = useCallback((optionId) => {
+        const confirmDelete = () => {
+            const newOptions = node.options.filter(o => o.id !== optionId);
+            onUpdate(node.id, { options: newOptions });
+        };
+
+        if (Platform.OS === 'web') {
+            // Some RN-web runtimes block confirm dialogs; delete directly on web.
+            confirmDelete();
+            return;
+        }
+
         Alert.alert(
             'Delete Option',
             'Are you sure you want to delete this option?',
@@ -210,10 +221,7 @@ const NodeEditor = React.memo(({ node, index, nodes, onUpdate, onDelete, onUploa
                 {
                     text: 'Delete',
                     style: 'destructive',
-                    onPress: () => {
-                        const newOptions = node.options.filter(o => o.id !== optionId);
-                        onUpdate(node.id, { options: newOptions });
-                    }
+                    onPress: confirmDelete
                 }
             ]
         );
@@ -372,12 +380,20 @@ const NodeEditor = React.memo(({ node, index, nodes, onUpdate, onDelete, onUploa
                     <TouchableOpacity
                         style={nodeStyles.deleteBtn}
                         onPress={() => {
+                            const confirmDeleteNode = () => onDelete(node.id);
+
+                            if (Platform.OS === 'web') {
+                                // Some RN-web runtimes block confirm dialogs; delete directly on web.
+                                confirmDeleteNode();
+                                return;
+                            }
+
                             Alert.alert(
                                 'Delete Step',
                                 'Are you sure you want to delete this step?',
                                 [
                                     { text: 'Cancel', style: 'cancel' },
-                                    { text: 'Delete', style: 'destructive', onPress: () => onDelete(node.id) }
+                                    { text: 'Delete', style: 'destructive', onPress: confirmDeleteNode }
                                 ]
                             );
                         }}

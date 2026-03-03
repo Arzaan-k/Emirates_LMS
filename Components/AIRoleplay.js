@@ -164,11 +164,20 @@ export default function AIRoleplay({ onClose, scenario }) {
 
         try {
             const formData = new FormData();
-            formData.append('file', {
-                uri: uri,
-                type: 'audio/m4a', // or audio/mp4 depending on iOS/Android
-                name: 'upload.m4a'
-            });
+            if (Platform.OS === 'web') {
+                // Web requires a real Blob/File for multipart UploadFile parsing in FastAPI.
+                const audioResponse = await fetch(uri);
+                const audioBlob = await audioResponse.blob();
+                const mimeType = audioBlob.type || 'audio/webm';
+                const extension = mimeType.includes('webm') ? 'webm' : 'm4a';
+                formData.append('file', audioBlob, `upload.${extension}`);
+            } else {
+                formData.append('file', {
+                    uri: uri,
+                    type: 'audio/m4a',
+                    name: 'upload.m4a'
+                });
+            }
             formData.append('history', JSON.stringify(chat));
             formData.append('context', getContext()); // Pass Context
 
@@ -404,6 +413,12 @@ export default function AIRoleplay({ onClose, scenario }) {
         else if (avgScore >= 70) grade = "B";
         else if (avgScore >= 60) grade = "C";
         else grade = "D";
+
+        // On web, React Native's Alert callbacks can be unreliable – just close directly.
+        if (Platform.OS === 'web') {
+            onClose();
+            return;
+        }
 
         Alert.alert(
             "Session Ended",

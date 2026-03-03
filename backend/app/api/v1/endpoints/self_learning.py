@@ -199,34 +199,40 @@ def get_self_learning_buckets(
         all_mandatory_done = len(mandatory_courses) > 0 and mandatory_completed == len(mandatory_courses)
 
         # If all mandatory done, progress = 100% (optional courses don't affect)
-        if all_mandatory_done:
+        if all_mandatory_done and len(mandatory_courses) > 0:
             courses_for_progress = mandatory_courses
+            total_progress = 100 * len(mandatory_courses)
+            avg_progress = 100
+            
+            # Calculate duration based on all courses for display purposes
+            total_duration = 0
+            remaining_duration = 0
+            for c in bucket_courses:
+                total_duration += _estimate_duration(c)
+            
         else:
             courses_for_progress = bucket_courses
+            
+            # Calculate total duration for all courses (for display)
+            total_duration = 0
+            for c in bucket_courses:
+                total_duration += _estimate_duration(c)
 
-        total = len(bucket_courses)  # Show total including optional
-        completed = sum(1 for c in bucket_courses if c.id in completed_ids)
-
-        # Calculate total duration for all courses (for display)
-        total_duration = 0
-        for c in bucket_courses:
-            total_duration += _estimate_duration(c)
-
-        # Calculate average watch progress and remaining time using courses_for_progress
-        total_progress = 0
-        remaining_duration = 0
-        for c in courses_for_progress:
-            course_dur = _estimate_duration(c)
-            p = progress_map.get(c.id, {})
-            if p.get("completed"):
-                total_progress += 100
-            else:
-                watched = p.get("watched_percent", 0)
-                total_progress += watched
-                remaining_duration += int(course_dur * (1 - watched / 100))
-        # Empty folders (0 courses) are considered 100% complete
-        progress_count = len(courses_for_progress)
-        avg_progress = round(total_progress / progress_count, 1) if progress_count > 0 else 100
+            # Calculate average watch progress and remaining time using courses_for_progress
+            total_progress = 0
+            remaining_duration = 0
+            for c in courses_for_progress:
+                course_dur = _estimate_duration(c)
+                p = progress_map.get(c.id, {})
+                if p.get("completed"):
+                    total_progress += 100
+                else:
+                    watched = p.get("watched_percent", 0)
+                    total_progress += watched
+                    remaining_duration += int(course_dur * (1 - watched / 100))
+            # Empty folders (0 courses) are considered 100% complete
+            progress_count = len(courses_for_progress)
+            avg_progress = round(total_progress / progress_count, 1) if progress_count > 0 else 100
 
         # Last attended date — O(1) dict lookup, no DB query per bucket
         last_attended = None
@@ -250,8 +256,8 @@ def get_self_learning_buckets(
 
         result.append({
             **bucket.to_dict(),
-            "total_courses": total,
-            "completed_courses": completed,
+            "total_courses": len(bucket_courses),
+            "completed_courses": sum(1 for c in bucket_courses if c.id in completed_ids),
             "progress_percent": avg_progress,
             "total_duration_seconds": total_duration,
             "remaining_duration_seconds": remaining_duration,
@@ -331,6 +337,10 @@ def get_self_learning_hierarchy(
         now = datetime.utcnow()
         visible_courses = [c for c in all_courses if not c.scheduled_at or c.scheduled_at <= now]
 
+        # Filter per-course access control (if course has assigned_users set)
+        if user_email != "user" and user:
+            visible_courses = [c for c in visible_courses if _user_has_course_access(user, c)]
+
         # Query user-specific data: completions and progress
         completed_ids = set()
         progress_map = {}
@@ -384,32 +394,40 @@ def get_self_learning_hierarchy(
 
             # If all mandatory courses are done, use only mandatory for progress (stays 100%)
             # Otherwise, include optional courses that were added before user started
-            if all_mandatory_done:
+            if all_mandatory_done and len(mandatory_courses) > 0:
                 courses_for_progress = mandatory_courses
+                total_progress = 100 * len(mandatory_courses)
+                avg_progress = 100
+                
+                # Calculate duration based on all courses for display purposes
+                total_duration = 0
+                remaining_duration = 0
+                for c in bucket_courses:
+                    total_duration += _estimate_duration(c)
+                
             else:
                 courses_for_progress = bucket_courses
+                # Calculate total duration for all courses
+                total_duration = 0
+                for c in bucket_courses:
+                    total_duration += _estimate_duration(c)
 
-            # Calculate total duration for all courses
-            total_duration = 0
-            for c in bucket_courses:
-                total_duration += _estimate_duration(c)
+                # Calculate progress and remaining time using courses_for_progress
+                total_progress = 0
+                remaining_duration = 0
+                for c in courses_for_progress:
+                    course_dur = _estimate_duration(c)
+                    p = progress_map.get(c.id, {})
+                    if p.get("completed") or c.id in completed_ids:
+                        total_progress += 100
+                    else:
+                        watched = p.get("watched_percent", 0)
+                        total_progress += watched
+                        remaining_duration += int(course_dur * (1 - watched / 100))
 
-            # Calculate progress and remaining time using courses_for_progress
-            total_progress = 0
-            remaining_duration = 0
-            for c in courses_for_progress:
-                course_dur = _estimate_duration(c)
-                p = progress_map.get(c.id, {})
-                if p.get("completed") or c.id in completed_ids:
-                    total_progress += 100
-                else:
-                    watched = p.get("watched_percent", 0)
-                    total_progress += watched
-                    remaining_duration += int(course_dur * (1 - watched / 100))
-
-            # Empty folders (0 courses) are considered 100% complete
-            progress_count = len(courses_for_progress)
-            avg_progress = round(total_progress / progress_count, 1) if progress_count > 0 else 100
+                # Empty folders (0 courses) are considered 100% complete
+                progress_count = len(courses_for_progress)
+                avg_progress = round(total_progress / progress_count, 1) if progress_count > 0 else 100
 
             return {
                 "total_courses": len(bucket_courses),  # Show total including optional
