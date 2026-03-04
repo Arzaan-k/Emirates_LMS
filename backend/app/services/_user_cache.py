@@ -31,6 +31,38 @@ class CachedUser:
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
 
+    def to_dict(self):
+        """Convert to dictionary for API responses."""
+        # Ensure privileges is always a list, never null
+        privileges = getattr(self, "privileges", [])
+        if not isinstance(privileges, list):
+            privileges = []
+
+        is_super = getattr(self, "is_superadmin", False)
+        # If user is superadmin, automatically grant all privileges for frontend compatibility
+        if is_super:
+            from app.services.user_service import ALL_PRIVILEGES
+            privileges = ALL_PRIVILEGES
+
+        created_at = getattr(self, "created_at", None)
+        
+        return {
+            "id": getattr(self, "id", None),
+            "email": getattr(self, "email", None),
+            "name": getattr(self, "name", None),
+            "role": getattr(self, "role", None),
+            "category": getattr(self, "category", None),
+            "privileges": privileges,
+            "is_superadmin": is_super or False,
+            "has_admin_access": getattr(self, "has_admin_access", False) or False,
+            "store": getattr(self, "store", None),
+            "self_learning_completed": getattr(self, "self_learning_completed", False) or False,
+            "is_external": getattr(self, "is_external", False) or False,
+            "joined_at_level": getattr(self, "joined_at_level", None),
+            "profile_data": getattr(self, "profile_data", {}) or {},
+            "created_at": created_at.isoformat() if created_at and hasattr(created_at, "isoformat") else str(created_at) if created_at else None,
+        }
+
 class _UserCache:
     def __init__(self):
         self._lock = threading.Lock()
