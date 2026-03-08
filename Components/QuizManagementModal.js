@@ -573,7 +573,7 @@ export default function QuizManagementModal({ visible, onClose, contentItem, onS
                                         style={styles.textArea}
                                         multiline
                                         numberOfLines={4}
-                                        placeholder="e.g. What is the standard temperature for baking a waffle?"
+                                        placeholder="e.g. What is the standard pre-flight cabin check procedure?"
                                         placeholderTextColor="#9CA3AF"
                                         value={editQuestion}
                                         onChangeText={setEditQuestion}

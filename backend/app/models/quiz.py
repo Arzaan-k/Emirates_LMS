@@ -139,14 +139,14 @@ class LevelExamQuestion(Base):
     """
     Stores admin-editable level advancement exam questions.
     These are the questions shown when a user takes the role advancement exam
-    (e.g., Waffler → Silver Waffler). Admins can edit, add, delete, or regenerate.
+    (e.g., Crew Member → Senior Crew). Admins can edit, add, delete, or regenerate.
     
     Questions are stored per level_name (the level the user is advancing FROM).
     """
     __tablename__ = "level_exam_questions"
 
     id = Column(String(255), primary_key=True)
-    level_name = Column(String(255), nullable=False, index=True)  # e.g., "Waffler"
+    level_name = Column(String(255), nullable=False, index=True)  # e.g., "Crew Member"
     questions = Column(JSON, nullable=False, default=[])  # Array of question objects
     # Format: [{"question": str, "options": [str], "correctIndex": int, "explanation": str}]
     

@@ -14,7 +14,7 @@ class UserBase(BaseSchema):
     """Base user schema with common fields."""
     email: str = Field(..., min_length=1, max_length=255)
     name: str = Field(..., min_length=1, max_length=255)
-    role: str = Field(default="Waffler", max_length=100)
+    role: str = Field(default="Crew Member", max_length=100)
     category: str = Field(default="Employee", max_length=100)
     store: str = Field(default="Unassigned", max_length=255)
     profile_data: Optional[Dict[str, Any]] = None

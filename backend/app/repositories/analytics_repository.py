@@ -35,45 +35,45 @@ _skill_categories_cache = {
 # Default skill categories (fallback if database is empty)
 DEFAULT_SKILL_CATEGORIES = {
     "product_knowledge": {
-        "name": "Product Knowledge",
-        "icon": "coffee",
-        "color": "#F59E0B",
-        "description": "Understanding of waffle recipes, ingredients, and preparation techniques",
-        "keywords": ["waffle", "recipe", "ingredient", "product", "menu", "preparation", "chocolate", "toppings"]
+        "name": "Flight Operations",
+        "icon": "airplane",
+        "color": "#D71A21",
+        "description": "Understanding of flight operations, cabin procedures, and service protocols",
+        "keywords": ["flight", "cabin", "operations", "procedure", "service", "boarding", "departure"]
     },
     "customer_service": {
-        "name": "Customer Service",
+        "name": "Passenger Service",
         "icon": "account-heart",
         "color": "#10B981",
-        "description": "Skills for handling customer interactions, complaints, and feedback",
-        "keywords": ["customer", "service", "complaint", "feedback", "communication", "satisfaction", "handling", "resolution"]
+        "description": "Skills for handling passenger interactions, complaints, and feedback",
+        "keywords": ["passenger", "service", "complaint", "feedback", "communication", "satisfaction", "handling", "resolution"]
     },
     "safety_hygiene": {
-        "name": "Safety & Hygiene",
+        "name": "Safety & Emergency",
         "icon": "shield-check",
         "color": "#EF4444",
-        "description": "Knowledge of food safety protocols and workplace hygiene standards",
-        "keywords": ["safety", "hygiene", "clean", "sanitation", "health", "protocol", "compliance", "food safety"]
+        "description": "Knowledge of aviation safety protocols and emergency procedures",
+        "keywords": ["safety", "emergency", "evacuation", "security", "protocol", "compliance", "aviation safety"]
     },
     "operations": {
-        "name": "Operations",
+        "name": "Aircraft Systems",
         "icon": "cog",
         "color": "#8B5CF6",
-        "description": "Understanding of store operations, inventory, and equipment management",
-        "keywords": ["operation", "inventory", "equipment", "machine", "maintenance", "stock", "order", "management"]
+        "description": "Understanding of aircraft systems, equipment, and cabin management",
+        "keywords": ["aircraft", "system", "equipment", "cabin", "maintenance", "galley", "cargo", "management"]
     },
     "espresso_coffee": {
-        "name": "Espresso & Coffee",
-        "icon": "coffee",
+        "name": "Premium Service",
+        "icon": "star",
         "color": "#6366F1",
-        "description": "Mastery of espresso preparation, milk texturing, and coffee techniques",
-        "keywords": ["espresso", "coffee", "milk", "barista", "grind", "extraction", "latte", "cappuccino"]
+        "description": "Mastery of premium cabin service, First & Business class protocols",
+        "keywords": ["premium", "first class", "business", "lounge", "vip", "luxury", "fine dining"]
     },
     "onboarding": {
         "name": "Onboarding Essentials",
         "icon": "account-plus",
         "color": "#3B82F6",
-        "description": "Foundational training for new team members",
+        "description": "Foundational training for new crew members",
         "keywords": ["onboarding", "training", "introduction", "basics", "foundation", "new", "starter"]
     }
 }

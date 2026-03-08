@@ -66,7 +66,7 @@ const MODULE_CONTENT = {
 
 export default function ModuleDetail({ route, navigation }) {
     const { moduleName } = route.params;
-    const content = MODULE_CONTENT[moduleName] || MODULE_CONTENT["Batter Preparation"];
+    const content = MODULE_CONTENT[moduleName] || MODULE_CONTENT["Flight Prep & Service"];
     const insets = useSafeAreaInsets();
 
     return (

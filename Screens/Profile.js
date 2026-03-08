@@ -479,19 +479,19 @@ const ActivityCalendar = ({ userEmail }) => {
 
 // --- MOCK DATA ---
 const COMPLETED_LESSONS = [
-    { id: 1, title: "Espresso Mastery 101", date: "Dec 05", score: "100%", icon: "coffee" },
+    { id: 1, title: "Aviation Safety 101", date: "Dec 05", score: "100%", icon: "airplane" },
     { id: 2, title: "Hygiene Protocols", date: "Dec 04", score: "95%", icon: "shield-check" },
     { id: 3, title: "Customer Empathy", date: "Dec 02", score: "90%", icon: "heart-outline" },
 ];
 
 const INCOMPLETE_LESSONS = [
     { id: 4, title: "Advanced Service Excellence", progress: 0.7, due: "Today" },
-    { id: 5, title: "Inventory Management", progress: 0.3, due: "Tomorrow" },
+    { id: 5, title: "First Class Cabin Prep", progress: 0.3, due: "Tomorrow" },
 ];
 
 const EXTRA_CREDIT = [
-    { id: 6, title: "Mystery Shopper Sim", xp: "+500 XP", tag: "RECOMMENDED" },
-    { id: 7, title: "Speed Service Drill", xp: "+200 XP", tag: "OPTIONAL" },
+    { id: 6, title: "Mystery Passenger Sim", xp: "+500 XP", tag: "RECOMMENDED" },
+    { id: 7, title: "Boarding Service Drill", xp: "+200 XP", tag: "OPTIONAL" },
 ];
 
 const BADGES = [

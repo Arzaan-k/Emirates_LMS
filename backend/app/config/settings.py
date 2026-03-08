@@ -121,7 +121,7 @@ class Settings(BaseSettings):
     SMTP_PORT: int = Field(default=587, env="SMTP_PORT")
     SMTP_USERNAME: Optional[str] = Field(default=None, env="SMTP_USERNAME")
     SMTP_PASSWORD: Optional[str] = Field(default=None, env="SMTP_PASSWORD")
-    EMAIL_FROM: str = Field(default="noreply@belgianwaffle.com", env="EMAIL_FROM")
+    EMAIL_FROM: str = Field(default="noreply@emirates-lms.com", env="EMAIL_FROM")
     EMAIL_FROM_NAME: str = Field(default="BWC LMS Support", env="EMAIL_FROM_NAME")
     USE_TLS: bool = Field(default=True, env="USE_TLS")
 

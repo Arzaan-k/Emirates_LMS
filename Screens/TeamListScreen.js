@@ -33,7 +33,7 @@ const ITEMS_PER_PAGE = 30;
 
 // EMIRATES THEME COLORS
 const THEME = {
-    primary: '#D71A21',    // Waffle Yellow/Orange
+    primary: '#D71A21',    // Emirates Red
     secondary: '#B91C1C',  // Darker Amber
     chocolate: '#451A03',  // Dark Brown Text
     cream: '#FFFBEB',      // Light Cream Background

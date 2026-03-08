@@ -412,7 +412,7 @@ async def create_user(
         "email": data.get("email"),
         "name": data.get("name"),
         "password": data.get("password"),
-        "role": data.get("role", "Waffler"),
+        "role": data.get("role", "Crew Member"),
         "category": data.get("category", "Employee"),
         "store": data.get("store", "Unassigned"),
         "privileges": data.get("privileges", []),
@@ -493,13 +493,13 @@ async def get_all_privileges(db: Session = Depends(get_db)):
     """
     Returns ACCESS CONTROL RULES for each level (used by frontend for career progression).
     This endpoint returns a dictionary like:
-    { "Waffler": { "accessible_courses": [...], "accessible_buckets": [...] }, ... }
+    { "Crew Member": { "accessible_courses": [...], "accessible_buckets": [...] }, ... }
     
     Note: This is NOT user privileges - those are at /privileges endpoint.
     Frontend expects this format for building the career hierarchy view.
     
     FALLBACK: If no access rules exist, returns ALL career progression courses
-    assigned to the first level (Waffler) to ensure content is visible.
+    assigned to the first level (Crew Member) to ensure content is visible.
     """
     from app.repositories.content_repository import AccessRuleRepository, ContentRepository, ProgressionLevelRepository
     from app.models.content import Content
@@ -530,8 +530,8 @@ async def get_all_privileges(db: Session = Depends(get_db)):
             else:
                 # Default hierarchy
                 level_names = [
-                    "Waffler", "Silver Waffler", "Gold Waffler", 
-                    "Shift Manager", "Assistant Store Manager", "Store Manager"
+                    "Crew Member", "Senior Crew", "Flight Purser", 
+                    "Shift Manager", "Assistant Manager", "Cabin Manager"
                 ]
             
             # Assign all courses to each level (so all are visible regardless of user level)
@@ -878,8 +878,8 @@ def process_bulk_upload_task(task_id: str, contents: bytes):
                 name = str(row_dict.get('Full Name', row_dict.get('Name', row_dict.get('name', '')))).strip()
                 if not name: name = email.split('@')[0]
 
-                raw_role = str(row_dict.get('Designation', row_dict.get('Role', 'Waffler'))).strip()
-                role = raw_role if raw_role and raw_role.lower() != 'nan' else "Waffler"
+                raw_role = str(row_dict.get('Designation', row_dict.get('Role', 'Crew Member'))).strip()
+                role = raw_role if raw_role and raw_role.lower() != 'nan' else "Crew Member"
 
                 raw_cat = str(row_dict.get('Category', row_dict.get('Department', 'Employee'))).strip()
                 category = "Employee"
@@ -915,7 +915,7 @@ def process_bulk_upload_task(task_id: str, contents: bytes):
                         "profile_data": profile_data,
                     }
                     # Only update role/category if the sheet has a meaningful value
-                    if role and role != "Waffler":
+                    if role and role != "Crew Member":
                         updates["role"] = role
                     if category and category != "Employee":
                         updates["category"] = category
@@ -1026,7 +1026,7 @@ async def get_bulk_upload_template():
                 "Gender": "male",
                 "Join Date": "23-09-2017",
                 "Is External": "Yes",
-                "Joined At Level": "Gold Waffler"
+                "Joined At Level": "Flight Purser"
             }
         ],
         "notes": [
@@ -1133,10 +1133,10 @@ async def get_smart_user_categories(
     Results are filtered based on the current user's access grants.
 
     Returns categories like:
-    - Completed All Waffler Courses
-    - Completed All Silver Waffler Courses
+    - Completed All Crew Member Courses
+    - Completed All Senior Crew Courses
     - Ready for Promotion (eligible for next level)
-    - All Current Wafflers (by role)
+    - All Current Crew Members (by role)
     - Mumbai Central Store (by location)
     """
     from app.models.user import User, UserNodeProgress
@@ -1165,7 +1165,7 @@ async def get_smart_user_categories(
         # Category 1: By Current Role
         role_counts = {}
         for user in all_users:
-            role = user.role or "Waffler"
+            role = user.role or "Crew Member"
             if role not in role_counts:
                 role_counts[role] = []
             role_counts[role].append(user.email)
@@ -1216,8 +1216,8 @@ async def get_smart_user_categories(
 
         # Define role levels for career progression
         role_levels = [
-            "Waffler", "Silver Waffler", "Gold Waffler",
-            "Shift Manager", "Assistant Store Manager", "Store Manager"
+            "Crew Member", "Senior Crew", "Flight Purser",
+            "Shift Manager", "Assistant Manager", "Cabin Manager"
         ]
 
         for role_level in role_levels:

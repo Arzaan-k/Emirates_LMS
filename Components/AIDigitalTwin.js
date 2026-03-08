@@ -19,49 +19,49 @@ const { width, height } = Dimensions.get("window");
 // --- ASSETS ---
 const STORE_MAP_BG = "https://images.unsplash.com/photo-1556910103-1c02745a30bf?q=80&w=2000&auto=format&fit=crop"; // Placeholder for Iso Map
 const ZONES = [
-    { id: 'kitchen', title: 'The Kitchen', icon: 'chef-hat', x: 20, y: 30, color: '#EF4444' },
-    { id: 'counter', title: 'Front Counter', icon: 'cash-register', x: 60, y: 40, color: '#D71A21' },
-    { id: 'dining', title: 'Dining Area', icon: 'table-chair', x: 40, y: 70, color: '#10B981' },
-    { id: 'inventory', title: 'Inventory Room', icon: 'warehouse', x: 80, y: 20, color: '#6366F1' },
+    { id: 'galley', title: 'Aircraft Galley', icon: 'silverware-fork-knife', x: 20, y: 30, color: '#EF4444' },
+    { id: 'boarding', title: 'Boarding Gate', icon: 'gate', x: 60, y: 40, color: '#D71A21' },
+    { id: 'cabin', title: 'Cabin Section', icon: 'seat-passenger', x: 40, y: 70, color: '#10B981' },
+    { id: 'cargo', title: 'Cargo Hold', icon: 'package-variant-closed', x: 80, y: 20, color: '#6366F1' },
 ];
 
 const TASKS = {
-    'kitchen': {
-        title: "Make a Classic Waffle (Kitchen)",
+    'galley': {
+        title: "Prepare Meal Service (Galley)",
         bg: "https://images.unsplash.com/photo-1556910103-1c02745a30bf?q=80&w=2000&auto=format&fit=crop",
         steps: [
-            { id: 'clean', label: "Sanitize Hands", x: 10, y: 70, icon: "hand-wash-outline" },
-            { id: 'batter', label: "Pour Batter", x: 30, y: 50, icon: "cup-water" },
-            { id: 'iron', label: "Close Iron", x: 50, y: 60, icon: "toaster-oven" },
-            { id: 'timer', label: "Set Timer", x: 70, y: 40, icon: "timer-outline" },
-            { id: 'serve', label: "Serve", x: 80, y: 80, icon: "room-service-outline" },
+            { id: 'sanitize', label: "Sanitize Hands", x: 10, y: 70, icon: "hand-wash-outline" },
+            { id: 'check', label: "Check Meal Count", x: 30, y: 50, icon: "clipboard-check" },
+            { id: 'heat', label: "Heat Meals", x: 50, y: 60, icon: "toaster-oven" },
+            { id: 'plate', label: "Plate Service", x: 70, y: 40, icon: "room-service-outline" },
+            { id: 'serve', label: "Serve Passengers", x: 80, y: 80, icon: "silverware-fork-knife" },
         ]
     },
-    'counter': {
-        title: "Take an Order (Front Counter)",
+    'boarding': {
+        title: "Manage Boarding (Gate)",
         bg: "https://images.unsplash.com/photo-1556742049-0cfed4f7a07d?q=80&w=2000&auto=format&fit=crop",
         steps: [
-            { id: 'greet', label: "Greet Guest", x: 50, y: 30, icon: "emoticon-happy-outline" },
-            { id: 'pos', label: "Enter Order", x: 50, y: 60, icon: "monitor-dashboard" },
-            { id: 'pay', label: "Take Payment", x: 70, y: 60, icon: "credit-card" },
-            { id: 'receipt', label: "Give Receipt", x: 30, y: 60, icon: "receipt" },
+            { id: 'greet', label: "Greet Passenger", x: 50, y: 30, icon: "emoticon-happy-outline" },
+            { id: 'scan', label: "Scan Boarding Pass", x: 50, y: 60, icon: "barcode-scan" },
+            { id: 'direct', label: "Direct to Seat", x: 70, y: 60, icon: "arrow-right-circle" },
+            { id: 'assist', label: "Assist Luggage", x: 30, y: 60, icon: "bag-suitcase" },
         ]
     },
-    'dining': {
-        title: "Sanitize Tables (Dining)",
+    'cabin': {
+        title: "Safety Check (Cabin)",
         bg: "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?q=80&w=2000&auto=format&fit=crop",
         steps: [
-            { id: 'spray', label: "Spray Table", x: 20, y: 60, icon: "spray-bottle" },
-            { id: 'wipe', label: "Wipe Down", x: 50, y: 50, icon: "hand-wash" },
-            { id: 'reset', label: "Reset Chairs", x: 80, y: 60, icon: "chair-rolling" },
+            { id: 'seatbelt', label: "Check Seatbelts", x: 20, y: 60, icon: "seatbelt" },
+            { id: 'overhead', label: "Secure Bins", x: 50, y: 50, icon: "archive" },
+            { id: 'demo', label: "Safety Demo", x: 80, y: 60, icon: "shield-check" },
         ]
     },
-    'inventory': {
-        title: "Stock Check (Inventory)",
+    'cargo': {
+        title: "Inventory Check (Cargo)",
         bg: "https://images.unsplash.com/photo-1580674285054-bed31e145f59?q=80&w=2000&auto=format&fit=crop",
         steps: [
-            { id: 'count', label: "Count Mix", x: 30, y: 40, icon: "counter" },
-            { id: 'check', label: "Check Expiry", x: 60, y: 40, icon: "calendar-clock" },
+            { id: 'count', label: "Count Cargo", x: 30, y: 40, icon: "counter" },
+            { id: 'check', label: "Verify Manifest", x: 60, y: 40, icon: "calendar-clock" },
             { id: 'log', label: "Log Data", x: 50, y: 70, icon: "clipboard-check" },
         ]
     }

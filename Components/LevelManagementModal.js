@@ -825,7 +825,7 @@ export default function LevelManagementModal({ visible, onClose }) {
                             style={styles.input}
                             value={newLevel.name}
                             onChangeText={(text) => setNewLevel({ ...newLevel, name: text })}
-                            placeholder="e.g., Diamond Waffler"
+                            placeholder="e.g., Diamond Crew Member"
                         />
 
                         {/* Description */}

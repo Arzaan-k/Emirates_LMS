@@ -1419,7 +1419,7 @@ export default function CurriculumHierarchyModal({ visible, onClose }) {
                     <View style={styles.infoBanner}>
                         <MaterialCommunityIcons name="gesture-swipe" size={20} color="#6366F1" />
                         <Text style={styles.infoText}>
-                            Long press to drag • Levels at top = lower rank (Waffler first)
+                            Long press to drag • Levels at top = lower rank (Crew Member first)
                         </Text>
                     </View>
 

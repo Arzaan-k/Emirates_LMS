@@ -16,7 +16,7 @@ import LanguageDisclaimerModal from './LanguageDisclaimerModal'; // [NEW] Discla
 
 // Mock initial data
 const MESSAGES = [
-    { id: 1, text: "[Angry] Arre bhai, meri waffle thandi hai! I want a refund now!", sender: 'ai', mood: 20 },
+    { id: 1, text: "[Angry] Arre bhai, meri flight 4 ghante late hai! What kind of service is this?!", sender: 'ai', mood: 20 },
 ];
 
 export default function AIRoleplay({ onClose, scenario }) {
@@ -149,10 +149,10 @@ export default function AIRoleplay({ onClose, scenario }) {
 
     // Helper to map scenario ID to backend context
     const getContext = () => {
-        if (!scenario) return 'cold_waffle';
+        if (!scenario) return 'delayed_flight';
         if (scenario.id === 'confused') return 'payment_trouble';
         if (scenario.id === 'happy') return 'positive_feedback';
-        return 'cold_waffle'; // Default/Angry
+        return 'delayed_flight'; // Default/Angry
     };
 
     const handleSendWithAudio = async (uri) => {

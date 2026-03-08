@@ -86,7 +86,7 @@ async def get_content(
         payload = verify_token(token, "access")
         
         if payload:
-            user_role = payload.get("role", "Waffler")
+            user_role = payload.get("role", "Crew Member")
             # Filter would be applied here based on access rules
             # For now, return all content
     

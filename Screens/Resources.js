@@ -84,11 +84,11 @@ const MOCK_RESOURCES = [
     },
     {
         id: 2,
-        title: "EMIRATES Recipe v2.0",
+        title: "Emirates Service Manual v2.0",
         type: "Document",
-        category: "Recipes",
+        category: "Service",
         timestamp: new Date(Date.now() - 86400000).toISOString(),
-        description: "Official EMIRATES recipe with exact measurements, timing, and presentation guidelines"
+        description: "Official Emirates cabin service manual with procedures, timing, and presentation guidelines"
     },
     {
         id: 3,
@@ -100,35 +100,35 @@ const MOCK_RESOURCES = [
     },
     {
         id: 4,
-        title: "Espresso Machine Training",
+        title: "Aircraft Systems Training",
         type: "Video",
         category: "Training",
         timestamp: new Date(Date.now() - 259200000).toISOString(),
-        description: "Complete training video for espresso machine operation and maintenance"
+        description: "Complete training video for aircraft cabin systems operation and emergency procedures"
     },
     {
         id: 5,
-        title: "Customer Complaint Handling",
+        title: "Passenger Complaint Handling",
         type: "PDF",
         category: "Service",
         timestamp: new Date(Date.now() - 345600000).toISOString(),
-        description: "Guidelines for handling customer complaints professionally and effectively"
+        description: "Guidelines for handling passenger complaints professionally and effectively"
     },
     {
         id: 6,
-        title: "Food Safety Certification Guide",
+        title: "Aviation Safety Certification Guide",
         type: "PDF",
         category: "Safety",
         timestamp: new Date(Date.now() - 432000000).toISOString(),
-        description: "Complete food safety and hygiene certification training material"
+        description: "Complete aviation safety and emergency certification training material"
     },
     {
         id: 7,
-        title: "POS System Quick Reference",
+        title: "Cabin Crew System Quick Reference",
         type: "Document",
         category: "Operations",
         timestamp: new Date(Date.now() - 518400000).toISOString(),
-        description: "Quick reference guide for the point-of-sale system features and common operations"
+        description: "Quick reference guide for cabin crew systems features and common operations"
     },
 ];
 
@@ -159,10 +159,10 @@ const MOCK_CONTENT = {
 };
 
 const MANDATORY_MODULES = [
-    { id: 1, name: "Batter Preparation", icon: "flask-outline", count: 4, color: "#D71A21" },
-    { id: 2, name: "Flight Safety", icon: "grid-outline", count: 6, color: "#8B5CF6" },
-    { id: 3, name: "Topping Application", icon: "color-palette-outline", count: 5, color: "#EF4444" },
-    { id: 4, name: "Equipment Care", icon: "build-outline", count: 8, color: "#10B981" },
+    { id: 1, name: "Flight Prep & Service", icon: "airplane-outline", count: 4, color: "#D71A21" },
+    { id: 2, name: "Safety Procedure Standards", icon: "shield-checkmark-outline", count: 6, color: "#8B5CF6" },
+    { id: 3, name: "Premium Cabin Aesthetics", icon: "star-outline", count: 5, color: "#EF4444" },
+    { id: 4, name: "Equipment Maintenance", icon: "build-outline", count: 8, color: "#10B981" },
 ];
 
 // Content Preview Modal
