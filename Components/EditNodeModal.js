@@ -187,7 +187,7 @@ export default function EditNodeModal({
                                     <Switch
                                         value={skippable}
                                         onValueChange={setSkippable}
-                                        trackColor={{ false: "#D1D5DB", true: "#F59E0B" }}
+                                        trackColor={{ false: "#D1D5DB", true: "#D71A21" }}
                                     />
                                 </View>
                             </View>
@@ -270,7 +270,7 @@ export default function EditNodeModal({
                             disabled={isSaving}
                         >
                             <LinearGradient
-                                colors={['#F59E0B', '#D97706']}
+                                colors={['#D71A21', '#B91C1C']}
                                 style={styles.gradientBtn}
                             >
                                 {isSaving ? (
@@ -332,7 +332,7 @@ const styles = StyleSheet.create({
         borderBottomColor: 'transparent',
     },
     activeTab: {
-        borderBottomColor: '#F59E0B',
+        borderBottomColor: '#D71A21',
     },
     tabText: {
         fontSize: 15,
@@ -340,7 +340,7 @@ const styles = StyleSheet.create({
         color: '#6B7280',
     },
     activeTabText: {
-        color: '#F59E0B',
+        color: '#D71A21',
         fontFamily: 'Poppins_600SemiBold',
     },
     scrollContent: {
@@ -430,7 +430,7 @@ const styles = StyleSheet.create({
     qIndex: {
         fontSize: 14,
         fontFamily: 'Poppins_700Bold',
-        color: '#F59E0B',
+        color: '#D71A21',
     },
     qInput: {
         fontSize: 16,

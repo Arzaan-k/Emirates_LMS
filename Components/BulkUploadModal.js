@@ -324,7 +324,7 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                             <View style={{ paddingBottom: 20 }}>
                                 {/* ADD FILES BTN */}
                                 <TouchableOpacity style={styles.addBtn} onPress={pickFiles}>
-                                    <MaterialCommunityIcons name="cloud-upload-outline" size={28} color="#F59E0B" />
+                                    <MaterialCommunityIcons name="cloud-upload-outline" size={28} color="#D71A21" />
                                     <Text style={styles.addBtnText}>Select Files</Text>
                                 </TouchableOpacity>
 
@@ -413,7 +413,7 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                                     <Switch
                                         value={isPathNode}
                                         onValueChange={setIsPathNode}
-                                        trackColor={{ false: "#E5E7EB", true: "#F59E0B" }}
+                                        trackColor={{ false: "#E5E7EB", true: "#D71A21" }}
                                     />
                                 </View>
 
@@ -451,9 +451,9 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                                         <MaterialCommunityIcons
                                             name={isSelfLearning ? "book-education" : "trending-up"}
                                             size={20}
-                                            color={isSelfLearning ? '#10B981' : '#F59E0B'}
+                                            color={isSelfLearning ? '#10B981' : '#D71A21'}
                                         />
-                                        <Text style={[styles.pathIndicatorText, { color: isSelfLearning ? '#047857' : '#D97706' }]}>
+                                        <Text style={[styles.pathIndicatorText, { color: isSelfLearning ? '#047857' : '#B91C1C' }]}>
                                             {isSelfLearning ? '📚 Self Learning Path' : '🚀 Career Progression Path'}
                                         </Text>
                                     </View>
@@ -546,7 +546,7 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                                                     </View>
                                                     <View style={styles.affectedUserBox}>
                                                         <View style={[styles.affectedUserIcon, { backgroundColor: '#FEF3C7' }]}>
-                                                            <MaterialIcons name="schedule" size={20} color="#D97706" />
+                                                            <MaterialIcons name="schedule" size={20} color="#B91C1C" />
                                                         </View>
                                                         <View style={styles.affectedUserInfo}>
                                                             <Text style={styles.affectedUserCount}>
@@ -614,7 +614,7 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                 <View style={styles.footer}>
                     {uploading ? (
                         <View style={styles.uploadingBox}>
-                            <ActivityIndicator color={isSelfLearning ? "#10B981" : "#F59E0B"} />
+                            <ActivityIndicator color={isSelfLearning ? "#10B981" : "#D71A21"} />
                             <Text style={styles.uploadingText}>Uploading... {(progress * 100).toFixed(0)}%</Text>
                         </View>
                     ) : (
@@ -754,7 +754,7 @@ export default function BulkUploadModal({ visible, onClose, onUploadComplete }) 
                                 <View style={styles.affectedUsersSection}>
                                     <View style={styles.affectedUsersSectionHeader}>
                                         <View style={[styles.sectionIconBadge, { backgroundColor: '#FEF3C7' }]}>
-                                            <MaterialIcons name="schedule" size={16} color="#D97706" />
+                                            <MaterialIcons name="schedule" size={16} color="#B91C1C" />
                                         </View>
                                         <View>
                                             <Text style={styles.affectedUsersSectionTitle}>
@@ -841,7 +841,7 @@ const styles = StyleSheet.create({
     content: { flex: 1, padding: 20 },
 
     addBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF7ED', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#FED7AA', borderStyle: 'dashed', marginBottom: 20 },
-    addBtnText: { marginLeft: 10, fontSize: 16, fontFamily: 'Poppins_600SemiBold', color: '#F59E0B' },
+    addBtnText: { marginLeft: 10, fontSize: 16, fontFamily: 'Poppins_600SemiBold', color: '#D71A21' },
 
     optionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#FFF', padding: 16, borderRadius: 16, marginBottom: 12, borderWidth: 1, borderColor: '#E5E7EB' },
     optionTitle: { fontSize: 15, fontFamily: 'Poppins_600SemiBold', color: '#374151' },
@@ -874,7 +874,7 @@ const styles = StyleSheet.create({
     emptyText: { marginTop: 10, color: '#9CA3AF', fontFamily: 'Poppins_500Medium' },
 
     footer: { padding: 20, backgroundColor: '#FFF', borderTopWidth: 1, borderTopColor: '#F3F4F6' },
-    uploadBtn: { backgroundColor: '#F59E0B', padding: 16, borderRadius: 16, alignItems: 'center' },
+    uploadBtn: { backgroundColor: '#D71A21', padding: 16, borderRadius: 16, alignItems: 'center' },
     disabledBtn: { backgroundColor: '#E5E7EB' },
     uploadBtnText: { color: '#FFF', fontSize: 16, fontFamily: 'Poppins_700Bold' },
 
@@ -1226,7 +1226,7 @@ const styles = StyleSheet.create({
     progressBadgeText: {
         fontSize: 11,
         fontFamily: 'Poppins_600SemiBold',
-        color: '#D97706',
+        color: '#B91C1C',
     },
     affectedUsersMore: {
         fontSize: 13,

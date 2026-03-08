@@ -19,7 +19,7 @@ const { width, height } = Dimensions.get('window');
 
 const SKILL_COLORS = {
     1: '#EF4444', // Red - Beginner
-    2: '#F59E0B', // Orange - Basic
+    2: '#D71A21', // Orange - Basic
     3: '#FBBF24', // Yellow - Intermediate
     4: '#10B981', // Green - Advanced
     5: '#3B82F6', // Blue - Expert
@@ -64,7 +64,7 @@ const EmployeeRow = ({ employee, skills, onSelect }) => {
                 ))}
             </ScrollView>
             
-            <View style={[styles.overallBadge, { backgroundColor: avgLevel >= 4 ? '#10B981' : (avgLevel >= 3 ? '#F59E0B' : '#EF4444') }]}>
+            <View style={[styles.overallBadge, { backgroundColor: avgLevel >= 4 ? '#10B981' : (avgLevel >= 3 ? '#D71A21' : '#EF4444') }]}>
                 <Text style={styles.overallText}>{employee.overall_score}%</Text>
             </View>
         </TouchableOpacity>
@@ -560,7 +560,7 @@ const styles = StyleSheet.create({
     gapAvg: {
         fontSize: 11,
         fontFamily: 'Poppins_500Medium',
-        color: '#F59E0B',
+        color: '#D71A21',
     },
     gapDot: {
         width: 4,

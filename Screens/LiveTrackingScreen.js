@@ -216,14 +216,14 @@ export default function LiveTrackingScreen({ navigation }) {
             .marker-active { background-color: #10B981; }
             .marker-inactive { background-color: #9CA3AF; }
             .marker-store { 
-                background-color: #F59E0B; 
+                background-color: #D71A21; 
                 border-radius: 8px; /* Square with rounded corners */
                 width: 32px;
                 height: 32px;
             }
             .marker-selected { 
                 transform: scale(1.3); 
-                border-color: #F59E0B !important;
+                border-color: #D71A21 !important;
                 z-index: 1000 !important;
             }
             .leaflet-popup-content-wrapper {
@@ -450,14 +450,14 @@ export default function LiveTrackingScreen({ navigation }) {
                 </View>
 
                 <TouchableOpacity style={styles.refreshBtn} onPress={fetchLocations}>
-                    <Feather name="refresh-cw" size={20} color="#F59E0B" />
+                    <Feather name="refresh-cw" size={20} color="#D71A21" />
                 </TouchableOpacity>
             </Animated.View>
 
             {/* MAP - ALWAYS VISIBLE FOR STORE VIEW */}
             {loading ? (
                 <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color="#F59E0B" />
+                    <ActivityIndicator size="large" color="#D71A21" />
                     <Text style={styles.loadingText}>Loading locations...</Text>
                 </View>
             ) : (
@@ -480,7 +480,7 @@ export default function LiveTrackingScreen({ navigation }) {
                             startInLoadingState={true}
                             renderLoading={() => (
                                 <View style={styles.mapLoading}>
-                                    <ActivityIndicator size="large" color="#F59E0B" />
+                                    <ActivityIndicator size="large" color="#D71A21" />
                                     <Text style={styles.mapLoadingText}>Loading map...</Text>
                                 </View>
                             )}
@@ -494,7 +494,7 @@ export default function LiveTrackingScreen({ navigation }) {
                     {/* FLOATING LEGEND */}
                     <View style={styles.legend}>
                         <View style={styles.legendItem}>
-                            <View style={[styles.legendDot, { backgroundColor: '#F59E0B' }]} />
+                            <View style={[styles.legendDot, { backgroundColor: '#D71A21' }]} />
                             <Text style={styles.legendText}>Stores</Text>
                         </View>
                         <View style={styles.legendItem}>
@@ -683,7 +683,7 @@ const styles = StyleSheet.create({
         borderRadius: 24,
         overflow: 'hidden',
         backgroundColor: '#FFF',
-        shadowColor: "#F59E0B",
+        shadowColor: "#D71A21",
         shadowOffset: { width: 0, height: 8 },
         shadowOpacity: 0.15,
         shadowRadius: 20,
@@ -749,7 +749,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(255, 255, 255, 0.98)',
         borderRadius: 16,
         padding: 12,
-        shadowColor: "#F59E0B",
+        shadowColor: "#D71A21",
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.2,
         shadowRadius: 10,
@@ -886,8 +886,8 @@ const styles = StyleSheet.create({
     },
     employeeCardSelected: {
         // borderWidth: 2, // inherited from base
-        borderColor: '#F59E0B',
-        shadowColor: "#F59E0B",
+        borderColor: '#D71A21',
+        shadowColor: "#D71A21",
     },
     cardHeader: {
         padding: 16,

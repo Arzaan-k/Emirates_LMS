@@ -191,7 +191,7 @@ export default function ExamAttendanceModal({ visible, onClose, exam, userProfil
                                             )}
                                             {record.marked_present && !record.completed && (
                                                 <View style={styles.presentBadge}>
-                                                    <Feather name="clock" size={12} color="#F59E0B" />
+                                                    <Feather name="clock" size={12} color="#D71A21" />
                                                     <Text style={styles.presentText}>Waiting to Start</Text>
                                                 </View>
                                             )}
@@ -265,7 +265,7 @@ const styles = StyleSheet.create({
     completedBadge: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
     completedText: { fontSize: 11, fontFamily: 'Poppins_500Medium', color: '#10B981', marginLeft: 4 },
     presentBadge: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
-    presentText: { fontSize: 11, fontFamily: 'Poppins_500Medium', color: '#F59E0B', marginLeft: 4 },
+    presentText: { fontSize: 11, fontFamily: 'Poppins_500Medium', color: '#D71A21', marginLeft: 4 },
     actionBtns: { marginTop: 12, flexDirection: 'row', gap: 10 },
     presentBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#10B981', paddingVertical: 10, borderRadius: 10, gap: 6 },
     presentBtnText: { fontSize: 13, fontFamily: 'Poppins_600SemiBold', color: '#FFF' },

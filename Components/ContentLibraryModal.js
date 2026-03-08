@@ -803,11 +803,11 @@ export default function ContentLibraryModal({ visible, onClose }) {
 
                     {/* Folder Icon */}
                     {depth === 0 ? (
-                        <View style={[styles.folderIconBox, { backgroundColor: (folder.color || "#F59E0B") + '15' }]}>
+                        <View style={[styles.folderIconBox, { backgroundColor: (folder.color || "#D71A21") + '15' }]}>
                             <MaterialCommunityIcons
                                 name={isExpanded ? "folder-open" : "folder"}
                                 size={iconSize}
-                                color={folder.color || "#F59E0B"}
+                                color={folder.color || "#D71A21"}
                             />
                         </View>
                     ) : (
@@ -863,9 +863,9 @@ export default function ContentLibraryModal({ visible, onClose }) {
                     {/* Item Count Badge */}
                     <View style={[
                         styles.folderBadge,
-                        { backgroundColor: (folder.color || "#F59E0B") + '20' }
+                        { backgroundColor: (folder.color || "#D71A21") + '20' }
                     ]}>
-                        <Text style={[styles.folderBadgeText, { color: folder.color || "#F59E0B" }]}>
+                        <Text style={[styles.folderBadgeText, { color: folder.color || "#D71A21" }]}>
                             {folder.total_count || folder.item_count || folder.items?.length || 0}
                         </Text>
                     </View>
@@ -1013,7 +1013,7 @@ export default function ContentLibraryModal({ visible, onClose }) {
 
         if (resourceType === 'PDF' || item.title.endsWith('.pdf')) { iconName = 'file-pdf-box'; iconColor = '#EF4444'; }
         else if (resourceType === 'Video' || item.videoUrl) { iconName = 'play-circle'; iconColor = '#8B5CF6'; }
-        else if (resourceType === 'Presentation' || item.title.endsWith('.ppt') || item.title.endsWith('.pptx')) { iconName = 'file-powerpoint'; iconColor = '#F59E0B'; }
+        else if (resourceType === 'Presentation' || item.title.endsWith('.ppt') || item.title.endsWith('.pptx')) { iconName = 'file-powerpoint'; iconColor = '#D71A21'; }
         else if (resourceType === 'Document' || item.title.endsWith('.doc') || item.title.endsWith('.docx')) { iconName = 'file-word'; iconColor = '#2B579A'; }
         else if (resourceType === 'Excel' || item.title.endsWith('.xlsx')) { iconName = 'file-excel'; iconColor = '#10B981'; }
         else if (resourceType === 'Audio') { iconName = 'volume-high'; iconColor = '#EC4899'; }
@@ -1090,8 +1090,8 @@ export default function ContentLibraryModal({ visible, onClose }) {
                             <Text style={[styles.actionLabel, { color: '#8B5CF6' }]}>Settings</Text>
                         </TouchableOpacity>
                         <TouchableOpacity onPress={() => openCategoryModal(item)} style={[styles.actionBtn, { backgroundColor: '#FFFBEB' }]}>
-                            <Feather name="folder" size={16} color="#F59E0B" />
-                            <Text style={[styles.actionLabel, { color: '#F59E0B' }]}>Bucket</Text>
+                            <Feather name="folder" size={16} color="#D71A21" />
+                            <Text style={[styles.actionLabel, { color: '#D71A21' }]}>Bucket</Text>
                         </TouchableOpacity>
                         <TouchableOpacity onPress={() => handleDelete(item)} style={[styles.actionBtn, { backgroundColor: '#FEF2F2' }]}>
                             <Feather name="trash-2" size={16} color="#EF4444" />
@@ -2124,7 +2124,7 @@ const styles = StyleSheet.create({
     cutItem: {
         opacity: 0.6,
         borderWidth: 2,
-        borderColor: '#F59E0B',
+        borderColor: '#D71A21',
         borderStyle: 'dashed',
     },
     contentItemTopRow: {
@@ -2358,8 +2358,8 @@ const styles = StyleSheet.create({
         marginLeft: 'auto',
     },
     bulkCutBtn: {
-        backgroundColor: '#F59E0B',
-        borderColor: '#D97706',
+        backgroundColor: '#D71A21',
+        borderColor: '#B91C1C',
     },
     bulkCopyBtn: {
         backgroundColor: '#8B5CF6',
@@ -2570,7 +2570,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(245, 158, 11, 0.15)',
         borderRadius: 12,
         borderWidth: 2,
-        borderColor: '#F59E0B',
+        borderColor: '#D71A21',
         borderStyle: 'dashed',
     },
 

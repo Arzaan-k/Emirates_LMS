@@ -1348,7 +1348,7 @@ export default function ScheduleExamModal({ visible, onClose, userProfile, editi
                                     switch (category.type) {
                                         case 'role': return '#3B82F6';
                                         case 'store': return '#10B981';
-                                        case 'completion': return '#F59E0B';
+                                        case 'completion': return '#D71A21';
                                         case 'promotion': return '#8B5CF6';
                                         case 'progress': return '#06B6D4';
                                         default: return '#6B7280';
@@ -1642,11 +1642,11 @@ export default function ScheduleExamModal({ visible, onClose, userProfile, editi
                     disabled={importingQuestions}
                 >
                     {importingQuestions ? (
-                        <ActivityIndicator color="#D97706" size="small" />
+                        <ActivityIndicator color="#B91C1C" size="small" />
                     ) : (
                         <>
-                            <MaterialCommunityIcons name="file-excel-box" size={18} color="#D97706" />
-                            <Text style={[styles.actionBtnText, { color: '#D97706', fontSize: 12 }]}>Import Excel</Text>
+                            <MaterialCommunityIcons name="file-excel-box" size={18} color="#B91C1C" />
+                            <Text style={[styles.actionBtnText, { color: '#B91C1C', fontSize: 12 }]}>Import Excel</Text>
                         </>
                     )}
                 </TouchableOpacity>
@@ -1764,7 +1764,7 @@ export default function ScheduleExamModal({ visible, onClose, userProfile, editi
                                     <View style={styles.premiumToggleRow}>
                                         <View style={styles.premiumToggleInfo}>
                                             <View style={[styles.premiumToggleIcon, { backgroundColor: '#FEF3C7' }]}>
-                                                <Feather name="layers" size={16} color="#D97706" />
+                                                <Feather name="layers" size={16} color="#B91C1C" />
                                             </View>
                                             <View style={styles.premiumToggleText}>
                                                 <Text style={styles.premiumToggleLabel}>Different Questions Per Batch</Text>

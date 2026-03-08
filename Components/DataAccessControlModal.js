@@ -40,7 +40,7 @@ const THEME = {
     primary: '#3B82F6',
     primaryDark: '#1E40AF',
     success: '#10B981',
-    warning: '#F59E0B',
+    warning: '#D71A21',
     danger: '#EF4444',
     purple: '#8B5CF6',
     pink: '#EC4899',
@@ -58,7 +58,7 @@ const TAB_COLORS = {
     users: '#3B82F6',
     stores: '#8B5CF6',
     cities: '#EC4899',
-    regions: '#F59E0B',
+    regions: '#D71A21',
     states: '#10B981',
     departments: '#14B8A6',
     designations: '#F97316',
@@ -1371,7 +1371,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#EF4444',
     },
     toastWarning: {
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
     },
     toastText: {
         flex: 1,

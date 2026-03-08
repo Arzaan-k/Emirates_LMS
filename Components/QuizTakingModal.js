@@ -352,7 +352,7 @@ export default function QuizTakingModal({ visible, quiz, onClose, userName = "Us
                             style={styles.languageBtn}
                             onPress={() => setShowLanguageMenu(!showLanguageMenu)}
                         >
-                            <MaterialIcons name="translate" size={20} color="#F59E0B" />
+                            <MaterialIcons name="translate" size={20} color="#D71A21" />
                         </TouchableOpacity>
                     </View>
                 </View>
@@ -397,7 +397,7 @@ export default function QuizTakingModal({ visible, quiz, onClose, userName = "Us
                                             {name}
                                         </Text>
                                         {selectedLanguage === code && (
-                                            <Feather name="check" size={18} color="#F59E0B" />
+                                            <Feather name="check" size={18} color="#D71A21" />
                                         )}
                                     </TouchableOpacity>
                                 ))
@@ -413,7 +413,7 @@ export default function QuizTakingModal({ visible, quiz, onClose, userName = "Us
                 {/* Translation Loading Indicator */}
                 {isTranslating && (
                     <View style={styles.translatingIndicator}>
-                        <ActivityIndicator size="small" color="#F59E0B" />
+                        <ActivityIndicator size="small" color="#D71A21" />
                         <Text style={styles.translatingText}>Translating quiz to {QUIZ_LANGUAGES[selectedLanguage]}...</Text>
                     </View>
                 )}
@@ -533,7 +533,7 @@ const styles = StyleSheet.create({
     },
     progressFill: {
         height: '100%',
-        backgroundColor: '#F59E0B'
+        backgroundColor: '#D71A21'
     },
     scrollContent: {
         padding: 20,
@@ -557,7 +557,7 @@ const styles = StyleSheet.create({
         marginBottom: 12
     },
     optionSelected: {
-        borderColor: '#F59E0B',
+        borderColor: '#D71A21',
         backgroundColor: 'rgba(245, 158, 11, 0.1)'
     },
     optionCircle: {
@@ -574,7 +574,7 @@ const styles = StyleSheet.create({
         width: 12,
         height: 12,
         borderRadius: 6,
-        backgroundColor: '#F59E0B'
+        backgroundColor: '#D71A21'
     },
     optionText: {
         flex: 1,
@@ -608,7 +608,7 @@ const styles = StyleSheet.create({
         flex: 1,
         paddingVertical: 16,
         borderRadius: 12,
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         alignItems: 'center'
     },
     nextBtnDisabled: {
@@ -649,7 +649,7 @@ const styles = StyleSheet.create({
         borderRadius: 100,
         backgroundColor: 'rgba(245, 158, 11, 0.2)',
         borderWidth: 8,
-        borderColor: '#F59E0B',
+        borderColor: '#D71A21',
         justifyContent: 'center',
         alignItems: 'center',
         alignSelf: 'center',
@@ -669,7 +669,7 @@ const styles = StyleSheet.create({
         marginHorizontal: 20,
         paddingVertical: 16,
         borderRadius: 12,
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         alignItems: 'center'
     },
     doneBtnText: {
@@ -750,7 +750,7 @@ const styles = StyleSheet.create({
     },
     languageOptionTextSelected: {
         fontFamily: 'Poppins_600SemiBold',
-        color: '#F59E0B'
+        color: '#D71A21'
     },
     noResultsContainer: {
         padding: 20,
@@ -776,6 +776,6 @@ const styles = StyleSheet.create({
     translatingText: {
         fontSize: 13,
         fontFamily: 'Poppins_500Medium',
-        color: '#F59E0B'
+        color: '#D71A21'
     }
 });

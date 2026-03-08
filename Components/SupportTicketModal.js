@@ -21,14 +21,14 @@ const { width, height } = Dimensions.get('window');
 
 const PRIORITY_COLORS = {
     low: '#10B981',
-    medium: '#F59E0B',
+    medium: '#D71A21',
     high: '#EF4444',
     critical: '#7C3AED'
 };
 
 const STATUS_COLORS = {
     open: '#3B82F6',
-    in_progress: '#F59E0B',
+    in_progress: '#D71A21',
     resolved: '#10B981',
     closed: '#6B7280'
 };
@@ -255,7 +255,7 @@ export default function SupportTicketModal({
                                 <Feather name="x" size={24} color="#FFF" />
                             </TouchableOpacity>
                             <View style={styles.headerCenter}>
-                                <MaterialCommunityIcons name="headset" size={24} color="#F59E0B" />
+                                <MaterialCommunityIcons name="headset" size={24} color="#D71A21" />
                                 <Text style={styles.headerTitle}>Support Center</Text>
                             </View>
                             <TouchableOpacity 
@@ -290,7 +290,7 @@ export default function SupportTicketModal({
                         {view === 'list' ? (
                             <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
                                 {loading ? (
-                                    <ActivityIndicator size="large" color="#F59E0B" style={{ marginTop: 40 }} />
+                                    <ActivityIndicator size="large" color="#D71A21" style={{ marginTop: 40 }} />
                                 ) : myTickets.length === 0 ? (
                                     <View style={styles.emptyState}>
                                         <MaterialCommunityIcons name="ticket-outline" size={64} color="#4B5563" />
@@ -470,7 +470,7 @@ const styles = StyleSheet.create({
         width: 40,
         height: 40,
         borderRadius: 12,
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -488,7 +488,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     tabActive: {
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
     },
     tabText: {
         fontSize: 14,
@@ -598,7 +598,7 @@ const styles = StyleSheet.create({
     },
     createFirstBtn: {
         marginTop: 24,
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         paddingHorizontal: 24,
         paddingVertical: 12,
         borderRadius: 12,
@@ -674,7 +674,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         paddingVertical: 16,
         borderRadius: 14,
         marginTop: 24,

@@ -243,10 +243,10 @@ export default function SimulationAdminManager({ onClose }) {
 
                 <View style={[styles.statCard, { borderColor: 'rgba(245,158,11,0.3)' }]}>
                     <View style={[styles.statIconWrap, { backgroundColor: 'rgba(245,158,11,0.15)' }]}>
-                        <MaterialCommunityIcons name="percent" size={20} color="#F59E0B" />
+                        <MaterialCommunityIcons name="percent" size={20} color="#D71A21" />
                     </View>
                     {analyticsLoading && overallAvgScore === 0
-                        ? <ActivityIndicator size="small" color="#F59E0B" style={{ marginTop: 8 }} />
+                        ? <ActivityIndicator size="small" color="#D71A21" style={{ marginTop: 8 }} />
                         : <Text style={styles.statValue}>{overallAvgScore}%</Text>
                     }
                     <Text style={styles.statLabel}>Avg Score</Text>
@@ -267,7 +267,7 @@ export default function SimulationAdminManager({ onClose }) {
             {/* Simulations List */}
             {isLoading ? (
                 <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color="#F59E0B" />
+                    <ActivityIndicator size="large" color="#D71A21" />
                 </View>
             ) : (
                 <FlatList
@@ -283,8 +283,8 @@ export default function SimulationAdminManager({ onClose }) {
                         const steps = item.steps || item.total_branches || 0;
 
                         // Score colour band
-                        const scoreColor = avgScore >= 70 ? '#10B981' : avgScore >= 40 ? '#F59E0B' : '#EF4444';
-                        const passColor = passRate >= 70 ? '#10B981' : passRate >= 40 ? '#F59E0B' : '#EF4444';
+                        const scoreColor = avgScore >= 70 ? '#10B981' : avgScore >= 40 ? '#D71A21' : '#EF4444';
+                        const passColor = passRate >= 70 ? '#10B981' : passRate >= 40 ? '#D71A21' : '#EF4444';
 
                         return (
                             <Animated.View
@@ -305,7 +305,7 @@ export default function SimulationAdminManager({ onClose }) {
                                             }]}>
                                                 <Text style={[styles.metaText, {
                                                     color: item.difficulty === 'Easy' ? '#10B981' :
-                                                        item.difficulty === 'Medium' ? '#F59E0B' : '#EF4444'
+                                                        item.difficulty === 'Medium' ? '#D71A21' : '#EF4444'
                                                 }]}>{item.difficulty}</Text>
                                             </View>
                                         </View>
@@ -455,11 +455,11 @@ export default function SimulationAdminManager({ onClose }) {
                                             <View style={styles.breakdownCard}>
                                                 <Text style={styles.breakdownTitle}>Score Breakdown</Text>
                                                 <ScoreBar label="Average Score" value={agg.avg_score} max={100}
-                                                    color={agg.avg_score >= 70 ? '#10B981' : agg.avg_score >= 40 ? '#F59E0B' : '#EF4444'} />
+                                                    color={agg.avg_score >= 70 ? '#10B981' : agg.avg_score >= 40 ? '#D71A21' : '#EF4444'} />
                                                 <ScoreBar label="Highest Score" value={agg.highest_score} max={100} color="#10B981" />
                                                 <ScoreBar label="Lowest Score" value={agg.lowest_score} max={100} color="#EF4444" />
                                                 <ScoreBar label="Pass Rate" value={agg.pass_rate} max={100}
-                                                    color={agg.pass_rate >= 70 ? '#10B981' : agg.pass_rate >= 40 ? '#F59E0B' : '#EF4444'} />
+                                                    color={agg.pass_rate >= 70 ? '#10B981' : agg.pass_rate >= 40 ? '#D71A21' : '#EF4444'} />
                                                 <ScoreBar label="Passing Threshold" value={sim.passing_score || 70} max={100} color="#9CA3AF" dashed />
                                             </View>
 
@@ -491,7 +491,7 @@ export default function SimulationAdminManager({ onClose }) {
                                                 <Text style={styles.breakdownTitle}>Simulation Details</Text>
                                                 <InfoRow icon="tag" label="Category" value={sim.category || '—'} />
                                                 <InfoRow icon="zap" label="Difficulty" value={sim.difficulty || '—'}
-                                                    valueColor={sim.difficulty === 'Easy' ? '#10B981' : sim.difficulty === 'Medium' ? '#F59E0B' : '#EF4444'} />
+                                                    valueColor={sim.difficulty === 'Easy' ? '#10B981' : sim.difficulty === 'Medium' ? '#D71A21' : '#EF4444'} />
                                                 <InfoRow icon="target" label="Passing Score" value={`${sim.passing_score || 70}%`} />
                                                 <InfoRow icon="star" label="Max Score" value={`${sim.max_score || 100}%`} />
                                                 <InfoRow icon="layers" label="Steps" value={sim.steps || sim.total_branches || 0} />
@@ -520,7 +520,7 @@ export default function SimulationAdminManager({ onClose }) {
                                                             </View>
                                                             <View style={attemptStyles.right}>
                                                                 <Text style={[attemptStyles.score, {
-                                                                    color: attempt.score >= 70 ? '#10B981' : attempt.score >= 40 ? '#F59E0B' : '#EF4444'
+                                                                    color: attempt.score >= 70 ? '#10B981' : attempt.score >= 40 ? '#D71A21' : '#EF4444'
                                                                 }]}>
                                                                     {attempt.score}%
                                                                 </Text>
@@ -592,7 +592,7 @@ function PerformanceBadge({ avgScore, passRate, totalAttempts }) {
     } else if (avgScore >= 70 && passRate >= 60) {
         grade = 'Good'; color = '#3B82F6'; desc = 'Learners meeting expectations';
     } else if (avgScore >= 50 && passRate >= 40) {
-        grade = 'Average'; color = '#F59E0B'; desc = 'Room for improvement in training quality';
+        grade = 'Average'; color = '#D71A21'; desc = 'Room for improvement in training quality';
     } else {
         grade = 'Needs Attention'; color = '#EF4444'; desc = 'Consider reviewing simulation difficulty';
     }

@@ -773,7 +773,7 @@ export default function SimulationFlowBuilder({ existingSimulation, onSave, onCl
                         style={styles.input}
                         value={title}
                         onChangeText={setTitle}
-                        placeholder="e.g., Making the Perfect Belgian Waffle"
+                        placeholder="e.g., Making the Perfect EMIRATES"
                         placeholderTextColor="#6B7280"
                     />
 
@@ -828,7 +828,7 @@ export default function SimulationFlowBuilder({ existingSimulation, onSave, onCl
                                     difficulty === diff && styles.chipActive,
                                     {
                                         backgroundColor: difficulty === diff
-                                            ? diff === 'Easy' ? '#10B981' : diff === 'Medium' ? '#F59E0B' : '#EF4444'
+                                            ? diff === 'Easy' ? '#10B981' : diff === 'Medium' ? '#D71A21' : '#EF4444'
                                             : 'rgba(255,255,255,0.1)'
                                     }
                                 ]}

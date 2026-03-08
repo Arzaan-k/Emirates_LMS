@@ -1,5 +1,5 @@
 """
-SQLAlchemy ORM Models for BW LMS Backend
+SQLAlchemy ORM Models for Emirates LMS Backend
 Organized by domain for better maintainability
 """
 

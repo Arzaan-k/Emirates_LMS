@@ -21,7 +21,7 @@ const DisclaimerModal = () => {
                 <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
                 <View style={styles.modalView}>
                     <View style={styles.iconContainer}>
-                        <Feather name="alert-triangle" size={32} color="#F59E0B" />
+                        <Feather name="alert-triangle" size={32} color="#D71A21" />
                     </View>
 
                     <Text style={styles.modalTitle}>Development Notice</Text>

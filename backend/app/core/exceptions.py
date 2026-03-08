@@ -1,5 +1,5 @@
 """
-Custom Exception Classes for BW LMS Backend
+Custom Exception Classes for Emirates LMS Backend
 Provides consistent error handling across the application
 """
 

@@ -1988,7 +1988,7 @@ def generate_certificate(
         "completed_date": completed_date,
         "score": completion.score_percent,
         "xp_earned": completion.xp_earned or course.xp or 50,
-        "company_name": "Belgian Waffle Co.",
+        "company_name": "Emirates Airlines",
         "issued_at": datetime.utcnow().isoformat(),
     }
 

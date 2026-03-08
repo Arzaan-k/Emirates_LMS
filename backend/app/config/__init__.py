@@ -1,5 +1,5 @@
 """
-Configuration module for BW LMS Backend
+Configuration module for Emirates LMS Backend
 """
 
 from app.config.settings import settings

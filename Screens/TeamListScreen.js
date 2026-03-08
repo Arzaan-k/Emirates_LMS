@@ -31,10 +31,10 @@ import * as XLSX from 'xlsx';
 const { width, height } = Dimensions.get('window');
 const ITEMS_PER_PAGE = 30;
 
-// BELGIAN WAFFLE THEME COLORS
+// EMIRATES THEME COLORS
 const THEME = {
-    primary: '#F59E0B',    // Waffle Yellow/Orange
-    secondary: '#D97706',  // Darker Amber
+    primary: '#D71A21',    // Waffle Yellow/Orange
+    secondary: '#B91C1C',  // Darker Amber
     chocolate: '#451A03',  // Dark Brown Text
     cream: '#FFFBEB',      // Light Cream Background
     white: '#FFFFFF',
@@ -650,12 +650,12 @@ const TeamListScreen = ({ navigation, route }) => {
         const colors = {
             'Super Admin': '#7C2D12',
             'Store Manager': '#B45309',
-            'Shift Manager': '#D97706',
-            'Gold Waffler': '#F59E0B',
-            'Silver Waffler': '#9CA3AF',
-            'Waffler': '#6B7280',
+            'Shift Manager': '#B91C1C',
+            'Gold Crew': '#D71A21',
+            'Silver Crew': '#9CA3AF',
+            'Crew Member': '#6B7280',
         };
-        return colors[role] || '#F59E0B';
+        return colors[role] || '#D71A21';
     };
 
     const getInitials = (name) => {
@@ -778,7 +778,7 @@ const TeamListScreen = ({ navigation, route }) => {
                             <View>
                                 <Text style={styles.filterTitle}>Filter Team</Text>
                                 {totalActive > 0 && (
-                                    <Text style={{ fontSize: 12, color: '#F59E0B', fontWeight: '600' }}>
+                                    <Text style={{ fontSize: 12, color: '#D71A21', fontWeight: '600' }}>
                                         {totalActive} filter{totalActive > 1 ? 's' : ''} active
                                     </Text>
                                 )}
@@ -854,7 +854,7 @@ const TeamListScreen = ({ navigation, route }) => {
                                             is_external: val ? true : undefined
                                         }))}
                                         trackColor={{ false: '#D1D5DB', true: '#FCD34D' }}
-                                        thumbColor={tempFilters['is_external'] ? '#F59E0B' : '#F4F4F5'}
+                                        thumbColor={tempFilters['is_external'] ? '#D71A21' : '#F4F4F5'}
                                     />
                                 </View>
                             </View>
@@ -1120,7 +1120,7 @@ const TeamListScreen = ({ navigation, route }) => {
                 </TouchableOpacity>
                 <View style={{ flex: 1 }}>
                     <Text style={styles.headerTitle}>Team Directory</Text>
-                    <Text style={styles.headerSubtitle}>Manage your waffle family</Text>
+                    <Text style={styles.headerSubtitle}>Manage your Emirates team</Text>
                 </View>
                 <TouchableOpacity onPress={onRefresh} style={styles.headerActionBtn}>
                     <Feather name="refresh-cw" size={20} color="#FFF" />
@@ -1283,7 +1283,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingHorizontal: 20,
         paddingVertical: 15,
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
     },
     backBtn: {
         padding: 8,
@@ -1343,7 +1343,7 @@ const styles = StyleSheet.create({
         position: 'relative',
     },
     filterBtnActive: {
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         borderColor: '#B45309',
     },
     badge: {
@@ -1375,7 +1375,7 @@ const styles = StyleSheet.create({
         marginBottom: 8,
         borderRadius: 8,
         borderWidth: 1,
-        borderColor: '#F59E0B',
+        borderColor: '#D71A21',
     },
     selectionText: {
         fontWeight: '600',
@@ -1421,7 +1421,7 @@ const styles = StyleSheet.create({
         borderColor: 'transparent',
     },
     userCardSelected: {
-        borderColor: '#F59E0B',
+        borderColor: '#D71A21',
         backgroundColor: '#FFFBEB',
     },
     selectionCheckbox: {
@@ -1435,8 +1435,8 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     selectionCheckboxActive: {
-        backgroundColor: '#F59E0B',
-        borderColor: '#F59E0B',
+        backgroundColor: '#D71A21',
+        borderColor: '#D71A21',
     },
     userAvatar: {
         width: 48,
@@ -1568,7 +1568,7 @@ const styles = StyleSheet.create({
         color: '#374151',
     },
     filterCountBadge: {
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         borderRadius: 12,
         paddingHorizontal: 6,
         paddingVertical: 1,
@@ -1598,7 +1598,7 @@ const styles = StyleSheet.create({
         borderColor: '#E5E7EB',
     },
     filterOptionChipSelected: {
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         borderColor: '#B45309',
     },
     filterOptionText: {
@@ -1633,9 +1633,9 @@ const styles = StyleSheet.create({
         flex: 2,
         paddingVertical: 14,
         borderRadius: 12,
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         alignItems: 'center',
-        shadowColor: '#F59E0B',
+        shadowColor: '#D71A21',
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.3,
         shadowRadius: 8,

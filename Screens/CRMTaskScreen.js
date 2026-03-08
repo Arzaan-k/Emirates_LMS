@@ -20,7 +20,7 @@ const { width } = Dimensions.get('window');
 
 const PRIORITY_COLORS = {
     low: '#10B981',
-    medium: '#F59E0B',
+    medium: '#D71A21',
     high: '#EF4444',
     critical: '#7C3AED'
 };
@@ -162,7 +162,7 @@ export default function CRMTaskScreen({ route, navigation }) {
 
                 {/* Task Instructions */}
                 <View style={styles.instructionsCard}>
-                    <MaterialCommunityIcons name="lightbulb-on" size={24} color="#F59E0B" />
+                    <MaterialCommunityIcons name="lightbulb-on" size={24} color="#D71A21" />
                     <View style={styles.instructionsContent}>
                         <Text style={styles.instructionsTitle}>Your Task</Text>
                         <Text style={styles.instructionsText}>
@@ -276,7 +276,7 @@ const styles = StyleSheet.create({
 
     instructionsCard: { flexDirection: 'row', backgroundColor: 'rgba(245, 158, 11, 0.1)', borderRadius: 16, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.2)' },
     instructionsContent: { flex: 1, marginLeft: 12 },
-    instructionsTitle: { fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: '#F59E0B', marginBottom: 4 },
+    instructionsTitle: { fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: '#D71A21', marginBottom: 4 },
     instructionsText: { fontSize: 13, fontFamily: 'Poppins_400Regular', color: '#FCD34D', lineHeight: 20 },
 
     xpCard: { marginBottom: 20, borderRadius: 16, overflow: 'hidden' },

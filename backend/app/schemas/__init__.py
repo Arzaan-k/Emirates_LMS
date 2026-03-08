@@ -1,5 +1,5 @@
 """
-Pydantic Schemas for BW LMS Backend
+Pydantic Schemas for Emirates LMS Backend
 Data validation and serialization for API requests/responses
 """
 

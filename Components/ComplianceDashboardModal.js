@@ -19,7 +19,7 @@ const { width, height } = Dimensions.get('window');
 
 const STATUS_COLORS = {
     green: '#10B981',
-    yellow: '#F59E0B',
+    yellow: '#D71A21',
     red: '#EF4444'
 };
 
@@ -55,7 +55,7 @@ const StoreCard = ({ store }) => {
                     <Text style={styles.storeStatLabel}>Compliant</Text>
                 </View>
                 <View style={styles.storeStat}>
-                    <MaterialCommunityIcons name="clock-alert" size={16} color="#F59E0B" />
+                    <MaterialCommunityIcons name="clock-alert" size={16} color="#D71A21" />
                     <Text style={styles.storeStatValue}>{store.expiring}</Text>
                     <Text style={styles.storeStatLabel}>Expiring</Text>
                 </View>
@@ -76,7 +76,7 @@ const StoreCard = ({ store }) => {
 
 // Expiring Certification Alert
 const ExpiringAlert = ({ cert }) => {
-    const daysColor = cert.days_remaining <= 7 ? '#EF4444' : (cert.days_remaining <= 14 ? '#F59E0B' : '#10B981');
+    const daysColor = cert.days_remaining <= 7 ? '#EF4444' : (cert.days_remaining <= 14 ? '#D71A21' : '#10B981');
     
     return (
         <View style={styles.alertCard}>
@@ -186,7 +186,7 @@ export default function ComplianceDashboardModal({ visible, onClose }) {
                                 {/* Compliance Rate Hero */}
                                 <View style={styles.heroCard}>
                                     <LinearGradient 
-                                        colors={dashboard?.overview?.compliance_rate >= 80 ? ['#10B981', '#059669'] : ['#F59E0B', '#D97706']} 
+                                        colors={dashboard?.overview?.compliance_rate >= 80 ? ['#10B981', '#059669'] : ['#D71A21', '#B91C1C']} 
                                         style={styles.heroGradient}
                                         start={{ x: 0, y: 0 }}
                                         end={{ x: 1, y: 1 }}
@@ -226,7 +226,7 @@ export default function ComplianceDashboardModal({ visible, onClose }) {
                                     <RAGCard 
                                         label="At Risk" 
                                         count={dashboard?.stores?.yellow || 0} 
-                                        color="#F59E0B" 
+                                        color="#D71A21" 
                                         icon="alert"
                                     />
                                     <RAGCard 

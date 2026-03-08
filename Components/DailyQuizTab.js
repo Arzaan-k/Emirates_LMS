@@ -25,7 +25,7 @@ const COLORS = {
     greenLight: '#D1FAE5',
     red: '#EF4444',
     redLight: '#FEE2E2',
-    amber: '#F59E0B',
+    amber: '#D71A21',
     amberLight: '#FEF3C7',
     text: '#1E293B',
     sub: '#64748B',

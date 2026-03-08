@@ -29,9 +29,9 @@ const { width, height } = Dimensions.get('window');
 
 // Level colors and icons - must include all possible roles
 const LEVEL_COLORS = {
-    'Waffler': '#9CA3AF',
-    'Silver Waffler': '#60A5FA',
-    'Gold Waffler': '#F59E0B',
+    'Crew Member': '#9CA3AF',
+    'Silver Crew': '#60A5FA',
+    'Gold Crew': '#D71A21',
     'Shift Manager': '#8B5CF6',
     'Assistant Store Manager': '#EF4444',
     'Store Manager': '#C084FC',
@@ -40,9 +40,9 @@ const LEVEL_COLORS = {
 };
 
 const LEVEL_ICONS = {
-    'Waffler': 'account',
-    'Silver Waffler': 'medal-outline',
-    'Gold Waffler': 'medal',
+    'Crew Member': 'account',
+    'Silver Crew': 'medal-outline',
+    'Gold Crew': 'medal',
     'Shift Manager': 'account-tie',
     'Assistant Store Manager': 'store',
     'Store Manager': 'crown',
@@ -81,7 +81,7 @@ const EligibilityModal = ({ visible, eligibility, onGenerateExam, onClose, loadi
                                     <MaterialCommunityIcons
                                         name={isReappear ? "refresh-circle" : "trophy-award"}
                                         size={48}
-                                        color={isReappear ? "#60A5FA" : "#F59E0B"}
+                                        color={isReappear ? "#60A5FA" : "#D71A21"}
                                     />
                                 </View>
                                 {isReappear && (
@@ -147,7 +147,7 @@ const EligibilityModal = ({ visible, eligibility, onGenerateExam, onClose, loadi
 
                                 {/* Warning */}
                                 <View style={eligibilityStyles.warningBox}>
-                                    <MaterialCommunityIcons name="alert" size={20} color="#F59E0B" />
+                                    <MaterialCommunityIcons name="alert" size={20} color="#D71A21" />
                                     <Text style={eligibilityStyles.warningText}>
                                         This exam covers all content from your current level.
                                         Results will be sent to your manager.
@@ -446,7 +446,7 @@ export default function RoleAdvancementExam({ userEmail, onComplete, visible, on
         return (
             <Modal visible={visible} animationType="slide">
                 <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color="#F59E0B" />
+                    <ActivityIndicator size="large" color="#D71A21" />
                     <Text style={styles.loadingText}>Checking eligibility...</Text>
                 </View>
             </Modal>
@@ -484,7 +484,7 @@ export default function RoleAdvancementExam({ userEmail, onComplete, visible, on
                             <Text style={styles.examSubtitle}>{exam.current_role} → {exam.target_role}</Text>
                         </View>
                         <View style={[styles.timerBox, isLowTime && styles.timerBoxLow]}>
-                            <Feather name="clock" size={16} color={isLowTime ? "#EF4444" : "#F59E0B"} />
+                            <Feather name="clock" size={16} color={isLowTime ? "#EF4444" : "#D71A21"} />
                             <Text style={[styles.timerText, isLowTime && styles.timerTextLow]}>
                                 {formatTime(timeRemaining)}
                             </Text>
@@ -822,7 +822,7 @@ const eligibilityStyles = StyleSheet.create({
     warningText: {
         fontSize: 12,
         fontFamily: 'Poppins_500Medium',
-        color: '#F59E0B',
+        color: '#D71A21',
         marginLeft: 10,
         flex: 1,
     },
@@ -830,7 +830,7 @@ const eligibilityStyles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         paddingVertical: 16,
         borderRadius: 14,
     },
@@ -861,7 +861,7 @@ const eligibilityStyles = StyleSheet.create({
     },
     progressFill: {
         height: '100%',
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         borderRadius: 4,
     },
     closeFullBtn: {
@@ -910,7 +910,7 @@ const styles = StyleSheet.create({
     examSubtitle: {
         fontSize: 12,
         fontFamily: 'Poppins_500Medium',
-        color: '#F59E0B',
+        color: '#D71A21',
         marginTop: 2,
     },
     timerBox: {
@@ -927,7 +927,7 @@ const styles = StyleSheet.create({
     timerText: {
         fontSize: 16,
         fontFamily: 'Poppins_700Bold',
-        color: '#F59E0B',
+        color: '#D71A21',
         marginLeft: 6,
     },
     timerTextLow: {
@@ -999,7 +999,7 @@ const styles = StyleSheet.create({
     questionNumber: {
         fontSize: 12,
         fontFamily: 'Poppins_600SemiBold',
-        color: '#F59E0B',
+        color: '#D71A21',
         textTransform: 'uppercase',
         letterSpacing: 1,
         marginBottom: 8,
@@ -1022,7 +1022,7 @@ const styles = StyleSheet.create({
         marginBottom: 12,
     },
     optionBtnSelected: {
-        borderColor: '#F59E0B',
+        borderColor: '#D71A21',
         backgroundColor: 'rgba(245, 158, 11, 0.1)',
     },
     optionCircle: {
@@ -1036,13 +1036,13 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     optionCircleSelected: {
-        borderColor: '#F59E0B',
+        borderColor: '#D71A21',
     },
     optionDot: {
         width: 10,
         height: 10,
         borderRadius: 5,
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
     },
     optionText: {
         fontSize: 15,
@@ -1051,7 +1051,7 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     optionTextSelected: {
-        color: '#F59E0B',
+        color: '#D71A21',
     },
     navContainer: {
         flexDirection: 'row',
@@ -1080,7 +1080,7 @@ const styles = StyleSheet.create({
     navBtnNext: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         paddingHorizontal: 20,
         paddingVertical: 12,
         borderRadius: 12,

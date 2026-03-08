@@ -66,7 +66,7 @@ const Analytics = ({ navigation }) => {
         return (
             <SafeAreaView style={styles.container} edges={['top']}>
                 <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color="#F59E0B" />
+                    <ActivityIndicator size="large" color="#D71A21" />
                     <Text style={styles.loadingText}>Loading Reports...</Text>
                 </View>
             </SafeAreaView>
@@ -93,7 +93,7 @@ const Analytics = ({ navigation }) => {
                 </View>
 
                 <TouchableOpacity onPress={onRefresh} style={styles.refreshBtn}>
-                    <Feather name="refresh-cw" size={20} color="#F59E0B" />
+                    <Feather name="refresh-cw" size={20} color="#D71A21" />
                 </TouchableOpacity>
             </View>
 
@@ -101,7 +101,7 @@ const Analytics = ({ navigation }) => {
             <ScrollView
                 style={styles.scrollView}
                 showsVerticalScrollIndicator={false}
-                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#F59E0B" />}
+                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#D71A21" />}
             >
                 <View style={styles.summaryContainer}>
                     {/* Working Now */}
@@ -116,9 +116,9 @@ const Analytics = ({ navigation }) => {
                     {/* Total Hours */}
                     <Animated.View entering={FadeInDown.delay(100)} style={[styles.summaryCard, styles.hoursCard]}>
                         <View style={styles.summaryIcon}>
-                            <Feather name="clock" size={24} color="#F59E0B" />
+                            <Feather name="clock" size={24} color="#D71A21" />
                         </View>
-                        <Text style={[styles.summaryValue, { color: '#F59E0B' }]}>{totalHoursToday.toFixed(1)}</Text>
+                        <Text style={[styles.summaryValue, { color: '#D71A21' }]}>{totalHoursToday.toFixed(1)}</Text>
                         <Text style={styles.summaryLabel}>Hours Today</Text>
                     </Animated.View>
 
@@ -141,7 +141,7 @@ const Analytics = ({ navigation }) => {
                         <Feather
                             name="clock"
                             size={18}
-                            color={selectedTab === 'attendance' ? '#F59E0B' : '#6B7280'}
+                            color={selectedTab === 'attendance' ? '#D71A21' : '#6B7280'}
                         />
                         <Text style={[
                             styles.tabText,
@@ -156,7 +156,7 @@ const Analytics = ({ navigation }) => {
                         <Feather
                             name="map-pin"
                             size={18}
-                            color={selectedTab === 'location' ? '#F59E0B' : '#6B7280'}
+                            color={selectedTab === 'location' ? '#D71A21' : '#6B7280'}
                         />
                         <Text style={[
                             styles.tabText,
@@ -171,7 +171,7 @@ const Analytics = ({ navigation }) => {
                         <Feather
                             name="award"
                             size={18}
-                            color={selectedTab === 'quizzes' ? '#F59E0B' : '#6B7280'}
+                            color={selectedTab === 'quizzes' ? '#D71A21' : '#6B7280'}
                         />
                         <Text style={[
                             styles.tabText,
@@ -233,7 +233,7 @@ const EmployeeCard = ({ employee, selectedTab }) => {
             {selectedTab === 'attendance' && (
                 <View style={styles.tabContent}>
                     <View style={styles.statRow}>
-                        <Feather name="clock" size={16} color="#F59E0B" />
+                        <Feather name="clock" size={16} color="#D71A21" />
                         <Text style={styles.statLabel}>Total Hours Today:</Text>
                         <Text style={styles.statValue}>{totalHours.toFixed(1)}h</Text>
                     </View>
@@ -324,7 +324,7 @@ const EmployeeCard = ({ employee, selectedTab }) => {
             {selectedTab === 'quizzes' && (
                 <View style={styles.tabContent}>
                     <View style={styles.statRow}>
-                        <Feather name="award" size={16} color="#F59E0B" />
+                        <Feather name="award" size={16} color="#D71A21" />
                         <Text style={styles.statLabel}>Quizzes Completed:</Text>
                         <Text style={styles.statValue}>{employee.quizzes_completed}</Text>
                     </View>
@@ -426,7 +426,7 @@ const styles = StyleSheet.create({
         shadowColor: '#10B981',
     },
     hoursCard: {
-        shadowColor: '#F59E0B',
+        shadowColor: '#D71A21',
     },
     locationCard: {
         shadowColor: '#3B82F6',
@@ -484,7 +484,7 @@ const styles = StyleSheet.create({
         color: '#6B7280',
     },
     tabTextActive: {
-        color: '#F59E0B',
+        color: '#D71A21',
         fontFamily: 'Poppins_600SemiBold',
     },
 
@@ -499,7 +499,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#FFF',
         borderRadius: 20,
         padding: 20,
-        shadowColor: '#F59E0B',
+        shadowColor: '#D71A21',
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.1,
         shadowRadius: 12,
@@ -519,7 +519,7 @@ const styles = StyleSheet.create({
         width: 50,
         height: 50,
         borderRadius: 25,
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -622,7 +622,7 @@ const styles = StyleSheet.create({
     durationText: {
         fontSize: 11,
         fontFamily: 'Poppins_700Bold',
-        color: '#F59E0B',
+        color: '#D71A21',
     },
     ongoingBadge: {
         marginLeft: 'auto',

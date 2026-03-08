@@ -141,7 +141,7 @@ export default function ExamHistoryModal({ visible, onClose }) {
     const getStatusColor = (status) => {
         switch (status) {
             case 'completed': return { bg: '#ECFDF5', text: '#059669', border: '#A7F3D0' };
-            case 'ongoing': return { bg: '#FEF3C7', text: '#D97706', border: '#FCD34D' };
+            case 'ongoing': return { bg: '#FEF3C7', text: '#B91C1C', border: '#FCD34D' };
             default: return { bg: '#EEF2FF', text: '#4F46E5', border: '#C7D2FE' };
         }
     };
@@ -361,7 +361,7 @@ export default function ExamHistoryModal({ visible, onClose }) {
                                                     styles.attendeeStatusText,
                                                     {
                                                         color: attendee.completed ? '#059669' :
-                                                            attendee.marked_present ? '#D97706' :
+                                                            attendee.marked_present ? '#B91C1C' :
                                                                 '#DC2626'
                                                     }
                                                 ]}>
@@ -419,7 +419,7 @@ export default function ExamHistoryModal({ visible, onClose }) {
                                                                     <View key={bIdx} style={styles.breachItem}>
                                                                         <View style={[
                                                                             styles.breachDot,
-                                                                            { backgroundColor: breach.severity === 'critical' ? '#EF4444' : '#F59E0B' }
+                                                                            { backgroundColor: breach.severity === 'critical' ? '#EF4444' : '#D71A21' }
                                                                         ]} />
                                                                         <View style={{ flex: 1 }}>
                                                                             <Text style={styles.breachLabel}>{breach.label || breach.type}</Text>

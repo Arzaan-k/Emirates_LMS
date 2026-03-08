@@ -604,11 +604,11 @@ export default function UpcomingExamsCard({ userEmail, onStartExam, refreshKey }
                                 <Feather
                                     name={exam.can_start ? "check-circle" : "clock"}
                                     size={12}
-                                    color={exam.can_start ? "#10B981" : "#F59E0B"}
+                                    color={exam.can_start ? "#10B981" : "#D71A21"}
                                 />
                                 <Text style={[
                                     styles.statusText,
-                                    { color: exam.can_start ? "#10B981" : "#F59E0B" }
+                                    { color: exam.can_start ? "#10B981" : "#D71A21" }
                                 ]}>
                                     {exam.can_start ? "Ready to Start" : "Awaiting Attendance"}
                                 </Text>
@@ -775,7 +775,7 @@ const styles = StyleSheet.create({
     },
     waitingBadge: {
         backgroundColor: 'rgba(245, 158, 11, 0.2)',
-        borderColor: '#F59E0B'
+        borderColor: '#D71A21'
     },
     statusText: {
         fontSize: 12,

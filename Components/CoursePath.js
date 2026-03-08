@@ -91,10 +91,10 @@ const PathNode = ({ item, index, x, y, onPress }) => {
     let ringColor = "rgba(0,0,0,0.05)";
 
     if (isCompleted) {
-        gradientColors = ["#F59E0B", "#D97706"]; // Gold
+        gradientColors = ["#D71A21", "#B91C1C"]; // Gold
         iconColor = "#FFF";
     } else if (isActive) {
-        gradientColors = ["#FBBF24", "#F59E0B"]; // Brighter Gold
+        gradientColors = ["#FBBF24", "#D71A21"]; // Brighter Gold
         iconColor = "#FFF";
         ringColor = "rgba(245, 158, 11, 0.3)";
     }
@@ -124,7 +124,7 @@ const PathNode = ({ item, index, x, y, onPress }) => {
             {/* CROWN (Active Only) */}
             {isActive && (
                 <View style={styles.crownContainer}>
-                    <MaterialCommunityIcons name="crown" size={28} color="#F59E0B" style={styles.crownShadow} />
+                    <MaterialCommunityIcons name="crown" size={28} color="#D71A21" style={styles.crownShadow} />
                     <MaterialCommunityIcons name="crown-outline" size={28} color="#FFF" style={{ position: 'absolute' }} />
                 </View>
             )}
@@ -174,7 +174,7 @@ const LevelDetailModal = ({ visible, level, onClose, onStart }) => {
 
                         {/* CONTENT */}
                         <View style={styles.modalHeader}>
-                            <View style={[styles.modalIcon, { backgroundColor: level.status === 'completed' ? '#F59E0B' : '#FBBF24' }]}>
+                            <View style={[styles.modalIcon, { backgroundColor: level.status === 'completed' ? '#D71A21' : '#FBBF24' }]}>
                                 <MaterialCommunityIcons name={level.icon} size={40} color="#FFF" />
                             </View>
                             <View style={{ flex: 1 }}>
@@ -194,14 +194,14 @@ const LevelDetailModal = ({ visible, level, onClose, onStart }) => {
                                 <Text style={styles.statText}>{level.lessonCount} Lessons</Text>
                             </View>
                             <View style={styles.statItem}>
-                                <MaterialCommunityIcons name="lightning-bolt" size={18} color="#F59E0B" />
+                                <MaterialCommunityIcons name="lightning-bolt" size={18} color="#D71A21" />
                                 <Text style={styles.statText}>+{level.xp} XP</Text>
                             </View>
                         </View>
 
                         {/* CTA BUTTON */}
                         <TouchableOpacity style={styles.startBtn} onPress={onStart}>
-                            <LinearGradient colors={["#F59E0B", "#D97706"]} style={styles.startBtnGradient}>
+                            <LinearGradient colors={["#D71A21", "#B91C1C"]} style={styles.startBtnGradient}>
                                 <Text style={styles.startBtnText}>
                                     {level.status === 'completed' ? "Practice Again" : "Start Chapter"}
                                 </Text>
@@ -261,7 +261,7 @@ const LevelUpCelebrationModal = ({ visible, previousLevel, newLevel, levelColor,
             <Animated.View style={[levelUpStyles.overlay, containerStyle]}>
                 <Animated.View style={[levelUpStyles.modal, modalStyle]}>
                     <LinearGradient
-                        colors={[levelColor || '#F59E0B', '#D97706']}
+                        colors={[levelColor || '#D71A21', '#B91C1C']}
                         style={levelUpStyles.gradient}
                     >
                         {/* Stars Decoration */}
@@ -299,7 +299,7 @@ const LevelUpCelebrationModal = ({ visible, previousLevel, newLevel, levelColor,
                         {/* Continue Button */}
                         <TouchableOpacity style={levelUpStyles.continueBtn} onPress={onClose}>
                             <Text style={levelUpStyles.continueBtnText}>Continue Journey</Text>
-                            <Feather name="arrow-right" size={18} color="#F59E0B" style={{ marginLeft: 8 }} />
+                            <Feather name="arrow-right" size={18} color="#D71A21" style={{ marginLeft: 8 }} />
                         </TouchableOpacity>
                     </LinearGradient>
                 </Animated.View>
@@ -319,7 +319,7 @@ const levelUpStyles = StyleSheet.create({
         width: width * 0.85,
         borderRadius: 30,
         overflow: 'hidden',
-        shadowColor: '#F59E0B',
+        shadowColor: '#D71A21',
         shadowOffset: { width: 0, height: 10 },
         shadowOpacity: 0.5,
         shadowRadius: 30,
@@ -401,7 +401,7 @@ const levelUpStyles = StyleSheet.create({
     continueBtnText: {
         fontSize: 16,
         fontFamily: 'Poppins_700Bold',
-        color: '#F59E0B',
+        color: '#D71A21',
     },
 });
 
@@ -438,24 +438,24 @@ export default function CoursePath(props) {
 
     // Level stages configuration
     const LEVEL_STAGES = [
-        { name: 'Waffler', icon: 'account', color: '#6B7280', minNodes: 0 },
-        { name: 'Silver Waffler', icon: 'medal-outline', color: '#9CA3AF', minNodes: 10 },
-        { name: 'Gold Waffler', icon: 'medal', color: '#F59E0B', minNodes: 25 },
+        { name: 'Crew Member', icon: 'account', color: '#6B7280', minNodes: 0 },
+        { name: 'Silver Crew', icon: 'medal-outline', color: '#9CA3AF', minNodes: 10 },
+        { name: 'Gold Crew', icon: 'medal', color: '#D71A21', minNodes: 25 },
     ];
 
     // Level stages configuration
-    const HIERARCHY = ['Waffler', 'Silver Waffler', 'Gold Waffler', 'Shift Manager', 'Assistant Store Manager'];
+    const HIERARCHY = ['Crew Member', 'Silver Crew', 'Gold Crew', 'Shift Manager', 'Assistant Store Manager'];
     const LEVEL_COLORS = {
-        'Waffler': '#9CA3AF',
-        'Silver Waffler': '#60A5FA',
-        'Gold Waffler': '#F59E0B',
+        'Crew Member': '#9CA3AF',
+        'Silver Crew': '#60A5FA',
+        'Gold Crew': '#D71A21',
         'Shift Manager': '#8B5CF6',
         'Assistant Store Manager': '#EF4444'
     };
     const LEVEL_ICONS = {
-        'Waffler': 'account',
-        'Silver Waffler': 'medal-outline',
-        'Gold Waffler': 'medal',
+        'Crew Member': 'account',
+        'Silver Crew': 'medal-outline',
+        'Gold Crew': 'medal',
         'Shift Manager': 'account-tie',
         'Assistant Store Manager': 'store'
     };
@@ -491,7 +491,7 @@ export default function CoursePath(props) {
         if (result?.passed) {
             // Show level up celebration
             setLevelUpInfo({
-                previousLevel: userProgress?.current_level || 'Waffler',
+                previousLevel: userProgress?.current_level || 'Crew Member',
                 newLevel: result.new_role
             });
             setShowConfetti(true);
@@ -611,7 +611,7 @@ export default function CoursePath(props) {
             });
 
             // Build Career Path
-            const userLevel = progressData.current_level || 'Waffler';
+            const userLevel = progressData.current_level || 'Crew Member';
             // Robust Index Finding: Exact -> Lowercase -> Default
             let userLevelIdx = hierarchyNames.indexOf(userLevel);
             if (userLevelIdx === -1) userLevelIdx = hierarchyNames.findIndex(h => h.toLowerCase() === userLevel.toLowerCase());
@@ -786,7 +786,7 @@ export default function CoursePath(props) {
                 };
 
                 // Determine if this milestone is "reached" (User is at or past this level)
-                const userLvlIdx = hierarchy.indexOf(userProgress?.current_level || 'Waffler');
+                const userLvlIdx = hierarchy.indexOf(userProgress?.current_level || 'Crew Member');
                 const thisLvlIdx = hierarchy.indexOf(levelName);
                 const isReached = userLvlIdx >= thisLvlIdx;
 
@@ -897,7 +897,7 @@ export default function CoursePath(props) {
             const cp2y = next.y - (VERTICAL_SPACING / 2);
 
             const isNextUnlocked = levels[index + 1].status !== "locked";
-            const color = isNextUnlocked ? "#F59E0B" : "#E5E7EB";
+            const color = isNextUnlocked ? "#D71A21" : "#E5E7EB";
 
             return (
                 <Path
@@ -920,7 +920,7 @@ export default function CoursePath(props) {
         // [NEW] Exam Node Handler
         if (item.type === 'EXAM') {
             const examRole = item.roleTarget || null;
-            const userCurrentLevel = userProgress?.current_level || 'Waffler';
+            const userCurrentLevel = userProgress?.current_level || 'Crew Member';
             const examLevelIdx = HIERARCHY.indexOf(examRole);
             const userLevelIdx = HIERARCHY.indexOf(userCurrentLevel);
             // Reappear = user has already advanced past this exam's level
@@ -948,7 +948,7 @@ export default function CoursePath(props) {
         // Check if a level up occurred from the lesson completion
         if (completionResult && completionResult.level_up && completionResult.new_level) {
             // Store previous level before refresh
-            const previousLevel = userProgress?.current_level || 'Waffler';
+            const previousLevel = userProgress?.current_level || 'Crew Member';
 
             // Show celebration
             setLevelUpInfo({
@@ -989,12 +989,12 @@ export default function CoursePath(props) {
                             <MaterialCommunityIcons
                                 name={LEVEL_ICONS[userProgress.current_level] || 'medal-outline'}
                                 size={24}
-                                color={LEVEL_COLORS[userProgress.current_level] || '#F59E0B'}
+                                color={LEVEL_COLORS[userProgress.current_level] || '#D71A21'}
                             />
                         </View>
                         <View style={{ flex: 1 }}>
                             <Text style={styles.progressTitle}>
-                                {userProgress.current_level || 'Waffler'}
+                                {userProgress.current_level || 'Crew Member'}
                             </Text>
                             <Text style={styles.progressSubtitle}>
                                 {userProgress.completed_nodes || 0} courses completed
@@ -1074,7 +1074,7 @@ export default function CoursePath(props) {
                 visible={!!levelUpInfo}
                 previousLevel={levelUpInfo?.previousLevel}
                 newLevel={levelUpInfo?.newLevel}
-                levelColor={LEVEL_COLORS[levelUpInfo?.newLevel] || '#F59E0B'}
+                levelColor={LEVEL_COLORS[levelUpInfo?.newLevel] || '#D71A21'}
                 levelIcon={LEVEL_ICONS[levelUpInfo?.newLevel] || 'medal'}
                 onClose={closeLevelUpModal}
             />
@@ -1165,7 +1165,7 @@ const styles = StyleSheet.create({
         left: 10,
     },
     crownShadow: {
-        shadowColor: "#F59E0B",
+        shadowColor: "#D71A21",
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.5,
         shadowRadius: 5,
@@ -1232,7 +1232,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         marginRight: 16,
-        shadowColor: "#F59E0B",
+        shadowColor: "#D71A21",
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.3,
         shadowRadius: 10,
@@ -1245,7 +1245,7 @@ const styles = StyleSheet.create({
     modalStatus: {
         fontSize: 12,
         fontFamily: "Poppins_600SemiBold",
-        color: "#F59E0B",
+        color: "#D71A21",
         marginTop: 4,
         letterSpacing: 1,
     },
@@ -1279,7 +1279,7 @@ const styles = StyleSheet.create({
     },
     startBtn: {
         marginTop: 'auto',
-        shadowColor: "#F59E0B",
+        shadowColor: "#D71A21",
         shadowOffset: { width: 0, height: 8 },
         shadowOpacity: 0.4,
         shadowRadius: 15,

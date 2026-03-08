@@ -1,5 +1,5 @@
 """
-Middleware for BW LMS Backend
+Middleware for Emirates LMS Backend
 Request/response processing, logging, error handling, and rate limiting
 """
 

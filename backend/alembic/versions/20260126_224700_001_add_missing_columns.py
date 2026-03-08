@@ -32,8 +32,11 @@ def column_exists(table_name: str, column_name: str) -> bool:
     """Check if a column exists in a table."""
     bind = op.get_bind()
     inspector = sa.inspect(bind)
-    columns = [col['name'] for col in inspector.get_columns(table_name)]
-    return column_name in columns
+    try:
+        columns = [col['name'] for col in inspector.get_columns(table_name)]
+        return column_name in columns
+    except sa.exc.NoSuchTableError:
+        return False
 
 
 def upgrade() -> None:

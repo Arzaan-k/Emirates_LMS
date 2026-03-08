@@ -1,5 +1,5 @@
 """
-Base Model Classes for BW LMS Backend
+Base Model Classes for Emirates LMS Backend
 Provides common functionality for all SQLAlchemy models
 """
 

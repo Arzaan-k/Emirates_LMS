@@ -18,7 +18,7 @@ import API_URL from '../config';
 const { width, height } = Dimensions.get('window');
 
 const THEME = {
-    primary: '#F59E0B',
+    primary: '#D71A21',
     primaryDark: '#78350F',
     green: '#10B981',
     blue: '#3B82F6',
@@ -34,7 +34,7 @@ const FILTER_COLORS = {
     roles: '#3B82F6',
     stores: '#8B5CF6',
     categories: '#10B981',
-    regions: '#F59E0B',
+    regions: '#D71A21',
     cities: '#EC4899',
     states: '#6366F1',
     designations: '#0EA5E9',
@@ -307,7 +307,7 @@ export default function UserAssignmentPicker({ visible, onClose, currentAssignme
                     )}
                     {user.region ? (
                         <View style={[styles.userTag, { backgroundColor: '#FFFBEB' }]}>
-                            <Text style={[styles.userTagText, { color: '#F59E0B' }]}>{user.region}</Text>
+                            <Text style={[styles.userTagText, { color: '#D71A21' }]}>{user.region}</Text>
                         </View>
                     ) : null}
                     {user.city ? (

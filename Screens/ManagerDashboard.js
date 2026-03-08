@@ -107,7 +107,7 @@ const getDashboardData = (role) => {
             };
         case 'Store Manager':
             return {
-                theme: ['#D97706', '#B45309'],
+                theme: ['#B91C1C', '#B45309'],
                 title: "Store Leadership",
                 stats: [
                     { label: "Daily Sales", value: "$3.2k", icon: "cash-register", trend: "+15%" },
@@ -152,7 +152,7 @@ const FeedItem = ({ item, index }) => {
     let color = "#60A5FA";
     if (item.type === 'alert') { icon = "alert"; color = "#EF4444"; }
     if (item.type === 'success') { icon = "check-circle"; color = "#10B981"; }
-    if (item.type === 'calendar') { icon = "calendar"; color = "#F59E0B"; }
+    if (item.type === 'calendar') { icon = "calendar"; color = "#D71A21"; }
 
     return (
         <Animated.View
@@ -1178,7 +1178,7 @@ export default function ManagerDashboard({ route, navigation }) {
                                 <Text style={styles.roleText}>{role}</Text>
                             </View>
                         </View>
-                        <Image source={require('../assets/BW_Logo.png')} style={styles.logo} resizeMode="contain" />
+                        <Image source={require('../assets/Emirates_Logo.png')} style={styles.logo} resizeMode="contain" />
                     </View>
                 </SafeAreaView>
             </LinearGradient>
@@ -1265,7 +1265,7 @@ export default function ManagerDashboard({ route, navigation }) {
                         {/* {hasPrivilege('assign_quiz') && (
                             <TouchableOpacity style={styles.actionBtn} onPress={() => setQuizModalVisible(true)}>
                                 <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
-                                    <MaterialCommunityIcons name="clipboard-check" size={24} color="#F59E0B" />
+                                    <MaterialCommunityIcons name="clipboard-check" size={24} color="#D71A21" />
                                 </View>
                                 <Text style={styles.actionText}>Assign Quiz</Text>
                             </TouchableOpacity>
@@ -1298,7 +1298,7 @@ export default function ManagerDashboard({ route, navigation }) {
                         {hasPrivilege('bulk_upload') && (
                             <TouchableOpacity style={styles.actionBtn} onPress={() => setBulkModalVisible(true)}>
                                 <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
-                                    <MaterialCommunityIcons name="layers-plus" size={24} color="#D97706" />
+                                    <MaterialCommunityIcons name="layers-plus" size={24} color="#B91C1C" />
                                 </View>
                                 <Text style={styles.actionText}>Bulk Upload</Text>
                             </TouchableOpacity>
@@ -1414,7 +1414,7 @@ export default function ManagerDashboard({ route, navigation }) {
                                 onPress={() => setCurriculumHierarchyVisible(true)}
                             >
                                 <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
-                                    <MaterialCommunityIcons name="sitemap" size={24} color="#D97706" />
+                                    <MaterialCommunityIcons name="sitemap" size={24} color="#B91C1C" />
                                 </View>
                                 <Text style={styles.actionText}>Curriculum</Text>
                             </TouchableOpacity>
@@ -1466,7 +1466,7 @@ export default function ManagerDashboard({ route, navigation }) {
                                 onPress={() => setCrmModalVisible(true)}
                             >
                                 <View style={[styles.actionIcon, { backgroundColor: '#FEF3C7' }]}>
-                                    <MaterialCommunityIcons name="ticket-account" size={24} color="#D97706" />
+                                    <MaterialCommunityIcons name="ticket-account" size={24} color="#B91C1C" />
                                 </View>
                                 <Text style={styles.actionText}>CRM Tickets</Text>
                             </TouchableOpacity>
@@ -1669,7 +1669,7 @@ export default function ManagerDashboard({ route, navigation }) {
                         </Text>
                     </View>
                     <View style={{ height: 6, backgroundColor: '#F3F4F6', borderRadius: 3, overflow: 'hidden' }}>
-                        <View style={{ height: '100%', backgroundColor: '#F59E0B', width: `${bulkUploadTask.progress}%` }} />
+                        <View style={{ height: '100%', backgroundColor: '#D71A21', width: `${bulkUploadTask.progress}%` }} />
                     </View>
                     {bulkUploadTask.status === 'failed' && (
                         <Text style={{ fontSize: 11, color: '#EF4444', marginTop: 4 }}>Error: {bulkUploadTask.error}</Text>
@@ -1987,13 +1987,13 @@ export default function ManagerDashboard({ route, navigation }) {
                                         <MaterialCommunityIcons
                                             name={isSelfLearning ? "book-education" : "trending-up"}
                                             size={18}
-                                            color={isSelfLearning ? '#10B981' : '#F59E0B'}
+                                            color={isSelfLearning ? '#10B981' : '#D71A21'}
                                         />
                                         <Text style={{
                                             marginLeft: 8,
                                             fontSize: 13,
                                             fontFamily: 'Poppins_600SemiBold',
-                                            color: isSelfLearning ? '#047857' : '#D97706'
+                                            color: isSelfLearning ? '#047857' : '#B91C1C'
                                         }}>
                                             {isSelfLearning ? '📚 Self Learning Path' : '🚀 Career Progression Path'}
                                         </Text>
@@ -2081,7 +2081,7 @@ export default function ManagerDashboard({ route, navigation }) {
                                                     </View>
                                                     <View style={styles.affectedUserBox}>
                                                         <View style={[styles.affectedUserIcon, { backgroundColor: '#FEF3C7' }]}>
-                                                            <MaterialIcons name="schedule" size={20} color="#D97706" />
+                                                            <MaterialIcons name="schedule" size={20} color="#B91C1C" />
                                                         </View>
                                                         <View style={styles.affectedUserInfo}>
                                                             <Text style={styles.affectedUserCount}>
@@ -2291,7 +2291,7 @@ export default function ManagerDashboard({ route, navigation }) {
                                             style={{
                                                 paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8,
                                                 backgroundColor: topicQuizDifficulty === d ?
-                                                    (d === 'Easy' ? '#10B981' : d === 'Medium' ? '#F59E0B' : '#EF4444') : '#F3F4F6',
+                                                    (d === 'Easy' ? '#10B981' : d === 'Medium' ? '#D71A21' : '#EF4444') : '#F3F4F6',
                                                 minWidth: 80, alignItems: 'center'
                                             }}
                                         >
@@ -3000,7 +3000,7 @@ const styles = StyleSheet.create({
         ...(Platform.OS === 'web' ? { backgroundColor: '#F8FAFC', color: '#1E293B' } : {})
     },
     uploadBtn: {
-        backgroundColor: Platform.OS === 'web' ? '#4F46E5' : '#F59E0B',
+        backgroundColor: Platform.OS === 'web' ? '#4F46E5' : '#D71A21',
         paddingVertical: Platform.OS === 'web' ? 18 : 16,
         borderRadius: Platform.OS === 'web' ? 20 : 14,
         alignItems: 'center',
@@ -3061,8 +3061,8 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     checkboxActive: {
-        backgroundColor: '#F59E0B',
-        borderColor: '#F59E0B',
+        backgroundColor: '#D71A21',
+        borderColor: '#D71A21',
     },
     toggleLabel: { fontSize: Platform.OS === 'web' ? 15 : 14, fontFamily: 'Poppins_500Medium', color: '#374151' },
 
@@ -3099,7 +3099,7 @@ const styles = StyleSheet.create({
         width: Platform.OS === 'web' ? 48 : 40,
         height: Platform.OS === 'web' ? 48 : 40,
         borderRadius: Platform.OS === 'web' ? 16 : 20,
-        backgroundColor: Platform.OS === 'web' ? '#FFF7ED' : '#F59E0B',
+        backgroundColor: Platform.OS === 'web' ? '#FFF7ED' : '#D71A21',
         justifyContent: 'center',
         alignItems: 'center',
         marginRight: Platform.OS === 'web' ? 16 : 10
@@ -3486,7 +3486,7 @@ const styles = StyleSheet.create({
     progressBadgeText: {
         fontSize: 11,
         fontFamily: 'Poppins_600SemiBold',
-        color: '#D97706',
+        color: '#B91C1C',
     },
     emptyAffectedUsers: {
         alignItems: 'center',

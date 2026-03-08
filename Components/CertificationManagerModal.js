@@ -45,7 +45,7 @@ const CertTypeCard = ({ cert, onEdit, onDelete }) => (
                     <Text style={styles.statText}>{cert.stats?.valid || 0} Valid</Text>
                 </View>
                 <View style={styles.stat}>
-                    <View style={[styles.statDot, { backgroundColor: '#F59E0B' }]} />
+                    <View style={[styles.statDot, { backgroundColor: '#D71A21' }]} />
                     <Text style={styles.statText}>{cert.stats?.expiring || 0} Expiring</Text>
                 </View>
                 <View style={styles.stat}>

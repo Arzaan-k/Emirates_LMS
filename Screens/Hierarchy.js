@@ -21,16 +21,16 @@ const FALLBACK_HIERARCHY = [
     { role: "Ops Manager", name: "Operations Manager", icon: "account-cog", color: "#9333EA", bg: "#F3E8FF" },
     { role: "City Manager", name: "City Manager", icon: "city", color: "#2563EB", bg: "#DBEAFE" },
     { role: "Area Manager", name: "Area Manager", icon: "map-marker-radius", color: "#059669", bg: "#D1FAE5" },
-    { role: "Store Manager", name: "Store Manager", icon: "store", color: "#D97706", bg: "#FEF3C7" },
-    { role: "Gold Waffler", name: "Gold Waffler", icon: "medal", color: "#F59E0B", bg: "#FEF3C7" },
-    { role: "Silver Waffler", name: "Silver Waffler", icon: "medal-outline", color: "#9CA3AF", bg: "#F3F4F6" },
-    { role: "Waffler", name: "Waffler", icon: "account", color: "#6B7280", bg: "#F9FAFB" },
+    { role: "Store Manager", name: "Store Manager", icon: "store", color: "#B91C1C", bg: "#FEF3C7" },
+    { role: "Gold Crew", name: "Gold Crew", icon: "medal", color: "#D71A21", bg: "#FEF3C7" },
+    { role: "Silver Crew", name: "Silver Crew", icon: "medal-outline", color: "#9CA3AF", bg: "#F3F4F6" },
+    { role: "Crew Member", name: "Crew Member", icon: "account", color: "#6B7280", bg: "#F9FAFB" },
 ];
 
 export default function Hierarchy({ navigation, route }) {
     const insets = useSafeAreaInsets();
     const { t } = useLanguage();
-    const userProfile = route?.params?.userProfile || { role: 'Waffler' };
+    const userProfile = route?.params?.userProfile || { role: 'Crew Member' };
 
     const [hierarchy, setHierarchy] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -79,7 +79,7 @@ export default function Hierarchy({ navigation, route }) {
     if (loading) {
         return (
             <View style={[styles.container, { paddingTop: insets.top, justifyContent: 'center', alignItems: 'center' }]}>
-                <ActivityIndicator size="large" color="#F59E0B" />
+                <ActivityIndicator size="large" color="#D71A21" />
                 <Text style={{ marginTop: 12, fontFamily: 'Poppins_500Medium', color: '#6B7280' }}>Loading hierarchy...</Text>
             </View>
         );
@@ -130,7 +130,7 @@ export default function Hierarchy({ navigation, route }) {
                 {/* LEVEL PROGRESSION INFO */}
                 <View style={styles.levelInfoCard}>
                     <LinearGradient
-                        colors={["#F59E0B", "#D97706"]}
+                        colors={["#D71A21", "#B91C1C"]}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 1 }}
                         style={styles.levelInfoGradient}
@@ -139,7 +139,7 @@ export default function Hierarchy({ navigation, route }) {
                         <View style={{ marginLeft: 12, flex: 1 }}>
                             <Text style={styles.levelInfoTitle}>Level Progression</Text>
                             <Text style={styles.levelInfoSub}>
-                                Complete courses to advance from Waffler → Silver → Gold
+                                Complete courses to advance from AirCrew → Elite → Royal
                             </Text>
                         </View>
                     </LinearGradient>
@@ -228,8 +228,8 @@ const styles = StyleSheet.create({
     currentRoleCard: {
         backgroundColor: '#FFF',
         borderWidth: 2,
-        borderColor: '#F59E0B',
-        shadowColor: "#F59E0B",
+        borderColor: '#D71A21',
+        shadowColor: "#D71A21",
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.15,
         shadowRadius: 6,
@@ -264,7 +264,7 @@ const styles = StyleSheet.create({
     youBadgeText: {
         fontSize: 10,
         fontFamily: "Poppins_700Bold",
-        color: "#D97706"
+        color: "#B91C1C"
     },
     levelInfoCard: {
         marginTop: 20,

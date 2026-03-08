@@ -32,7 +32,7 @@ import API_URL from '../config';
 
 const { width, height } = Dimensions.get('window');
 
-const COLORS = ['#FFFFFF', '#EF4444', '#F59E0B', '#10B981', '#3B82F6', '#8B5CF6', '#EC4899'];
+const COLORS = ['#FFFFFF', '#EF4444', '#D71A21', '#10B981', '#3B82F6', '#8B5CF6', '#EC4899'];
 const STROKE_WIDTHS = [2, 4, 8, 12];
 
 export default function MeetingRoom({ route, navigation }) {
@@ -788,7 +788,7 @@ export default function MeetingRoom({ route, navigation }) {
                                         <Text style={styles.pillAvatarText}>{p.user_name?.charAt(0)}</Text>
                                     </View>
                                     <Text style={styles.pillName} numberOfLines={1}>{p.user_name}</Text>
-                                    {p.isHost && <MaterialCommunityIcons name="crown" size={12} color="#F59E0B" />}
+                                    {p.isHost && <MaterialCommunityIcons name="crown" size={12} color="#D71A21" />}
                                 </LinearGradient>
                             </View>
                         ))}
@@ -950,7 +950,7 @@ export default function MeetingRoom({ route, navigation }) {
                             {/* Take Photo */}
                             <TouchableOpacity style={styles.shareOption} onPress={() => handleSharePhoto(true)}>
                                 <View style={[styles.shareOptionIcon, { backgroundColor: '#FEF3C7' }]}>
-                                    <MaterialCommunityIcons name="camera" size={28} color="#F59E0B" />
+                                    <MaterialCommunityIcons name="camera" size={28} color="#D71A21" />
                                 </View>
                                 <Text style={styles.shareOptionLabel}>Camera</Text>
                             </TouchableOpacity>

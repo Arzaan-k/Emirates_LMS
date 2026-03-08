@@ -462,7 +462,7 @@ export default function CertificateModal({ visible, onClose, courseId, userEmail
                                     {certificate.xp_earned > 0 && (
                                         <View style={styles.detailRow}>
                                             <Text style={styles.detailLabel}>XP Earned</Text>
-                                            <Text style={[styles.detailValue, { color: '#F59E0B' }]}>{certificate.xp_earned} XP</Text>
+                                            <Text style={[styles.detailValue, { color: '#D71A21' }]}>{certificate.xp_earned} XP</Text>
                                         </View>
                                     )}
                                 </View>

@@ -1,5 +1,5 @@
 """
-Authentication Utilities for BW LMS Backend
+Authentication Utilities for Emirates LMS Backend
 JWT token management with refresh token rotation and blacklisting
 """
 

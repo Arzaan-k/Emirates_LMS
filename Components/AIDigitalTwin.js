@@ -20,7 +20,7 @@ const { width, height } = Dimensions.get("window");
 const STORE_MAP_BG = "https://images.unsplash.com/photo-1556910103-1c02745a30bf?q=80&w=2000&auto=format&fit=crop"; // Placeholder for Iso Map
 const ZONES = [
     { id: 'kitchen', title: 'The Kitchen', icon: 'chef-hat', x: 20, y: 30, color: '#EF4444' },
-    { id: 'counter', title: 'Front Counter', icon: 'cash-register', x: 60, y: 40, color: '#F59E0B' },
+    { id: 'counter', title: 'Front Counter', icon: 'cash-register', x: 60, y: 40, color: '#D71A21' },
     { id: 'dining', title: 'Dining Area', icon: 'table-chair', x: 40, y: 70, color: '#10B981' },
     { id: 'inventory', title: 'Inventory Room', icon: 'warehouse', x: 80, y: 20, color: '#6366F1' },
 ];
@@ -171,7 +171,7 @@ export default function AIDigitalTwin({ onClose }) {
                             return (
                                 <TouchableOpacity
                                     key={step.id}
-                                    style={[styles.hotspot, { left: `${step.x}%`, top: `${step.y}%`, borderColor: isActive ? "#F59E0B" : "rgba(255,255,255,0.3)", backgroundColor: isActive ? "rgba(245, 158, 11, 0.2)" : "rgba(0,0,0,0.4)" }]}
+                                    style={[styles.hotspot, { left: `${step.x}%`, top: `${step.y}%`, borderColor: isActive ? "#D71A21" : "rgba(255,255,255,0.3)", backgroundColor: isActive ? "rgba(245, 158, 11, 0.2)" : "rgba(0,0,0,0.4)" }]}
                                     onPress={() => handleStepPress(index)}
                                 >
                                     {isActive && <Animated.View style={[styles.pulseRing, { transform: [{ scale: pulseAnim }] }]} />}
@@ -219,7 +219,7 @@ export default function AIDigitalTwin({ onClose }) {
                             <View style={styles.completionOverlay}>
                                 <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
                                 <View style={styles.resultCard}>
-                                    <MaterialCommunityIcons name="trophy" size={60} color="#F59E0B" style={{ marginBottom: 20 }} />
+                                    <MaterialCommunityIcons name="trophy" size={60} color="#D71A21" style={{ marginBottom: 20 }} />
                                     <Text style={styles.resultTitle}>Zone Cleared!</Text>
                                     <Text style={styles.resultScore}>Score: {score}%</Text>
                                     <TouchableOpacity style={styles.finishBtn} onPress={() => setViewMode('map')}>
@@ -258,7 +258,7 @@ const styles = StyleSheet.create({
     gradientOverlay: { ...StyleSheet.absoluteFillObject },
 
     hotspot: { position: 'absolute', width: 60, height: 60, borderRadius: 30, borderWidth: 2, justifyContent: 'center', alignItems: 'center', shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 5, elevation: 5 },
-    pulseRing: { position: 'absolute', width: 80, height: 80, borderRadius: 40, borderWidth: 2, borderColor: '#F59E0B', opacity: 0.5 },
+    pulseRing: { position: 'absolute', width: 80, height: 80, borderRadius: 40, borderWidth: 2, borderColor: '#D71A21', opacity: 0.5 },
     labelTag: { position: 'absolute', top: 65, backgroundColor: 'rgba(0,0,0,0.8)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
     labelText: { color: "#FFF", fontSize: 10, fontFamily: "Poppins_600SemiBold" },
 
@@ -284,6 +284,6 @@ const styles = StyleSheet.create({
     resultCard: { width: '80%', padding: 30, backgroundColor: '#1E293B', borderRadius: 30, alignItems: 'center', shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.5, shadowRadius: 20, elevation: 10 },
     resultTitle: { color: "#FFF", fontSize: 24, fontFamily: "Poppins_700Bold", marginBottom: 8 },
     resultScore: { color: "#10B981", fontSize: 32, fontFamily: "Poppins_700Bold", marginBottom: 20 },
-    finishBtn: { backgroundColor: "#F59E0B", paddingHorizontal: 30, paddingVertical: 14, borderRadius: 16 },
+    finishBtn: { backgroundColor: "#D71A21", paddingHorizontal: 30, paddingVertical: 14, borderRadius: 16 },
     finishBtnText: { color: "#FFF", fontSize: 16, fontFamily: "Poppins_700Bold" },
 });

@@ -763,7 +763,7 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
                         {/* Users in progress */}
                         <View style={styles.affectedUserBox}>
                           <View style={[styles.affectedUserIcon, { backgroundColor: '#FEF3C7' }]}>
-                            <MaterialIcons name="schedule" size={20} color="#D97706" />
+                            <MaterialIcons name="schedule" size={20} color="#B91C1C" />
                           </View>
                           <View style={styles.affectedUserInfo}>
                             <Text style={styles.affectedUserCount}>
@@ -833,7 +833,7 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
           <View style={styles.duplicateModalContent}>
             {/* Header */}
             <View style={styles.duplicateHeader}>
-              <MaterialIcons name="warning" size={32} color="#F59E0B" />
+              <MaterialIcons name="warning" size={32} color="#D71A21" />
               <Text style={styles.duplicateTitle}>Duplicate Files Found</Text>
             </View>
 
@@ -1065,7 +1065,7 @@ const FolderUploadModal = ({ visible, onClose, onUploadComplete }) => {
                 <View style={styles.affectedUsersSection}>
                   <View style={styles.affectedUsersSectionHeader}>
                     <View style={[styles.sectionIconBadge, { backgroundColor: '#FEF3C7' }]}>
-                      <MaterialIcons name="schedule" size={16} color="#D97706" />
+                      <MaterialIcons name="schedule" size={16} color="#B91C1C" />
                     </View>
                     <View>
                       <Text style={styles.affectedUsersSectionTitle}>
@@ -1850,7 +1850,7 @@ const styles = StyleSheet.create({
   progressBadgeText: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#D97706',
+    color: '#B91C1C',
   },
   affectedUsersMore: {
     fontSize: 13,

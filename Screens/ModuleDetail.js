@@ -14,41 +14,41 @@ import { LinearGradient } from "expo-linear-gradient";
 const { width } = Dimensions.get("window");
 
 const MODULE_CONTENT = {
-    "Batter Preparation": {
-        title: "Batter Preparation",
-        description: "Consistency is key to a perfect Belgian Waffle.",
+    "Flight Prep & Service": {
+        title: "Flight Prep & Service",
+        description: "Consistency is key to a perfect EMIRATES EXPERIENCE.",
         color: ["#EC4899", "#DB2777"],
         steps: [
-            { id: 1, title: "Ingredient Quality Check", detail: "Ensure milk, eggs, and butter are fresh and at room temperature before mixing." },
-            { id: 2, title: "The Dry Mix", detail: "Sift flour, sugar, and baking powder together to avoid lumps in the batter." },
-            { id: 3, title: "Whisking Efficiency", detail: "Whisk egg whites until stiff peaks form before folding into the wet-dry mixture." },
-            { id: 4, title: "Resting Period", detail: "Let the batter rest for at least 15 minutes to allow the gluten to relax." }
+            { id: 1, title: "Cabin Readiness", detail: "Ensure all safety equipment is per list and galley is secured." },
+            { id: 2, title: "Meal Service Prep", detail: "Sift through special meal requests and verify stock against manifest." },
+            { id: 3, title: "Presentation", detail: "Ensure all service trays are set to Emirates premium standards." },
+            { id: 4, title: "Final Walkthrough", detail: "Check cabin for any loose items before passenger boarding." }
         ],
-        tips: ["Never over-mix the batter", "Check expiry dates daily", "Maintain batter temperature at 4°C"]
+        tips: ["Consistency is key", "Attention to detail is paramount", "Smiles are part of the uniform"]
     },
-    "Waffle Baking Standards": {
-        title: "Waffle Baking Standards",
-        description: "Master the art of the perfect golden-brown crisp.",
-        color: ["#F59E0B", "#D97706"],
+    "Safety Procedure Standards": {
+        title: "Safety Procedure Standards",
+        description: "Master the art of passenger safety and cabin management.",
+        color: ["#D71A21", "#B91C1C"],
         steps: [
-            { id: 1, title: "Pre-heating", detail: "Irons must reach exactly 210°C before the first pour." },
-            { id: 2, title: "Standard Portioning", detail: "Use the 180ml scoop for standard waffles to ensure zero wastage." },
-            { id: 3, title: "The Flip", detail: "Flip the iron within 3 seconds of closing to ensure even batter distribution." },
-            { id: 4, title: "Golden Standard", detail: "Bake for 3m 45s until the external steam stops completely." }
+            { id: 1, title: "Exit Checking", detail: "Doors must be armed and secondary checks completed before departure." },
+            { id: 2, title: "Standard Seating Protocol", detail: "Ensure all passengers are seated and belts fastened before cabin secure signal." },
+            { id: 3, title: "Lighting Control", detail: "Dim cabin lights to appropriate level for the phase of flight." },
+            { id: 4, title: "Communications", detail: "Ensure intercom is clear for pilot announcements." }
         ],
-        tips: ["Clean irons between every bake", "Use non-stick spray sparingly", "Listen for the timer beep"]
+        tips: ["Safety first, always", "Be observant", "Follow the checklist"]
     },
-    "Topping Application": {
-        title: "Topping Application",
-        description: "Aesthetics and portion control framework.",
+    "Premium Cabin Aesthetics": {
+        title: "Premium Cabin Aesthetics",
+        description: "Emirates First Class cabin standards framework.",
         color: ["#8B5CF6", "#7C3AED"],
         steps: [
-            { id: 1, title: "Base Spreading", detail: "Apply chocolate or Nutella in a zigzag pattern covering 90% of the surface." },
-            { id: 2, title: "Fruit Placement", detail: "Add 5 slices of banana or strawberry, evenly spaced across the quadrants." },
-            { id: 3, title: "Drizzling Technique", detail: "Hold the sauce bottle 10cm above the waffle for a clean, professional finish." },
-            { id: 4, title: "Final Dusting", detail: "A light dusting of icing sugar from the sifter to enhance visual contrast." }
+            { id: 1, title: "Suite Setup", detail: "Check pajamas, slippers, and amenity kits are perfectly aligned in the suite." },
+            { id: 2, title: "Sanitization Review", detail: "Ensure the A380 Shower Spa is pristine and towels are rolled correctly." },
+            { id: 3, title: "Safety Briefing", detail: "Perform the safety demonstration clearly and ensure all emergency cards are in seat pockets." },
+            { id: 4, title: "Ambient Lighting", detail: "Set the mood lighting to 'Starry Night' for long-haul overnight sectors." }
         ],
-        tips: ["Always use chilled cream", "Check topping freshness every 2 hours", "Maintain clean garnish stations"]
+        tips: ["Excellence in every interaction", "Anticipate passenger needs", "Maintain discretion"]
     },
     "Equipment Maintenance": {
         title: "Equipment Maintenance",
@@ -98,7 +98,7 @@ export default function ModuleDetail({ route, navigation }) {
                     <Text style={styles.sectionTitle}>Pro Tips</Text>
                     {content.tips.map((tip, idx) => (
                         <View key={idx} style={styles.tipRow}>
-                            <MaterialCommunityIcons name="lightbulb-on" size={18} color="#F59E0B" />
+                            <MaterialCommunityIcons name="lightbulb-on" size={18} color="#D71A21" />
                             <Text style={styles.tipText}>{tip}</Text>
                         </View>
                     ))}

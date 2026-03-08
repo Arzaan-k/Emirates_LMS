@@ -1,5 +1,5 @@
 """
-BW LMS Backend Startup Script
+Emirates LMS Backend Startup Script
 
 This script serves as the main entry point for running the modular backend.
 It imports and runs the FastAPI application from the app module.

@@ -63,7 +63,7 @@ const AI_QUIZ_DATA = [
 ];
 
 const QUIZ_TOPICS = [
-    { id: 1, title: "Espresso Science", count: "12 Qs", color: ["#F59E0B", "#D97706"], icon: "coffee" },
+    { id: 1, title: "Espresso Science", count: "12 Qs", color: ["#D71A21", "#B91C1C"], icon: "coffee" },
     { id: 2, title: "Milk Texturing", count: "8 Qs", color: ["#3B82F6", "#2563EB"], icon: "water" },
     { id: 3, title: "Customer Service", count: "15 Qs", color: ["#10B981", "#059669"], icon: "account-heart" },
     { id: 4, title: "Machine Maint.", count: "10 Qs", color: ["#6366F1", "#4F46E5"], icon: "cogs" },
@@ -389,7 +389,7 @@ export default function QuizSection() {
 
     const renderResult = () => (
         <View style={styles.resultContainer}>
-            <MaterialCommunityIcons name="trophy" size={100} color="#F59E0B" />
+            <MaterialCommunityIcons name="trophy" size={100} color="#D71A21" />
             <Text style={styles.resultTitle}>Challenge Complete!</Text>
             <Text style={styles.resultScore}>You Scored: {score} XP</Text>
 
@@ -449,7 +449,7 @@ export default function QuizSection() {
                 </View>
                 <View style={styles.statDivider} />
                 <View style={styles.statItem}>
-                    <MaterialCommunityIcons name="target" size={24} color="#F59E0B" />
+                    <MaterialCommunityIcons name="target" size={24} color="#D71A21" />
                     <View>
                         <Text style={styles.statVal}>94%</Text>
                         <Text style={styles.statLabel}>Accuracy</Text>

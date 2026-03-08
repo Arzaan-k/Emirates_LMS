@@ -20,7 +20,7 @@ const { width, height } = Dimensions.get('window');
 const NOTIF_ICONS = {
     info: { name: 'info', color: '#3B82F6', bg: '#EFF6FF' },
     success: { name: 'check-circle', color: '#10B981', bg: '#D1FAE5' },
-    warning: { name: 'alert-triangle', color: '#F59E0B', bg: '#FEF3C7' },
+    warning: { name: 'alert-triangle', color: '#D71A21', bg: '#FEF3C7' },
     urgent: { name: 'alert-circle', color: '#EF4444', bg: '#FEE2E2' },
     error: { name: 'x-circle', color: '#EF4444', bg: '#FEE2E2' },
     course: { name: 'book-open', color: '#8B5CF6', bg: '#EDE9FE' },
@@ -200,7 +200,7 @@ export default function NotificationBell({ userEmail, onDailyQuizPress }) {
                                 <RefreshControl
                                     refreshing={refreshing}
                                     onRefresh={() => { setRefreshing(true); fetchNotifications(); }}
-                                    tintColor="#F59E0B"
+                                    tintColor="#D71A21"
                                 />
                             }
                             ListEmptyComponent={
@@ -335,7 +335,7 @@ const styles = StyleSheet.create({
         width: 8,
         height: 8,
         borderRadius: 4,
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
     },
     notifMessage: {
         fontSize: 12,

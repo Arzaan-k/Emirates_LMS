@@ -125,7 +125,7 @@ const AuditsScreen = ({ navigation, route }) => {
             id: 'service',
             name: 'Customer Service',
             icon: 'smile',
-            color: '#F59E0B',
+            color: '#D71A21',
             bg: '#FEF3C7',
         },
     ];
@@ -533,7 +533,7 @@ const AuditsScreen = ({ navigation, route }) => {
                             ]}>
                                 <Text style={[
                                     styles.historyItemBadgeText,
-                                    { color: item.completion_rate === 100 ? '#16A34A' : '#D97706' }
+                                    { color: item.completion_rate === 100 ? '#16A34A' : '#B91C1C' }
                                 ]}>
                                     {item.completion_rate}%
                                 </Text>
@@ -969,7 +969,7 @@ const AuditsScreen = ({ navigation, route }) => {
                                                             Assigned: {new Date(assign.assigned_at).toLocaleDateString()}
                                                         </Text>
                                                     </View>
-                                                    <View style={[styles.statusBadge, { backgroundColor: assign.status === 'completed' ? '#059669' : '#D97706' }]}>
+                                                    <View style={[styles.statusBadge, { backgroundColor: assign.status === 'completed' ? '#059669' : '#B91C1C' }]}>
                                                         <Text style={styles.statusText}>{assign.status}</Text>
                                                     </View>
                                                 </View>
@@ -1144,7 +1144,7 @@ const AuditsScreen = ({ navigation, route }) => {
                     {showConfirm && (() => {
                         const pct = completionRate;
                         const isPartial = pct < 100;
-                        const catColor = isPartial ? '#F59E0B' : currentCategory.color;
+                        const catColor = isPartial ? '#D71A21' : currentCategory.color;
                         return (
                             <View style={{
                                 marginTop: 12,
@@ -1216,7 +1216,7 @@ const AuditsScreen = ({ navigation, route }) => {
                                     ? [currentCategory.color, currentCategory.color + 'DD']
                                     : completionRate === 0
                                         ? ['#9CA3AF', '#6B7280']
-                                        : ['#F59E0B', '#D97706']
+                                        : ['#D71A21', '#B91C1C']
                             }
                             start={{ x: 0, y: 0 }}
                             end={{ x: 1, y: 0 }}

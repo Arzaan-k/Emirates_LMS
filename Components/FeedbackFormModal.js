@@ -228,7 +228,7 @@ export default function FeedbackFormModal({ visible, onClose, courseId, courseTi
                                     <MaterialCommunityIcons
                                         name={star <= (ans || 0) ? 'star' : 'star-outline'}
                                         size={34}
-                                        color={star <= (ans || 0) ? '#F59E0B' : '#D1D5DB'}
+                                        color={star <= (ans || 0) ? '#D71A21' : '#D1D5DB'}
                                     />
                                 </TouchableOpacity>
                             ))}
@@ -283,7 +283,7 @@ export default function FeedbackFormModal({ visible, onClose, courseId, courseTi
                         </View>
                     ) : loadingSurvey ? (
                         <View style={{ paddingVertical: 40, alignItems: 'center' }}>
-                            <ActivityIndicator size="large" color="#F59E0B" />
+                            <ActivityIndicator size="large" color="#D71A21" />
                             <Text style={{ marginTop: 12, color: '#6B7280', fontSize: 13 }}>Loading survey...</Text>
                         </View>
                     ) : survey ? (
@@ -345,7 +345,7 @@ export default function FeedbackFormModal({ visible, onClose, courseId, courseTi
                                         <MaterialCommunityIcons
                                             name={star <= rating ? 'star' : 'star-outline'}
                                             size={36}
-                                            color={star <= rating ? '#F59E0B' : '#D1D5DB'}
+                                            color={star <= rating ? '#D71A21' : '#D1D5DB'}
                                         />
                                     </TouchableOpacity>
                                 ))}
@@ -489,7 +489,7 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         fontSize: 13,
         fontWeight: '600',
-        color: '#F59E0B',
+        color: '#D71A21',
         marginBottom: 12,
     },
 
@@ -509,7 +509,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#F9FAFB',
     },
     mcqOptionSelected: {
-        borderColor: '#F59E0B',
+        borderColor: '#D71A21',
         backgroundColor: '#FFFBEB',
     },
     mcqRadio: {
@@ -522,13 +522,13 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     mcqRadioSelected: {
-        borderColor: '#F59E0B',
+        borderColor: '#D71A21',
     },
     mcqRadioDot: {
         width: 8,
         height: 8,
         borderRadius: 4,
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
     },
     mcqOptionText: {
         fontSize: 13,
@@ -555,7 +555,7 @@ const styles = StyleSheet.create({
 
     // Submit
     submitBtn: {
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         paddingVertical: 14,
         borderRadius: 14,
         alignItems: 'center',

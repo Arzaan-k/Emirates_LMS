@@ -54,7 +54,7 @@ const THEME = {
     primary: '#3B82F6',
     primaryLight: '#EFF6FF',
     primaryDark: '#1E40AF',
-    accent: '#F59E0B',
+    accent: '#D71A21',
     textMain: '#1E293B',
     textSub: '#64748B',
     green: '#10B981',
@@ -62,7 +62,7 @@ const THEME = {
     toolbar: '#FFFFFF',
 };
 
-const BUCKET_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EF4444', '#EC4899', '#14B8A6', '#F97316'];
+const BUCKET_COLORS = ['#3B82F6', '#10B981', '#D71A21', '#8B5CF6', '#EF4444', '#EC4899', '#14B8A6', '#F97316'];
 
 // Circular Progress Component
 const CircularProgress = ({ size = 36, strokeWidth = 3, progress = 0, color = THEME.primary }) => {
@@ -762,8 +762,8 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
                             </Text>
                             {course.xp > 0 && (
                                 <>
-                                    <MaterialCommunityIcons name="star-four-points" size={11} color="#F59E0B" style={{ marginLeft: 8 }} />
-                                    <Text style={[styles.listMeta, { color: '#F59E0B' }]}>{course.xp} XP</Text>
+                                    <MaterialCommunityIcons name="star-four-points" size={11} color="#D71A21" style={{ marginLeft: 8 }} />
+                                    <Text style={[styles.listMeta, { color: '#D71A21' }]}>{course.xp} XP</Text>
                                 </>
                             )}
                         </View>

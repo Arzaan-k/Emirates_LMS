@@ -63,7 +63,7 @@ const WrongChoiceModal = ({ visible, consequence, onRetry }) => {
                         <Text style={wrongStyles.subtitle}>Here's what could happen:</Text>
 
                         <View style={wrongStyles.consequenceBox}>
-                            <MaterialCommunityIcons name="lightning-bolt" size={20} color="#F59E0B" />
+                            <MaterialCommunityIcons name="lightning-bolt" size={20} color="#D71A21" />
                             <Text style={wrongStyles.consequenceText}>{consequence}</Text>
                         </View>
 
@@ -96,7 +96,7 @@ const SimulationCompleteModal = ({ visible, score, totalSteps, wrongAttempts, ti
 
     const percentage = Math.round((score / (totalSteps * 10)) * 100) || 0;
     const grade = percentage >= 90 ? 'A+' : percentage >= 80 ? 'A' : percentage >= 70 ? 'B' : percentage >= 60 ? 'C' : 'D';
-    const gradeColor = percentage >= 80 ? '#10B981' : percentage >= 60 ? '#F59E0B' : '#EF4444';
+    const gradeColor = percentage >= 80 ? '#10B981' : percentage >= 60 ? '#D71A21' : '#EF4444';
 
     return (
         <Modal visible={visible} transparent animationType="fade">
@@ -112,7 +112,7 @@ const SimulationCompleteModal = ({ visible, score, totalSteps, wrongAttempts, ti
                             <MaterialCommunityIcons
                                 name={percentage >= 80 ? "trophy" : percentage >= 60 ? "medal" : "school"}
                                 size={80}
-                                color="#F59E0B"
+                                color="#D71A21"
                             />
                         </View>
 
@@ -145,7 +145,7 @@ const SimulationCompleteModal = ({ visible, score, totalSteps, wrongAttempts, ti
                             </View>
                             <View style={completeStyles.statDivider} />
                             <View style={completeStyles.statItem}>
-                                <Feather name="clock" size={20} color="#F59E0B" />
+                                <Feather name="clock" size={20} color="#D71A21" />
                                 <Text style={completeStyles.statValue}>{Math.floor(timeSpent / 60)}m</Text>
                                 <Text style={completeStyles.statLabel}>Time</Text>
                             </View>
@@ -170,7 +170,7 @@ const SimulationCompleteModal = ({ visible, score, totalSteps, wrongAttempts, ti
                             </TouchableOpacity>
                             <TouchableOpacity style={completeStyles.doneBtn} onPress={onClose}>
                                 <LinearGradient
-                                    colors={['#F59E0B', '#D97706']}
+                                    colors={['#D71A21', '#B91C1C']}
                                     style={completeStyles.doneGradient}
                                     start={{ x: 0, y: 0 }}
                                     end={{ x: 1, y: 0 }}
@@ -204,7 +204,7 @@ const PauseMenuModal = ({ visible, onResume, onRestart, onQuit }) => {
                     </TouchableOpacity>
 
                     <TouchableOpacity style={pauseStyles.menuItem} onPress={onRestart}>
-                        <Feather name="refresh-cw" size={24} color="#F59E0B" />
+                        <Feather name="refresh-cw" size={24} color="#D71A21" />
                         <Text style={pauseStyles.menuText}>Restart Simulation</Text>
                     </TouchableOpacity>
 
@@ -532,7 +532,7 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
             <View style={styles.loadingContainer}>
                 <StatusBar hidden />
                 <LinearGradient colors={['#0F172A', '#1E293B']} style={StyleSheet.absoluteFill} />
-                <ActivityIndicator size="large" color="#F59E0B" />
+                <ActivityIndicator size="large" color="#D71A21" />
                 <Text style={styles.loadingText}>Loading Simulation...</Text>
             </View>
         );
@@ -583,7 +583,7 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
 
                     {isVideoLoading && (
                         <View style={styles.videoOverlayCenter} pointerEvents="none">
-                            <ActivityIndicator size="large" color="#F59E0B" />
+                            <ActivityIndicator size="large" color="#D71A21" />
                         </View>
                     )}
 
@@ -642,7 +642,7 @@ export default function InteractiveSimulation({ simulation, onClose, userId = 'u
                                     </View>
 
                                     <View style={styles.scoreContainer}>
-                                        <MaterialCommunityIcons name="star" size={16} color="#F59E0B" />
+                                        <MaterialCommunityIcons name="star" size={16} color="#D71A21" />
                                         <Text style={styles.scoreText}>{score}</Text>
                                     </View>
                                 </View>
@@ -861,7 +861,7 @@ const styles = StyleSheet.create({
         flex: 1,
         height: 44,
         borderRadius: 12,
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -924,7 +924,7 @@ const styles = StyleSheet.create({
         borderRadius: 16,
     },
     scoreText: {
-        color: '#F59E0B',
+        color: '#D71A21',
         fontSize: 14,
         fontFamily: 'Poppins_700Bold',
         marginLeft: 4,
@@ -1108,7 +1108,7 @@ const wrongStyles = StyleSheet.create({
         padding: 16,
         marginBottom: 20,
         borderLeftWidth: 3,
-        borderLeftColor: '#F59E0B',
+        borderLeftColor: '#D71A21',
     },
     consequenceText: {
         flex: 1,

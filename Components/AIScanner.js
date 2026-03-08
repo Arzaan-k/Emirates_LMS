@@ -125,7 +125,7 @@ export default function AIScanner({ onClose }) {
 
     const getScoreColor = (score) => {
         if (score >= 90) return ['#10B981', '#34D399']; // Green
-        if (score >= 70) return ['#F59E0B', '#FCD34D']; // Yellow
+        if (score >= 70) return ['#D71A21', '#FCD34D']; // Yellow
         return ['#EF4444', '#F87171']; // Red
     };
 
@@ -228,7 +228,7 @@ export default function AIScanner({ onClose }) {
                                         <Feather
                                             name={analysisResult.score >= 90 ? "check-circle" : "alert-circle"}
                                             size={18}
-                                            color={analysisResult.score >= 90 ? "#10B981" : "#F59E0B"}
+                                            color={analysisResult.score >= 90 ? "#10B981" : "#D71A21"}
                                             style={{ marginRight: 10, marginTop: 2 }}
                                         />
                                         <Text style={styles.tipText}>{tip}</Text>

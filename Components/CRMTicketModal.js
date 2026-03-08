@@ -27,7 +27,7 @@ const TICKET_TYPES = [
 
 const PRIORITY_LEVELS = [
     { id: 'low', label: 'Low', color: '#10B981' },
-    { id: 'medium', label: 'Medium', color: '#F59E0B' },
+    { id: 'medium', label: 'Medium', color: '#D71A21' },
     { id: 'high', label: 'High', color: '#EF4444' },
     { id: 'critical', label: 'Critical', color: '#7C3AED' },
 ];

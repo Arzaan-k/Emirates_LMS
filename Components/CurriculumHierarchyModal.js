@@ -25,7 +25,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 const { width } = Dimensions.get('window');
 
 // Fallback levels in case API fails
-const DEFAULT_LEVELS = ['Waffler', 'Silver Waffler', 'Gold Waffler', 'Shift Manager', 'Assistant Store Manager'];
+const DEFAULT_LEVELS = ['Crew Member', 'Silver Crew', 'Gold Crew', 'Shift Manager', 'Assistant Store Manager'];
 
 /**
  * CurriculumHierarchyModal
@@ -992,7 +992,7 @@ export default function CurriculumHierarchyModal({ visible, onClose }) {
                         <MaterialCommunityIcons
                             name={isExpanded ? "folder-open" : "folder"}
                             size={20}
-                            color="#F59E0B"
+                            color="#D71A21"
                             style={{ marginRight: 8 }}
                         />
                         <Text style={[styles.courseTitle, { fontWeight: '600' }]}>{node.name}</Text>
@@ -1246,7 +1246,7 @@ export default function CurriculumHierarchyModal({ visible, onClose }) {
                                 {/* Quiz Questions List */}
                                 {levelQuizzes[level.name]?.loading ? (
                                     <View style={{ padding: 20, alignItems: 'center' }}>
-                                        <ActivityIndicator size="small" color="#F59E0B" />
+                                        <ActivityIndicator size="small" color="#D71A21" />
                                         <Text style={{ marginTop: 6, fontSize: 12, color: '#6B7280' }}>Loading questions...</Text>
                                     </View>
                                 ) : (levelQuizzes[level.name]?.questions || []).length === 0 ? (
@@ -1315,7 +1315,7 @@ export default function CurriculumHierarchyModal({ visible, onClose }) {
                                                                 <Text style={qStyles.qNumber}>Q{qIdx + 1}</Text>
                                                                 <View style={{ flexDirection: 'row', gap: 6 }}>
                                                                     <TouchableOpacity onPress={() => startEditQuestion(level.name, qIdx)} style={{ padding: 4 }}>
-                                                                        <Feather name="edit-2" size={14} color="#F59E0B" />
+                                                                        <Feather name="edit-2" size={14} color="#D71A21" />
                                                                     </TouchableOpacity>
                                                                     <TouchableOpacity onPress={() => deleteQuizQuestion(level.name, qIdx)} style={{ padding: 4 }}>
                                                                         <Feather name="trash-2" size={14} color="#EF4444" />
@@ -1425,7 +1425,7 @@ export default function CurriculumHierarchyModal({ visible, onClose }) {
 
                     {loading ? (
                         <View style={styles.loadingContainer}>
-                            <ActivityIndicator size="large" color="#F59E0B" />
+                            <ActivityIndicator size="large" color="#D71A21" />
                             <Text style={{ marginTop: 10, color: '#6B7280' }}>Loading Hierarchy...</Text>
                         </View>
                     ) : Platform.OS === 'web' ? (
@@ -1674,7 +1674,7 @@ export default function CurriculumHierarchyModal({ visible, onClose }) {
                                                     {/* Quiz Questions List */}
                                                     {levelQuizzes[level.name]?.loading ? (
                                                         <View style={{ padding: 20, alignItems: 'center' }}>
-                                                            <ActivityIndicator size="small" color="#F59E0B" />
+                                                            <ActivityIndicator size="small" color="#D71A21" />
                                                             <Text style={{ marginTop: 6, fontSize: 12, color: '#6B7280' }}>Loading questions...</Text>
                                                         </View>
                                                     ) : (levelQuizzes[level.name]?.questions || []).length === 0 ? (
@@ -1743,7 +1743,7 @@ export default function CurriculumHierarchyModal({ visible, onClose }) {
                                                                                     <Text style={qStyles.qNumber}>Q{qIdx + 1}</Text>
                                                                                     <View style={{ flexDirection: 'row', gap: 6 }}>
                                                                                         <TouchableOpacity onPress={() => startEditQuestion(level.name, qIdx)} style={{ padding: 4 }}>
-                                                                                            <Feather name="edit-2" size={14} color="#F59E0B" />
+                                                                                            <Feather name="edit-2" size={14} color="#D71A21" />
                                                                                         </TouchableOpacity>
                                                                                         <TouchableOpacity onPress={() => deleteQuizQuestion(level.name, qIdx)} style={{ padding: 4 }}>
                                                                                             <Feather name="trash-2" size={14} color="#EF4444" />
@@ -2087,7 +2087,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#FFF',
     },
     levelHeaderActive: {
-        borderColor: '#F59E0B',
+        borderColor: '#D71A21',
         backgroundColor: '#FFFBEB',
         borderBottomLeftRadius: 0,
         borderBottomRightRadius: 0,
@@ -2117,7 +2117,7 @@ const styles = StyleSheet.create({
         padding: 16,
         borderWidth: 1,
         borderTopWidth: 0,
-        borderColor: '#F59E0B',
+        borderColor: '#D71A21',
         borderBottomLeftRadius: 16,
         borderBottomRightRadius: 16,
         backgroundColor: '#FFFBEB',
@@ -2352,7 +2352,7 @@ const qStyles = StyleSheet.create({
     saveQBtn: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         paddingHorizontal: 10,
         paddingVertical: 6,
         borderRadius: 6,
@@ -2380,7 +2380,7 @@ const qStyles = StyleSheet.create({
     qNumber: {
         fontSize: 11,
         fontFamily: 'Poppins_700Bold',
-        color: '#F59E0B',
+        color: '#D71A21',
         backgroundColor: '#FEF3C7',
         paddingHorizontal: 6,
         paddingVertical: 1,
@@ -2418,7 +2418,7 @@ const qStyles = StyleSheet.create({
     editLabel: {
         fontSize: 13,
         fontFamily: 'Poppins_600SemiBold',
-        color: '#F59E0B',
+        color: '#D71A21',
         marginBottom: 6,
     },
     qInput: {

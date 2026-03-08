@@ -77,7 +77,7 @@ export default function RoleplayHistoryModal({ visible, onClose }) {
                                             {item.timestamp ? new Date(item.timestamp).toLocaleString() : 'Recent'}
                                         </Text>
                                         <View style={[styles.scoreBadge, {
-                                            backgroundColor: item.score >= 80 ? '#10B981' : item.score >= 50 ? '#F59E0B' : '#EF4444'
+                                            backgroundColor: item.score >= 80 ? '#10B981' : item.score >= 50 ? '#D71A21' : '#EF4444'
                                         }]}>
                                             <Text style={styles.scoreText}>{item.score || 0}/100</Text>
                                         </View>

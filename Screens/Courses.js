@@ -427,7 +427,7 @@ const AllCourses = () => {
                     duration: "Video", // Placeholder
                     rating: 5.0, // Placeholder
                     image: bucket?.icon || "play-circle-outline", // Use bucket icon
-                    color: bucket?.color || "#F59E0B",
+                    color: bucket?.color || "#D71A21",
                     bg: bucket?.color ? `${bucket.color}15` : "#FFF7ED", // Light version of bucket color
                     videoUrl: item.videoUrl,
                     description: item.description,
@@ -452,7 +452,7 @@ const AllCourses = () => {
                 return {
                     ...course,
                     image: bucket?.icon || "play-circle-outline",
-                    color: bucket?.color || "#F59E0B",
+                    color: bucket?.color || "#D71A21",
                     bg: bucket?.color ? `${bucket.color}15` : "#FFF7ED"
                 };
             }));
@@ -584,13 +584,13 @@ const AllCourses = () => {
                                 <Text style={styles.courseTitle}>{course.title}</Text>
                                 <Text style={styles.courseMeta}>{course.category} • {course.duration}</Text>
                                 <View style={styles.ratingRow}>
-                                    <MaterialCommunityIcons name="star" size={14} color="#F59E0B" />
+                                    <MaterialCommunityIcons name="star" size={14} color="#D71A21" />
                                     <Text style={styles.ratingText}>{course.rating}</Text>
                                 </View>
                             </View>
 
                             <View style={{ alignItems: 'flex-end', gap: 10 }}>
-                                <Feather name="play-circle" size={24} color="#F59E0B" />
+                                <Feather name="play-circle" size={24} color="#D71A21" />
 
                                 {/* ASK AI BUTTON */}
                                 <TouchableOpacity
@@ -694,7 +694,7 @@ export default function Courses({ userEmail = "user" }) {
                             onDailyQuizPress={() => handlePathTabChange('daily_quiz')}
                         />
                         <View style={styles.xpContainer}>
-                            <MaterialCommunityIcons name="lightning-bolt" size={20} color="#F59E0B" />
+                            <MaterialCommunityIcons name="lightning-bolt" size={20} color="#D71A21" />
                             <Text style={styles.xpText}>1,240 XP</Text>
                         </View>
                     </View>
@@ -750,7 +750,7 @@ export default function Courses({ userEmail = "user" }) {
                         <MaterialCommunityIcons
                             name="trending-up"
                             size={18}
-                            color={learningPathTab === 'career_progression' ? '#FFF' : '#F59E0B'}
+                            color={learningPathTab === 'career_progression' ? '#FFF' : '#D71A21'}
                         />
                         <Text style={[
                             styles.learningPathTabText,
@@ -854,7 +854,7 @@ export default function Courses({ userEmail = "user" }) {
                 <View style={slStyles.overlay}>
                     <View style={slStyles.card}>
                         <View style={slStyles.trophyWrap}>
-                            <MaterialCommunityIcons name="trophy-award" size={56} color="#F59E0B" />
+                            <MaterialCommunityIcons name="trophy-award" size={56} color="#D71A21" />
                         </View>
                         <Text style={slStyles.congrats}>Congratulations! 🎉</Text>
                         <Text style={slStyles.message}>You have completed</Text>
@@ -924,7 +924,7 @@ const styles = StyleSheet.create({
     subTitle: {
         fontSize: 14,
         fontFamily: "Poppins_500Medium",
-        color: "#F59E0B",
+        color: "#D71A21",
     },
     xpContainer: {
         flexDirection: 'row',
@@ -940,7 +940,7 @@ const styles = StyleSheet.create({
         marginLeft: 4,
         fontSize: 14,
         fontFamily: "Poppins_600SemiBold",
-        color: "#D97706",
+        color: "#B91C1C",
     },
 
     // TOGGLE
@@ -955,7 +955,7 @@ const styles = StyleSheet.create({
         borderBottomColor: 'transparent',
     },
     activeToggle: {
-        borderBottomColor: '#F59E0B',
+        borderBottomColor: '#D71A21',
     },
     toggleText: {
         fontSize: 16,
@@ -1003,7 +1003,7 @@ const styles = StyleSheet.create({
         marginRight: 10,
     },
     activeCatChip: {
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
     },
     catText: {
         fontSize: 13,
@@ -1053,7 +1053,7 @@ const styles = StyleSheet.create({
     },
     ratingText: {
         fontSize: 12,
-        color: '#F59E0B',
+        color: '#D71A21',
         fontFamily: 'Poppins_600SemiBold',
         marginLeft: 4,
     },
@@ -1105,8 +1105,8 @@ const styles = StyleSheet.create({
         borderColor: '#10B981',
     },
     learningPathTabActiveCareer: {
-        backgroundColor: '#F59E0B',
-        borderColor: '#F59E0B',
+        backgroundColor: '#D71A21',
+        borderColor: '#D71A21',
     },
     learningPathTabLocked: {
         backgroundColor: '#F3F4F6',
@@ -1283,7 +1283,7 @@ const slStyles = StyleSheet.create({
         color: '#6B7280',
     },
     closeBtn: {
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         borderRadius: 12,
         paddingVertical: 13,
         paddingHorizontal: 40,

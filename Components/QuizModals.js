@@ -108,7 +108,7 @@ export function QuizCreationModal({
                     ))}
 
                     <TouchableOpacity style={styles.addBtn} onPress={onAddQuestion}>
-                        <MaterialCommunityIcons name="plus-circle" size={20} color="#F59E0B" />
+                        <MaterialCommunityIcons name="plus-circle" size={20} color="#D71A21" />
                         <Text style={styles.addBtnText}>Add Question</Text>
                     </TouchableOpacity>
 
@@ -268,13 +268,13 @@ const styles = StyleSheet.create({
         alignItems: 'center'
     },
     radioSelected: {
-        borderColor: '#F59E0B'
+        borderColor: '#D71A21'
     },
     radioDot: {
         width: 12,
         height: 12,
         borderRadius: 6,
-        backgroundColor: '#F59E0B'
+        backgroundColor: '#D71A21'
     },
     optionInput: {
         flex: 1,
@@ -300,7 +300,7 @@ const styles = StyleSheet.create({
         marginLeft: 8,
         fontSize: 15,
         fontFamily: 'Poppins_600SemiBold',
-        color: '#F59E0B'
+        color: '#D71A21'
     },
     questionCard: {
         flexDirection: 'row',
@@ -314,7 +314,7 @@ const styles = StyleSheet.create({
     questionNumber: {
         fontSize: 14,
         fontFamily: 'Poppins_700Bold',
-        color: '#F59E0B',
+        color: '#D71A21',
         marginRight: 12
     },
     questionPreview: {
@@ -348,7 +348,7 @@ const styles = StyleSheet.create({
         flex: 1,
         paddingVertical: 14,
         borderRadius: 12,
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         alignItems: 'center'
     },
     publishBtnText: {
@@ -389,7 +389,7 @@ const styles = StyleSheet.create({
     statValue: {
         fontSize: 24,
         fontFamily: 'Poppins_700Bold',
-        color: '#F59E0B',
+        color: '#D71A21',
         marginBottom: 4
     },
     statLabel: {

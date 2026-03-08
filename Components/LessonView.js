@@ -75,7 +75,7 @@ const MidVideoQuizModal = ({ visible, quiz, onSubmit, onClose }) => {
                     <LinearGradient colors={['#1F2937', '#111827']} style={midQuizStyles.gradient}>
                         {/* Header */}
                         <View style={midQuizStyles.header}>
-                            <MaterialCommunityIcons name="brain" size={28} color="#F59E0B" />
+                            <MaterialCommunityIcons name="brain" size={28} color="#D71A21" />
                             <Text style={midQuizStyles.title}>Quick Check! 🎯</Text>
                         </View>
                         <Text style={midQuizStyles.subtitle}>
@@ -111,7 +111,7 @@ const MidVideoQuizModal = ({ visible, quiz, onSubmit, onClose }) => {
                                             >
                                                 <Text style={[
                                                     midQuizStyles.optionText,
-                                                    isSelected && !submitted && { color: '#F59E0B' },
+                                                    isSelected && !submitted && { color: '#D71A21' },
                                                     isCorrect && { color: '#10B981' },
                                                     isWrong && { color: '#EF4444' }
                                                 ]}>
@@ -180,7 +180,7 @@ const CrossPlatformDocViewer = ({ uri, loadingText = "Loading...", onLoadEnd, di
             <View style={{ flex: 1, position: 'relative' }}>
                 {loading && !error && (
                     <View style={docViewerStyles.loadingOverlay}>
-                        <ActivityIndicator size="large" color="#F59E0B" />
+                        <ActivityIndicator size="large" color="#D71A21" />
                         <Text style={docViewerStyles.loadingText}>{loadingText}</Text>
                     </View>
                 )}
@@ -217,7 +217,7 @@ const CrossPlatformDocViewer = ({ uri, loadingText = "Loading...", onLoadEnd, di
             startInLoadingState={true}
             renderLoading={() => (
                 <View style={docViewerStyles.loadingOverlay}>
-                    <ActivityIndicator size="large" color="#F59E0B" />
+                    <ActivityIndicator size="large" color="#D71A21" />
                     <Text style={docViewerStyles.loadingText}>{loadingText}</Text>
                 </View>
             )}
@@ -300,7 +300,7 @@ const CompletionProgress = ({ videoPercent, quizPassed, videoRequired = 90, quiz
                     <MaterialCommunityIcons
                         name={videoOk ? "check-decagram" : "play-circle"}
                         size={20}
-                        color={videoOk ? "#F59E0B" : "#9CA3AF"}
+                        color={videoOk ? "#D71A21" : "#9CA3AF"}
                     />
                 </View>
                 <View>
@@ -319,7 +319,7 @@ const CompletionProgress = ({ videoPercent, quizPassed, videoRequired = 90, quiz
                     <MaterialCommunityIcons
                         name={hasQuiz ? (quizPassed ? "trophy" : "clipboard-text") : (videoOk ? "check-decagram" : "video-outline")}
                         size={20}
-                        color={(hasQuiz ? quizPassed : videoOk) ? "#F59E0B" : "#9CA3AF"}
+                        color={(hasQuiz ? quizPassed : videoOk) ? "#D71A21" : "#9CA3AF"}
                     />
                 </View>
                 <View>
@@ -1274,7 +1274,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
                 if (!nodeProgress) {
                     return (
                         <View style={{ flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' }}>
-                            <ActivityIndicator size="large" color="#F59E0B" />
+                            <ActivityIndicator size="large" color="#D71A21" />
                             <Text style={{ color: '#94A3B8', fontSize: 13, marginTop: 10, fontFamily: 'Poppins_400Regular' }}>
                                 Loading your progress...
                             </Text>
@@ -1371,7 +1371,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
                                 alignItems: 'center',
                                 zIndex: 5,
                             }}>
-                                <ActivityIndicator size="large" color="#F59E0B" />
+                                <ActivityIndicator size="large" color="#D71A21" />
                                 <Text style={{ color: '#94A3B8', fontSize: 13, marginTop: 10, fontFamily: 'Poppins_400Regular' }}>
                                     Loading video...
                                 </Text>
@@ -1462,7 +1462,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
                         {showDocumentHint && (
                             <View style={styles.documentHintOverlay}>
                                 <View style={styles.documentHintBox}>
-                                    <MaterialCommunityIcons name="gesture-swipe-horizontal" size={24} color="#F59E0B" />
+                                    <MaterialCommunityIcons name="gesture-swipe-horizontal" size={24} color="#D71A21" />
                                     <Text style={styles.documentHintText}>
                                         Swipe or scroll to navigate pages
                                     </Text>
@@ -1502,7 +1502,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
                         {showDocumentHint && (
                             <View style={styles.documentHintOverlay}>
                                 <View style={styles.documentHintBox}>
-                                    <MaterialCommunityIcons name="gesture-swipe-horizontal" size={24} color="#F59E0B" />
+                                    <MaterialCommunityIcons name="gesture-swipe-horizontal" size={24} color="#D71A21" />
                                     <Text style={styles.documentHintText}>
                                         Swipe or scroll to navigate slides
                                     </Text>
@@ -1542,7 +1542,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
                         {showDocumentHint && (
                             <View style={styles.documentHintOverlay}>
                                 <View style={styles.documentHintBox}>
-                                    <MaterialCommunityIcons name="gesture-swipe-horizontal" size={24} color="#F59E0B" />
+                                    <MaterialCommunityIcons name="gesture-swipe-horizontal" size={24} color="#D71A21" />
                                     <Text style={styles.documentHintText}>
                                         Swipe or scroll to navigate pages
                                     </Text>
@@ -1625,7 +1625,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
                     <View style={isDocumentType() ? styles.documentContainer : styles.videoContainer}>
                         {isLoading && (
                             <View style={styles.loadingOverlay}>
-                                <ActivityIndicator size="large" color="#F59E0B" />
+                                <ActivityIndicator size="large" color="#D71A21" />
                                 <Text style={styles.loadingText}>Generating quiz...</Text>
                             </View>
                         )}
@@ -1676,7 +1676,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
                                 <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20 }}>
                                     {isTranslating ? (
                                         <View style={{ padding: 40, alignItems: 'center' }}>
-                                            <ActivityIndicator size="small" color="#F59E0B" />
+                                            <ActivityIndicator size="small" color="#D71A21" />
                                             <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 10, fontFamily: 'Poppins_400Regular' }}>Translating transcript...</Text>
                                         </View>
                                     ) : (
@@ -1757,7 +1757,7 @@ export default function LessonView({ lesson, onClose, userEmail = "user", allowF
                                             {/* Requirements Notice */}
                                             {videoProgress < reqVideoPercent && (
                                                 <View style={styles.warningBanner}>
-                                                    <MaterialCommunityIcons name="alert-circle" size={18} color="#F59E0B" />
+                                                    <MaterialCommunityIcons name="alert-circle" size={18} color="#D71A21" />
                                                     <Text style={styles.warningText}>
                                                         {(lesson.resourceType === 'Video' || lesson.resource_type === 'Video' || lesson.resourceType === 'Audio' || lesson.resource_type === 'Audio')
                                                             ? `Watch at least ${reqVideoPercent}% of the content to complete (Current: ${videoProgress}%)`
@@ -1970,7 +1970,7 @@ const midQuizStyles = StyleSheet.create({
         marginBottom: 8,
     },
     optionSelected: {
-        borderColor: '#F59E0B',
+        borderColor: '#D71A21',
         backgroundColor: 'rgba(245, 158, 11, 0.1)',
     },
     optionCorrect: {
@@ -1991,7 +1991,7 @@ const midQuizStyles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         paddingVertical: 14,
         borderRadius: 12,
         marginTop: 16,
@@ -2065,7 +2065,7 @@ const progressStyles = StyleSheet.create({
         color: '#D1D5DB',
     },
     valueDone: {
-        color: '#F59E0B', // Gold
+        color: '#D71A21', // Gold
     },
     divider: {
         width: 1,
@@ -2114,7 +2114,7 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontFamily: 'Poppins_700Bold',
         letterSpacing: 0.5,
-        color: '#F59E0B', // Golden Header
+        color: '#D71A21', // Golden Header
     },
     headerSubtitle: {
         color: '#E5E7EB',
@@ -2180,7 +2180,7 @@ const styles = StyleSheet.create({
         zIndex: 10,
     },
     loadingText: {
-        color: '#F59E0B',
+        color: '#D71A21',
         marginTop: 12,
         fontFamily: 'Poppins_600SemiBold',
     },
@@ -2212,10 +2212,10 @@ const styles = StyleSheet.create({
     },
     tabBtnActive: {},
     tabBtnTextActive: {
-        color: '#F59E0B', // Active Gold
+        color: '#D71A21', // Active Gold
     },
     tabBadge: {
-        backgroundColor: '#F59E0B', // Gold Badge
+        backgroundColor: '#D71A21', // Gold Badge
         borderRadius: 10,
         paddingHorizontal: 6,
         paddingVertical: 2,
@@ -2232,10 +2232,10 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         height: 3,
-        backgroundColor: '#F59E0B', // Gold Line
+        backgroundColor: '#D71A21', // Gold Line
         borderTopLeftRadius: 3,
         borderTopRightRadius: 3,
-        shadowColor: "#F59E0B",
+        shadowColor: "#D71A21",
         shadowOffset: { width: 0, height: -2 },
         shadowOpacity: 0.5,
         shadowRadius: 4,
@@ -2271,7 +2271,7 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(245, 158, 11, 0.3)',
     },
     warningText: {
-        color: '#F59E0B',
+        color: '#D71A21',
         fontSize: 12,
         fontFamily: 'Poppins_500Medium',
         marginLeft: 8,

@@ -101,7 +101,7 @@ async def ai_chatbot(
     Dynamic AI Chatbot that:
     1. Searches through courses and resources (RAG)
     2. Uses Groq to generate contextual responses
-    3. Adds disclaimer for answers outside BW LMS context
+    3. Adds disclaimer for answers outside Emirates LMS context
     """
     try:
         # Parse chat history
@@ -145,7 +145,7 @@ async def ai_chatbot(
             logger.warning(f"Could not fetch courses: {e}")
         
         # --- BUILD PROMPT ---
-        system_prompt = """You are BWC AI Assistant, the intelligent helper for Belgian Waffle Co.'s Learning Management System.
+        system_prompt = """You are Emirates AI Assistant, the intelligent helper for Emirates Airlines' Learning Management System.
 
 YOUR KNOWLEDGE BASE INCLUDES:
 1. Training courses and learning paths
@@ -161,11 +161,11 @@ RESPONSE GUIDELINES:
 - Format responses with *bold* for important terms
 - Use bullet points for lists
 - Keep responses concise but informative
-- If the answer is from BW LMS training materials, mention the relevant course/resource
-- If answering general questions OUTSIDE the BW LMS scope, add this note at the end:
-  "ℹ️ Note: This information is general knowledge and not part of BW LMS training materials."
+- If the answer is from Emirates LMS training materials, mention the relevant course/resource
+- If answering general questions OUTSIDE the Emirates LMS scope, add this note at the end:
+  "ℹ️ Note: This information is general knowledge and not part of Emirates LMS training materials."
 
-BELGIAN WAFFLE CO. SPECIFIC INFO:
+Emirates Airlines SPECIFIC INFO:
 - Standard baking temp: 180-190°C
 - Batter: 5kg Premix + 4L Water + 500g Oil
 - Cooking time: 3:30 - 4:00 minutes
@@ -275,7 +275,7 @@ async def ai_voice_query(
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": f"You are BWC AI Assistant for Belgian Waffle Co. Be concise and helpful. Context: {context_text}"},
+                {"role": "system", "content": f"You are Emirates AI Assistant for Emirates Airlines Be concise and helpful. Context: {context_text}"},
                 {"role": "user", "content": user_text}
             ],
             temperature=0.7,
@@ -502,7 +502,7 @@ async def ask_ai(
         # Use BWC-specific system prompt for course Q&A
         client = Groq(api_key=settings.GROQ_API_KEY)
         
-        system_prompt = f"""You are BWC AI Assistant, helping a learner with questions about the course: "{course_title}".
+        system_prompt = f"""You are Emirates AI Assistant, helping a learner with questions about the course: "{course_title}".
 
 IMPORTANT GUIDELINES:
 - Answer based on the provided course content and transcript
@@ -512,7 +512,7 @@ IMPORTANT GUIDELINES:
 - Use emojis sparingly (🧇, ✅, 📚) to keep it engaging
 - Format important terms in bold using *term*
 
-BELGIAN WAFFLE CO. CONTEXT:
+Emirates Airlines CONTEXT:
 - Standard baking temp: 180-190°C
 - Batter: 5kg Premix + 4L Water + 500g Oil
 - Cooking time: 3:30 - 4:00 minutes"""
@@ -1120,7 +1120,7 @@ async def admin_copilot(
         # Build system prompt
         access_level = "SUPERADMIN (Full access to all data)" if is_superadmin else f"Admin (Access to {accessible_count} users)"
         
-        system_prompt = f"""You are the Admin Copilot AI for Belgian Waffle Co.'s Learning Management System (BW LMS).
+        system_prompt = f"""You are the Admin Copilot AI for Emirates Airlines' Learning Management System (Emirates LMS).
 You are assisting {admin_name}.
 
 ACCESS LEVEL: {access_level}

@@ -26,8 +26,8 @@ import API_URL from '../config';
 
 const { width, height } = Dimensions.get("window");
 
-// Floating Waffle Component
-const FloatingWaffle = ({ delay, duration, startX, startY }) => {
+// Floating Airplane Component
+const FloatingAirplane = ({ delay, duration, startX, startY }) => {
     const translateY = useSharedValue(startY);
     const translateX = useSharedValue(startX);
     const rotate = useSharedValue(0);
@@ -59,8 +59,8 @@ const FloatingWaffle = ({ delay, duration, startX, startY }) => {
     }));
 
     return (
-        <Animated.Text style={[styles.floatingWaffle, animatedStyle]}>
-            🧇
+        <Animated.Text style={[styles.FloatingAirplane, animatedStyle]}>
+            ✈
         </Animated.Text>
     );
 };
@@ -68,7 +68,7 @@ const FloatingWaffle = ({ delay, duration, startX, startY }) => {
 // MOCK DATA - Properly formatted categories with valid Ionicons names
 const MOCK_CATEGORIES = [
     { id: 1, name: "Standard SOPs", icon: "document-text", color: "#3B82F6", description: "Standard operating procedures" },
-    { id: 2, name: "Video Tutorials", icon: "play-circle", color: "#F59E0B", description: "Training video library" },
+    { id: 2, name: "Video Tutorials", icon: "play-circle", color: "#D71A21", description: "Training video library" },
     { id: 3, name: "Machine Manuals", icon: "cog", color: "#8B5CF6", description: "Equipment documentation" },
     { id: 4, name: "Safety Guides", icon: "shield-checkmark", color: "#10B981", description: "Safety protocols & guidelines" },
 ];
@@ -84,11 +84,11 @@ const MOCK_RESOURCES = [
     },
     {
         id: 2,
-        title: "Belgian Waffle Recipe v2.0",
+        title: "EMIRATES Recipe v2.0",
         type: "Document",
         category: "Recipes",
         timestamp: new Date(Date.now() - 86400000).toISOString(),
-        description: "Official Belgian waffle recipe with exact measurements, timing, and presentation guidelines"
+        description: "Official EMIRATES recipe with exact measurements, timing, and presentation guidelines"
     },
     {
         id: 3,
@@ -134,11 +134,11 @@ const MOCK_RESOURCES = [
 
 const MOCK_CONTENT = {
     // Individual Resource Content
-    "Opening Checklist SOP": `# Opening Checklist SOP\n\n## Pre-Opening (7:30 AM)\n- Unlock store and disarm security\n- Turn on all lights and HVAC\n- Check refrigerator temperatures (must be below 40°F)\n- Inspect waffle irons for cleanliness\n\n## Equipment Startup (7:45 AM)\n- Power on POS systems\n- Start waffle iron preheating\n- Prepare espresso machine\n- Stock batter dispensers\n\n## Final Checks (8:00 AM)\n- Verify cash drawer amounts\n- Check menu board displays\n- Ensure utensils are stocked\n- Open doors for business`,
+    "Opening Checklist SOP": `# Opening Checklist SOP\n\n## Pre-Opening (7:30 AM)\n- Unlock store and disarm security\n- Turn on all lights and HVAC\n- Check refrigerator temperatures (must be below 40°F)\n- Inspect service equipment for cleanliness\n\n## Equipment Startup (7:45 AM)\n- Power on POS systems\n- Start service equipment preheating\n- Prepare espresso machine\n- Stock batter dispensers\n\n## Final Checks (8:00 AM)\n- Verify cash drawer amounts\n- Check menu board displays\n- Ensure utensils are stocked\n- Open doors for business`,
 
-    "Belgian Waffle Recipe v2.0": `# Belgian Waffle Recipe v2.0\n\n## Ingredients (12 servings)\n- 2 cups all-purpose flour\n- 2 tablespoons sugar\n- 4 teaspoons baking powder\n- 2 large eggs (separated)\n- 1.5 cups whole milk\n- 1/2 cup melted butter\n- 1 teaspoon vanilla extract\n\n## Preparation\n1. Preheat waffle iron to 375°F\n2. Mix dry ingredients in large bowl\n3. Beat egg whites until stiff peaks form\n4. Combine wet ingredients with yolks\n5. Fold in egg whites gently\n6. Cook 4-5 minutes until golden brown\n\n## Presentation Standards\n- Serve within 2 minutes of cooking\n- Add toppings in specified order\n- Use branded serving plate`,
+    "EMIRATES Recipe v2.0": `# EMIRATES Recipe v2.0\n\n## Ingredients (12 servings)\n- 2 cups all-purpose flour\n- 2 tablespoons sugar\n- 4 teaspoons baking powder\n- 2 large eggs (separated)\n- 1.5 cups whole milk\n- 1/2 cup melted butter\n- 1 teaspoon vanilla extract\n\n## Preparation\n1. Preheat service equipment to 375°F\n2. Mix dry ingredients in large bowl\n3. Beat egg whites until stiff peaks form\n4. Combine wet ingredients with yolks\n5. Fold in egg whites gently\n6. Cook 4-5 minutes until golden brown\n\n## Presentation Standards\n- Serve within 2 minutes of cooking\n- Add toppings in specified order\n- Use branded serving plate`,
 
-    "Daily Cleaning Guidelines": `# Daily Cleaning Guidelines\n\n## Morning Shift\n- Sanitize all prep surfaces\n- Clean coffee equipment\n- Wipe down dining tables\n- Stock cleaning supplies\n\n## Afternoon Shift\n- Mid-day floor sweep\n- Restroom check and restock\n- Counter and display cleaning\n- Empty waste bins if 75% full\n\n## Closing Shift (9:00 PM)\n- Deep clean waffle irons\n- Drain and clean coffee machines\n- Mop all floor areas\n- Sanitize all door handles\n- Take out trash and recycling`,
+    "Daily Cleaning Guidelines": `# Daily Cleaning Guidelines\n\n## Morning Shift\n- Sanitize all prep surfaces\n- Clean coffee equipment\n- Wipe down dining tables\n- Stock cleaning supplies\n\n## Afternoon Shift\n- Mid-day floor sweep\n- Restroom check and restock\n- Counter and display cleaning\n- Empty waste bins if 75% full\n\n## Closing Shift (9:00 PM)\n- Deep clean service equipment\n- Drain and clean coffee machines\n- Mop all floor areas\n- Sanitize all door handles\n- Take out trash and recycling`,
 
     "Espresso Machine Training": `# Espresso Machine Training\n\n## Machine Components\n- Portafilter and basket\n- Steam wand for milk frothing\n- Drip tray and water reservoir\n- Pressure gauge (9-10 bar optimal)\n\n## Making Espresso\n1. Grind fresh beans (18g dose)\n2. Distribute and tamp evenly (30lbs pressure)\n3. Lock portafilter and start extraction\n4. Target 25-30 second extraction time\n5. Yield: 36-40ml double shot\n\n## Milk Steaming\n- Use cold milk, 34-38°F\n- Steam to 140-150°F\n- Create microfoam for lattes\n- Swirl to integrate foam`,
 
@@ -153,14 +153,14 @@ const MOCK_CONTENT = {
 
     "Video Tutorials Overview": `# Video Tutorials Library\n\n## Training Modules\nComprehensive video guides for skill development and certification.\n\n## Available Videos\n- New Hire Orientation (45 min)\n- Espresso Mastery Course (30 min)\n- Customer Service Excellence (25 min)\n- Safety and Hygiene (20 min)\n\n## Completion Tracking\nYour progress is tracked automatically. Certificates issued upon completion.`,
 
-    "Machine Manuals Overview": `# Machine Manuals\n\n## Equipment Documentation\nTechnical manuals and maintenance guides for all store equipment.\n\n## Covered Equipment\n- Waffle Irons (Model X-500)\n- Espresso Machine (Breville Pro)\n- Commercial Refrigerators\n- Ice Machines\n- HVAC Control Systems\n\n## Maintenance Schedules\nFollow weekly, monthly, and quarterly maintenance checklists.`,
+    "Machine Manuals Overview": `# Machine Manuals\n\n## Equipment Documentation\nTechnical manuals and maintenance guides for all store equipment.\n\n## Covered Equipment\n- service equipment (Model X-500)\n- Espresso Machine (Breville Pro)\n- Commercial Refrigerators\n- Ice Machines\n- HVAC Control Systems\n\n## Maintenance Schedules\nFollow weekly, monthly, and quarterly maintenance checklists.`,
 
     "Safety Guides Overview": `# Safety Guides\n\n## Overview\nEssential safety protocols and emergency procedures for all staff members.\n\n## Key Topics\n- Fire Safety & Evacuation\n- First Aid Basics\n- Food Allergen Handling\n- Slip & Fall Prevention\n- Equipment Safety\n\n## Emergency Contacts\n- Fire: 911\n- Manager On-Call: See schedule\n- Corporate Safety: 1-800-555-SAFE`,
 };
 
 const MANDATORY_MODULES = [
-    { id: 1, name: "Batter Preparation", icon: "flask-outline", count: 4, color: "#F59E0B" },
-    { id: 2, name: "Waffle Baking", icon: "grid-outline", count: 6, color: "#8B5CF6" },
+    { id: 1, name: "Batter Preparation", icon: "flask-outline", count: 4, color: "#D71A21" },
+    { id: 2, name: "Flight Safety", icon: "grid-outline", count: 6, color: "#8B5CF6" },
     { id: 3, name: "Topping Application", icon: "color-palette-outline", count: 5, color: "#EF4444" },
     { id: 4, name: "Equipment Care", icon: "build-outline", count: 8, color: "#10B981" },
 ];
@@ -224,11 +224,11 @@ const ContentPreviewModal = ({ visible, onClose, resource }) => {
 
                     <View style={styles.modalFooter}>
                         <TouchableOpacity style={styles.footerBtn}>
-                            <Feather name="download" size={20} color="#F59E0B" />
+                            <Feather name="download" size={20} color="#D71A21" />
                             <Text style={styles.footerBtnText}>Download</Text>
                         </TouchableOpacity>
                         <TouchableOpacity style={styles.footerBtn}>
-                            <Feather name="share-2" size={20} color="#F59E0B" />
+                            <Feather name="share-2" size={20} color="#D71A21" />
                             <Text style={styles.footerBtnText}>Share</Text>
                         </TouchableOpacity>
                         <TouchableOpacity style={[styles.footerBtn, styles.footerBtnPrimary]}>
@@ -285,7 +285,7 @@ export default function Resources() {
                     id: cat.id,
                     name: cat.name,
                     icon: cat.icon || "folder",
-                    color: Array.isArray(cat.color) ? cat.color[0] : (cat.color || "#F59E0B"),
+                    color: Array.isArray(cat.color) ? cat.color[0] : (cat.color || "#D71A21"),
                 })));
             }
         } catch (err) {
@@ -342,26 +342,26 @@ export default function Resources() {
 
     return (
         <View style={[styles.container, { paddingTop: insets.top }]}>
-            {/* FLOATING WAFFLES */}
-            <FloatingWaffle delay={0} duration={8} startX={50} startY={100} />
-            <FloatingWaffle delay={2} duration={10} startX={width - 80} startY={200} />
-            <FloatingWaffle delay={4} duration={7} startX={30} startY={height - 300} />
-            <FloatingWaffle delay={1} duration={9} startX={width - 100} startY={height - 400} />
+            {/* Floating AirplaneS */}
+            <FloatingAirplane delay={0} duration={8} startX={50} startY={100} />
+            <FloatingAirplane delay={2} duration={10} startX={width - 80} startY={200} />
+            <FloatingAirplane delay={4} duration={7} startX={30} startY={height - 300} />
+            <FloatingAirplane delay={1} duration={9} startX={width - 100} startY={height - 400} />
 
             <ScrollView contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
                 {/* HEADER */}
                 <View style={styles.header}>
                     <Text style={styles.pageTitle}>Knowledge Base</Text>
                     <View style={styles.aiBadge}>
-                        <MaterialCommunityIcons name="star-four-points" size={12} color="#F59E0B" />
+                        <MaterialCommunityIcons name="star-four-points" size={12} color="#D71A21" />
                         <Text style={styles.aiBadgeText}>AI Powered</Text>
                     </View>
                 </View>
 
                 {/* SEARCH */}
                 <View style={styles.searchSection}>
-                    <View style={[styles.searchBox, search.length > 0 && { borderColor: '#F59E0B', borderWidth: 2 }]}>
-                        <MaterialCommunityIcons name="magnify" size={24} color="#F59E0B" />
+                    <View style={[styles.searchBox, search.length > 0 && { borderColor: '#D71A21', borderWidth: 2 }]}>
+                        <MaterialCommunityIcons name="magnify" size={24} color="#D71A21" />
                         <TextInput
                             placeholder="Search SOPs, recipes, guides..."
                             style={styles.input}
@@ -396,7 +396,7 @@ export default function Resources() {
                             style={styles.clearSearchBtn}
                             onPress={() => setSearch('')}
                         >
-                            <Feather name="x" size={16} color="#F59E0B" />
+                            <Feather name="x" size={16} color="#D71A21" />
                             <Text style={styles.clearSearchText}>Clear Search</Text>
                         </TouchableOpacity>
                     </Animated.View>
@@ -427,7 +427,7 @@ export default function Resources() {
                 {filteredModules.length > 0 && (
                     <View style={styles.section}>
                         <Text style={styles.sectionTitle}>Learning Breakdown</Text>
-                        <Text style={styles.sectionSubtitle}>Process & Framework for Waffle Manufacturing</Text>
+                        <Text style={styles.sectionSubtitle}>Aviation Safety & Flight Operations Framework</Text>
                         <View style={styles.modulesGrid}>
                             {filteredModules.map((mod, index) => (
                                 <Animated.View key={mod.id} entering={FadeInDown.delay(index * 50)} style={styles.moduleCardWrapper}>
@@ -504,7 +504,7 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: "#FFFFFF",
     },
-    floatingWaffle: {
+    FloatingAirplane: {
         position: 'absolute',
         fontSize: 32,
         opacity: 0.15,
@@ -535,7 +535,7 @@ const styles = StyleSheet.create({
     aiBadgeText: {
         fontSize: 11,
         fontFamily: "Poppins_700Bold",
-        color: "#F59E0B",
+        color: "#D71A21",
     },
     searchSection: {
         paddingHorizontal: 20,
@@ -550,7 +550,7 @@ const styles = StyleSheet.create({
         paddingVertical: 14,
         borderRadius: 16,
         gap: 12,
-        shadowColor: "#F59E0B",
+        shadowColor: "#D71A21",
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.1,
         shadowRadius: 12,
@@ -627,7 +627,7 @@ const styles = StyleSheet.create({
         backgroundColor: "#FFF",
         borderRadius: 18,
         padding: 16,
-        shadowColor: "#F59E0B",
+        shadowColor: "#D71A21",
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.15,
         shadowRadius: 10,
@@ -649,7 +649,7 @@ const styles = StyleSheet.create({
     moduleCount: {
         fontSize: 11,
         fontFamily: "Poppins_500Medium",
-        color: "#F59E0B",
+        color: "#D71A21",
     },
 
     // RESOURCES
@@ -774,7 +774,7 @@ const styles = StyleSheet.create({
     },
     bullet: {
         fontSize: 14,
-        color: '#F59E0B',
+        color: '#D71A21',
         marginRight: 8,
         fontFamily: 'Poppins_700Bold',
     },
@@ -803,12 +803,12 @@ const styles = StyleSheet.create({
         gap: 6,
     },
     footerBtnPrimary: {
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
     },
     footerBtnText: {
         fontSize: 14,
         fontFamily: 'Poppins_600SemiBold',
-        color: '#F59E0B',
+        color: '#D71A21',
     },
     // No Results Styles
     noResultsContainer: {
@@ -843,6 +843,6 @@ const styles = StyleSheet.create({
     clearSearchText: {
         fontSize: 14,
         fontFamily: 'Poppins_600SemiBold',
-        color: '#F59E0B',
+        color: '#D71A21',
     },
 });

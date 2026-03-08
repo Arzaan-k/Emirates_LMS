@@ -1,14 +1,14 @@
 {
   "expo": {
-    "name": "BWC LMS Demo",
-    "slug": "LMS_BW",
+    "name": "Emirates LMS",
+    "slug": "LMS_Emirates",
     "version": "1.0.0",
     "orientation": "default",
-    "icon": "./assets/BW_Logo.png",
+    "icon": "./assets/Emirates_Logo.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/Emirates_Logo.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
@@ -17,7 +17,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/BW_Logo.png",
+        "foregroundImage": "./assets/Emirates_Logo.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
@@ -25,10 +25,10 @@
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION"
       ],
-      "package": "com.gajjoshi.LMS_BW"
+      "package": "com.emirates.LMS_Emirates"
     },
     "web": {
-      "favicon": "./assets/BW_Logo.png"
+      "favicon": "./assets/Emirates_Logo.png"
     },
     "plugins": [
       "expo-secure-store",
@@ -37,7 +37,7 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Allow Belgian Waffle LMS to use your location for attendance tracking and team coordination."
+          "locationAlwaysAndWhenInUsePermission": "Allow Emirates LMS to use your location for attendance tracking and team coordination."
         }
       ],
       "@react-native-community/datetimepicker"

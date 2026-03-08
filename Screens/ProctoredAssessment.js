@@ -982,7 +982,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                         <Text style={styles.resultsSummaryLabel}>Failed</Text>
                     </View>
                     <View style={styles.resultsSummaryStat}>
-                        <Text style={[styles.resultsSummaryNum, { color: '#F59E0B' }]}>{avgScore}%</Text>
+                        <Text style={[styles.resultsSummaryNum, { color: '#D71A21' }]}>{avgScore}%</Text>
                         <Text style={styles.resultsSummaryLabel}>Avg Score</Text>
                     </View>
                 </View>
@@ -1018,7 +1018,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                                 { key: 'passed', label: 'Passed', color: '#10B981' },
                                 { key: 'failed', label: 'Failed', color: '#EF4444' },
                                 { key: 'flagged', label: 'Flagged', color: '#DC2626' },
-                                { key: 'warning', label: 'Warning', color: '#D97706' },
+                                { key: 'warning', label: 'Warning', color: '#B91C1C' },
                                 { key: 'clean', label: 'Clean', color: '#059669' },
                             ].map(f => (
                                 <TouchableOpacity
@@ -1045,7 +1045,7 @@ export default function ProctoredAssessment({ route, navigation }) {
             )}
 
             {loadingSubmissions ? (
-                <ActivityIndicator size="large" color="#F59E0B" />
+                <ActivityIndicator size="large" color="#D71A21" />
             ) : viewSubmissions.length === 0 ? (
                 <Text style={styles.emptyText}>No submissions yet.</Text>
             ) : displayedSubs.length === 0 ? (
@@ -1097,7 +1097,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                                 )}
                                 {sub.warning_breaches > 0 && (
                                     <View style={[styles.breachBadge, { backgroundColor: '#FEF3C7' }]}>
-                                        <Text style={[styles.breachBadgeText, { color: '#D97706' }]}>
+                                        <Text style={[styles.breachBadgeText, { color: '#B91C1C' }]}>
                                             {sub.warning_breaches} Warning
                                         </Text>
                                     </View>
@@ -1124,7 +1124,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                                             <Feather
                                                 name={breach.icon || 'alert-circle'}
                                                 size={16}
-                                                color={breach.severity === 'critical' ? '#DC2626' : '#D97706'}
+                                                color={breach.severity === 'critical' ? '#DC2626' : '#B91C1C'}
                                             />
                                         </View>
                                         <View style={styles.breachLogContent}>
@@ -1138,7 +1138,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                                         </View>
                                         <View style={[
                                             styles.breachSeverityDot,
-                                            { backgroundColor: breach.severity === 'critical' ? '#DC2626' : breach.severity === 'warning' ? '#D97706' : '#6B7280' }
+                                            { backgroundColor: breach.severity === 'critical' ? '#DC2626' : breach.severity === 'warning' ? '#B91C1C' : '#6B7280' }
                                         ]} />
                                     </View>
                                 ))}
@@ -1150,7 +1150,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                             <View style={styles.breachDetailsContainer}>
                                 <Text style={styles.breachDetailsTitle}>Breach Summary</Text>
                                 <View style={styles.legacyBreachInfo}>
-                                    <Feather name="alert-triangle" size={20} color="#D97706" />
+                                    <Feather name="alert-triangle" size={20} color="#B91C1C" />
                                     <Text style={styles.legacyBreachText}>
                                         {sub.violations} integrity violation(s) detected during this assessment.
                                         Detailed logs not available for legacy submissions.
@@ -1176,14 +1176,14 @@ export default function ProctoredAssessment({ route, navigation }) {
                     </Text>
                     {canCreateManage && (
                         <TouchableOpacity style={styles.createBtnHeader} onPress={handleCreateNew}>
-                            <Feather name="plus-circle" size={24} color="#F59E0B" />
+                            <Feather name="plus-circle" size={24} color="#D71A21" />
                             <Text style={styles.createBtnHeaderText}>Create New</Text>
                         </TouchableOpacity>
                     )}
                 </View>
 
                 {loadingAssessments ? (
-                    <ActivityIndicator size="large" color="#F59E0B" style={{ marginTop: 40 }} />
+                    <ActivityIndicator size="large" color="#D71A21" style={{ marginTop: 40 }} />
                 ) : assessments.length === 0 ? (
                     <View style={styles.emptyState}>
                         <MaterialCommunityIcons name="clipboard-text-outline" size={60} color="#D1D5DB" />
@@ -1208,7 +1208,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                                 <MaterialCommunityIcons
                                     name={assessment.ai_generated ? "robot" : "clipboard-check"}
                                     size={24}
-                                    color="#F59E0B"
+                                    color="#D71A21"
                                 />
                             </View>
                             <View style={{ flex: 1 }}>
@@ -1218,7 +1218,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                                 </Text>
                                 <View style={styles.assessmentTags}>
                                     <View style={[styles.tag, { backgroundColor: '#FEF3C7' }]}>
-                                        <Text style={[styles.tagText, { color: '#D97706' }]}>Pass: {assessment.passing_score || 70}%</Text>
+                                        <Text style={[styles.tagText, { color: '#B91C1C' }]}>Pass: {assessment.passing_score || 70}%</Text>
                                     </View>
                                     {assessment.ai_generated && (
                                         <View style={[styles.tag, { backgroundColor: '#EDE9FE' }]}>
@@ -1383,7 +1383,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                         ))}
 
                         <TouchableOpacity style={styles.addBtn} onPress={addQuestion}>
-                            <Feather name={editingQIndex >= 0 ? "save" : "plus"} size={20} color="#F59E0B" />
+                            <Feather name={editingQIndex >= 0 ? "save" : "plus"} size={20} color="#D71A21" />
                             <Text style={styles.addBtnText}>
                                 {editingQIndex >= 0 ? 'Update Question' : 'Add to Assessment'}
                             </Text>
@@ -1417,7 +1417,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                         onPress={publishAssessment}
                         disabled={creating}
                     >
-                        <LinearGradient colors={['#F59E0B', '#D97706']} style={styles.gradientBtn}>
+                        <LinearGradient colors={['#D71A21', '#B91C1C']} style={styles.gradientBtn}>
                             {creating ? (
                                 <ActivityIndicator color="#FFF" />
                             ) : (
@@ -1438,7 +1438,7 @@ export default function ProctoredAssessment({ route, navigation }) {
         if (!testStarted) {
             return (
                 <View style={styles.centerMode}>
-                    <MaterialCommunityIcons name="shield-account" size={80} color="#F59E0B" />
+                    <MaterialCommunityIcons name="shield-account" size={80} color="#D71A21" />
                     <Text style={styles.modeTitle}>Secure Assessment</Text>
                     <View style={styles.assessmentInfoBox}>
                         <Text style={styles.assessmentInfoTitle}>{selectedAssessment?.title || "Untitled"}</Text>
@@ -1497,7 +1497,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                             <MaterialCommunityIcons
                                 name={totalBreaches > 0 ? "shield-alert" : "shield-check"}
                                 size={24}
-                                color={totalBreaches > 0 ? "#D97706" : "#10B981"}
+                                color={totalBreaches > 0 ? "#B91C1C" : "#10B981"}
                             />
                             <Text style={styles.integrityReportTitle}>Integrity Report</Text>
                         </View>
@@ -1517,7 +1517,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                                 <Text style={styles.breachStatLabel}>Critical</Text>
                             </View>
                             <View style={[styles.breachStatBox, { backgroundColor: warningBreaches > 0 ? '#FEF3C7' : '#F9FAFB' }]}>
-                                <Text style={[styles.breachStatNumber, { color: warningBreaches > 0 ? '#D97706' : '#6B7280' }]}>
+                                <Text style={[styles.breachStatNumber, { color: warningBreaches > 0 ? '#B91C1C' : '#6B7280' }]}>
                                     {warningBreaches}
                                 </Text>
                                 <Text style={styles.breachStatLabel}>Warnings</Text>
@@ -1538,7 +1538,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                                             <Feather
                                                 name={breach.icon || 'alert-circle'}
                                                 size={14}
-                                                color={breach.severity === 'critical' ? '#DC2626' : '#D97706'}
+                                                color={breach.severity === 'critical' ? '#DC2626' : '#B91C1C'}
                                             />
                                         </View>
                                         <View style={{ flex: 1 }}>
@@ -1576,7 +1576,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                 <View style={[
                     styles.proctorBar,
                     cheatingStatus === 'critical' && { backgroundColor: '#DC2626' },
-                    cheatingStatus === 'warning' && { backgroundColor: '#D97706' },
+                    cheatingStatus === 'warning' && { backgroundColor: '#B91C1C' },
                     isAiScanning && cheatingStatus === 'clean' && { backgroundColor: '#7C3AED' }
                 ]}>
                     <View style={styles.proctorLeft}>
@@ -1761,7 +1761,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                         {/* TOPIC/CONTENT SECTION */}
                         <View style={[styles.aiSectionCard, aiDocumentFile && { opacity: 0.5 }]}>
                             <View style={styles.aiSectionHeader}>
-                                <MaterialCommunityIcons name="text-box-outline" size={20} color="#F59E0B" />
+                                <MaterialCommunityIcons name="text-box-outline" size={20} color="#D71A21" />
                                 <Text style={styles.aiSectionTitle}>Enter Topic or Content</Text>
                             </View>
 
@@ -1890,7 +1890,7 @@ export default function ProctoredAssessment({ route, navigation }) {
                 </Text>
                 {isAdmin && viewMode === 'list' && (
                     <TouchableOpacity onPress={() => setViewMode('admin')}>
-                        <Feather name="plus-circle" size={24} color="#F59E0B" />
+                        <Feather name="plus-circle" size={24} color="#D71A21" />
                     </TouchableOpacity>
                 )}
                 {viewMode !== 'list' && <View style={{ width: 24 }} />}
@@ -1982,11 +1982,11 @@ const styles = StyleSheet.create({
     divider: { height: 1, backgroundColor: '#E5E7EB', marginVertical: 20 },
     optionRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
     radio: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: '#D1D5DB', alignItems: 'center', justifyContent: 'center', marginRight: 10 },
-    radioActive: { borderColor: '#F59E0B' },
-    radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#F59E0B' },
+    radioActive: { borderColor: '#D71A21' },
+    radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#D71A21' },
     optionInput: { flex: 1, backgroundColor: '#F3F4F6', borderRadius: 8, padding: 10, fontSize: 14 },
-    addBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 12, borderStyle: 'dashed', borderWidth: 1, borderColor: '#F59E0B', borderRadius: 12, marginTop: 10 },
-    addBtnText: { color: '#F59E0B', fontFamily: 'Poppins_600SemiBold', marginLeft: 5 },
+    addBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 12, borderStyle: 'dashed', borderWidth: 1, borderColor: '#D71A21', borderRadius: 12, marginTop: 10 },
+    addBtnText: { color: '#D71A21', fontFamily: 'Poppins_600SemiBold', marginLeft: 5 },
     publishBtn: { marginTop: 20, marginBottom: 50 },
     gradientBtn: { padding: 16, borderRadius: 14, alignItems: 'center' },
     publishBtnText: { color: '#FFF', fontSize: 16, fontFamily: 'Poppins_700Bold' },
@@ -2010,7 +2010,7 @@ const styles = StyleSheet.create({
     // Assessments List
     emptyState: { alignItems: 'center', justifyContent: 'center', paddingVertical: 60 },
     emptyText: { fontFamily: 'Poppins_500Medium', color: '#9CA3AF', marginTop: 15 },
-    createFirstBtn: { marginTop: 20, backgroundColor: '#F59E0B', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 20 },
+    createFirstBtn: { marginTop: 20, backgroundColor: '#D71A21', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 20 },
     createFirstBtnText: { color: '#FFF', fontFamily: 'Poppins_600SemiBold' },
     assessmentCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 16, borderRadius: 16, marginBottom: 12, borderWidth: 1, borderColor: '#E5E7EB' },
     assessmentIcon: { width: 50, height: 50, borderRadius: 12, backgroundColor: '#FFF7ED', justifyContent: 'center', alignItems: 'center', marginRight: 15 },
@@ -2042,13 +2042,13 @@ const styles = StyleSheet.create({
     timerBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.2)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
     timerText: { marginLeft: 5, color: '#FCD34D', fontSize: 12, fontFamily: 'Poppins_700Bold' },
     progressContainer: { height: 4, backgroundColor: '#E5E7EB' },
-    progressFill: { height: '100%', backgroundColor: '#F59E0B' },
+    progressFill: { height: '100%', backgroundColor: '#D71A21' },
     questionCounter: { textAlign: 'center', paddingVertical: 10, fontFamily: 'Poppins_600SemiBold', color: '#6B7280', backgroundColor: '#FFF' },
 
     cameraPreview: { position: 'absolute', top: 50, right: 20, width: 80, height: 100, backgroundColor: '#111827', borderRadius: 10, borderWidth: 2, borderColor: '#EF4444', overflow: 'hidden', zIndex: 50, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 10, elevation: 8 },
     cameraInner: { flex: 1 },
     recDot: { position: 'absolute', top: 6, left: 6, width: 5, height: 5, borderRadius: 3, backgroundColor: '#EF4444' },
-    faceWarning: { position: 'absolute', bottom: 6, left: 6, width: 20, height: 20, borderRadius: 10, backgroundColor: '#D97706', justifyContent: 'center', alignItems: 'center' },
+    faceWarning: { position: 'absolute', bottom: 6, left: 6, width: 20, height: 20, borderRadius: 10, backgroundColor: '#B91C1C', justifyContent: 'center', alignItems: 'center' },
 
     aiScanOverlay: { position: 'absolute', top: 50, left: 20, right: 110, height: 100, backgroundColor: 'rgba(124, 58, 237, 0.1)', borderRadius: 10, borderWidth: 1, borderStyle: 'dashed', borderColor: '#7C3AED', justifyContent: 'center', alignItems: 'center', zIndex: 40 },
     scanLine: { position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: '#7C3AED', opacity: 0.7 },
@@ -2059,7 +2059,7 @@ const styles = StyleSheet.create({
 
     qText: { fontSize: 18, fontFamily: 'Poppins_600SemiBold', color: '#1F2937', marginBottom: 25, marginTop: 60, lineHeight: 26 },
     answerBtn: { backgroundColor: '#FFF', borderWidth: 2, borderColor: '#E5E7EB', borderRadius: 14, padding: 16, marginBottom: 10 },
-    answerBtnActive: { borderColor: '#F59E0B', backgroundColor: '#FFFBEB' },
+    answerBtnActive: { borderColor: '#D71A21', backgroundColor: '#FFFBEB' },
     answerText: { fontSize: 15, fontFamily: 'Poppins_500Medium', color: '#374151' },
     answerTextActive: { color: '#B45309' },
     footer: { flexDirection: 'row', padding: 15, backgroundColor: '#FFF', borderTopWidth: 1, borderTopColor: '#E5E7EB', alignItems: 'center' },
@@ -2073,7 +2073,7 @@ const styles = StyleSheet.create({
     scoreSub: { fontSize: 18, fontFamily: 'Poppins_600SemiBold', marginTop: 5 },
     scorePassReq: { fontSize: 12, fontFamily: 'Poppins_400Regular', color: '#9CA3AF', marginTop: 10 },
     timeTaken: { marginTop: 20, fontFamily: 'Poppins_500Medium', color: '#6B7280' },
-    backHomeBtn: { backgroundColor: '#F59E0B', paddingHorizontal: 40, paddingVertical: 14, borderRadius: 25, marginTop: 30 },
+    backHomeBtn: { backgroundColor: '#D71A21', paddingHorizontal: 40, paddingVertical: 14, borderRadius: 25, marginTop: 30 },
     backHomeBtnText: { color: '#FFF', fontSize: 15, fontFamily: 'Poppins_700Bold' },
 
     // Modal
@@ -2146,7 +2146,7 @@ const styles = StyleSheet.create({
     // Breach Log Item
     breachLogItem: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#FFF', borderRadius: 10, padding: 12, marginBottom: 8, borderLeftWidth: 3, borderLeftColor: '#D1D5DB' },
     breachLogItemCritical: { borderLeftColor: '#DC2626', backgroundColor: '#FEF2F2' },
-    breachLogItemWarning: { borderLeftColor: '#D97706', backgroundColor: '#FFFBEB' },
+    breachLogItemWarning: { borderLeftColor: '#B91C1C', backgroundColor: '#FFFBEB' },
     breachLogIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
     breachLogContent: { flex: 1 },
     breachLogLabel: { fontSize: 13, fontFamily: 'Poppins_600SemiBold', color: '#1F2937' },
@@ -2169,9 +2169,9 @@ const styles = StyleSheet.create({
     resultsSortRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
     resultsControlLabel: { fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: '#374151', marginRight: 4 },
     resultsSortBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: '#D1D5DB', backgroundColor: '#F9FAFB' },
-    resultsSortBtnActive: { borderColor: '#F59E0B', backgroundColor: '#FEF3C7' },
+    resultsSortBtnActive: { borderColor: '#D71A21', backgroundColor: '#FEF3C7' },
     resultsSortBtnText: { fontSize: 12, fontFamily: 'Poppins_500Medium', color: '#6B7280' },
-    resultsSortBtnTextActive: { color: '#D97706', fontFamily: 'Poppins_600SemiBold' },
+    resultsSortBtnTextActive: { color: '#B91C1C', fontFamily: 'Poppins_600SemiBold' },
     resultsFilterRow: { flexDirection: 'row', gap: 8, paddingBottom: 4 },
     resultsFilterBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: '#D1D5DB', backgroundColor: '#F9FAFB' },
     resultsFilterBtnText: { fontSize: 12, fontFamily: 'Poppins_500Medium', color: '#6B7280' },
@@ -2180,7 +2180,7 @@ const styles = StyleSheet.create({
     // Proctor Status Bar Styles
     proctorStatusBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 8, zIndex: 100 },
     proctorStatusActive: { backgroundColor: '#10B981' },
-    proctorStatusWarning: { backgroundColor: '#F59E0B' },
+    proctorStatusWarning: { backgroundColor: '#D71A21' },
     proctorStatusCritical: { backgroundColor: '#EF4444' },
     proctorStatusLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     proctorStatusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FFF' },

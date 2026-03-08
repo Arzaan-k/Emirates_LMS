@@ -795,7 +795,7 @@ export default function QuizManagementModal({ visible, onClose, contentItem, onS
                                             {questions.length > 0 && (
                                                 <TouchableOpacity
                                                     onPress={commitStagedReplace}
-                                                    style={[styles.saveBtn, { backgroundColor: '#F59E0B' }]}
+                                                    style={[styles.saveBtn, { backgroundColor: '#D71A21' }]}
                                                 >
                                                     <Feather name="refresh-cw" size={16} color="#FFF" style={{ marginRight: 6 }} />
                                                     <Text style={styles.saveBtnText}>Replace All</Text>

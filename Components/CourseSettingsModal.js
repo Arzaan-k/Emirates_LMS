@@ -23,7 +23,7 @@ const { width, height } = Dimensions.get('window');
 const THEME = {
     bg: '#FFFDF7',
     card: '#FFFFFF',
-    primary: '#F59E0B',
+    primary: '#D71A21',
     primaryDark: '#78350F',
     textMain: '#1F2937',
     textSub: '#6B7280',
@@ -529,7 +529,7 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
                     )}
                     {assignmentData.regions?.length > 0 && (
                         <View style={styles.assignSummaryRow}>
-                            <Feather name="globe" size={12} color="#F59E0B" />
+                            <Feather name="globe" size={12} color="#D71A21" />
                             <Text style={styles.assignSummaryLabel}>Regions: {assignmentData.regions.join(', ')}</Text>
                         </View>
                     )}
@@ -688,7 +688,7 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
                                                         styles.certPreviewCompany,
                                                         certificateTemplate === 'modern' && { color: '#1E40AF' },
                                                         certificateTemplate === 'elegant' && { color: '#6B21A8', fontStyle: 'italic' },
-                                                    ]}>Belgian Waffle Co.</Text>
+                                                    ]}>Emirates Airlines</Text>
                                                     <Text style={[
                                                         styles.certPreviewHeading,
                                                         certificateTemplate === 'modern' && { color: '#1E40AF', letterSpacing: 3 },
@@ -1187,7 +1187,7 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
                                                             <Text style={styles.responseStatAvg}>{stat.average || '—'}</Text>
                                                             <View style={{ flexDirection: 'row', gap: 2 }}>
                                                                 {[1, 2, 3, 4, 5].map(s => (
-                                                                    <MaterialCommunityIcons key={s} name={s <= Math.round(stat.average || 0) ? 'star' : 'star-outline'} size={16} color="#F59E0B" />
+                                                                    <MaterialCommunityIcons key={s} name={s <= Math.round(stat.average || 0) ? 'star' : 'star-outline'} size={16} color="#D71A21" />
                                                                 ))}
                                                             </View>
                                                             <Text style={styles.responseStatCount}>({stat.count} responses)</Text>
@@ -1257,7 +1257,7 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
                                                                 key={s}
                                                                 name={s <= Math.round(feedbackData.average_rating || 0) ? 'star' : 'star-outline'}
                                                                 size={20}
-                                                                color="#F59E0B"
+                                                                color="#D71A21"
                                                             />
                                                         ))}
                                                     </View>
@@ -1272,7 +1272,7 @@ export default function CourseSettingsModal({ visible, onClose, item, itemType =
                                                                     key={s}
                                                                     name={s <= f.rating ? 'star' : 'star-outline'}
                                                                     size={14}
-                                                                    color="#F59E0B"
+                                                                    color="#D71A21"
                                                                 />
                                                             ))}
                                                         </View>
@@ -1566,7 +1566,7 @@ const styles = StyleSheet.create({
         borderWidth: 1, borderColor: THEME.border, marginBottom: 8,
     },
     responseStatQ: { fontSize: 13, fontWeight: '700', color: THEME.textMain },
-    responseStatAvg: { fontSize: 22, fontWeight: '800', color: '#F59E0B' },
+    responseStatAvg: { fontSize: 22, fontWeight: '800', color: '#D71A21' },
     responseStatCount: { fontSize: 11, color: THEME.textSub, marginTop: 4 },
 
     mcqOptLabel: { fontSize: 12, color: THEME.textMain, flex: 1 },

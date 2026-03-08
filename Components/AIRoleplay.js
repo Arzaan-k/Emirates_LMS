@@ -331,14 +331,14 @@ export default function AIRoleplay({ onClose, scenario }) {
                 accent: '#EF4444',
                 emoji: '😠',
                 bgOpacity: 0.15,
-                label: 'Angry Customer',
+                label: 'Frustrated Passenger',
                 hint: 'Stay calm, show empathy'
             };
         }
         if (currentMood < 70) {
             return {
                 gradient: ['#1a1400', '#3d2800', '#1F2937'],
-                accent: '#F59E0B',
+                accent: '#D71A21',
                 emoji: '😐',
                 bgOpacity: 0.12,
                 label: 'Annoyed',
@@ -357,7 +357,7 @@ export default function AIRoleplay({ onClose, scenario }) {
 
     const getMoodColor = (currentMood) => {
         if (currentMood < 40) return '#EF4444'; // Red for angry
-        if (currentMood < 70) return '#F59E0B'; // Orange for annoyed
+        if (currentMood < 70) return '#D71A21'; // Orange for annoyed
         return '#10B981'; // Green for satisfied
     };
 
@@ -469,24 +469,24 @@ export default function AIRoleplay({ onClose, scenario }) {
                 end={{ x: 1, y: 1 }}
             />
 
-            {/* GHOST WAFFLE DECORATIONS */}
+            {/* Ghost Airplane DECORATIONS */}
             <View style={styles.ghostContainer} pointerEvents="none">
                 <Animated.Text
                     entering={FadeInUp.delay(100)}
-                    style={[styles.ghostWaffle, { top: '8%', left: '5%', opacity: theme.bgOpacity, transform: [{ rotate: '-15deg' }] }]}
-                >🧇</Animated.Text>
+                    style={[styles.ghostAirplane, { top: '8%', left: '5%', opacity: theme.bgOpacity, transform: [{ rotate: '-15deg' }] }]}
+                >✈</Animated.Text>
                 <Animated.Text
                     entering={FadeInUp.delay(200)}
-                    style={[styles.ghostWaffle, { top: '12%', right: '8%', opacity: theme.bgOpacity, transform: [{ rotate: '20deg' }], fontSize: 32 }]}
-                >🧇</Animated.Text>
+                    style={[styles.ghostAirplane, { top: '12%', right: '8%', opacity: theme.bgOpacity, transform: [{ rotate: '20deg' }], fontSize: 32 }]}
+                >✈</Animated.Text>
                 <Animated.Text
                     entering={FadeInUp.delay(300)}
-                    style={[styles.ghostWaffle, { bottom: '25%', left: '3%', opacity: theme.bgOpacity, transform: [{ rotate: '10deg' }] }]}
-                >🧇</Animated.Text>
+                    style={[styles.ghostAirplane, { bottom: '25%', left: '3%', opacity: theme.bgOpacity, transform: [{ rotate: '10deg' }] }]}
+                >✈</Animated.Text>
                 <Animated.Text
                     entering={FadeInUp.delay(400)}
-                    style={[styles.ghostWaffle, { bottom: '15%', right: '5%', opacity: theme.bgOpacity, transform: [{ rotate: '-25deg' }], fontSize: 28 }]}
-                >🧇</Animated.Text>
+                    style={[styles.ghostAirplane, { bottom: '15%', right: '5%', opacity: theme.bgOpacity, transform: [{ rotate: '-25deg' }], fontSize: 28 }]}
+                >✈</Animated.Text>
             </View>
 
             {/* PREMIUM HEADER */}
@@ -497,8 +497,8 @@ export default function AIRoleplay({ onClose, scenario }) {
                 <View style={{ alignItems: 'center' }}>
                     {/* Brand Badge */}
                     <View style={styles.brandBadge}>
-                        <Text style={styles.brandEmoji}>🧇</Text>
-                        <Text style={styles.brandText}>Belgian Waffle Co.</Text>
+                        <Text style={styles.brandEmoji}>✈</Text>
+                        <Text style={styles.brandText}>Emirates Airlines</Text>
                     </View>
                     <Text style={styles.headerTitle}>{scenario ? scenario.title : "Customer Simulation"}</Text>
                     {/* Mood Status Pill */}
@@ -538,7 +538,7 @@ export default function AIRoleplay({ onClose, scenario }) {
                 <View style={styles.resolutionContainer}>
                     <View style={styles.resolutionHeader}>
                         <Text style={styles.resolutionLabel}>🎯 Resolution Progress</Text>
-                        <Text style={[styles.resolutionPercent, { color: resolutionProgress > 70 ? '#10B981' : resolutionProgress > 40 ? '#F59E0B' : '#EF4444' }]}>
+                        <Text style={[styles.resolutionPercent, { color: resolutionProgress > 70 ? '#10B981' : resolutionProgress > 40 ? '#D71A21' : '#EF4444' }]}>
                             {resolutionProgress}%
                         </Text>
                     </View>
@@ -548,7 +548,7 @@ export default function AIRoleplay({ onClose, scenario }) {
                                 styles.resolutionBarFill,
                                 {
                                     width: `${resolutionProgress}%`,
-                                    backgroundColor: resolutionProgress > 70 ? '#10B981' : resolutionProgress > 40 ? '#F59E0B' : '#EF4444'
+                                    backgroundColor: resolutionProgress > 70 ? '#10B981' : resolutionProgress > 40 ? '#D71A21' : '#EF4444'
                                 }
                             ]}
                         />
@@ -680,14 +680,14 @@ const styles = StyleSheet.create({
 
     hintText: { color: "rgba(255,255,255,0.5)", fontSize: 12, textAlign: 'center', fontFamily: "Poppins_400Regular" },
 
-    // Ghost Waffle Decorations
+    // Ghost Airplane Decorations
     ghostContainer: { ...StyleSheet.absoluteFillObject, overflow: 'hidden', zIndex: 0 },
-    ghostWaffle: { position: 'absolute', fontSize: 40 },
+    ghostAirplane: { position: 'absolute', fontSize: 40 },
 
     // Brand Badge
     brandBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(245, 158, 11, 0.15)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginBottom: 6 },
     brandEmoji: { fontSize: 14, marginRight: 4 },
-    brandText: { color: '#F59E0B', fontSize: 10, fontFamily: 'Poppins_600SemiBold', letterSpacing: 0.5 },
+    brandText: { color: '#D71A21', fontSize: 10, fontFamily: 'Poppins_600SemiBold', letterSpacing: 0.5 },
 
     // Mood Status Pill
     moodPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, marginTop: 6 },

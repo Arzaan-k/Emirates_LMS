@@ -594,10 +594,10 @@ const styles = StyleSheet.create({
     avatarImg: { width: 52, height: 52, borderRadius: 26 },
     avatarPlaceholder: { width: 52, height: 52, borderRadius: 26, backgroundColor: '#FEF3C7', justifyContent: 'center', alignItems: 'center' },
     avatarInitial: { fontSize: 22, fontWeight: '700', color: '#B45309' },
-    avatarEditBadge: { position: 'absolute', bottom: 0, right: 0, width: 18, height: 18, borderRadius: 9, backgroundColor: '#F59E0B', justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: '#FFF' },
+    avatarEditBadge: { position: 'absolute', bottom: 0, right: 0, width: 18, height: 18, borderRadius: 9, backgroundColor: '#D71A21', justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: '#FFF' },
     profileName: { fontSize: 15, fontWeight: '700', color: '#111827' },
     profileEmail: { fontSize: 12, color: '#6B7280', marginTop: 1 },
-    profileRole: { fontSize: 11, color: '#F59E0B', fontWeight: '600', marginTop: 2 },
+    profileRole: { fontSize: 11, color: '#D71A21', fontWeight: '600', marginTop: 2 },
 
     // Modal
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
@@ -625,7 +625,7 @@ const styles = StyleSheet.create({
     pwdRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 10, backgroundColor: '#FAFAFA', overflow: 'hidden' },
     eyeBtn: { paddingHorizontal: 12, paddingVertical: 10 },
 
-    saveBtn: { backgroundColor: '#F59E0B', borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 8 },
+    saveBtn: { backgroundColor: '#D71A21', borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 8 },
     saveBtnTxt: { color: '#FFF', fontWeight: '700', fontSize: 15 },
     resendBtn: { alignItems: 'center', paddingVertical: 12 },
     resendTxt: { color: '#6B7280', fontSize: 13 },

@@ -36,7 +36,7 @@ const CampaignCard = ({ campaign, onSelect }) => {
                         <Text style={styles.statusText}>{isActive ? 'Active' : 'Ended'}</Text>
                     </View>
                     <View style={styles.xpBadge}>
-                        <MaterialCommunityIcons name="lightning-bolt" size={14} color="#F59E0B" />
+                        <MaterialCommunityIcons name="lightning-bolt" size={14} color="#D71A21" />
                         <Text style={styles.xpText}>+{campaign.xp_reward} XP</Text>
                     </View>
                 </View>
@@ -254,7 +254,7 @@ const styles = StyleSheet.create({
     statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
     statusText: { fontSize: 11, fontFamily: 'Poppins_600SemiBold', color: '#FFF' },
     xpBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.2)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10 },
-    xpText: { fontSize: 11, fontFamily: 'Poppins_700Bold', color: '#F59E0B', marginLeft: 2 },
+    xpText: { fontSize: 11, fontFamily: 'Poppins_700Bold', color: '#D71A21', marginLeft: 2 },
     campaignTitle: { fontSize: 18, fontFamily: 'Poppins_700Bold', color: '#FFF', marginBottom: 4 },
     campaignDesc: { fontSize: 13, fontFamily: 'Poppins_400Regular', color: 'rgba(255,255,255,0.7)', marginBottom: 12 },
     campaignFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

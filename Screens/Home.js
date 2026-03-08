@@ -61,8 +61,8 @@ import useTabPrefetch from '../hooks/useTabPrefetch';
 
 const { width, height } = Dimensions.get('window');
 
-// --- PREMIUM ACCENT: FLOATING WAFFLE ---
-const FloatingWaffle = ({ delay, duration, size, top, left, rotate }) => {
+// --- PREMIUM ACCENT: Floating Airplane ---
+const FloatingAirplane = ({ delay, duration, size, top, left, rotate }) => {
   const translateY = useSharedValue(0);
 
   useEffect(() => {
@@ -79,7 +79,7 @@ const FloatingWaffle = ({ delay, duration, size, top, left, rotate }) => {
 
   return (
     <Animated.View pointerEvents="none" style={[{ position: 'absolute', top, left, opacity: 0.1 }, animatedStyle]}>
-      <MaterialCommunityIcons name="grid" size={size} color="#D97706" />
+      <MaterialCommunityIcons name="grid" size={size} color="#B91C1C" />
     </Animated.View>
   );
 };
@@ -104,7 +104,7 @@ function NotificationsModal({ visible, notifications, onClose, onAction }) {
       onPress={() => onAction(notif)}
       activeOpacity={0.7}
     >
-      <View style={[styles.notifIconBox, { backgroundColor: notif.type === 'quiz' ? '#F59E0B' : (notif.type === 'crucial' ? '#EF4444' : '#3B82F6') }]}>
+      <View style={[styles.notifIconBox, { backgroundColor: notif.type === 'quiz' ? '#D71A21' : (notif.type === 'crucial' ? '#EF4444' : '#3B82F6') }]}>
         <MaterialCommunityIcons
           name={notif.type === 'quiz' ? 'school' : (notif.type === 'proctored' ? 'shield-lock' : ((notif.mediaUrl || notif.media_url) ? 'paperclip' : 'bell'))}
           size={20}
@@ -430,7 +430,7 @@ function VideoPlayerModal({ visible, videoData, userEmail, onClose }) {
 
                 {isTranslating ? (
                   <View style={{ padding: 40, alignItems: 'center' }}>
-                    <ActivityIndicator size="small" color="#F59E0B" />
+                    <ActivityIndicator size="small" color="#D71A21" />
                     <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 10, fontFamily: 'Poppins_400Regular' }}>Translating transcript...</Text>
                   </View>
                 ) : (
@@ -467,7 +467,7 @@ function VideoPlayerModal({ visible, videoData, userEmail, onClose }) {
                   </>
                 ) : (
                   <View style={styles.resultContainer}>
-                    <Feather name="award" size={60} color="#F59E0B" />
+                    <Feather name="award" size={60} color="#D71A21" />
                     <Text style={styles.resultTitle}>Quiz Completed!</Text>
                     <Text style={styles.resultScore}>You scored {score}/{videoData.quiz.length}</Text>
                     <TouchableOpacity style={styles.retryBtn} onPress={() => { setQuizIndex(0); setScore(0); setShowResult(false); }}>
@@ -518,10 +518,10 @@ function VideoPlayerModal({ visible, videoData, userEmail, onClose }) {
                   }}
                   onPress={() => handleTranslate(lang)}
                 >
-                  <Text style={{ color: translationLang === lang ? '#F59E0B' : '#E5E7EB', flex: 1, fontFamily: translationLang === lang ? 'Poppins_600SemiBold' : 'Poppins_400Regular' }}>
+                  <Text style={{ color: translationLang === lang ? '#D71A21' : '#E5E7EB', flex: 1, fontFamily: translationLang === lang ? 'Poppins_600SemiBold' : 'Poppins_400Regular' }}>
                     {lang}
                   </Text>
-                  {translationLang === lang && <Feather name="check" size={16} color="#F59E0B" />}
+                  {translationLang === lang && <Feather name="check" size={16} color="#D71A21" />}
                 </TouchableOpacity>
               ))}
               {filteredLanguages.length === 0 && (
@@ -610,7 +610,7 @@ const QuizFeedSection = memo(function QuizFeedSection({ data, onStart }) {
     <View style={styles.sectionContainer}>
       <View style={[styles.sectionHeader, { paddingHorizontal: 20 }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#F59E0B', marginRight: 8 }} />
+          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#D71A21', marginRight: 8 }} />
           <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Assigned Quizzes</Text>
         </View>
       </View>
@@ -725,7 +725,7 @@ function MeetingsFeedSection({ data, onJoin }) {
 // --- NEW: CRM TASKS FEED SECTION ---
 const PRIORITY_COLORS = {
   low: '#10B981',
-  medium: '#F59E0B',
+  medium: '#D71A21',
   high: '#EF4444',
   critical: '#7C3AED'
 };
@@ -748,7 +748,7 @@ function CRMTasksFeedSection({ data, onOpenTask }) {
       <View style={[styles.sectionHeader, { paddingHorizontal: 20 }]}>
         <View>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#F59E0B', marginRight: 8 }} />
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#D71A21', marginRight: 8 }} />
             <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>🎯 Live Assessments</Text>
           </View>
           <Text style={styles.sectionSubtitle}>Real customer tickets to practice</Text>
@@ -757,7 +757,7 @@ function CRMTasksFeedSection({ data, onOpenTask }) {
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20, paddingBottom: 10 }}>
         {pendingTasks.map((item, index) => {
           const ticket = item.ticket || {};
-          const priorityColor = PRIORITY_COLORS[ticket.priority] || '#F59E0B';
+          const priorityColor = PRIORITY_COLORS[ticket.priority] || '#D71A21';
           const typeIcon = TYPE_ICONS[ticket.type] || 'file';
 
           return (
@@ -846,12 +846,12 @@ function CrucialNotificationModal({ notification, onAcknowledge }) {
           style={StyleSheet.absoluteFill}
         />
 
-        {/* Ghost Waffle Decorations */}
+        {/* Ghost Airplane Decorations */}
         <View style={crucialStyles.ghostContainer} pointerEvents="none">
-          <Text style={[crucialStyles.ghostWaffle, { top: '5%', left: '10%', transform: [{ rotate: '-15deg' }] }]}>🧇</Text>
-          <Text style={[crucialStyles.ghostWaffle, { top: '15%', right: '8%', transform: [{ rotate: '20deg' }] }]}>🧇</Text>
-          <Text style={[crucialStyles.ghostWaffle, { bottom: '20%', left: '5%', transform: [{ rotate: '10deg' }] }]}>🧇</Text>
-          <Text style={[crucialStyles.ghostWaffle, { bottom: '10%', right: '12%', transform: [{ rotate: '-25deg' }] }]}>🧇</Text>
+          <Text style={[crucialStyles.ghostAirplane, { top: '5%', left: '10%', transform: [{ rotate: '-15deg' }] }]}>✈</Text>
+          <Text style={[crucialStyles.ghostAirplane, { top: '15%', right: '8%', transform: [{ rotate: '20deg' }] }]}>✈</Text>
+          <Text style={[crucialStyles.ghostAirplane, { bottom: '20%', left: '5%', transform: [{ rotate: '10deg' }] }]}>✈</Text>
+          <Text style={[crucialStyles.ghostAirplane, { bottom: '10%', right: '12%', transform: [{ rotate: '-25deg' }] }]}>✈</Text>
         </View>
 
         <TouchableOpacity
@@ -918,10 +918,10 @@ function CrucialNotificationModal({ notification, onAcknowledge }) {
                 <Text style={crucialStyles.message}>{notification.message}</Text>
               </ScrollView>
 
-              {/* Waffle Divider */}
+              {/* Divider */}
               <View style={crucialStyles.dividerRow}>
                 <View style={crucialStyles.dividerLine} />
-                <Text style={crucialStyles.dividerEmoji}>🧇</Text>
+                <Text style={crucialStyles.dividerEmoji}>✈</Text>
                 <View style={crucialStyles.dividerLine} />
               </View>
 
@@ -999,7 +999,7 @@ const crucialStyles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     overflow: 'hidden',
   },
-  ghostWaffle: {
+  ghostAirplane: {
     position: 'absolute',
     fontSize: 40,
     opacity: 0.05,
@@ -1736,7 +1736,7 @@ function HomeContent({ onOpenTool, onOpenTwin, userEmail, userProfile }) {
               )}
               <View style={{ padding: 20 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-                  <Text style={{ color: '#F59E0B', fontFamily: 'Poppins_600SemiBold', fontSize: 13 }}>
+                  <Text style={{ color: '#D71A21', fontFamily: 'Poppins_600SemiBold', fontSize: 13 }}>
                     {selectedNews?.author || 'Team'}
                   </Text>
                   <Text style={{ color: '#6B7280', fontSize: 12, marginLeft: 8 }}>
@@ -1792,7 +1792,7 @@ const CONTINUE_WATCHING = [
 const RECENT_COURSES = [
   {
     id: 3,
-    title: "Advanced Waffle Textures",
+    title: "Advanced Service Excellence",
     author: "Chef Mike",
     rating: 4.9,
     image: "https://images.unsplash.com/photo-1562608420-532c201fac48?q=80&w=2000&auto=format&fit=crop",
@@ -1807,10 +1807,10 @@ const RECENT_COURSES = [
 ];
 
 const AI_TOOLS = [
-  { id: 'roleplay', title: 'Customer Sim', desc: 'Practice Empathy', icon: 'chat-processing-outline', color: ['#8B5CF6', '#7C3AED'], accent: '#FFF' },
-  { id: 'videosim', title: 'Video Training', desc: 'Interactive Sims', icon: 'movie-filter', color: ['#EC4899', '#BE185D'], accent: '#FFF' },
-  { id: 'scanner', title: 'Hygiene Scan', desc: 'AR Inspection', icon: 'camera-iris', color: ['#10B981', '#059669'], accent: '#FFF' },
-  { id: 'flashcards', title: 'Wiki Cards', desc: 'Rapid Recall', icon: 'cards-playing-outline', color: ['#F59E0B', '#D97706'], accent: '#FFF' },
+  { id: 'roleplay', title: 'Crew Response', desc: 'Practice Empathy', icon: 'chat-processing-outline', color: ['#8B5CF6', '#7C3AED'], accent: '#FFF' },
+  { id: 'videosim', title: 'Flight Scenarios', desc: 'Interactive Sims', icon: 'airplane-marker', color: ['#EC4899', '#BE185D'], accent: '#FFF' },
+  { id: 'scanner', title: 'Safety Scan', desc: 'AR Inspection', icon: 'shield-check-outline', color: ['#10B981', '#059669'], accent: '#FFF' },
+  { id: 'flashcards', title: 'Aviation Wiki', desc: 'Rapid Recall', icon: 'cards-playing-outline', color: ['#D71A21', '#B91C1C'], accent: '#FFF' },
 ];
 
 function Header({ onNotificationPress, userName, userProfile }) {
@@ -1830,7 +1830,7 @@ function Header({ onNotificationPress, userName, userProfile }) {
       <View style={styles.headerRight}>
         {/* STREAK */}
         <TouchableOpacity style={styles.streakPill}>
-          <MaterialCommunityIcons name="fire" size={20} color="#F59E0B" />
+          <MaterialCommunityIcons name="fire" size={20} color="#D71A21" />
           <Text style={styles.streakText}>5</Text>
         </TouchableOpacity>
 
@@ -1877,7 +1877,7 @@ function DigitalTwinCard({ onOpen }) {
     <Animated.View entering={FadeInDown.delay(200).duration(800)} style={styles.twinContainer}>
       <TouchableOpacity style={styles.twinCard} activeOpacity={0.9} onPress={onOpen}>
         <ImageBackground
-          source={{ uri: "https://images.unsplash.com/photo-1562376552-0d160a2f238d?q=80&w=2000&auto=format&fit=crop" }}
+          source={{ uri: "https://images.unsplash.com/photo-1540339832862-4745ea9842bf?q=80&w=2000&auto=format&fit=crop" }}
           style={styles.twinBg}
           imageStyle={{ borderRadius: 24, opacity: 0.6 }}
         >
@@ -1908,7 +1908,7 @@ const NEWS_FEED_DATA = [
     author: "Head Chef",
     date: "2 hours ago",
     image: "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?q=80&w=2000&auto=format&fit=crop",
-    content: "Get ready for the summer season with our refreshing new waffle toppings! Mango Madness and Berry Blast are joining the menu starting next week. Training modules are now live."
+    content: "Get ready for the summer season with our refreshing new in-flight services! Mango Madness and Berry Blast are joining the menu starting next week. Training modules are now live."
   },
   {
     id: 2,
@@ -1943,7 +1943,7 @@ function TodaysGoalModal({ visible, item, onClose, onContinue }) {
           </TouchableOpacity>
 
           <View style={styles.goalIconContainer}>
-            <MaterialCommunityIcons name="target" size={60} color="#F59E0B" />
+            <MaterialCommunityIcons name="target" size={60} color="#D71A21" />
           </View>
 
           <Text style={styles.goalModalTitle}>{t('todaysGoal')}</Text>
@@ -1961,12 +1961,12 @@ function TodaysGoalModal({ visible, item, onClose, onContinue }) {
           </View>
 
           <Text style={styles.goalDesc}>
-            {item ? (item.description || "Master the basics of waffle preparation.") : "Start your journey by completing the first training unit."}
+            {item ? (item.description || "Master the basics of safety procedures.") : "Start your journey by completing the first training unit."}
           </Text>
 
           <TouchableOpacity style={styles.continueGoalBtn} onPress={onContinue}>
             <LinearGradient
-              colors={['#F59E0B', '#D97706']}
+              colors={['#D71A21', '#B91C1C']}
               style={styles.continueGoalGradient}
               start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
             >
@@ -2057,7 +2057,7 @@ function AIRecommendationsCard({ navigation }) {
 
             <View style={styles.recsRight}>
               <View style={styles.recsIconBg}>
-                <MaterialCommunityIcons name="lightbulb-on-outline" size={28} color="#F59E0B" />
+                <MaterialCommunityIcons name="lightbulb-on-outline" size={28} color="#D71A21" />
               </View>
               <View style={styles.recsArrow}>
                 <Feather name="chevron-right" size={20} color="rgba(255,255,255,0.7)" />
@@ -2069,7 +2069,7 @@ function AIRecommendationsCard({ navigation }) {
           <View style={styles.recsSkillRow}>
             <View style={[styles.recsSkillDot, { backgroundColor: '#EF4444' }]} />
             <Text style={styles.recsSkillText}>Identify gaps</Text>
-            <View style={[styles.recsSkillDot, { backgroundColor: '#F59E0B' }]} />
+            <View style={[styles.recsSkillDot, { backgroundColor: '#D71A21' }]} />
             <Text style={styles.recsSkillText}>Get suggestions</Text>
             <View style={[styles.recsSkillDot, { backgroundColor: '#10B981' }]} />
             <Text style={styles.recsSkillText}>Improve skills</Text>
@@ -2167,7 +2167,7 @@ const CourseList = memo(function CourseList({ items, hasRealWatchHistory, onPlay
             <Text style={styles.courseTitle} numberOfLines={1}>{item.title}</Text>
             <View style={styles.progressRow}>
               <View style={styles.progressBar}>
-                <View style={[styles.progressFill, { width: `${Math.min(100, progressPct)}%`, backgroundColor: isCompleted ? '#10B981' : '#F59E0B' }]} />
+                <View style={[styles.progressFill, { width: `${Math.min(100, progressPct)}%`, backgroundColor: isCompleted ? '#10B981' : '#D71A21' }]} />
               </View>
               <Text style={styles.durationText}>{isCompleted ? '✓ Done' : `${Math.round(progressPct)}%`}</Text>
             </View>
@@ -2269,31 +2269,31 @@ const NewArrivals = memo(function NewArrivals({ news = [], onOpenNews, isLoading
 const LIVE_QUIZZES = [
   {
     id: 'q1',
-    title: 'Espresso Mastery',
+    title: 'First Class Service',
     questions: [
-      { question: "What is the ideal tamping pressure for espresso?", options: ["10 lbs", "30 lbs", "50 lbs", "100 lbs"], correct: 1 },
-      { question: "How long should a standard espresso shot take?", options: ["10-15s", "20-30s", "40-50s", "1 min"], correct: 1 },
-      { question: "Which part of the espresso is the 'crema'?", options: ["The dark bottom", "The golden foam on top", "The bitter aftertaste", "The grounds"], correct: 1 },
-      { question: "What temperature should water be for brewing?", options: ["190°F - 200°F", "212°F (Boiling)", "150°F", "Cold"], correct: 0 },
-      { question: "A double shot is typically how many ounces?", options: ["1 oz", "2 oz", "3 oz", "4 oz"], correct: 1 }
+      { question: "What is the proper way to address a First Class passenger?", options: ["By their first name", "Sir/Madam or by their Title and Surname", "Hey there", "Guest"], correct: 1 },
+      { question: "When should the pre-departure drink be offered?", options: ["After takeoff", "Immediately upon boarding", "After safety briefing", "Mid-flight"], correct: 1 },
+      { question: "Which wine should be paired with the signature beef menu?", options: ["Dom Perignon", "Bordeaux Red", "Sauvignon Blanc", "Rose"], correct: 1 },
+      { question: "What is the Emirates 'On-Demand Dining' protocol?", options: ["Fixed meal times", "Eat whenever the passenger wants", "Only snacks available", "Breakfast only"], correct: 1 },
+      { question: "How to handle a special dietary meal request not on list?", options: ["Apologize and offer standard", "Check with Galley Manager for alternatives", "Tell them to wait for next flight", "Ignore it"], correct: 1 }
     ],
     time: '10 min',
     difficulty: 'Hard',
-    image: 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?q=80&w=600'
+    image: 'https://images.unsplash.com/photo-1540339832862-4745ea9842bf?q=80&w=600'
   },
   {
     id: 'q2',
-    title: 'Waffle Crisp Science',
+    title: 'B777 Safety Protocols',
     questions: [
-      { question: "What ingredient adds the most crispness?", options: ["Milk", "Cornstarch/Rice Flour", "Sugar", "Eggs"], correct: 1 },
-      { question: "When should you flip the waffle maker?", options: ["Immediately", "After 1 min", "Never", "When it beeps"], correct: 0 },
-      { question: "Why do we let batter rest?", options: ["To thicken", "To relax gluten", "To cool down", "To separate"], correct: 1 },
-      { question: "What is the best way to keep waffles warm?", options: ["Stack them", "Cover with foil", "Wire rack in oven", "Microwave"], correct: 2 },
-      { question: "Overmixing the batter causes what?", options: ["Fluffiness", "Toughness", "Sweetness", "Crispness"], correct: 1 }
+      { question: "Where are the emergency oxygen kits located in the B777 galley?", options: ["Above the ovens", "In the ceiling panels", "Under the floor", "Behind the jumpseats"], correct: 1 },
+      { question: "How many emergency exits are on a standard B777-300ER?", options: ["6", "8", "10", "12"], correct: 2 },
+      { question: "Which exit is designated for crew during a water landing?", options: ["All exits", "Overwing only", "Main deck doors only", "Forward doors only"], correct: 0 },
+      { question: "What color is the emergency light on the AIP?", options: ["Blue", "Amber", "Red", "Green"], correct: 2 },
+      { question: "Duration of the emergency oxygen flow for passengers?", options: ["10 mins", "15 mins", "22 mins", "30 mins"], correct: 2 }
     ],
     time: '15 min',
     difficulty: 'Medium',
-    image: 'https://images.unsplash.com/photo-1568051243851-f9b136146e97?q=80&w=600'
+    image: 'https://images.unsplash.com/photo-1569154941061-e231b4725ef1?q=80&w=600'
   },
   {
     id: 'q3',
@@ -2320,7 +2320,7 @@ const TopicQuizzes = memo(function TopicQuizzes({ quizzes = [], onStartQuiz }) {
 
           <View style={styles.topicQuizTop}>
             <BlurView intensity={30} tint="light" style={styles.topicQuizBadge}>
-              <Text style={[styles.topicQuizBadgeText, { color: quiz.difficulty === 'Hard' ? '#EF4444' : quiz.difficulty === 'Medium' ? '#F59E0B' : '#10B981' }]}>
+              <Text style={[styles.topicQuizBadgeText, { color: quiz.difficulty === 'Hard' ? '#EF4444' : quiz.difficulty === 'Medium' ? '#D71A21' : '#10B981' }]}>
                 {quiz.difficulty}
               </Text>
             </BlurView>
@@ -2355,7 +2355,7 @@ const TopicQuizzes = memo(function TopicQuizzes({ quizzes = [], onStartQuiz }) {
       <View style={[styles.sectionHeader, { paddingHorizontal: 20 }]}>
         <Text style={styles.sectionTitle}>Live Topic Quizzes</Text>
         <TouchableOpacity>
-          <Text style={{ color: '#F59E0B', fontFamily: 'Poppins_600SemiBold', fontSize: 13 }}>See All</Text>
+          <Text style={{ color: '#D71A21', fontFamily: 'Poppins_600SemiBold', fontSize: 13 }}>See All</Text>
         </TouchableOpacity>
       </View>
 
@@ -2415,7 +2415,7 @@ function NotificationToast({ message, type, visible, navigation, targetScreen, o
       pointerEvents="box-none" // ensures touches pass through properly
     >
       <BlurView intensity={80} tint="dark" style={styles.toastContent}>
-        <View style={[styles.toastIcon, { backgroundColor: isQuiz ? "#F59E0B" : "#3B82F6" }]}>
+        <View style={[styles.toastIcon, { backgroundColor: isQuiz ? "#D71A21" : "#3B82F6" }]}>
           <MaterialCommunityIcons name={isQuiz ? "school" : "bell"} size={24} color="#FFF" />
         </View>
 
@@ -2519,9 +2519,9 @@ export default function Home() {
       />
 
       {/* 2. FLOATING ACCENTS */}
-      <FloatingWaffle delay={0} duration={8000} size={150} top={-20} left={-40} rotate="15deg" />
-      <FloatingWaffle delay={1000} duration={9000} size={100} top={height * 0.4} left={width - 60} rotate="-10deg" />
-      <FloatingWaffle delay={2000} duration={10000} size={180} top={height * 0.8} left={-50} rotate="30deg" />
+      <FloatingAirplane delay={0} duration={8000} size={150} top={-20} left={-40} rotate="15deg" />
+      <FloatingAirplane delay={1000} duration={9000} size={100} top={height * 0.4} left={width - 60} rotate="-10deg" />
+      <FloatingAirplane delay={2000} duration={10000} size={180} top={height * 0.8} left={-50} rotate="30deg" />
 
       {/* TWIN OVERLAY */}
       {showTwin && (
@@ -2602,29 +2602,29 @@ const styles = StyleSheet.create({
   nameText: { fontSize: 24, fontFamily: "Poppins_700Bold", color: "#1E293B" },
   headerRight: { flexDirection: 'row', alignItems: 'center' },
   streakPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.6)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, marginRight: 12, borderWidth: 1, borderColor: '#FFF' },
-  streakText: { fontFamily: "Poppins_700Bold", color: "#D97706", marginLeft: 4 },
+  streakText: { fontFamily: "Poppins_700Bold", color: "#B91C1C", marginLeft: 4 },
   iconBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.6)', justifyContent: 'center', alignItems: 'center', marginRight: 12, borderWidth: 1, borderColor: '#FFF' },
   dotBadage: { position: 'absolute', top: 10, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444', borderWidth: 1, borderColor: '#FFF' },
   profileBtn: { shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 4 },
   profileImage: { width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: '#FFF' },
 
   // SEARCH
-  searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.7)', marginHorizontal: 24, paddingHorizontal: 16, height: 52, borderRadius: 16, marginBottom: 20, borderWidth: 1, borderColor: '#FFF', shadowColor: "#D97706", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10 },
+  searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.7)', marginHorizontal: 24, paddingHorizontal: 16, height: 52, borderRadius: 16, marginBottom: 20, borderWidth: 1, borderColor: '#FFF', shadowColor: "#B91C1C", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10 },
   searchIcon: { marginRight: 12 },
   searchInput: { flex: 1, fontFamily: "Poppins_400Regular", fontSize: 14, color: "#1E293B" },
   micBtn: { padding: 8, backgroundColor: "rgba(255,247,237, 0.8)", borderRadius: 10 },
 
   // TWIN CARD
   twinContainer: { paddingHorizontal: 24, marginBottom: 24 },
-  twinCard: { height: 200, borderRadius: 28, overflow: 'hidden', shadowColor: "#F59E0B", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.25, shadowRadius: 15, elevation: 10 },
+  twinCard: { height: 200, borderRadius: 28, overflow: 'hidden', shadowColor: "#D71A21", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.25, shadowRadius: 15, elevation: 10 },
   twinBg: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#000' },
   twinGradient: { padding: 24, paddingBottom: 20 },
-  twinBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F59E0B', alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, marginBottom: 10 },
+  twinBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#D71A21', alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, marginBottom: 10 },
   twinBadgeText: { color: "#FFF", fontSize: 10, fontFamily: "Poppins_700Bold", letterSpacing: 1 },
   twinTitle: { color: "#FFF", fontSize: 24, fontFamily: "Poppins_700Bold", marginBottom: 6, textShadowColor: 'rgba(0,0,0,0.3)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 4 },
   twinDesc: { color: "rgba(255,255,255,0.9)", fontSize: 13, fontFamily: "Poppins_400Regular", marginBottom: 16 },
   twinBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', alignSelf: 'flex-start', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 14 },
-  twinBtnText: { fontFamily: "Poppins_700Bold", color: "#D97706", marginRight: 8, fontSize: 12 },
+  twinBtnText: { fontFamily: "Poppins_700Bold", color: "#B91C1C", marginRight: 8, fontSize: 12 },
 
   // DAILY FOCUS
   focusContainer: { paddingHorizontal: 24, marginBottom: 30 },
@@ -2653,7 +2653,7 @@ const styles = StyleSheet.create({
   aiDesc: { color: "rgba(255,255,255,0.9)", fontSize: 11, fontFamily: "Poppins_500Medium" },
 
   // COURSE LIST
-  courseCard: { width: 220, marginRight: 20, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.6)', overflow: 'hidden', borderWidth: 1, borderColor: '#FFF', shadowColor: "#D97706", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10 },
+  courseCard: { width: 220, marginRight: 20, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.6)', overflow: 'hidden', borderWidth: 1, borderColor: '#FFF', shadowColor: "#B91C1C", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10 },
   courseImg: { width: '100%', height: 130 },
   playOverlay: { position: 'absolute', top: 0, left: 0, right: 0, height: 130, justifyContent: 'center', alignItems: 'center' },
   resumeBadge: { position: 'absolute', top: 8, right: 8, flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8 },
@@ -2664,8 +2664,8 @@ const styles = StyleSheet.create({
   courseTitle: { fontSize: 15, fontFamily: "Poppins_600SemiBold", color: "#1E293B", marginBottom: 10 },
   progressRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   progressBar: { flex: 1, height: 6, backgroundColor: "rgba(0,0,0,0.05)", borderRadius: 3, marginRight: 10 },
-  progressFill: { height: '100%', backgroundColor: "#F59E0B", borderRadius: 3 },
-  durationText: { fontSize: 11, fontFamily: "Poppins_700Bold", color: "#D97706" },
+  progressFill: { height: '100%', backgroundColor: "#D71A21", borderRadius: 3 },
+  durationText: { fontSize: 11, fontFamily: "Poppins_700Bold", color: "#B91C1C" },
 
   // NEW ARRIVALS
   listCard: { flexDirection: 'row', padding: 14, backgroundColor: 'rgba(255,255,255,0.6)', borderRadius: 20, marginBottom: 16, borderWidth: 1, borderColor: '#FFF' },
@@ -2685,7 +2685,7 @@ const styles = StyleSheet.create({
   tabIconContainer: { alignItems: 'center', justifyContent: 'center', top: 18 },
   activeTabIcon: { top: 12 },
   iconWrapper: { width: 48, height: 48, borderRadius: 24, justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent' },
-  activeIconWrapper: { backgroundColor: '#F59E0B', shadowColor: "#F59E0B", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 10 },
+  activeIconWrapper: { backgroundColor: '#D71A21', shadowColor: "#D71A21", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 10 },
 
   // FEED STYLES (Unified)
   liveCard: { width: 280, marginRight: 16, marginBottom: 5 },
@@ -2702,7 +2702,7 @@ const styles = StyleSheet.create({
   quizFeedIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
   quizFeedTitle: { color: "#FFF", fontSize: 14, fontFamily: "Poppins_600SemiBold", marginBottom: 2 },
   quizFeedMeta: { color: "rgba(255,255,255,0.8)", fontSize: 12, fontFamily: "Poppins_400Regular" },
-  quizFeedBadge: { position: 'absolute', top: 12, right: 12, backgroundColor: '#F59E0B', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  quizFeedBadge: { position: 'absolute', top: 12, right: 12, backgroundColor: '#D71A21', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
   quizFeedBadgeText: { color: '#FFF', fontSize: 9, fontFamily: "Poppins_700Bold" },
 
   // PROCTORED FEED
@@ -2769,9 +2769,9 @@ const styles = StyleSheet.create({
   interactiveContainer: { flex: 1, backgroundColor: '#0F172A', borderTopLeftRadius: 32, borderTopRightRadius: 32, marginTop: -24 },
   tabRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#334155' },
   tabBtn: { flex: 1, paddingVertical: 18, alignItems: 'center' },
-  activeTabBtn: { borderBottomWidth: 2, borderBottomColor: '#F59E0B' },
+  activeTabBtn: { borderBottomWidth: 2, borderBottomColor: '#D71A21' },
   tabText: { color: '#94A3B8', fontSize: 14, fontFamily: "Poppins_600SemiBold" },
-  activeTabText: { color: '#F59E0B' },
+  activeTabText: { color: '#D71A21' },
   contentArea: { flex: 1, padding: 24 },
   transcriptText: { color: '#CBD5E1', fontSize: 15, fontFamily: "Poppins_400Regular", lineHeight: 26 },
 
@@ -2780,7 +2780,7 @@ const styles = StyleSheet.create({
   quizHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
   quizCount: { color: '#94A3B8', fontSize: 13, fontFamily: "Poppins_600SemiBold" },
   quizProgress: { width: 120, height: 8, backgroundColor: '#334155', borderRadius: 4 },
-  quizProgressBar: { height: '100%', backgroundColor: '#F59E0B', borderRadius: 4 },
+  quizProgressBar: { height: '100%', backgroundColor: '#D71A21', borderRadius: 4 },
   questionText: { color: '#FFF', fontSize: 20, fontFamily: "Poppins_700Bold", marginBottom: 24, lineHeight: 28 },
   optionBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1E293B', padding: 20, borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: '#334155' },
   optionCircle: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#334155', justifyContent: 'center', alignItems: 'center', marginRight: 16 },
@@ -2789,7 +2789,7 @@ const styles = StyleSheet.create({
   resultContainer: { alignItems: 'center', justifyContent: 'center', paddingVertical: 60 },
   resultTitle: { color: '#FFF', fontSize: 28, fontFamily: "Poppins_700Bold", marginTop: 20, marginBottom: 10 },
   resultScore: { color: '#CBD5E1', fontSize: 18, fontFamily: "Poppins_500Medium", marginBottom: 30 },
-  retryBtn: { backgroundColor: '#F59E0B', paddingHorizontal: 32, paddingVertical: 14, borderRadius: 16 },
+  retryBtn: { backgroundColor: '#D71A21', paddingHorizontal: 32, paddingVertical: 14, borderRadius: 16 },
   retryText: { color: '#FFF', fontSize: 16, fontFamily: "Poppins_700Bold" },
 
   // OTHERS
@@ -2806,7 +2806,7 @@ const styles = StyleSheet.create({
   goalModalContent: { width: '85%', backgroundColor: '#FFF', borderRadius: 24, padding: 24, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.25, shadowRadius: 20, elevation: 10 },
   closeGoalBtn: { position: 'absolute', top: 16, right: 16, zIndex: 10, backgroundColor: '#F3F4F6', borderRadius: 20, padding: 4 },
   goalIconContainer: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#FEF3C7', justifyContent: 'center', alignItems: 'center', marginBottom: 20, borderWidth: 4, borderColor: '#FFFBEB' },
-  goalModalTitle: { fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: '#F59E0B', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
+  goalModalTitle: { fontSize: 14, fontFamily: 'Poppins_600SemiBold', color: '#D71A21', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
   goalModalSub: { fontSize: 24, fontFamily: 'Poppins_700Bold', color: '#111827', textAlign: 'center', marginBottom: 20 },
   goalDesc: { fontSize: 14, fontFamily: 'Poppins_400Regular', color: '#6B7280', textAlign: 'center', marginBottom: 24, lineHeight: 22 },
 
@@ -2814,7 +2814,7 @@ const styles = StyleSheet.create({
   goalDetailRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12 },
   goalDetailText: { fontSize: 12, fontFamily: 'Poppins_500Medium', color: '#4B5563', marginLeft: 6 },
 
-  continueGoalBtn: { width: '100%', shadowColor: '#F59E0B', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 },
+  continueGoalBtn: { width: '100%', shadowColor: '#D71A21', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 },
   continueGoalGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, borderRadius: 16, gap: 8 },
   continueGoalText: { fontSize: 16, fontFamily: 'Poppins_600SemiBold', color: '#FFF' },
 
@@ -2824,7 +2824,7 @@ const styles = StyleSheet.create({
   newsOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, height: '70%', justifyContent: 'flex-end', padding: 16 },
   newsContent: {},
   newsMetaRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
-  newsAuthor: { fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: '#F59E0B' },
+  newsAuthor: { fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: '#D71A21' },
   newsDate: { fontSize: 12, fontFamily: 'Poppins_400Regular', color: '#D1D5DB' },
   newsTitle: { fontSize: 18, fontFamily: 'Poppins_700Bold', color: '#FFF', marginBottom: 4, lineHeight: 24 },
   newsBody: { fontSize: 13, fontFamily: 'Poppins_400Regular', color: 'rgba(255,255,255,0.9)', lineHeight: 18 },
@@ -2841,11 +2841,11 @@ const styles = StyleSheet.create({
   closeNewsBtn: { position: 'absolute', top: 50, right: 20, zIndex: 10, borderRadius: 24, overflow: 'hidden' },
   closeNewsBlur: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.3)' },
   newsHeroText: { position: 'absolute', bottom: 30, left: 24, right: 24 },
-  newsBadge: { backgroundColor: '#F59E0B', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, alignSelf: 'flex-start', marginBottom: 12 },
+  newsBadge: { backgroundColor: '#D71A21', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, alignSelf: 'flex-start', marginBottom: 12 },
   newsBadgeText: { fontSize: 11, fontFamily: 'Poppins_700Bold', color: '#FFF', letterSpacing: 1 },
   newsHeroTitle: { fontSize: 26, fontFamily: 'Poppins_700Bold', color: '#FFF', marginBottom: 8, lineHeight: 34 },
   newsHeroMeta: { flexDirection: 'row', alignItems: 'center' },
-  newsHeroAuthor: { fontSize: 13, fontFamily: 'Poppins_600SemiBold', color: '#F59E0B' },
+  newsHeroAuthor: { fontSize: 13, fontFamily: 'Poppins_600SemiBold', color: '#D71A21' },
   newsHeroDate: { fontSize: 13, fontFamily: 'Poppins_400Regular', color: '#CBD5E1' },
   newsBodyContainer: { flex: 1 },
   newsBodyText: { fontSize: 16, fontFamily: 'Poppins_400Regular', color: '#CBD5E1', lineHeight: 28 },
@@ -2863,7 +2863,7 @@ const styles = StyleSheet.create({
   topicQuizMetaRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
   topicQuizMetaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   topicQuizMetaText: { fontSize: 11, fontFamily: 'Poppins_500Medium', color: '#CBD5E1' },
-  startQuizBtnSmall: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F59E0B', paddingVertical: 8, borderRadius: 10, gap: 6 },
+  startQuizBtnSmall: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#D71A21', paddingVertical: 8, borderRadius: 10, gap: 6 },
   startQuizBtnText: { fontSize: 12, fontFamily: 'Poppins_700Bold', color: '#FFF' },
 
   // --- AI RECOMMENDATIONS CARD STYLES ---

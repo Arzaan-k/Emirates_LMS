@@ -20,54 +20,55 @@ const HIRING_RESOURCES = [
   {
     id: 'general',
     title: 'Behavioral & Culture Fit',
-    desc: 'Core questions to assess detailed soft skills and company fit.',
+    desc: 'Core questions to assess soft skills and Emirates service values.',
     icon: 'account-group',
     color: ['#3B82F6', '#2563EB'],
     questions: [
-      "Tell me about a time you had to deal with a difficult customer.",
-      "How do you prioritize tasks during a busy shift?",
-      "Why do you want to work at Belgian Waffle?",
-      "Describe a situation where you had to work as part of a team.",
-      "What is your greatest weakness and how are you working on it?"
+      "Tell me about a time you had to handle a difficult passenger situation.",
+      "How do you prioritize tasks during a busy flight turnaround?",
+      "Why do you want to work at Emirates Airlines?",
+      "Describe a situation where you had to work with a diverse, multicultural team.",
+      "How do you maintain composure and professionalism under pressure?"
     ]
   },
   {
-    id: 'barista',
-    title: 'Barista / Front Staff',
-    desc: 'Technical questions for food handling and customer service.',
-    icon: 'coffee',
-    color: ['#F59E0B', '#D97706'],
+    id: 'cabincrew',
+    title: 'Cabin Crew',
+    desc: 'Service delivery, emergency procedures, and passenger care.',
+    icon: 'airplane',
+    color: ['#D71A21', '#B91C1C'],
     questions: [
-      "Walk me through the steps of making a standard Cappuccino.",
-      "How do you handle a wrong order complaint?",
-      "What are the hygiene standards you follow before starting a shift?",
-      "How would you upsell a waffle to a customer purchasing a coffee?"
+      "Walk me through the pre-flight safety demonstration procedure.",
+      "How would you handle a passenger refusing to comply with safety instructions?",
+      "What would you do if a passenger has a medical emergency mid-flight?",
+      "How would you manage service delivery in turbulence conditions?",
+      "Describe how you would de-escalate a conflict between two passengers."
     ]
   },
   {
     id: 'manager',
-    title: 'Store Manager',
-    desc: 'Leadership, inventory, and conflict resolution scenarios.',
+    title: 'Station / Fleet Manager',
+    desc: 'Leadership, operations, and crew management scenarios.',
     icon: 'tie',
     color: ['#10B981', '#059669'],
     questions: [
-      "How do you handle an employee who is consistently late?",
-      "Describe your experience with inventory management.",
-      "What strategies would you use to increase store sales?",
-      "How do you motivate your team during low-traffic periods?"
+      "How do you handle a crew member who is not meeting service standards?",
+      "Describe your experience with flight operations management.",
+      "What strategies would you use to improve on-time departure performance?",
+      "How do you manage crew morale during extended duty periods?"
     ]
   },
   {
     id: 'safety',
-    title: 'Safety & Compliance',
-    desc: 'Essential checks for food safety and emergency protocols.',
+    title: 'Aviation Safety & Compliance',
+    desc: 'Essential checks for aviation safety and emergency protocols.',
     icon: 'shield-check',
     color: ['#8B5CF6', '#7C3AED'],
     questions: [
-      "What is the first thing you do in case of a fire alarm?",
-      "Explain the 'First In, First Out' (FIFO) method in inventory.",
-      "How often should the espresso machine be deep cleaned?",
-      "What are the critical temperatures for food storage?"
+      "What is the first thing you do when an emergency evacuation is initiated?",
+      "Explain the procedure for handling a cabin decompression event.",
+      "How often should emergency equipment be inspected on the aircraft?",
+      "What are the critical procedures for dangerous goods handling?"
     ]
   },
 ];
@@ -232,7 +233,7 @@ const styles = StyleSheet.create({
   },
   questionCount: {
     fontSize: 11,
-    color: '#F59E0B',
+    color: '#D71A21',
     fontFamily: 'Poppins_600SemiBold',
   },
   // MODAL styles

@@ -157,7 +157,7 @@ export default function ScheduledExamsListModal({ visible, onClose, userProfile,
     const getStatusColor = (status) => {
         switch (status) {
             case 'completed': return '#10B981';
-            case 'ongoing': return '#F59E0B';
+            case 'ongoing': return '#D71A21';
             default: return '#6366F1';
         }
     };

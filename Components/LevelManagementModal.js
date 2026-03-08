@@ -72,9 +72,9 @@ export default function LevelManagementModal({ visible, onClose }) {
 
     // Available colors for levels
     const LEVEL_COLORS = [
-        '#6B7280', '#9CA3AF', '#F59E0B', '#EF4444', '#10B981',
+        '#6B7280', '#9CA3AF', '#D71A21', '#EF4444', '#10B981',
         '#3B82F6', '#6366F1', '#8B5CF6', '#EC4899', '#14B8A6',
-        '#D97706', '#059669', '#7C3AED', '#DC2626', '#0891B2',
+        '#B91C1C', '#059669', '#7C3AED', '#DC2626', '#0891B2',
     ];
 
     // Fetch levels on mount
@@ -520,7 +520,7 @@ export default function LevelManagementModal({ visible, onClose }) {
                             style={styles.actionBtn}
                             onPress={() => setEditingLevel({ ...item })}
                         >
-                            <Feather name="edit-2" size={18} color="#F59E0B" />
+                            <Feather name="edit-2" size={18} color="#D71A21" />
                         </TouchableOpacity>
                         <TouchableOpacity
                             style={styles.actionBtn}
@@ -718,7 +718,7 @@ export default function LevelManagementModal({ visible, onClose }) {
                             style={styles.input}
                             value={editingLevel.name}
                             onChangeText={(text) => setEditingLevel({ ...editingLevel, name: text })}
-                            placeholder="e.g., Gold Waffler"
+                            placeholder="e.g., Gold Crew"
                         />
 
                         {/* Description */}
@@ -961,7 +961,7 @@ export default function LevelManagementModal({ visible, onClose }) {
                     {/* Questions List */}
                     {quizLoading ? (
                         <View style={styles.loadingContainer}>
-                            <ActivityIndicator size="large" color="#F59E0B" />
+                            <ActivityIndicator size="large" color="#D71A21" />
                             <Text style={styles.loadingText}>Loading questions...</Text>
                         </View>
                     ) : (
@@ -1032,7 +1032,7 @@ export default function LevelManagementModal({ visible, onClose }) {
                                                     <Text style={quizStyles.questionNumber}>Q{idx + 1}</Text>
                                                     <View style={quizStyles.questionActions}>
                                                         <TouchableOpacity onPress={() => startEditQuestion(idx)} style={{ padding: 4 }}>
-                                                            <Feather name="edit-2" size={16} color="#F59E0B" />
+                                                            <Feather name="edit-2" size={16} color="#D71A21" />
                                                         </TouchableOpacity>
                                                         <TouchableOpacity onPress={() => deleteQuestion(idx)} style={{ padding: 4 }}>
                                                             <Feather name="trash-2" size={16} color="#EF4444" />
@@ -1118,7 +1118,7 @@ export default function LevelManagementModal({ visible, onClose }) {
                     {/* Levels List */}
                     {loading ? (
                         <View style={styles.loadingContainer}>
-                            <ActivityIndicator size="large" color="#F59E0B" />
+                            <ActivityIndicator size="large" color="#D71A21" />
                             <Text style={styles.loadingText}>Loading levels...</Text>
                         </View>
                     ) : Platform.OS === 'web' ? (
@@ -1226,7 +1226,7 @@ export default function LevelManagementModal({ visible, onClose }) {
                                                 style={styles.actionBtn}
                                                 onPress={() => setEditingLevel({ ...item })}
                                             >
-                                                <Feather name="edit-2" size={18} color="#F59E0B" />
+                                                <Feather name="edit-2" size={18} color="#D71A21" />
                                             </TouchableOpacity>
                                             <TouchableOpacity
                                                 style={styles.actionBtn}
@@ -1561,7 +1561,7 @@ const styles = StyleSheet.create({
         marginRight: 10,
     },
     iconOptionSelected: {
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
     },
     colorPicker: {
         flexDirection: 'row',
@@ -1589,7 +1589,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         padding: 16,
         borderRadius: 12,
         marginTop: 20,
@@ -1626,7 +1626,7 @@ const styles = StyleSheet.create({
     },
     courseCardActive: {
         backgroundColor: '#FEF3C7',
-        borderColor: '#F59E0B',
+        borderColor: '#D71A21',
     },
     courseInfo: {
         flex: 1,
@@ -1714,7 +1714,7 @@ const quizStyles = StyleSheet.create({
     saveAllBtn: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         paddingHorizontal: 14,
         paddingVertical: 8,
         borderRadius: 8,
@@ -1748,7 +1748,7 @@ const quizStyles = StyleSheet.create({
     questionNumber: {
         fontSize: 12,
         fontFamily: 'Poppins_700Bold',
-        color: '#F59E0B',
+        color: '#D71A21',
         backgroundColor: '#FEF3C7',
         paddingHorizontal: 8,
         paddingVertical: 2,
@@ -1790,7 +1790,7 @@ const quizStyles = StyleSheet.create({
     editLabel: {
         fontSize: 14,
         fontFamily: 'Poppins_600SemiBold',
-        color: '#F59E0B',
+        color: '#D71A21',
         marginBottom: 8,
     },
     optionEditRow: {

@@ -30,8 +30,8 @@ import CustomAlert from '../Components/CustomAlert';
 
 const { width, height } = Dimensions.get('window');
 
-// Floating Waffle Component
-const FloatingWaffle = ({ size, top, left, delay }) => {
+// Floating Airplane Component
+const FloatingAirplane = ({ size, top, left, delay }) => {
     const translateY = useSharedValue(0);
     const rotate = useSharedValue(0);
     const scale = useSharedValue(1);
@@ -76,7 +76,7 @@ const FloatingWaffle = ({ size, top, left, delay }) => {
     return (
         <Animated.View
             style={[
-                styles.floatingWaffle,
+                styles.FloatingAirplane,
                 {
                     top,
                     left,
@@ -86,7 +86,7 @@ const FloatingWaffle = ({ size, top, left, delay }) => {
                 animatedStyle,
             ]}
         >
-            <Text style={{ fontSize: size * 0.8 }}>🧇</Text>
+            <Text style={{ fontSize: size * 0.8 }}>✈</Text>
         </Animated.View>
     );
 };
@@ -364,18 +364,18 @@ export default function Login({ navigation }) {
         <View style={styles.container}>
             {/* BACKGROUND GRADIENT */}
             <LinearGradient
-                colors={['#FFFBEB', '#FFF7ED', '#FFFFFF', '#FEF3C7']}
+                colors={['#FEF2F2', '#FFF1F2', '#FFFFFF', '#F1F5F9']}
                 style={StyleSheet.absoluteFill}
             />
 
-            {/* FLOATING WAFFLES */}
-            <FloatingWaffle size={80} top={100} left={30} delay={0} />
-            <FloatingWaffle size={60} top={150} left={width - 80} delay={500} />
-            <FloatingWaffle size={70} top={height * 0.3} left={50} delay={1000} />
-            <FloatingWaffle size={50} top={height * 0.5} left={width - 70} delay={1500} />
-            <FloatingWaffle size={90} top={height * 0.7} left={width / 2 - 45} delay={800} />
-            <FloatingWaffle size={55} top={height * 0.8} left={40} delay={1200} />
-            <FloatingWaffle size={65} top={height * 0.6} left={width - 90} delay={300} />
+            {/* Floating AirplaneS */}
+            <FloatingAirplane size={80} top={100} left={30} delay={0} />
+            <FloatingAirplane size={60} top={150} left={width - 80} delay={500} />
+            <FloatingAirplane size={70} top={height * 0.3} left={50} delay={1000} />
+            <FloatingAirplane size={50} top={height * 0.5} left={width - 70} delay={1500} />
+            <FloatingAirplane size={90} top={height * 0.7} left={width / 2 - 45} delay={800} />
+            <FloatingAirplane size={55} top={height * 0.8} left={40} delay={1200} />
+            <FloatingAirplane size={65} top={height * 0.6} left={width - 90} delay={300} />
 
             {/* SPARKLES */}
             <Sparkle size={20} top={120} left={100} delay={0} />
@@ -392,13 +392,13 @@ export default function Login({ navigation }) {
                     {/* HEADER */}
                     <View style={styles.header}>
                         <Text style={styles.welcomeText}>Welcome to</Text>
-                        <Text style={styles.brandText}>Belgian Waffle LMS</Text>
-                        <Text style={styles.tagline}>Learn • Grow • Excel</Text>
+                        <Text style={styles.brandText}>Emirates LMS</Text>
+                        <Text style={styles.tagline}>Fly Better • Learn Smarter</Text>
                     </View>
 
                     {/* USERNAME INPUT */}
                     <View style={styles.inputContainer}>
-                        <Feather name="user" size={20} color="#F59E0B" />
+                        <Feather name="user" size={20} color="#D71A21" />
                         <TextInput
                             style={styles.input}
                             placeholder="Username"
@@ -411,7 +411,7 @@ export default function Login({ navigation }) {
 
                     {/* PASSWORD INPUT */}
                     <View style={styles.inputContainer}>
-                        <Feather name="lock" size={20} color="#F59E0B" />
+                        <Feather name="lock" size={20} color="#D71A21" />
                         <TextInput
                             style={styles.input}
                             placeholder="Password"
@@ -434,7 +434,7 @@ export default function Login({ navigation }) {
                     {/* LOGIN BUTTON */}
                     <TouchableOpacity style={styles.loginBtn} onPress={handleLogin} disabled={loading}>
                         <LinearGradient
-                            colors={['#F59E0B', '#D97706']}
+                            colors={['#D71A21', '#B91C1C']}
                             start={{ x: 0, y: 0 }}
                             end={{ x: 1, y: 0 }}
                             style={styles.loginGradient}
@@ -465,7 +465,7 @@ export default function Login({ navigation }) {
                     <View style={styles.roleModalCard}>
                         {/* Header */}
                         <View style={styles.roleModalHeader}>
-                            <MaterialCommunityIcons name="shield-account" size={48} color="#F59E0B" />
+                            <MaterialCommunityIcons name="shield-account" size={48} color="#D71A21" />
                             <Text style={styles.roleModalTitle}>Choose Login Mode</Text>
                             <Text style={styles.roleModalSubtitle}>
                                 You have admin privileges. How would you like to login?
@@ -549,7 +549,7 @@ export default function Login({ navigation }) {
                             <View style={styles.roleModalCard}>
                                 {/* Header */}
                                 <View style={styles.roleModalHeader}>
-                                    <MaterialCommunityIcons name="lock-reset" size={48} color="#F59E0B" />
+                                    <MaterialCommunityIcons name="lock-reset" size={48} color="#D71A21" />
                                     <Text style={styles.roleModalTitle}>
                                         {resetStage === 'email' ? 'Forgot Password?' : 'Reset Password'}
                                     </Text>
@@ -563,7 +563,7 @@ export default function Login({ navigation }) {
                                 {resetStage === 'email' ? (
                                     <View>
                                         <View style={[styles.inputContainer, { backgroundColor: '#F3F4F6' }]}>
-                                            <Feather name="mail" size={20} color="#F59E0B" />
+                                            <Feather name="mail" size={20} color="#D71A21" />
                                             <TextInput
                                                 style={styles.input}
                                                 placeholder="Enter your email"
@@ -581,7 +581,7 @@ export default function Login({ navigation }) {
                                             disabled={resetLoading}
                                         >
                                             <LinearGradient
-                                                colors={['#F59E0B', '#D97706']}
+                                                colors={['#D71A21', '#B91C1C']}
                                                 start={{ x: 0, y: 0 }}
                                                 end={{ x: 1, y: 0 }}
                                                 style={styles.loginGradient}
@@ -595,7 +595,7 @@ export default function Login({ navigation }) {
                                 ) : (
                                     <View>
                                         <View style={[styles.inputContainer, { backgroundColor: '#F3F4F6' }]}>
-                                            <MaterialCommunityIcons name="numeric" size={20} color="#F59E0B" />
+                                            <MaterialCommunityIcons name="numeric" size={20} color="#D71A21" />
                                             <TextInput
                                                 style={styles.input}
                                                 placeholder="6-digit Code"
@@ -608,7 +608,7 @@ export default function Login({ navigation }) {
                                         </View>
 
                                         <View style={[styles.inputContainer, { backgroundColor: '#F3F4F6' }]}>
-                                            <Feather name="lock" size={20} color="#F59E0B" />
+                                            <Feather name="lock" size={20} color="#D71A21" />
                                             <TextInput
                                                 style={styles.input}
                                                 placeholder="New Password"
@@ -620,7 +620,7 @@ export default function Login({ navigation }) {
                                         </View>
 
                                         <View style={[styles.inputContainer, { backgroundColor: '#F3F4F6' }]}>
-                                            <Feather name="lock" size={20} color="#F59E0B" />
+                                            <Feather name="lock" size={20} color="#D71A21" />
                                             <TextInput
                                                 style={styles.input}
                                                 placeholder="Confirm Password"
@@ -637,7 +637,7 @@ export default function Login({ navigation }) {
                                             disabled={resetLoading}
                                         >
                                             <LinearGradient
-                                                colors={['#F59E0B', '#D97706']}
+                                                colors={['#D71A21', '#B91C1C']}
                                                 start={{ x: 0, y: 0 }}
                                                 end={{ x: 1, y: 0 }}
                                                 style={styles.loginGradient}
@@ -678,7 +678,7 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
     },
-    floatingWaffle: {
+    FloatingAirplane: {
         position: 'absolute',
         opacity: 0.4,
         alignItems: 'center',
@@ -699,7 +699,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(255, 255, 255, 0.85)',
         borderRadius: 32,
         padding: 28,
-        shadowColor: '#F59E0B',
+        shadowColor: '#D71A21',
         shadowOffset: { width: 0, height: 20 },
         shadowOpacity: 0.3,
         shadowRadius: 30,
@@ -726,7 +726,7 @@ const styles = StyleSheet.create({
     tagline: {
         fontSize: 13,
         fontFamily: 'Poppins_500Medium',
-        color: '#F59E0B',
+        color: '#D71A21',
         letterSpacing: 2,
     },
     inputContainer: {
@@ -754,13 +754,13 @@ const styles = StyleSheet.create({
     forgotText: {
         fontSize: 13,
         fontFamily: 'Poppins_500Medium',
-        color: '#F59E0B',
+        color: '#D71A21',
     },
     loginBtn: {
         borderRadius: 16,
         overflow: 'hidden',
         marginBottom: 20,
-        shadowColor: '#F59E0B',
+        shadowColor: '#D71A21',
         shadowOffset: { width: 0, height: 8 },
         shadowOpacity: 0.4,
         shadowRadius: 12,

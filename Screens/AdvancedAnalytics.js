@@ -21,14 +21,14 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 const { width } = Dimensions.get('window');
 
-// WAFFLE THEME CONSTANTS
+// EMIRATES THEME CONSTANTS
 const THEME = {
-    primary: '#F59E0B',    // Amber 500
-    primaryDark: '#B45309', // Amber 700
-    bg: '#FFFBEB',         // Amber 50 (Cream)
+    primary: '#D71A21',    // Emirates Red
+    primaryDark: '#B91C1C', 
+    bg: '#FFF',         
     cardBg: '#FFFFFF',
-    textMain: '#451A03',   // Amber 950 (Deep Brown)
-    textSub: '#92400E',    // Amber 800
+    textMain: '#111827',   
+    textSub: '#4B5563',    
     border: '#FDE68A',     // Amber 200
     green: '#059669',
     red: '#DC2626',
@@ -37,11 +37,11 @@ const THEME = {
 // Analytics Main Menu Component
 const AnalyticsMenu = ({ onSelect }) => {
     const menuItems = [
-        { id: 'dashboard', title: 'Dashboard', icon: 'view-dashboard', color: '#F59E0B', desc: 'Overview metrics & trends' },
+        { id: 'dashboard', title: 'Dashboard', icon: 'view-dashboard', color: '#D71A21', desc: 'Overview metrics & trends' },
         { id: 'stores', title: 'Store Performance', icon: 'store', color: '#10B981', desc: 'Store-wise analytics' },
         { id: 'employees', title: 'Employee Performance', icon: 'account-group', color: '#F97316', desc: 'Individual employee metrics' },
         { id: 'training', title: 'Training Effectiveness', icon: 'school', color: '#8B5CF6', desc: 'Course-wise effectiveness' },
-        { id: 'hygiene', title: 'Hygiene & Compliance', icon: 'shield-check', color: '#EF4444', desc: 'SOP adherence & audits' },
+        { id: 'hygiene', title: 'Cabin Compliance', icon: 'shield-check', color: '#EF4444', desc: 'Safety SOP adherence' },
         { id: 'customer', title: 'Customer Experience', icon: 'heart', color: '#EC4899', desc: 'Training-sales correlation' },
         { id: 'ai-insights', title: 'AI Learning Insights', icon: 'brain', color: '#6366F1', desc: 'AI-powered recommendations' },
         { id: 'reports', title: 'Reports & Export', icon: 'file-chart', color: '#14B8A6', desc: 'Download & share reports' },
@@ -165,7 +165,7 @@ const AnalyticsDashboard = ({ onNavigate }) => {
         color: (opacity = 1) => `rgba(245, 158, 11, ${opacity})`,
         labelColor: (opacity = 1) => `rgba(69, 26, 3, ${opacity})`,
         style: { borderRadius: 16 },
-        propsForDots: { r: '4', strokeWidth: '2', stroke: '#D97706' }
+        propsForDots: { r: '4', strokeWidth: '2', stroke: '#B91C1C' }
     };
 
     return (
@@ -173,7 +173,7 @@ const AnalyticsDashboard = ({ onNavigate }) => {
             {/* Overview Stats */}
             <Text style={styles.sectionTitle}>Key Metrics</Text>
             <View style={styles.statsGrid}>
-                <StatCard label="Total Stores" value={data.overview.total_stores} icon="store" color="#F59E0B" />
+                <StatCard label="Total Stores" value={data.overview.total_stores} icon="store" color="#D71A21" />
                 <StatCard label="Total Employees" value={data.overview.total_employees} icon="account-group" color="#F97316" />
                 <StatCard label="Avg Completion" value={`${data.overview.avg_completion}%`} icon="chart-line" color="#10B981" />
                 <StatCard label="Avg Quiz Score" value={`${data.overview.avg_quiz_score}%`} icon="school" color="#8B5CF6" />
@@ -201,13 +201,13 @@ const AnalyticsDashboard = ({ onNavigate }) => {
             <Text style={[styles.sectionTitle, { marginTop: 20 }]}>Risk Overview</Text>
             <View style={styles.riskContainer}>
                 <RiskCard label="High Risk" value={data.risk_summary.high_risk_stores} color="#EF4444" icon="alert-circle" />
-                <RiskCard label="Retraining" value={data.risk_summary.employees_needing_retraining} color="#F59E0B" icon="account-alert" />
+                <RiskCard label="Retraining" value={data.risk_summary.employees_needing_retraining} color="#D71A21" icon="account-alert" />
                 <RiskCard label="Compliant" value={data.risk_summary.fully_compliant_stores} color="#10B981" icon="check-circle" />
             </View>
 
             {/* Action Buttons */}
             <View style={styles.buttonRow}>
-                <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#F59E0B' }]} onPress={() => onNavigate('reports')}>
+                <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#D71A21' }]} onPress={() => onNavigate('reports')}>
                     <Feather name="file-text" size={18} color="#FFF" />
                     <Text style={styles.actionButtonText}>Reports</Text>
                 </TouchableOpacity>
@@ -302,7 +302,7 @@ const EmployeeDetailReport = ({ email, onBack }) => {
         }
     };
 
-    if (loading) return <View style={styles.loadingContainer}><ActivityIndicator size="large" color="#F59E0B" /></View>;
+    if (loading) return <View style={styles.loadingContainer}><ActivityIndicator size="large" color="#D71A21" /></View>;
     if (!report) return <View style={styles.loadingContainer}><Text>No data found</Text></View>;
 
     return (
@@ -320,7 +320,7 @@ const EmployeeDetailReport = ({ email, onBack }) => {
 
             {/* Stats Grid */}
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 20 }}>
-                <StatCard label="Logins" value={report.stats.total_logins} icon="login" color="#F59E0B" />
+                <StatCard label="Logins" value={report.stats.total_logins} icon="login" color="#D71A21" />
                 <StatCard label="Courses" value={report.stats.courses_completed} icon="book-open" color="#10B981" />
                 <StatCard label="Quizzes" value={report.stats.quizzes_taken} icon="help-circle" color="#EF4444" />
                 <StatCard label="Avg Score" value={`${Math.round(report.performance_metrics.avg_quiz_score)}%`} icon="chart-bar" color="#8B5CF6" />
@@ -330,8 +330,8 @@ const EmployeeDetailReport = ({ email, onBack }) => {
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
                 <Text style={styles.sectionTitle}>Recent Activity Log</Text>
                 <TouchableOpacity onPress={downloadLog} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#FDE68A' }}>
-                    <Feather name="download" size={14} color="#F59E0B" />
-                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#F59E0B', marginLeft: 6 }}>Export CSV</Text>
+                    <Feather name="download" size={14} color="#D71A21" />
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#D71A21', marginLeft: 6 }}>Export CSV</Text>
                 </TouchableOpacity>
             </View>
 
@@ -398,7 +398,7 @@ const StorePerformance = () => {
 
     const getRiskColor = (level) => {
         if (level === 'green') return '#10B981';
-        if (level === 'yellow') return '#F59E0B';
+        if (level === 'yellow') return '#D71A21';
         return '#EF4444';
     };
 
@@ -455,7 +455,7 @@ const EmployeePerformance = ({ onSelect }) => {
                         onPress={() => onSelect && onSelect(emp.email)}
                         activeOpacity={0.7}
                     >
-                        <View style={[styles.empAvatar, { backgroundColor: '#F59E0B' }]}>
+                        <View style={[styles.empAvatar, { backgroundColor: '#D71A21' }]}>
                             <Text style={styles.empAvatarText}>
                                 {emp.name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
                             </Text>
@@ -499,7 +499,7 @@ const TrainingEffectiveness = () => {
         } catch (e) { console.error(e); } finally { setLoading(false); }
     };
 
-    const getEffColor = (e) => (e === 'Excellent' ? '#10B981' : e === 'Good' ? '#F59E0B' : '#EF4444');
+    const getEffColor = (e) => (e === 'Excellent' ? '#10B981' : e === 'Good' ? '#D71A21' : '#EF4444');
 
     if (loading) return <View style={styles.loadingContainer}><ActivityIndicator size="large" color="#8B5CF6" /></View>;
 
@@ -553,7 +553,7 @@ const HygieneCompliance = () => {
             <Text style={styles.sectionTitle}>Hygiene Overview</Text>
             <View style={styles.complianceSummary}>
                 <View style={[styles.complianceCard, { backgroundColor: '#10B98115' }]}><MaterialCommunityIcons name="check-circle" size={28} color="#10B981" /><Text style={[styles.complianceValue, { color: '#10B981' }]}>{data.summary.fully_compliant_stores}</Text><Text style={styles.complianceLabel}>Compliant</Text></View>
-                <View style={[styles.complianceCard, { backgroundColor: '#F59E0B15' }]}><MaterialCommunityIcons name="alert" size={28} color="#F59E0B" /><Text style={[styles.complianceValue, { color: '#F59E0B' }]}>{data.summary.stores_needing_attention}</Text><Text style={styles.complianceLabel}>Attention</Text></View>
+                <View style={[styles.complianceCard, { backgroundColor: '#D71A2115' }]}><MaterialCommunityIcons name="alert" size={28} color="#D71A21" /><Text style={[styles.complianceValue, { color: '#D71A21' }]}>{data.summary.stores_needing_attention}</Text><Text style={styles.complianceLabel}>Attention</Text></View>
                 <View style={[styles.complianceCard, { backgroundColor: '#EF444415' }]}><MaterialCommunityIcons name="alert-circle" size={28} color="#EF4444" /><Text style={[styles.complianceValue, { color: '#EF4444' }]}>{data.summary.critical_risk_stores}</Text><Text style={styles.complianceLabel}>Critical</Text></View>
             </View>
             <Text style={[styles.sectionTitle, { marginTop: 20 }]}>Store Compliance</Text>
@@ -591,7 +591,7 @@ const CustomerImpact = () => (
 const AIInsights = () => (
     <ScrollView style={styles.contentContainer} contentContainerStyle={{ paddingBottom: 20 }}>
         <Text style={styles.sectionTitle}>AI Insights</Text>
-        <View style={styles.topicCard}><View style={styles.topicRank}><Text style={styles.topicRankText}>1</Text></View><Text style={styles.topicName}>Waffle Crispiness</Text><View style={styles.topicCount}><Text style={styles.topicCountText}>45 queries</Text></View></View>
+        <View style={styles.topicCard}><View style={styles.topicRank}><Text style={styles.topicRankText}>1</Text></View><Text style={styles.topicName}>Safety Compliance</Text><View style={styles.topicCount}><Text style={styles.topicCountText}>45 queries</Text></View></View>
         <View style={styles.topicCard}><View style={styles.topicRank}><Text style={styles.topicRankText}>2</Text></View><Text style={styles.topicName}>Hygiene Protocols</Text><View style={styles.topicCount}><Text style={styles.topicCountText}>32 queries</Text></View></View>
 
         <Text style={[styles.subSectionTitle, { marginTop: 20 }]}>Areas of Confusion</Text>
@@ -652,12 +652,12 @@ const ReportsExport = () => {
             <Text style={styles.sectionTitle}>Reports & Export</Text>
             {['Training Summary', 'Store Performance', 'Employee Progress', 'Compliance Report'].map((title, i) => (
                 <TouchableOpacity key={i} style={styles.reportCard} onPress={() => exportReport(title.toLowerCase().replace(' ', '_'))}>
-                    <View style={[styles.reportIcon, { backgroundColor: '#F59E0B15' }]}><Feather name="file-text" size={24} color="#F59E0B" /></View>
+                    <View style={[styles.reportIcon, { backgroundColor: '#D71A2115' }]}><Feather name="file-text" size={24} color="#D71A21" /></View>
                     <View style={styles.reportInfo}><Text style={styles.reportTitle}>{title}</Text><Text style={styles.reportDesc}>Download CSV report</Text></View>
                     <Feather name="download" size={20} color="#92400E" />
                 </TouchableOpacity>
             ))}
-            {exporting && <View style={styles.exportingOverlay}><ActivityIndicator size="large" color="#F59E0B" /><Text style={styles.exportingText}>Generating...</Text></View>}
+            {exporting && <View style={styles.exportingOverlay}><ActivityIndicator size="large" color="#D71A21" /><Text style={styles.exportingText}>Generating...</Text></View>}
         </ScrollView>
     );
 };
@@ -706,7 +706,7 @@ export default function AdvancedAnalytics({ navigation, route }) {
 
     return (
         <SafeAreaView style={styles.container}>
-            <LinearGradient colors={['#F59E0B', '#D97706']} style={styles.header} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+            <LinearGradient colors={['#D71A21', '#B91C1C']} style={styles.header} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
                 <View style={styles.headerContent}>
                     <TouchableOpacity onPress={() => currentView !== 'menu' ? setCurrentView('menu') : navigation.goBack()} style={styles.backButton}>
                         <Feather name="arrow-left" size={24} color="#FFF" />
@@ -724,7 +724,7 @@ export default function AdvancedAnalytics({ navigation, route }) {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#FFFBEB' },
-    header: { paddingHorizontal: 20, paddingVertical: 16, borderBottomLeftRadius: 20, borderBottomRightRadius: 20, shadowColor: '#F59E0B', shadowOpacity: 0.2, shadowRadius: 8, elevation: 5, marginBottom: -10, zIndex: 10 },
+    header: { paddingHorizontal: 20, paddingVertical: 16, borderBottomLeftRadius: 20, borderBottomRightRadius: 20, shadowColor: '#D71A21', shadowOpacity: 0.2, shadowRadius: 8, elevation: 5, marginBottom: -10, zIndex: 10 },
     headerContent: { flexDirection: 'row', alignItems: 'center' },
     backButton: { marginRight: 12, padding: 4, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20 },
     headerTitle: { fontSize: 20, fontWeight: '800', color: '#FFF' },
@@ -742,7 +742,7 @@ const styles = StyleSheet.create({
     sectionTitle: { fontSize: 18, fontWeight: '700', color: '#451A03', marginBottom: 14 },
     subSectionTitle: { fontSize: 15, fontWeight: '600', color: '#451A03', marginBottom: 12 },
     statsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-    statCard: { width: '48%', backgroundColor: '#FFF', padding: 14, borderRadius: 16, marginBottom: 12, borderLeftWidth: 3, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#FEF3C7', shadowColor: '#D97706', shadowOpacity: 0.05, shadowRadius: 3, elevation: 1 },
+    statCard: { width: '48%', backgroundColor: '#FFF', padding: 14, borderRadius: 16, marginBottom: 12, borderLeftWidth: 3, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#FEF3C7', shadowColor: '#B91C1C', shadowOpacity: 0.05, shadowRadius: 3, elevation: 1 },
     statIcon: { width: 36, height: 36, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
     statLabel: { fontSize: 11, color: '#92400E', fontWeight: '500' },
     statValue: { fontSize: 16, fontWeight: '700', color: '#451A03', marginTop: 2 },
@@ -752,7 +752,7 @@ const styles = StyleSheet.create({
     riskValue: { fontSize: 20, fontWeight: '700', marginTop: 6 },
     riskLabel: { fontSize: 10, fontWeight: '600', color: '#92400E', textAlign: 'center', marginTop: 2 },
     buttonRow: { flexDirection: 'row', marginTop: 20, justifyContent: 'space-between' },
-    actionButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 14, marginHorizontal: 4, shadowColor: '#F59E0B', shadowOpacity: 0.2, shadowRadius: 4, elevation: 3 },
+    actionButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 14, marginHorizontal: 4, shadowColor: '#D71A21', shadowOpacity: 0.2, shadowRadius: 4, elevation: 3 },
     actionButtonText: { fontSize: 14, fontWeight: '700', color: '#FFF', marginLeft: 8 },
     aiSummaryButton: { marginTop: 16, borderRadius: 16, overflow: 'hidden' },
     aiButtonGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16 },
@@ -799,7 +799,7 @@ const styles = StyleSheet.create({
     impactValue: { fontSize: 18, fontWeight: '700', color: '#10B981', marginTop: 8 },
     impactLabel: { fontSize: 10, fontWeight: '500', color: '#92400E', textAlign: 'center', marginTop: 4 },
     topicCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 12, borderRadius: 12, marginBottom: 8, borderWidth: 1, borderColor: '#FEF3C7' },
-    topicRank: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#F59E0B', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+    topicRank: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#D71A21', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
     topicRankText: { fontSize: 12, fontWeight: '700', color: '#FFF' },
     topicName: { flex: 1, fontSize: 14, fontWeight: '500', color: '#451A03' },
     topicCount: { backgroundColor: '#FFFBEB', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#FDE68A' },
@@ -807,9 +807,9 @@ const styles = StyleSheet.create({
     confusionCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 12, borderRadius: 12, marginBottom: 8, borderWidth: 1, borderColor: '#FEF3C7' },
     confusionTopic: { width: 100, fontSize: 13, fontWeight: '500', color: '#451A03' },
     confusionBar: { flex: 1, height: 8, backgroundColor: '#FFFBEB', borderRadius: 4, marginHorizontal: 10, overflow: 'hidden' },
-    confusionFill: { height: '100%', backgroundColor: '#F59E0B', borderRadius: 4 },
-    confusionScore: { fontSize: 12, fontWeight: '600', color: '#D97706', width: 36, textAlign: 'right' },
-    reportCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 16, borderRadius: 16, marginBottom: 12, borderWidth: 1, borderColor: '#FEF3C7', shadowColor: '#D97706', shadowOpacity: 0.05, shadowRadius: 3, elevation: 1 },
+    confusionFill: { height: '100%', backgroundColor: '#D71A21', borderRadius: 4 },
+    confusionScore: { fontSize: 12, fontWeight: '600', color: '#B91C1C', width: 36, textAlign: 'right' },
+    reportCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 16, borderRadius: 16, marginBottom: 12, borderWidth: 1, borderColor: '#FEF3C7', shadowColor: '#B91C1C', shadowOpacity: 0.05, shadowRadius: 3, elevation: 1 },
     reportIcon: { width: 48, height: 48, borderRadius: 14, justifyContent: 'center', alignItems: 'center', marginRight: 14 },
     reportInfo: { flex: 1 },
     reportTitle: { fontSize: 15, fontWeight: '600', color: '#451A03' },

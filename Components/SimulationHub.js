@@ -11,9 +11,9 @@ const { width, height } = Dimensions.get('window');
 
 // Mock Scenarios
 const SCENARIOS = [
-    { id: 'angry', title: 'The Cold Waffle', subtitle: 'Angry Customer', icon: 'alert-circle', color: '#EF4444' },
-    { id: 'confused', title: 'Payment Trouble', subtitle: 'Confused Customer', icon: 'help-circle', color: '#F59E0B' },
-    { id: 'happy', title: 'Positive Feedback', subtitle: 'Loyal Customer', icon: 'heart', color: '#10B981' },
+    { id: 'angry', title: 'Delayed Flight', subtitle: 'Frustrated Passenger', icon: 'alert-circle', color: '#EF4444' },
+    { id: 'confused', title: 'Lost Baggage', subtitle: 'Worried Passenger', icon: 'help-circle', color: '#D71A21' },
+    { id: 'happy', title: 'Positive Feedback', subtitle: 'Loyal Passenger', icon: 'heart', color: '#10B981' },
 ];
 
 export default function SimulationHub({ onClose }) {
@@ -97,7 +97,7 @@ export default function SimulationHub({ onClose }) {
                             <Animated.View entering={FadeInRight.delay(index * 100)} style={styles.historyItem}>
                                 <View style={styles.historyHeader}>
                                     <Text style={styles.dateText}>{new Date(item.timestamp).toLocaleTimeString()}</Text>
-                                    <View style={[styles.scoreBadge, { backgroundColor: item.score >= 70 ? '#10B981' : item.score >= 50 ? '#F59E0B' : '#EF4444' }]}>
+                                    <View style={[styles.scoreBadge, { backgroundColor: item.score >= 70 ? '#10B981' : item.score >= 50 ? '#D71A21' : '#EF4444' }]}>
                                         <Text style={styles.scoreText}>{item.score}</Text>
                                     </View>
                                 </View>

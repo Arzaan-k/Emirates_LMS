@@ -59,7 +59,7 @@ const REPORT_CATEGORIES = [
         id: 'quizzes',
         name: 'Quiz Performance',
         icon: 'edit-3',
-        color: '#F59E0B',
+        color: '#D71A21',
         description: 'Quiz scores and submission metrics',
         endpoint: '/api/v1/reports/quizzes',
         downloadEndpoint: '/api/v1/reports/quizzes/download',
@@ -178,7 +178,7 @@ const DETAILED_REPORT_CATEGORIES = [
         id: 'career',
         name: 'Career Progression',
         icon: 'trending-up',
-        color: '#F59E0B',
+        color: '#D71A21',
         description: 'Career path progress and module analytics',
         reports: [
             { id: 'career-summary', name: 'Career Summary', icon: 'star', endpoint: '/api/v1/reports/detailed/career/summary' },
@@ -653,7 +653,7 @@ const AdminReports = ({ navigation }) => {
             { label: 'Active (30d)', value: s.active_users_30d || 0, icon: 'activity', color: '#10B981' },
             { label: 'Active (7d)', value: s.active_users_7d || 0, icon: 'zap', color: '#F97316' },
             { label: 'New (30d)', value: s.new_users_30d || 0, icon: 'user-plus', color: '#06B6D4' },
-            { label: 'Courses Done', value: s.total_completions || 0, icon: 'award', color: '#F59E0B' },
+            { label: 'Courses Done', value: s.total_completions || 0, icon: 'award', color: '#D71A21' },
             { label: 'This Week', value: s.weekly_completions || s.completions_this_week || 0, icon: 'calendar', color: '#6366F1' },
             { label: 'Avg Score', value: `${s.avg_score || 0}%`, icon: 'trending-up', color: '#8B5CF6' },
             { label: 'Quiz Avg', value: `${s.avg_quiz_score || 0}%`, icon: 'edit-3', color: '#EF4444' },
@@ -909,7 +909,7 @@ const AdminReports = ({ navigation }) => {
                 <View style={styles.modalContent}>
                     <View style={styles.modalHeader}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                            <MaterialCommunityIcons name="email-fast-outline" size={28} color="#F59E0B" />
+                            <MaterialCommunityIcons name="email-fast-outline" size={28} color="#D71A21" />
                             <Text style={styles.modalTitle}>Weekly Email Reports</Text>
                         </View>
                         <TouchableOpacity onPress={() => setShowSubscriptionModal(false)}>
@@ -937,7 +937,7 @@ const AdminReports = ({ navigation }) => {
                                         value={subscriptions[cat.id]?.isActive || false}
                                         onValueChange={() => toggleSubscription(cat.id)}
                                         trackColor={{ false: '#D1D5DB', true: '#FCD34D' }}
-                                        thumbColor={subscriptions[cat.id]?.isActive ? '#F59E0B' : '#F3F4F6'}
+                                        thumbColor={subscriptions[cat.id]?.isActive ? '#D71A21' : '#F3F4F6'}
                                     />
                                 </View>
 
@@ -1108,7 +1108,7 @@ const AdminReports = ({ navigation }) => {
                                                 <Text style={[styles.pickerItemText, isSelected && styles.pickerItemTextActive]}>{item.name}</Text>
                                                 {item.city && <Text style={styles.pickerSubText}>{item.city}</Text>}
                                             </View>
-                                            {isSelected && <Feather name="check" size={16} color="#D97706" />}
+                                            {isSelected && <Feather name="check" size={16} color="#B91C1C" />}
                                         </TouchableOpacity>
                                     );
                                 }}
@@ -1175,7 +1175,7 @@ const AdminReports = ({ navigation }) => {
         if (loading) {
             return (
                 <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color="#F59E0B" />
+                    <ActivityIndicator size="large" color="#D71A21" />
                     <Text style={styles.loadingText}>Loading report data...</Text>
                 </View>
             );
@@ -1504,8 +1504,8 @@ const AdminReports = ({ navigation }) => {
                                 style={[
                                     {
                                         paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, marginLeft: 4,
-                                        backgroundColor: pageSize === size ? '#F59E0B' : '#F3F4F6',
-                                        borderWidth: 1, borderColor: pageSize === size ? '#D97706' : '#E5E7EB'
+                                        backgroundColor: pageSize === size ? '#D71A21' : '#F3F4F6',
+                                        borderWidth: 1, borderColor: pageSize === size ? '#B91C1C' : '#E5E7EB'
                                     }
                                 ]}
                                 onPress={() => { setPageSize(size); setCurrentPage(1); }}
@@ -1585,7 +1585,7 @@ const AdminReports = ({ navigation }) => {
                             onPress={() => { if (safeCurrentPage > 1) setCurrentPage(safeCurrentPage - 1); }}
                             disabled={safeCurrentPage <= 1}
                         >
-                            <Feather name="chevron-left" size={16} color={safeCurrentPage <= 1 ? '#D1D5DB' : '#F59E0B'} />
+                            <Feather name="chevron-left" size={16} color={safeCurrentPage <= 1 ? '#D1D5DB' : '#D71A21'} />
                             <Text style={[styles.pageBtnText, safeCurrentPage <= 1 && { color: '#D1D5DB' }]}>Prev</Text>
                         </TouchableOpacity>
 
@@ -1600,8 +1600,8 @@ const AdminReports = ({ navigation }) => {
                                         style={[
                                             {
                                                 width: 32, height: 32, borderRadius: 8, justifyContent: 'center', alignItems: 'center',
-                                                marginHorizontal: 3, backgroundColor: pill === safeCurrentPage ? '#F59E0B' : '#F9FAFB',
-                                                borderWidth: 1, borderColor: pill === safeCurrentPage ? '#D97706' : '#E5E7EB'
+                                                marginHorizontal: 3, backgroundColor: pill === safeCurrentPage ? '#D71A21' : '#F9FAFB',
+                                                borderWidth: 1, borderColor: pill === safeCurrentPage ? '#B91C1C' : '#E5E7EB'
                                             }
                                         ]}
                                         onPress={() => setCurrentPage(pill)}
@@ -1622,7 +1622,7 @@ const AdminReports = ({ navigation }) => {
                             disabled={safeCurrentPage >= totalPages}
                         >
                             <Text style={[styles.pageBtnText, safeCurrentPage >= totalPages && { color: '#D1D5DB' }]}>Next</Text>
-                            <Feather name="chevron-right" size={16} color={safeCurrentPage >= totalPages ? '#D1D5DB' : '#F59E0B'} />
+                            <Feather name="chevron-right" size={16} color={safeCurrentPage >= totalPages ? '#D1D5DB' : '#D71A21'} />
                         </TouchableOpacity>
                     </View>
                 )}
@@ -1826,7 +1826,7 @@ const AdminReports = ({ navigation }) => {
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 0 }}
                 >
-                    <Feather name="grid" size={20} color="#F59E0B" />
+                    <Feather name="grid" size={20} color="#D71A21" />
                     <Text style={detailedStyles.sectionTitle}>Detailed Reports</Text>
                     <Text style={detailedStyles.sectionBadge}>{DETAILED_REPORT_CATEGORIES.reduce((a, c) => a + c.reports.length, 0)} Reports</Text>
                 </LinearGradient>
@@ -1951,7 +1951,7 @@ const AdminReports = ({ navigation }) => {
         <SafeAreaView style={styles.container}>
             {/* Header */}
             <LinearGradient
-                colors={['#F59E0B', '#D97706']}
+                colors={['#D71A21', '#B91C1C']}
                 style={styles.header}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
@@ -1986,7 +1986,7 @@ const AdminReports = ({ navigation }) => {
                         style={styles.filterButton}
                         onPress={() => setShowFilters(!showFilters)}
                     >
-                        <Feather name="filter" size={16} color="#F59E0B" />
+                        <Feather name="filter" size={16} color="#D71A21" />
                         <Text style={styles.filterButtonText}>Filters</Text>
                         {(dateFrom || dateTo || roleFilter || storeFilter || bucketFilter) && (
                             <View style={styles.filterBadge}>
@@ -2231,7 +2231,7 @@ const styles = StyleSheet.create({
     summaryValue: {
         fontSize: 18,
         fontFamily: 'Poppins_700Bold',
-        color: '#F59E0B',
+        color: '#D71A21',
     },
     summaryLabel: {
         fontSize: 11,
@@ -2320,7 +2320,7 @@ const styles = StyleSheet.create({
     pageBtnText: {
         fontSize: 13,
         fontFamily: 'Poppins_600SemiBold',
-        color: '#F59E0B',
+        color: '#D71A21',
     },
     pageText: {
         fontSize: 13,
@@ -2392,7 +2392,7 @@ const styles = StyleSheet.create({
     performerRankText: {
         fontSize: 12,
         fontFamily: 'Poppins_600SemiBold',
-        color: '#D97706',
+        color: '#B91C1C',
     },
     performerInfo: {
         flex: 1,
@@ -2479,7 +2479,7 @@ const styles = StyleSheet.create({
     metricValue: {
         fontSize: 20,
         fontFamily: 'Poppins_700Bold',
-        color: '#F59E0B',
+        color: '#D71A21',
     },
     metricLabel: {
         fontSize: 11,
@@ -2535,7 +2535,7 @@ const styles = StyleSheet.create({
         paddingVertical: 10,
         borderRadius: 12,
         borderWidth: 1,
-        borderColor: '#F59E0B',
+        borderColor: '#D71A21',
         alignSelf: 'flex-start',
         gap: 8,
         shadowColor: '#000',
@@ -2547,7 +2547,7 @@ const styles = StyleSheet.create({
     filterButtonText: {
         fontSize: 14,
         fontFamily: 'Poppins_600SemiBold',
-        color: '#F59E0B',
+        color: '#D71A21',
     },
     filterBadge: {
         width: 8,
@@ -2645,7 +2645,7 @@ const styles = StyleSheet.create({
         flex: 1,
         paddingVertical: 12,
         borderRadius: 10,
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         alignItems: 'center',
     },
     filterApplyText: {
@@ -2742,7 +2742,7 @@ const styles = StyleSheet.create({
     },
     dayChipActive: {
         backgroundColor: '#FDE68A',
-        borderColor: '#F59E0B',
+        borderColor: '#D71A21',
     },
     dayChipText: {
         fontSize: 11,
@@ -2820,9 +2820,9 @@ const styles = StyleSheet.create({
         flex: 1,
         paddingVertical: 12,
         borderRadius: 12,
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         alignItems: 'center',
-        shadowColor: '#F59E0B',
+        shadowColor: '#D71A21',
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.3,
         shadowRadius: 8,
@@ -2885,7 +2885,7 @@ const styles = StyleSheet.create({
         color: '#374151',
     },
     pickerItemTextActive: {
-        color: '#D97706',
+        color: '#B91C1C',
         fontWeight: '600',
     },
     pickerSubText: {
@@ -2964,7 +2964,7 @@ const detailedStyles = StyleSheet.create({
     sectionBadge: {
         fontSize: 12,
         fontFamily: 'Poppins_600SemiBold',
-        color: '#F59E0B',
+        color: '#D71A21',
         backgroundColor: 'rgba(245,158,11,0.15)',
         paddingHorizontal: 10,
         paddingVertical: 3,
@@ -3023,7 +3023,7 @@ const detailedStyles = StyleSheet.create({
     reportCount: {
         fontSize: 16,
         fontFamily: 'Poppins_700Bold',
-        color: '#D97706',
+        color: '#B91C1C',
         marginBottom: 2,
     },
     reportsGrid: {
@@ -3126,7 +3126,7 @@ const detailedStyles = StyleSheet.create({
     },
     previewTableHeader: {
         flexDirection: 'row',
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         borderRadius: 6,
         paddingVertical: 8,
     },

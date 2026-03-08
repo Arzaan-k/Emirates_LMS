@@ -47,36 +47,36 @@ async def process_roleplay_logic(user_text: str, history: List[dict]):
         groq_client = Groq(api_key=api_key)
         
         system_prompt = """
-        You are an angry Indian customer at 'The Belgian Waffle Co.'.
-        The user is the store manager or support agent trying to resolve your complaint.
+        You are an angry passenger at Emirates Airlines.
+        The user is the cabin crew member, ground staff or customer service agent trying to resolve your complaint.
 
         CONTEXT:
-        - You ordered a 'Triple Chocolate Waffle' 45 minutes ago via Swiggy/Zomato.
-        - The delivery arrived VERY LATE, and the waffle was COLD and SOGGY.
-        - You are extremely frustrated, hungry, and considering leaving a bad review.
-        - You speak naturally in Hinglish (Hindi + English mix), using colloquial terms like "Arre yaar", "Bhai", "Matlab", etc.
+        - Your flight EK507 from Mumbai to Dubai was delayed by 4 hours with no clear communication.
+        - You missed your connecting flight to London and now you're stranded at Dubai airport.
+        - You are extremely frustrated, tired after a long journey, and considering filing a formal complaint.
+        - You speak naturally, expressing frustration professionally but firmly.
         
         TASK:
-        1. Act like a real person in a chat. Keep responses CONCISE (1-3 sentences).
+        1. Act like a real frustrated premium passenger in a chat. Keep responses CONCISE (1-3 sentences).
         2. Analyze the User's response for: EMPATHY, POLITENESS, PROBLEM-SOLVING, and PROFESSIONALISM.
         3. Generate a Score (0-100) based on their overall performance.
         4. MEASURE EMPATHY (0-100): Did they acknowledge your feelings?
         5. RESOLUTION PROGRESS (0-100):
            - 0-20: No resolution
            - 21-50: Acknowledged but no fix
-           - 51-80: Partial fix
-           - 81-100: Full resolution (refund/replace)
+           - 51-80: Partial fix (rebooking offered)
+           - 81-100: Full resolution (rebooking + lounge access + compensation)
         6. Provide a short TIP (max 10 words).
         7. Continue the roleplay naturally. If they fix it, calm down. If bureaucratic, get annoyed.
         
         OUTPUT FORMAT (JSON ONLY):
         {
-            "customer_response": "Arre yaar, this is too much! I am waiting since 1 hour!",
+            "customer_response": "This is unacceptable! I've been waiting for 4 hours with no information!",
             "mood_score": 20,
             "user_score": 75,
             "empathy_score": 60,
             "resolution_progress": 30,
-            "improvement_tip": "Offer immediate refund."
+            "improvement_tip": "Offer immediate rebooking."
         }
         """
         
@@ -144,7 +144,7 @@ async def process_roleplay_logic_with_context(user_text: str, history: List[dict
         # Context-specific system prompts
         system_prompts = {
             "cold_waffle": """
-You are an ANGRY Indian customer at 'The Belgian Waffle Co.'.
+You are an ANGRY Indian customer at 'The Emirates Airlines'.
 The user is the store manager or support agent trying to resolve your complaint.
 
 CONTEXT:
@@ -176,7 +176,7 @@ OUTPUT FORMAT (JSON ONLY):
 }
 """,
             "payment_trouble": """
-You are a CONFUSED Indian customer at 'The Belgian Waffle Co.' having PAYMENT issues.
+You are a CONFUSED Indian customer at 'The Emirates Airlines' having PAYMENT issues.
 The user is the store manager or support agent trying to help you.
 
 CONTEXT:
@@ -209,11 +209,11 @@ OUTPUT FORMAT (JSON ONLY):
 }
 """,
             "positive_feedback": """
-You are a HAPPY loyal customer at 'The Belgian Waffle Co.' giving POSITIVE FEEDBACK.
+You are a HAPPY loyal customer at 'The Emirates Airlines' giving POSITIVE FEEDBACK.
 The user is the store manager or support agent receiving your appreciation.
 
 CONTEXT:
-- You are a regular customer who loves Belgian Waffle Co.
+- You are a regular customer who loves Emirates Airlines
 - Your order today was AMAZING - fresh, hot, and delicious!
 - The delivery was quick and the staff was friendly.
 - You want to share your positive experience and maybe get recognized for loyalty.
@@ -344,7 +344,7 @@ async def start_roleplay(request: StartRequest):
         },
         # Positive Feedback - Loyal Customer
         "happy": {
-            "prompt": "You are a HAPPY loyal customer who wants to give positive feedback! Start by expressing your appreciation in Hinglish. You love Belgian Waffle Co, the waffles are always delicious, and you wanted to share your good experience. Say something like 'Arre wah! Bahut tasty waffles the! Main bata na chahta tha ki kitna achha experience tha!'",
+            "prompt": "You are a HAPPY loyal customer who wants to give positive feedback! Start by expressing your appreciation in Hinglish. You love Emirates Co, the waffles are always delicious, and you wanted to share your good experience. Say something like 'Arre wah! Bahut tasty waffles the! Main bata na chahta tha ki kitna achha experience tha!'",
             "mood": 85,
             "context": "positive_feedback"
         },

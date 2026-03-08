@@ -1,5 +1,5 @@
 """
-Repository Layer for BW LMS Backend
+Repository Layer for Emirates LMS Backend
 Data access layer with consistent CRUD operations
 """
 

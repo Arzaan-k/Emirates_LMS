@@ -1,5 +1,5 @@
 """
-FastAPI Dependencies for BW LMS Backend
+FastAPI Dependencies for Emirates LMS Backend
 Reusable dependencies for authentication, authorization, and common operations
 """
 

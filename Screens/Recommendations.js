@@ -36,7 +36,7 @@ const SkillGapCard = ({ skill, index, onPress }) => {
     const getGapColor = (level) => {
         switch (level) {
             case "critical": return ["#EF4444", "#DC2626"];
-            case "moderate": return ["#F59E0B", "#D97706"];
+            case "moderate": return ["#D71A21", "#B91C1C"];
             case "minor": return ["#10B981", "#059669"];
             case "none": return ["#3B82F6", "#2563EB"];
             default: return ["#6B7280", "#4B5563"];
@@ -108,7 +108,7 @@ const RecommendedCourseCard = ({ course, index, onStart }) => {
     const getPriorityStyle = (priority) => {
         switch (priority) {
             case "high": return { bg: "#FEE2E2", color: "#DC2626", icon: "fire" };
-            case "medium": return { bg: "#FEF3C7", color: "#D97706", icon: "trending-up" };
+            case "medium": return { bg: "#FEF3C7", color: "#B91C1C", icon: "trending-up" };
             case "low": return { bg: "#D1FAE5", color: "#059669", icon: "leaf" };
             default: return { bg: "#E0E7FF", color: "#4F46E5", icon: "star" };
         }
@@ -167,7 +167,7 @@ const RecommendedCourseCard = ({ course, index, onStart }) => {
                     {/* Expected Improvement */}
                     {course.expected_improvement && (
                         <View style={styles.improvementContainer}>
-                            <MaterialCommunityIcons name="trending-up" size={14} color="#F59E0B" />
+                            <MaterialCommunityIcons name="trending-up" size={14} color="#D71A21" />
                             <Text style={styles.improvementText} numberOfLines={2}>
                                 {course.expected_improvement}
                             </Text>
@@ -219,7 +219,7 @@ const RecommendedCourseCard = ({ course, index, onStart }) => {
 
                     {/* XP Badge */}
                     <View style={styles.xpBadge}>
-                        <MaterialCommunityIcons name="star-four-points" size={14} color="#F59E0B" />
+                        <MaterialCommunityIcons name="star-four-points" size={14} color="#D71A21" />
                         <Text style={styles.xpText}>+{course.course_data?.xp || 50} XP</Text>
                     </View>
                 </LinearGradient>
@@ -258,7 +258,7 @@ const ProfileSummaryCard = ({ profile, skillGaps }) => {
                 <View style={styles.statsRow}>
                     <View style={styles.statItem}>
                         <View style={styles.statIcon}>
-                            <MaterialCommunityIcons name="star" size={20} color="#F59E0B" />
+                            <MaterialCommunityIcons name="star" size={20} color="#D71A21" />
                         </View>
                         <Text style={styles.statValue}>{profile?.total_xp || 0}</Text>
                         <Text style={styles.statLabel}>Total XP</Text>
@@ -1098,7 +1098,7 @@ const styles = StyleSheet.create({
         gap: 4,
     },
     xpText: {
-        color: "#F59E0B",
+        color: "#D71A21",
         fontSize: 12,
         fontWeight: "700",
     },

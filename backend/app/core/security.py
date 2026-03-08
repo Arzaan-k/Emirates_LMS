@@ -1,5 +1,5 @@
 """
-Security Utilities for BW LMS Backend
+Security Utilities for Emirates LMS Backend
 Password hashing, input validation, sanitization, and file validation
 """
 

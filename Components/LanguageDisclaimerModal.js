@@ -44,7 +44,7 @@ const LanguageDisclaimerModal = ({ onDismiss }) => {
             <View style={styles.centeredView}>
                 <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
 
-                {/* Floating Waffle/Chocolate Elements */}
+                {/* Floating Airplane/Chocolate Elements */}
                 {/* <View style={[styles.decoCircle, { top: 100, left: -20, backgroundColor: '#FCD34D', opacity: 0.1 }]} /> */}
                 {/* <View style={[styles.decoCircle, { bottom: 100, right: -20, backgroundColor: '#5D4037', opacity: 0.1 }]} /> */}
 

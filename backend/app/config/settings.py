@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     # ===========================================
     # APPLICATION
     # ===========================================
-    APP_NAME: str = "BW LMS Backend"
+    APP_NAME: str = "Emirates LMS Backend"
     APP_VERSION: str = "2.0.0"
     DEBUG: bool = Field(default=False, env="DEBUG")
     ENVIRONMENT: str = Field(default="development", env="ENVIRONMENT")

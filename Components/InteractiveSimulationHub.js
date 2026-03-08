@@ -24,6 +24,9 @@ const { width, height } = Dimensions.get('window');
 // --- SIMULATION CARD COMPONENT ---
 const SimulationCard = ({ simulation, onStart, index }) => {
     const difficultyColors = {
+        'easy': '#10B981',
+        'medium': '#F59E0B',
+        'hard': '#EF4444',
         'Easy': '#10B981',
         'Medium': '#F59E0B',
         'Hard': '#EF4444',
@@ -157,8 +160,7 @@ export default function InteractiveSimulationHub({ onClose, userProfile }) {
     const [history, setHistory] = useState([]);
     const [selectedSimulation, setSelectedSimulation] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
-    const [filter, setFilter] = useState('all'); // all, waffle, hygiene, service
-
+    const [filter, setFilter] = useState('all'); // all, operations, service, safety, emergency
     const simulationsFetchControllerRef = useRef(null);
 
     useEffect(() => {
@@ -178,35 +180,19 @@ export default function InteractiveSimulationHub({ onClose, userProfile }) {
         }
     }, [view]);
 
+
+
     const fetchSimulations = async () => {
         setIsLoading(true);
 
-        if (simulationsFetchControllerRef.current) {
-            simulationsFetchControllerRef.current.abort();
-        }
-
         try {
-            const controller = new AbortController();
-            simulationsFetchControllerRef.current = controller;
-            const timeoutId = setTimeout(() => controller.abort(), 30000);
-            const res = await fetch(`${API_URL}/api/v1/simulations/`, {
-                signal: controller.signal
-            });
-            clearTimeout(timeoutId);
-
+            const res = await fetch(`${API_URL}/api/v1/simulations/`);
             const data = await res.json();
             setSimulations(Array.isArray(data) ? data : []);
+            setIsLoading(false);
         } catch (e) {
-            if (e?.name === 'AbortError') {
-                return;
-            }
             console.error('Failed to fetch simulations:', e);
-            // Show empty list on error - no mock data
             setSimulations([]);
-        } finally {
-            if (simulationsFetchControllerRef.current) {
-                simulationsFetchControllerRef.current = null;
-            }
             setIsLoading(false);
         }
     };
@@ -224,19 +210,12 @@ export default function InteractiveSimulationHub({ onClose, userProfile }) {
     };
 
     const handleStartSimulation = async (simulation) => {
-        // Fetch full simulation data (including nodes) before starting
         try {
             setIsLoading(true);
+            
+            // Fetch full simulation details from API
             const res = await fetch(`${API_URL}/api/v1/simulations/${simulation.id}`);
             const fullSimulation = await res.json();
-
-            // Verify we have nodes
-            if (!fullSimulation.nodes || fullSimulation.nodes.length === 0) {
-                console.error('Simulation has no steps/nodes:', fullSimulation);
-                Alert.alert('Error', 'This simulation has no steps. Please contact an administrator.');
-                setIsLoading(false);
-                return;
-            }
 
             setSelectedSimulation(fullSimulation);
             setView('playing');
@@ -334,7 +313,7 @@ export default function InteractiveSimulationHub({ onClose, userProfile }) {
                             showsHorizontalScrollIndicator={false}
                             contentContainerStyle={styles.filterContainer}
                         >
-                            {['all', 'waffle', 'hygiene', 'service', 'safety'].map((cat) => (
+                            {['all', 'operations', 'service', 'safety', 'emergency'].map((cat) => (
                                 <TouchableOpacity
                                     key={cat}
                                     style={[styles.filterChip, filter === cat && styles.filterChipActive]}

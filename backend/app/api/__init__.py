@@ -1,5 +1,5 @@
 """
-API Module for BW LMS Backend
+API Module for Emirates LMS Backend
 Contains all API routers and dependencies
 """
 

@@ -26,8 +26,8 @@ const { height, width } = Dimensions.get("window");
 
 // Voice Skills
 const VOICE_SKILLS = [
-    { id: 'daily', title: "Daily Briefing", icon: "sun", color: ["#F59E0B", "#D97706"] },
-    { id: 'roleplay', title: 'Angry Customer', icon: "theater-masks", color: ["#EF4444", "#B91C1C"] },
+    { id: 'daily', title: "Daily Briefing", icon: "sun", color: ["#D71A21", "#B91C1C"] },
+    { id: 'roleplay', title: 'Frustrated Passenger', icon: "theater-masks", color: ["#EF4444", "#B91C1C"] },
     { id: 'quiz', title: "SOP Quiz", icon: "clipboard-list", color: ["#10B981", "#059669"] },
     { id: 'timer', title: "Timer", icon: "stopwatch", color: ["#6366F1", "#4F46E5"] },
 ];
@@ -49,7 +49,7 @@ export default function AIChatBot() {
     const [messages, setMessages] = useState([
         {
             id: 1,
-            text: "Hello! I'm your BWC AI Assistant 🧇\n\nI can help you with:\n• Training courses & learning paths\n• SOPs & recipes\n• Equipment & safety protocols\n• Store operations\n\nAsk me anything!",
+            text: "Hello! I'm your Emirates AI Assistant ✈\n\nI can help you with:\n• Training courses & learning paths\n• SOPs & recipes\n• Equipment & safety protocols\n• Store operations\n\nAsk me anything!",
             sender: "ai",
             status: "done",
         },
@@ -308,9 +308,9 @@ export default function AIChatBot() {
         // Send skill-specific query
         const skillQueries = {
             'daily': "Give me today's daily briefing and important tasks",
-            'roleplay': "Let's practice handling an angry customer scenario",
+            'roleplay': "Let's practice handling an Frustrated Passenger scenario",
             'quiz': "Quiz me on the standard operating procedures",
-            'timer': "Set a 4 minute timer for waffle baking",
+            'timer': "Set a 4 minute timer for Flight Safety",
         };
 
         const query = skillQueries[skill.id] || `Tell me about ${skill.title}`;

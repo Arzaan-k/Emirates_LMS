@@ -1,5 +1,5 @@
 """
-Service Layer for BW LMS Backend
+Service Layer for Emirates LMS Backend
 Business logic separated from API routes
 """
 

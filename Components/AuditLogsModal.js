@@ -33,12 +33,12 @@ const ACTION_COLORS = {
     // Content actions
     UPLOAD_CONTENT: '#3B82F6',
     DELETE_CONTENT: '#EF4444',
-    UPDATE_CONTENT: '#F59E0B',
+    UPDATE_CONTENT: '#D71A21',
     // Quiz actions
     CREATE_QUIZ: '#8B5CF6',
     DELETE_QUIZ: '#EF4444',
-    UPDATE_QUIZ: '#F59E0B',
-    ASSIGN_QUIZ: '#F59E0B',
+    UPDATE_QUIZ: '#D71A21',
+    ASSIGN_QUIZ: '#D71A21',
     SUBMIT_QUIZ: '#10B981',
     // Assessment actions
     CREATE_ASSESSMENT: '#8B5CF6',
@@ -58,11 +58,11 @@ const ACTION_COLORS = {
     // Level/bucket actions
     CREATE_LEVEL: '#8B5CF6',
     DELETE_LEVEL: '#EF4444',
-    UPDATE_LEVEL: '#F59E0B',
+    UPDATE_LEVEL: '#D71A21',
     // Other actions
     RECORD_ATTENDANCE: '#10B981',
     START_SIMULATION: '#3B82F6',
-    SUBMIT_AUDIT: '#F59E0B',
+    SUBMIT_AUDIT: '#D71A21',
 };
 
 const ACTION_ICONS = {

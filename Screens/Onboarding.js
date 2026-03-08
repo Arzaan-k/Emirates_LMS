@@ -1,4 +1,4 @@
-// SplashScreen.js
+// Emirates LMS - Onboarding / Splash Screen
 import React, { useEffect } from 'react';
 import { View, Text, StyleSheet, Animated, Image, Platform } from 'react-native';
 
@@ -33,20 +33,29 @@ export default function Onboarding({ navigation }) {
     <View style={styles.container}>
       {/* Center content */}
       <View style={styles.centerContent}>
-        {/* TODO: Replace this Text with your Image logo when ready */}
         <Image
-          source={require('../assets/BW_Logo.png')}
+          source={require('../assets/Emirates_Logo.png')}
+          style={{ width: 200, height: 200, resizeMode: 'contain' }}
         />
+        <Text style={styles.brandName}>Emirates LMS</Text>
         <Text style={styles.tagline}>
-          Enterprise Learning.{'\n'}Powered by AI.
+          Fly Better.{'\n'}Learn Smarter.
         </Text>
+
+        {/* Loading bar */}
+        <View style={styles.loadingContainer}>
+          <View style={styles.loadingTrack}>
+            <Animated.View style={[styles.loadingFill, { width: loadingBarWidth }]} />
+          </View>
+        </View>
       </View>
     </View>
   );
 }
 
 const WHITE = '#FFFFFF';
-const DARK = '#1C1508';
+const DARK = '#1A1F36';
+const RED = '#D71A21';
 
 const styles = StyleSheet.create({
   container: {
@@ -61,11 +70,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  logoText: {
+  brandName: {
     fontSize: 28,
     fontWeight: '800',
     letterSpacing: 2,
-    color: DARK,
+    color: RED,
+    marginTop: 8,
   },
   tagline: {
     marginTop: 16,
@@ -75,17 +85,18 @@ const styles = StyleSheet.create({
     opacity: 0.8,
   },
   loadingContainer: {
-    width: '100%',
+    width: '60%',
+    marginTop: 40,
   },
   loadingTrack: {
     height: 4,
     borderRadius: 999,
-    backgroundColor: 'rgba(0,0,0,0.15)',
+    backgroundColor: 'rgba(0,0,0,0.1)',
     overflow: 'hidden',
   },
   loadingFill: {
     height: 4,
     borderRadius: 999,
-    backgroundColor: DARK,
+    backgroundColor: RED,
   },
 });

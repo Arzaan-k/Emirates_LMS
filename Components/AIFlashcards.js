@@ -58,7 +58,7 @@ export default function AIFlashcards({ onClose }) {
                             <View style={styles.cardContent}>
                                 <Text style={styles.questionLabel}>QUESTION</Text>
                                 <Text style={styles.questionText}>{currentCard.question}</Text>
-                                <MaterialCommunityIcons name="help-circle-outline" size={60} color="#F59E0B" style={styles.icon} />
+                                <MaterialCommunityIcons name="help-circle-outline" size={60} color="#D71A21" style={styles.icon} />
                             </View>
                         )}
 

@@ -1,5 +1,5 @@
 """
-Core module for BW LMS Backend
+Core module for Emirates LMS Backend
 Contains security, authentication, dependencies, and middleware
 """
 

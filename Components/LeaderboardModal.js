@@ -63,7 +63,7 @@ const LeaderboardRow = ({ item, index }) => (
         </View>
         
         <View style={styles.xpContainer}>
-            <MaterialCommunityIcons name="lightning-bolt" size={16} color="#F59E0B" />
+            <MaterialCommunityIcons name="lightning-bolt" size={16} color="#D71A21" />
             <Text style={styles.xpText}>{item.xp?.toLocaleString()}</Text>
         </View>
         
@@ -89,7 +89,7 @@ const BadgeCard = ({ badge, earned }) => (
         <Text style={[styles.badgeName, !earned && styles.badgeNameLocked]}>{badge.name}</Text>
         <Text style={styles.badgeDesc} numberOfLines={2}>{badge.description}</Text>
         <View style={styles.badgeXp}>
-            <MaterialCommunityIcons name="lightning-bolt" size={12} color="#F59E0B" />
+            <MaterialCommunityIcons name="lightning-bolt" size={12} color="#D71A21" />
             <Text style={styles.badgeXpText}>+{badge.xp_reward} XP</Text>
         </View>
         {!earned && (
@@ -188,7 +188,7 @@ export default function LeaderboardModal({ visible, onClose }) {
                                 <Feather name="x" size={24} color="#FFF" />
                             </TouchableOpacity>
                             <View style={styles.headerCenter}>
-                                <MaterialCommunityIcons name="trophy" size={24} color="#F59E0B" />
+                                <MaterialCommunityIcons name="trophy" size={24} color="#D71A21" />
                                 <Text style={styles.headerTitle}>Leaderboard</Text>
                             </View>
                             <View style={{ width: 40 }} />
@@ -217,7 +217,7 @@ export default function LeaderboardModal({ visible, onClose }) {
                         {/* Content */}
                         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
                             {loading ? (
-                                <ActivityIndicator size="large" color="#F59E0B" style={{ marginTop: 40 }} />
+                                <ActivityIndicator size="large" color="#D71A21" style={{ marginTop: 40 }} />
                             ) : activeTab === 'leaderboard' ? (
                                 <>
                                     {/* Top 3 Podium */}
@@ -377,7 +377,7 @@ const styles = StyleSheet.create({
         gap: 6,
     },
     tabActive: {
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
     },
     tabText: {
         fontSize: 12,
@@ -452,7 +452,7 @@ const styles = StyleSheet.create({
     },
     podiumStand1: {
         height: 60,
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
     },
     podiumStand2: {
         height: 45,
@@ -533,7 +533,7 @@ const styles = StyleSheet.create({
     xpText: {
         fontSize: 12,
         fontFamily: 'Poppins_700Bold',
-        color: '#F59E0B',
+        color: '#D71A21',
         marginLeft: 4,
     },
     badgeCount: {
@@ -598,7 +598,7 @@ const styles = StyleSheet.create({
     badgeXpText: {
         fontSize: 11,
         fontFamily: 'Poppins_600SemiBold',
-        color: '#F59E0B',
+        color: '#D71A21',
         marginLeft: 2,
     },
     lockOverlay: {
@@ -624,7 +624,7 @@ const styles = StyleSheet.create({
     challengeXpBadge: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         paddingHorizontal: 10,
         paddingVertical: 4,
         borderRadius: 12,

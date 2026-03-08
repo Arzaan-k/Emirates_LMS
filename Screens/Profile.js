@@ -234,7 +234,7 @@ const ActivityCalendar = ({ userEmail }) => {
                             (hasActivity.completions || 0) +
                             (hasActivity.audits || 0);
                         if (totalActs > 4) {
-                            cellBg = '#F59E0B'; // Deep Gold
+                            cellBg = '#D71A21'; // Deep Gold
                             cellText = '#FFF';
                         } else if (totalActs > 0) {
                             cellBg = '#FEF3C7'; // Light Gold
@@ -243,7 +243,7 @@ const ActivityCalendar = ({ userEmail }) => {
                     }
 
                     if (isToday) {
-                        cellBorder = '#F59E0B';
+                        cellBorder = '#D71A21';
                         if (!hasActivity) cellBg = '#FFFBEB';
                     }
 
@@ -258,8 +258,8 @@ const ActivityCalendar = ({ userEmail }) => {
                                 {/* Tiny Indicators */}
                                 {hasActivity && (
                                     <View style={styles.dotRow}>
-                                        {hasActivity.videos > 0 && <View style={[styles.dot, { backgroundColor: cellText === '#FFF' ? '#FFF' : '#F59E0B' }]} />}
-                                        {hasActivity.quizzes > 0 && <View style={[styles.dot, { backgroundColor: cellText === '#FFF' ? 'rgba(255,255,255,0.7)' : '#D97706' }]} />}
+                                        {hasActivity.videos > 0 && <View style={[styles.dot, { backgroundColor: cellText === '#FFF' ? '#FFF' : '#D71A21' }]} />}
+                                        {hasActivity.quizzes > 0 && <View style={[styles.dot, { backgroundColor: cellText === '#FFF' ? 'rgba(255,255,255,0.7)' : '#B91C1C' }]} />}
                                     </View>
                                 )}
                             </View>
@@ -270,7 +270,7 @@ const ActivityCalendar = ({ userEmail }) => {
 
             {calendarLoading && (
                 <View style={{ marginTop: 8 }}>
-                    <ActivityIndicator size="small" color="#F59E0B" />
+                    <ActivityIndicator size="small" color="#D71A21" />
                 </View>
             )}
 
@@ -282,7 +282,7 @@ const ActivityCalendar = ({ userEmail }) => {
 
                     <View style={styles.goldModalContent}>
                         <LinearGradient
-                            colors={['#F59E0B', '#D97706']}
+                            colors={['#D71A21', '#B91C1C']}
                             start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
                             style={styles.goldModalHeader}
                         >
@@ -303,19 +303,19 @@ const ActivityCalendar = ({ userEmail }) => {
                                     <View style={styles.goldStatGrid}>
                                         {/* VIDEOS */}
                                         <View style={styles.goldStatItem}>
-                                            <View style={styles.goldIconBg}><Feather name="play" size={18} color="#D97706" /></View>
+                                            <View style={styles.goldIconBg}><Feather name="play" size={18} color="#B91C1C" /></View>
                                             <Text style={styles.goldVal}>{selectedDay.videos}</Text>
                                             <Text style={styles.goldLabel}>Videos</Text>
                                         </View>
                                         {/* QUIZZES */}
                                         <View style={styles.goldStatItem}>
-                                            <View style={styles.goldIconBg}><MaterialCommunityIcons name="note-text-outline" size={18} color="#D97706" /></View>
+                                            <View style={styles.goldIconBg}><MaterialCommunityIcons name="note-text-outline" size={18} color="#B91C1C" /></View>
                                             <Text style={styles.goldVal}>{selectedDay.quizzes}</Text>
                                             <Text style={styles.goldLabel}>Quizzes</Text>
                                         </View>
                                         {/* TIME */}
                                         <View style={styles.goldStatItem}>
-                                            <View style={styles.goldIconBg}><Feather name="clock" size={18} color="#D97706" /></View>
+                                            <View style={styles.goldIconBg}><Feather name="clock" size={18} color="#B91C1C" /></View>
                                             <Text style={styles.goldVal}>{selectedDay.focusTime}</Text>
                                             <Text style={styles.goldLabel}>Focus</Text>
                                         </View>
@@ -324,7 +324,7 @@ const ActivityCalendar = ({ userEmail }) => {
                                     {/* MAIN INSIGHT CARD */}
                                     <LinearGradient colors={['#FFFBEB', '#FEF3C7']} style={styles.insightCard}>
                                         <View style={styles.insightHeader}>
-                                            <MaterialCommunityIcons name="lightning-bolt" size={20} color="#F59E0B" />
+                                            <MaterialCommunityIcons name="lightning-bolt" size={20} color="#D71A21" />
                                             <Text style={styles.insightTitle}>Performance Highlight</Text>
                                         </View>
                                         <Text style={styles.insightBig}>Top Skill: {selectedDay.topSkill}</Text>
@@ -344,7 +344,7 @@ const ActivityCalendar = ({ userEmail }) => {
 
                                         {dayDetailsLoading ? (
                                             <View style={{ paddingVertical: 10 }}>
-                                                <ActivityIndicator size="small" color="#F59E0B" />
+                                                <ActivityIndicator size="small" color="#D71A21" />
                                             </View>
                                         ) : selectedTimeline.length === 0 ? (
                                             <View style={{ paddingVertical: 10 }}>
@@ -404,7 +404,7 @@ const ActivityCalendar = ({ userEmail }) => {
                                                                         justifyContent: 'center',
                                                                         marginRight: 10
                                                                     }}>
-                                                                        <MaterialCommunityIcons name={iconName} size={18} color="#D97706" />
+                                                                        <MaterialCommunityIcons name={iconName} size={18} color="#B91C1C" />
                                                                     </View>
                                                                     <View style={{ flex: 1 }}>
                                                                         <Text style={{ fontWeight: '700', color: '#111827' }} numberOfLines={1}>
@@ -485,7 +485,7 @@ const COMPLETED_LESSONS = [
 ];
 
 const INCOMPLETE_LESSONS = [
-    { id: 4, title: "Advanced Waffle Textures", progress: 0.7, due: "Today" },
+    { id: 4, title: "Advanced Service Excellence", progress: 0.7, due: "Today" },
     { id: 5, title: "Inventory Management", progress: 0.3, due: "Tomorrow" },
 ];
 
@@ -495,7 +495,7 @@ const EXTRA_CREDIT = [
 ];
 
 const BADGES = [
-    { id: 1, name: "Early Bird", icon: "weather-sunny", color: "#F59E0B", bg: "#FEF3C7" },
+    { id: 1, name: "Early Bird", icon: "weather-sunny", color: "#D71A21", bg: "#FEF3C7" },
     { id: 2, name: "Fast Learner", icon: "lightning-bolt", color: "#EF4444", bg: "#FEE2E2" },
     { id: 3, name: "Team Player", icon: "account-group", color: "#3B82F6", bg: "#DBEAFE" },
     { id: 4, name: "Safety First", icon: "shield-check", color: "#10B981", bg: "#D1FAE5" },
@@ -515,7 +515,7 @@ const DonutChart = () => {
     const data = [
         { key: 'completed', value: 50, color: '#10B981', label: t('completed') },
         { key: 'incomplete', value: 20, color: '#EF4444', label: t('incomplete') },
-        { key: 'extra', value: 30, color: '#F59E0B', label: t('extraCredit') },
+        { key: 'extra', value: 30, color: '#D71A21', label: t('extraCredit') },
     ];
 
     const [activeSection, setActiveSection] = useState(data[0]);
@@ -867,7 +867,7 @@ export default function Profile({ navigation, route }) {
                 <View style={styles.attendanceCard}>
                     <View style={styles.attendanceHeader}>
                         <View style={styles.attendanceIcon}>
-                            <Feather name="clock" size={20} color="#F59E0B" />
+                            <Feather name="clock" size={20} color="#D71A21" />
                         </View>
                         <View style={{ flex: 1 }}>
                             <Text style={styles.attendanceTitle}>Attendance</Text>
@@ -1075,7 +1075,7 @@ const styles = StyleSheet.create({
     listSection: { paddingHorizontal: 20 },
     sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
     sectionTitle: { fontSize: 16, fontFamily: "Poppins_700Bold", color: "#111827" },
-    seeAll: { fontSize: 13, color: "#F59E0B", fontFamily: "Poppins_600SemiBold" },
+    seeAll: { fontSize: 13, color: "#D71A21", fontFamily: "Poppins_600SemiBold" },
 
     taskCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: "#FFF", padding: 16, borderRadius: 16, marginBottom: 10, borderWidth: 1, borderColor: '#F3F4F6' },
     taskTitle: { fontSize: 14, fontFamily: "Poppins_600SemiBold", color: "#111827" },
@@ -1111,7 +1111,7 @@ const styles = StyleSheet.create({
     navCardSub: { color: "rgba(255,255,255,0.8)", fontSize: 12, fontFamily: "Poppins_400Regular" },
 
     // CALENDAR STYLES (GOLDEN THEME)
-    calendarContainer: { marginHorizontal: 20, marginBottom: 24, padding: 20, backgroundColor: '#FFF', borderRadius: 24, shadowColor: "#F59E0B", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.1, shadowRadius: 15, elevation: 5, borderWidth: 1, borderColor: '#FFFBEB', overflow: 'hidden' },
+    calendarContainer: { marginHorizontal: 20, marginBottom: 24, padding: 20, backgroundColor: '#FFF', borderRadius: 24, shadowColor: "#D71A21", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.1, shadowRadius: 15, elevation: 5, borderWidth: 1, borderColor: '#FFFBEB', overflow: 'hidden' },
     goldGlow: { position: 'absolute', top: -50, right: -50, width: 150, height: 150, borderRadius: 75, backgroundColor: 'rgba(245, 158, 11, 0.1)' },
 
     calHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
@@ -1133,7 +1133,7 @@ const styles = StyleSheet.create({
 
     // GOLD MODAL STYLES
     calModalOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
-    goldModalContent: { width: '100%', maxWidth: 320, backgroundColor: '#FFF', borderRadius: 24, overflow: 'hidden', shadowColor: "#F59E0B", shadowOffset: { width: 0, height: 20 }, shadowOpacity: 0.3, shadowRadius: 30, elevation: 20 },
+    goldModalContent: { width: '100%', maxWidth: 320, backgroundColor: '#FFF', borderRadius: 24, overflow: 'hidden', shadowColor: "#D71A21", shadowOffset: { width: 0, height: 20 }, shadowOpacity: 0.3, shadowRadius: 30, elevation: 20 },
     goldModalHeader: { padding: 20, paddingTop: 24, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
     goldModalDate: { color: '#FFF', fontSize: 20, fontFamily: "Poppins_700Bold" },
     goldModalYear: { color: 'rgba(255,255,255,0.8)', fontSize: 14, fontFamily: "Poppins_500Medium" },
@@ -1152,12 +1152,12 @@ const styles = StyleSheet.create({
     insightBig: { fontSize: 16, fontFamily: "Poppins_600SemiBold", color: "#451A03", marginBottom: 12 },
     scoreRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: 'rgba(245, 158, 11, 0.2)', paddingTop: 12 },
     scoreLabel: { fontSize: 12, color: "#92400E", fontFamily: "Poppins_500Medium" },
-    scorePill: { backgroundColor: "#FFF", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, shadowColor: "#F59E0B", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 1 },
-    scorePillText: { fontSize: 12, fontFamily: "Poppins_700Bold", color: "#D97706" },
+    scorePill: { backgroundColor: "#FFF", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, shadowColor: "#D71A21", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 1 },
+    scorePillText: { fontSize: 12, fontFamily: "Poppins_700Bold", color: "#B91C1C" },
 
     noActivity: { alignItems: 'center', paddingVertical: 30 },
     noActText: { color: '#9CA3AF', marginTop: 12, fontFamily: "Poppins_400Regular", marginBottom: 20 },
-    startBtn: { backgroundColor: '#F59E0B', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12, shadowColor: "#F59E0B", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+    startBtn: { backgroundColor: '#D71A21', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12, shadowColor: "#D71A21", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
     startBtnText: { color: '#FFF', fontSize: 14, fontFamily: "Poppins_700Bold" },
 
     // LOCATION TRACKING STYLES
@@ -1220,7 +1220,7 @@ const styles = StyleSheet.create({
         padding: 20,
         marginHorizontal: 20,
         marginTop: 16,
-        shadowColor: '#F59E0B',
+        shadowColor: '#D71A21',
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.1,
         shadowRadius: 12,

@@ -1019,7 +1019,7 @@ async def ai_chatbot_alias(
     Dynamic AI Chatbot that:
     1. Searches through courses and resources (knowledge base)
     2. Uses Groq to generate contextual responses
-    3. Adds disclaimer for answers outside BW LMS context
+    3. Adds disclaimer for answers outside Emirates LMS context
     """
     from app.services.ai_service import AIService
     from app.services.content_service import ContentService
@@ -1061,7 +1061,7 @@ async def ai_chatbot_alias(
             logger.warning(f"Could not fetch courses: {e}")
         
         # --- BUILD PROMPT ---
-        system_prompt = """You are BWC AI Assistant, the intelligent helper for Belgian Waffle Co.'s Learning Management System.
+        system_prompt = """You are Emirates AI Assistant, the intelligent helper for Emirates Airlines' Learning Management System.
 
 YOUR KNOWLEDGE BASE INCLUDES:
 1. Training courses and learning paths
@@ -1077,11 +1077,11 @@ RESPONSE GUIDELINES:
 - Format responses with **bold** for important terms
 - Use bullet points for lists
 - Keep responses concise but informative
-- If the answer is from BW LMS training materials, mention the relevant course/resource
-- If answering general questions OUTSIDE the BW LMS scope, add this note at the end:
-  "ℹ️ Note: This information is general knowledge and not part of BW LMS training materials."
+- If the answer is from Emirates LMS training materials, mention the relevant course/resource
+- If answering general questions OUTSIDE the Emirates LMS scope, add this note at the end:
+  "ℹ️ Note: This information is general knowledge and not part of Emirates LMS training materials."
 
-BELGIAN WAFFLE CO. SPECIFIC INFO:
+Emirates Airlines SPECIFIC INFO:
 - Standard baking temp: 180-190°C
 - Batter: 5kg Premix + 4L Water + 500g Oil
 - Cooking time: 3:30 - 4:00 minutes
@@ -1203,7 +1203,7 @@ async def ai_voice_query_alias(
             logger.warning(f"Could not fetch courses: {e}")
         
         # Build system prompt
-        system_prompt = """You are BWC AI Assistant, the intelligent helper for Belgian Waffle Co.'s Learning Management System.
+        system_prompt = """You are Emirates AI Assistant, the intelligent helper for Emirates Airlines' Learning Management System.
 
 YOUR KNOWLEDGE BASE INCLUDES:
 1. Training courses and learning paths
@@ -1217,9 +1217,9 @@ RESPONSE GUIDELINES:
 - Be helpful, friendly, and professional
 - Use emojis sparingly to keep it engaging (🧇, ✅, 📚)
 - Keep responses concise for voice output
-- If answering general questions OUTSIDE the BW LMS scope, mention it briefly
+- If answering general questions OUTSIDE the Emirates LMS scope, mention it briefly
 
-BELGIAN WAFFLE CO. SPECIFIC INFO:
+Emirates Airlines SPECIFIC INFO:
 - Standard baking temp: 180-190°C
 - Batter: 5kg Premix + 4L Water + 500g Oil
 - Cooking time: 3:30 - 4:00 minutes

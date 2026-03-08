@@ -20,7 +20,7 @@ const C = {
     primaryLight: '#EEF2FF',
     green: '#10B981',
     greenLight: '#D1FAE5',
-    amber: '#F59E0B',
+    amber: '#D71A21',
     amberLight: '#FEF3C7',
     red: '#EF4444',
     redLight: '#FEE2E2',

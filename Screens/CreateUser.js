@@ -24,7 +24,7 @@ import API_URL from '../config';
 
 // BWC THEME
 const THEME = {
-    primary: '#F59E0B',    // Amber 500
+    primary: '#D71A21',    // Amber 500
     primaryDark: '#B45309', // Amber 700
     bg: '#FFFBEB',         // Amber 50 (Cream)
     cardBg: '#FFFFFF',
@@ -219,8 +219,8 @@ const CreateUser = ({
             console.error('Error fetching categories:', error);
             setCategories([
                 { id: '1', name: 'Super Admin', description: 'Full access', color: '#B45309' },
-                { id: '2', name: 'Manager', description: 'Admin access', color: '#D97706' },
-                { id: '3', name: 'Supervisor', description: 'Limited admin', color: '#F59E0B' },
+                { id: '2', name: 'Manager', description: 'Admin access', color: '#B91C1C' },
+                { id: '3', name: 'Supervisor', description: 'Limited admin', color: '#D71A21' },
                 { id: '4', name: 'Employee', description: 'Regular access', color: '#FCD34D' },
             ]);
         }
@@ -272,7 +272,7 @@ const CreateUser = ({
                     name: newRoleName.trim(),
                     order: maxOrder,
                     icon: 'medal-outline',
-                    color: '#F59E0B',
+                    color: '#D71A21',
                     description: `${newRoleName.trim()} progression level`
                 })
             });
@@ -363,9 +363,9 @@ const CreateUser = ({
         } else if (newCategory === 'Supervisor') {
             // Find middle level
             const midIndex = Math.floor(displayRoles.length / 2);
-            setRole(displayRoles[midIndex]?.name || 'Gold Waffler');
+            setRole(displayRoles[midIndex]?.name || 'Gold Crew');
         } else {
-            setRole(displayRoles[0]?.name || 'Waffler'); // Entry level (first progression role)
+            setRole(displayRoles[0]?.name || 'Crew Member'); // Entry level (first progression role)
             clearAllPrivileges();
         }
     };
@@ -377,7 +377,7 @@ const CreateUser = ({
             const response = await fetch(`${API_URL}/api/v1/users/categories`, {
                 method: 'POST',
                 headers,
-                body: JSON.stringify({ name: newCategoryName, description: '', color: '#F59E0B' })
+                body: JSON.stringify({ name: newCategoryName, description: '', color: '#D71A21' })
             });
             const result = await response.json();
             if (result.status === 'success') {
@@ -521,7 +521,7 @@ const CreateUser = ({
                             if (response.ok) {
                                 // If current role deleted, reset to default
                                 if (role === roleObj.name) {
-                                    setRole('Waffler');
+                                    setRole('Crew Member');
                                 }
                                 fetchDisplayRoles();
                             } else {
@@ -1191,7 +1191,7 @@ const CreateUser = ({
                                             flexDirection: 'row', alignItems: 'center', gap: 10,
                                             backgroundColor: isExternal ? '#FEF3C7' : '#F9FAFB',
                                             padding: 12, borderRadius: 12,
-                                            borderWidth: 1, borderColor: isExternal ? '#F59E0B' : '#E5E7EB',
+                                            borderWidth: 1, borderColor: isExternal ? '#D71A21' : '#E5E7EB',
                                         }}
                                         onPress={() => {
                                             const next = !isExternal;
@@ -1201,7 +1201,7 @@ const CreateUser = ({
                                     >
                                         <View style={{
                                             width: 22, height: 22, borderRadius: 6,
-                                            backgroundColor: isExternal ? '#F59E0B' : '#E5E7EB',
+                                            backgroundColor: isExternal ? '#D71A21' : '#E5E7EB',
                                             justifyContent: 'center', alignItems: 'center',
                                         }}>
                                             {isExternal && <Feather name="check" size={14} color="#FFF" />}
@@ -1210,7 +1210,7 @@ const CreateUser = ({
                                             External User
                                         </Text>
                                         {isExternal && (
-                                            <View style={{ backgroundColor: '#F59E0B', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, marginLeft: 'auto' }}>
+                                            <View style={{ backgroundColor: '#D71A21', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, marginLeft: 'auto' }}>
                                                 <Text style={{ fontSize: 11, color: '#FFF', fontWeight: '700' }}>EXTERNAL</Text>
                                             </View>
                                         )}
@@ -1688,8 +1688,8 @@ const CreateUser = ({
                                             setSelectModalVisible(false);
                                         }}
                                     >
-                                        <Feather name="plus-circle" size={18} color="#D97706" style={{ marginRight: 8 }} />
-                                        <Text style={{ color: '#D97706', fontWeight: '600', fontSize: 15 }}>
+                                        <Feather name="plus-circle" size={18} color="#B91C1C" style={{ marginRight: 8 }} />
+                                        <Text style={{ color: '#B91C1C', fontWeight: '600', fontSize: 15 }}>
                                             Use "{selectSearch}"
                                         </Text>
                                     </TouchableOpacity>
@@ -1728,7 +1728,7 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: '#FDE68A',
         elevation: 5,
-        shadowColor: '#F59E0B',
+        shadowColor: '#D71A21',
         shadowOpacity: 0.2,
         shadowRadius: 10,
     },
@@ -1777,8 +1777,8 @@ const styles = StyleSheet.create({
         borderColor: '#FDE68A',
     },
     tabActive: {
-        backgroundColor: '#F59E0B',
-        borderColor: '#F59E0B',
+        backgroundColor: '#D71A21',
+        borderColor: '#D71A21',
     },
     tabText: {
         fontSize: 13,
@@ -1886,8 +1886,8 @@ const styles = StyleSheet.create({
         gap: 6,
     },
     storeChipActive: {
-        backgroundColor: '#F59E0B',
-        borderColor: '#F59E0B',
+        backgroundColor: '#D71A21',
+        borderColor: '#D71A21',
     },
     storeText: {
         fontSize: 13,
@@ -1899,7 +1899,7 @@ const styles = StyleSheet.create({
     },
     storeCityText: {
         fontSize: 11,
-        color: '#D97706',
+        color: '#B91C1C',
     },
     storeCityTextActive: {
         color: 'rgba(255,255,255,0.8)',
@@ -1932,14 +1932,14 @@ const styles = StyleSheet.create({
         paddingVertical: 10,
         borderRadius: 20,
         borderWidth: 1,
-        borderColor: '#D97706',
+        borderColor: '#B91C1C',
         borderStyle: 'dashed',
         gap: 4,
     },
     addCategoryText: {
         fontSize: 13,
         fontWeight: '600',
-        color: '#D97706',
+        color: '#B91C1C',
     },
     newCategoryRow: {
         flexDirection: 'row',
@@ -1986,8 +1986,8 @@ const styles = StyleSheet.create({
         marginRight: 10,
     },
     roleActive: {
-        backgroundColor: '#F59E0B',
-        borderColor: '#F59E0B',
+        backgroundColor: '#D71A21',
+        borderColor: '#D71A21',
     },
     roleText: {
         fontSize: 13,
@@ -2005,7 +2005,7 @@ const styles = StyleSheet.create({
         paddingVertical: 10,
         borderRadius: 14,
         borderWidth: 1,
-        borderColor: '#D97706',
+        borderColor: '#B91C1C',
         borderStyle: 'dashed',
         backgroundColor: '#FFFBEB',
         gap: 4,
@@ -2013,7 +2013,7 @@ const styles = StyleSheet.create({
     addRoleText: {
         fontSize: 13,
         fontWeight: '600',
-        color: '#D97706',
+        color: '#B91C1C',
     },
     newRoleRow: {
         flexDirection: 'row',
@@ -2093,7 +2093,7 @@ const styles = StyleSheet.create({
     },
     privilegeItemActive: {
         backgroundColor: '#FEF3C7',
-        borderColor: '#F59E0B',
+        borderColor: '#D71A21',
     },
     privilegeCheck: {
         width: 18,
@@ -2106,8 +2106,8 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     privilegeCheckActive: {
-        backgroundColor: '#F59E0B',
-        borderColor: '#F59E0B',
+        backgroundColor: '#D71A21',
+        borderColor: '#D71A21',
     },
     privilegeInfo: {
         flexDirection: 'row',
@@ -2127,14 +2127,14 @@ const styles = StyleSheet.create({
     },
     createBtn: {
         flexDirection: 'row',
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         borderRadius: 16,
         paddingVertical: 15,
         justifyContent: 'center',
         alignItems: 'center',
         gap: 8,
         marginTop: 8,
-        shadowColor: '#F59E0B',
+        shadowColor: '#D71A21',
         shadowOpacity: 0.3,
         shadowRadius: 5,
         elevation: 3,
@@ -2190,13 +2190,13 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#D71A21',
         paddingVertical: 16,
         borderRadius: 14,
         gap: 8,
     },
     uploadingBtn: {
-        backgroundColor: '#D97706',
+        backgroundColor: '#B91C1C',
     },
     uploadBtnText: {
         fontSize: 15,

@@ -105,7 +105,7 @@ class EmailService:
         """
         Send password reset email with OTP.
         """
-        subject = "Password Reset Request - Belgian Waffle LMS"
+        subject = "Password Reset Request - Emirates LMS"
         
         html_content = f"""
         <!DOCTYPE html>
@@ -128,7 +128,7 @@ class EmailService:
                 </div>
                 <div class="content">
                     <p>Hello,</p>
-                    <p>We received a request to reset your password for the Belgian Waffle LMS.</p>
+                    <p>We received a request to reset your password for the Emirates LMS.</p>
                     <p>Use the following code to reset your password. This code is valid for 15 minutes.</p>
                     
                     <div class="code">{token}</div>
@@ -137,7 +137,7 @@ class EmailService:
                     <p>Best regards,<br>BWC LMS Team</p>
                 </div>
                 <div class="footer">
-                    &copy; {2026} Belgian Waffle Co. All rights reserved.
+                    &copy; {2026} Emirates Airlines All rights reserved.
                 </div>
             </div>
         </body>
@@ -149,7 +149,7 @@ class EmailService:
         
         Hello,
         
-        We received a request to reset your password for the Belgian Waffle LMS.
+        We received a request to reset your password for the Emirates LMS.
         
         Your verification code is: {token}
         

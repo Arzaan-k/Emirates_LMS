@@ -1,5 +1,5 @@
 """
-BW LMS Backend - Main Application Entry Point
+Emirates LMS Backend - Main Application Entry Point
 
 Production-ready FastAPI application with modular architecture.
 """
@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI):
     Runs on startup and shutdown.
     """
     # Startup
-    logger.info("Starting BW LMS Backend...")
+    logger.info("Starting Emirates LMS Backend...")
 
     # Create database tables
     try:
@@ -95,7 +95,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
-    logger.info("Shutting down BW LMS Backend...")
+    logger.info("Shutting down Emirates LMS Backend...")
 
 
 # ==========================================
@@ -103,8 +103,8 @@ async def lifespan(app: FastAPI):
 # ==========================================
 
 app = FastAPI(
-    title="BW LMS Backend",
-    description="Learning Management System Backend API - Production Ready",
+    title="Emirates LMS Backend",
+    description="Emirates Airlines Learning Management System Backend API - Production Ready",
     version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -140,7 +140,7 @@ if os.path.exists(settings.UPLOAD_DIR):
 async def root():
     """Root endpoint - API information."""
     return {
-        "message": "BW LMS Backend API",
+        "message": "Emirates LMS Backend API",
         "version": "2.0.0",
         "docs": "/docs",
         "health": "/health",
