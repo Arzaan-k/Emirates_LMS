@@ -24,7 +24,7 @@ class User(Base):
     email = Column(String(255), unique=True, index=True, nullable=False)
     name = Column(String(255), nullable=False)
     password = Column(String(255), nullable=False)  # Bcrypt hashed
-    role = Column(String(100), default="Waffler")
+    role = Column(String(100), default="Crew Member")
     
     # These columns might be missing in production DB - using Column but will handle None gracefully
     category = Column(String(100), default="Employee", nullable=True)

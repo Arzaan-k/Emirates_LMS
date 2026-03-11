@@ -6,11 +6,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { SlideInDown } from 'react-native-reanimated';
 
 const SECTIONS = [
-    { id: 'waffle_station', label: 'Waffle Station', icon: 'grid' },
-    { id: 'coffee_bar', label: 'Coffee Bar', icon: 'coffee' },
-    { id: 'fridge_interior', label: 'Fridge Interior', icon: 'snowflake' },
-    { id: 'sink_area', label: 'Sink Area', icon: 'water' },
-    { id: 'floor_dining', label: 'Dining Floor', icon: 'floor-plan' },
+    { id: 'galley_area', label: 'Galley Area', icon: 'food-variant' },
+    { id: 'beverage_cart', label: 'Beverage Cart', icon: 'coffee' },
+    { id: 'storage_champagne', label: 'Storage Compartment', icon: 'snowflake' },
+    { id: 'lavatory', label: 'Lavatory', icon: 'water' },
+    { id: 'cabin_section', label: 'Cabin Section', icon: 'seat-passenger' },
     { id: 'other', label: 'Other', icon: 'image-plus' },
 ];
 

@@ -33,7 +33,7 @@ const ITEMS_PER_PAGE = 30;
 
 // EMIRATES THEME COLORS
 const THEME = {
-    primary: '#D71A21',    // Waffle Yellow/Orange
+    primary: '#D71A21',    // Emirates Red
     secondary: '#B91C1C',  // Darker Amber
     chocolate: '#451A03',  // Dark Brown Text
     cream: '#FFFBEB',      // Light Cream Background
@@ -312,8 +312,8 @@ const TeamListScreen = ({ navigation, route }) => {
                 'Date of Leaving',
                 'Reason for Leaving',
                 'Franchise',
-                'Store Name',
-                'Store Code',
+                'Airport Name',
+                'Airport Code',
                 'Region',
                 'City',
                 'State',
@@ -363,8 +363,8 @@ const TeamListScreen = ({ navigation, route }) => {
                     safeCell(pd['Date of Leaving']),
                     safeCell(pd['Reason for Leaving']),
                     safeCell(pd['Franchise']),
-                    safeCell(pd['Store Name'] || u?.store),
-                    safeCell(pd['Store Code']),
+                    safeCell(pd['Airport Name'] || u?.store),
+                    safeCell(pd['Airport Code']),
                     safeCell(pd['Region']),
                     safeCell(pd['City']),
                     safeCell(pd['State']),
@@ -649,7 +649,7 @@ const TeamListScreen = ({ navigation, route }) => {
         if (levelColorMap[role]) return levelColorMap[role];
         const colors = {
             'Super Admin': '#7C2D12',
-            'Store Manager': '#B45309',
+            'Airport Manager': '#B45309',
             'Shift Manager': '#B91C1C',
             'Gold Crew': '#D71A21',
             'Silver Crew': '#9CA3AF',
@@ -717,7 +717,7 @@ const TeamListScreen = ({ navigation, route }) => {
                             </View>
                             {user.store && user.store !== 'Unassigned' && (
                                 <View style={styles.storeBadge}>
-                                    <MaterialCommunityIcons name="store" size={12} color="#78350F" />
+                                    <MaterialCommunityIcons name="airplane" size={12} color="#78350F" />
                                     <Text style={styles.storeText}>{user.store}</Text>
                                 </View>
                             )}
@@ -749,7 +749,7 @@ const TeamListScreen = ({ navigation, route }) => {
             { id: 'functions', paramKey: 'function', label: 'Function', icon: 'git-branch' },
             { id: 'sub_functions', paramKey: 'sub_function', label: 'Sub Function', icon: 'git-merge' },
             { id: 'job_roles', paramKey: 'job_role', label: 'Job Role', icon: 'user-check' },
-            { id: 'stores', paramKey: 'store', label: 'Store', icon: 'shopping-bag' },
+            { id: 'stores', paramKey: 'store', label: 'Airport', icon: 'airplane' },
             { id: 'regions', paramKey: 'region', label: 'Region', icon: 'map' },
             { id: 'cities', paramKey: 'city', label: 'City', icon: 'map-pin' },
             { id: 'states', paramKey: 'state', label: 'State', icon: 'flag' },
@@ -1029,8 +1029,8 @@ const TeamListScreen = ({ navigation, route }) => {
                 title: "Location",
                 icon: "map-pin",
                 data: [
-                    { label: "Store Name", value: viewingUser.store },
-                    { label: "Store Code", value: profile['Store Code'] },
+                    { label: "Airport Name", value: viewingUser.store },
+                    { label: "Airport Code", value: profile['Airport Code'] },
                     { label: "Region", value: profile['Region'] },
                     { label: "City", value: profile['City'] },
                     { label: "State", value: profile['State'] },

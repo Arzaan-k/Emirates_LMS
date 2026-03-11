@@ -41,12 +41,12 @@ logger = logging.getLogger(__name__)
 
 # Role hierarchy for access control
 ROLE_HIERARCHY = [
-    'Waffler',
-    'Silver Waffler',
-    'Gold Waffler',
+    'Crew Member',
+    'Senior Crew',
+    'Flight Purser',
     'Shift Manager',
-    'Assistant Store Manager',
-    'Store Manager'
+    'Assistant Manager',
+    'Cabin Manager'
 ]
 
 # All available privileges — grouped as (id, label, description, group, access_level)
@@ -406,7 +406,7 @@ class UserService:
             logger.info(f"Elevating privileges for new user {email} (Role: {role}, Category: {category})")
             
         # Set defaults
-        user_data.setdefault("role", "Waffler")
+        user_data.setdefault("role", "Crew Member")
         user_data.setdefault("category", "Employee")
         user_data.setdefault("store", "Unassigned")
         user_data.setdefault("privileges", [])
@@ -924,14 +924,14 @@ class UserService:
 
         if not user:
             return {
-                "current_level": "Waffler",
-                "next_level": "Silver Waffler",
+                "current_level": "Crew Member",
+                "next_level": "Senior Crew",
                 "nodes_completed_in_level": 0,
                 "nodes_required_in_level": 0,
                 "progress_percent": 0,
             }
 
-        current_role = user.role or "Waffler"
+        current_role = user.role or "Crew Member"
 
         # Use access rules for current level - these are the courses assigned by admin
         access_rule = self.access_rule_repo.get_by_level(current_role)
@@ -1009,13 +1009,13 @@ class UserService:
         if not user:
             return {
                 "eligible": False,
-                "current_role": "Waffler",
+                "current_role": "Crew Member",
                 "next_role": None,
                 "requirements_met": [],
                 "requirements_pending": []
             }
 
-        current_role = override_role or user.role or "Waffler"
+        current_role = override_role or user.role or "Crew Member"
         level_index = self.get_user_level_index(current_role)
         
         # Check if already at max level

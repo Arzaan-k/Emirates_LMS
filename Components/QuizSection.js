@@ -29,44 +29,44 @@ const { width, height } = Dimensions.get("window");
 const AI_QUIZ_DATA = [
     {
         id: 1,
-        question: "A customer returns a waffle claiming it's 'soggy'. What is the AI-recommended first step?",
+        question: "A passenger reports their seat recline is broken on a 14-hour flight. What is the AI-recommended first step?",
         options: [
-            { id: 'a', text: "Apologize and refund immediately." },
-            { id: 'b', text: "Inspect cooking time logs.", correct: true },
-            { id: 'c', text: "Reheat the same waffle." },
-            { id: 'd', text: "Blame the humidity." },
+            { id: 'a', text: "Apologize and offer a drink voucher." },
+            { id: 'b', text: "Check seat availability for reassignment.", correct: true },
+            { id: 'c', text: "Tell the passenger to push harder." },
+            { id: 'd', text: "Blame maintenance." },
         ],
-        aiLogic: "AI Analysis: Refund is costly. Reheating ruins quality. Inspecting logs (Data-Driven) is the correct root-cause analysis approach.",
+        aiLogic: "AI Analysis: Vouchers don't fix comfort. Reassignment (Data-Driven) is the correct root-cause resolution approach for long-haul flights.",
     },
     {
         id: 2,
-        question: "The Espresso machine pressure gauge reads 7 bars. What do you do?",
+        question: "The cabin pressure alarm reads abnormal levels at FL350. What do you do?",
         options: [
             { id: 'a', text: "Continue serving, it's fine." },
-            { id: 'b', text: "Adjust grind size coarser." },
-            { id: 'c', text: "Adjust grind size finer.", correct: true },
-            { id: 'd', text: "Call the technician immediately." },
+            { id: 'b', text: "Alert the flight deck immediately.", correct: true },
+            { id: 'c', text: "Adjust the overhead vents." },
+            { id: 'd', text: "Wait for the next routine check." },
         ],
-        aiLogic: "AI Analysis: 7 bars is under-extracted. Finer grind increases resistance to reach the optimal 9 bars. Technician is a last resort.",
+        aiLogic: "AI Analysis: Abnormal cabin pressure is a safety critical issue. Immediate notification to flight deck follows standard operating procedure.",
     },
     {
         id: 3,
-        question: "Inventory Alert: Nutella is running low (2 days stock). A bulk order takes 3 days. Action?",
+        question: "Catering Alert: Business Class meal count is short by 5 meals. Boarding starts in 20 mins. Action?",
         options: [
-            { id: 'a', text: "Place Emergency Transfer from nearby store.", correct: true },
-            { id: 'b', text: "Wait for bulk order." },
-            { id: 'c', text: "Stop serving Nutella waffles." },
-            { id: 'd', text: "Use generic chocolate sauce." },
+            { id: 'a', text: "Request emergency catering uplift from the lounge.", correct: true },
+            { id: 'b', text: "Wait for next catering cycle." },
+            { id: 'c', text: "Stop serving Business Class meals." },
+            { id: 'd', text: "Use Economy meals instead." },
         ],
-        aiLogic: "AI Analysis: OOS (Out of Stock) damages reputation. Emergency transfer maintains availability without compromising quality.",
+        aiLogic: "AI Analysis: Premium passengers expect full service. Emergency uplift maintains Emirates service standards without compromise.",
     }
 ];
 
 const QUIZ_TOPICS = [
-    { id: 1, title: "Espresso Science", count: "12 Qs", color: ["#D71A21", "#B91C1C"], icon: "coffee" },
-    { id: 2, title: "Milk Texturing", count: "8 Qs", color: ["#3B82F6", "#2563EB"], icon: "water" },
-    { id: 3, title: "Customer Service", count: "15 Qs", color: ["#10B981", "#059669"], icon: "account-heart" },
-    { id: 4, title: "Machine Maint.", count: "10 Qs", color: ["#6366F1", "#4F46E5"], icon: "cogs" },
+    { id: 1, title: "Safety Procedures", count: "12 Qs", color: ["#D71A21", "#B91C1C"], icon: "shield-check" },
+    { id: 2, title: "Cabin Service", count: "8 Qs", color: ["#3B82F6", "#2563EB"], icon: "glass-cocktail" },
+    { id: 3, title: "Passenger Relations", count: "15 Qs", color: ["#10B981", "#059669"], icon: "account-heart" },
+    { id: 4, title: "Aircraft Systems", count: "10 Qs", color: ["#6366F1", "#4F46E5"], icon: "cogs" },
 ];
 
 // TOPIC QUIZ DATA

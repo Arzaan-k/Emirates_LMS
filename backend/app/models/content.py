@@ -230,7 +230,7 @@ class Resource(Base):
 
 class ProgressionLevel(Base):
     """
-    Employee progression levels (Waffler, Silver Waffler, etc.).
+    Employee progression levels (Crew Member, Senior Crew, etc.).
     Defines the career progression hierarchy.
     """
     __tablename__ = "progression_levels"

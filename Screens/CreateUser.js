@@ -921,18 +921,18 @@ const CreateUser = ({
                                     </View>
                                 </View>
 
-                                {/* Store Assignment Section with Search */}
+                                {/* Airport Assignment Section with Search */}
                                 <View style={styles.section}>
                                     <Text style={styles.sectionTitle}>
-                                        <MaterialCommunityIcons name="store" size={16} color={THEME.primaryDark} /> Store Assignment
+                                        <MaterialCommunityIcons name="airplane" size={16} color={THEME.primaryDark} /> Airport Assignment
                                     </Text>
-                                    <Text style={styles.sectionDesc}>Assign employee to a store for tracking</Text>
+                                    <Text style={styles.sectionDesc}>Assign employee to an airport for tracking</Text>
 
-                                    {/* Store Search */}
+                                    {/* Airport Search */}
                                     <View style={styles.storeSearchBox}>
                                         <Feather name="search" size={16} color={THEME.primaryDark} />
                                         <TextInput
-                                            placeholder="Search stores..."
+                                            placeholder="Search airports..."
                                             placeholderTextColor="#92400E"
                                             style={styles.storeSearchInput}
                                             value={storeSearch}
@@ -1013,14 +1013,14 @@ const CreateUser = ({
                                             <View style={{ flex: 1, gap: 8 }}>
                                                 <TextInput
                                                     style={styles.newCategoryInput}
-                                                    placeholder="Store Name"
+                                                    placeholder="Airport Name"
                                                     placeholderTextColor="#92400E"
                                                     value={newStoreName}
                                                     onChangeText={setNewStoreName}
                                                 />
                                                 <TextInput
                                                     style={styles.newCategoryInput}
-                                                    placeholder="City (e.g. Mumbai)"
+                                                    placeholder="City (e.g. Dubai)"
                                                     placeholderTextColor="#92400E"
                                                     value={newStoreCity}
                                                     onChangeText={setNewStoreCity}

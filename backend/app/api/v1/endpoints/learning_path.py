@@ -582,9 +582,9 @@ async def track_course_completion(
         # 6. Check for level advancement (matches old backend line 6185-6228)
         level_up = False
         new_role = None
-        current_role = user.role or "Waffler"
+        current_role = user.role or "Crew Member"
 
-        HIERARCHY = ['Waffler', 'Silver Waffler', 'Gold Waffler', 'Shift Manager', 'Assistant Store Manager']
+        HIERARCHY = ['Crew Member', 'Senior Crew', 'Flight Purser', 'Shift Manager', 'Assistant Manager']
 
         if current_role in HIERARCHY:
             current_idx = HIERARCHY.index(current_role)
@@ -650,7 +650,7 @@ def find_skill_for_content(bucket: str, title: str) -> Optional[str]:
 
     # Skill keywords mapping
     skill_mapping = {
-        "product_knowledge": ["product", "menu", "coffee", "drink", "ingredient", "waffle"],
+        "product_knowledge": ["product", "menu", "service", "flight", "aircraft", "cabin"],
         "customer_service": ["customer", "service", "guest", "hospitality", "communication"],
         "hygiene_safety": ["hygiene", "safety", "sanitation", "food safety", "haccp", "clean"],
         "operations": ["operation", "procedure", "sop", "process", "efficiency", "equipment"],

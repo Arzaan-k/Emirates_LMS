@@ -155,7 +155,7 @@ async def register(
     email: str = Form(...),
     name: str = Form(...),
     password: str = Form(...),
-    role: str = Form("Waffler"),
+    role: str = Form("Crew Member"),
     store: str = Form("Unassigned"),
     db: Session = Depends(get_db)
 ):

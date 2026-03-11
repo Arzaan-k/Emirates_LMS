@@ -991,10 +991,10 @@ async def ai_suggested_questions_alias(
     logger = logging.getLogger(__name__)
 
     suggestions = [
-        "What is the standard waffle baking temperature?",
-        "Explain the opening checklist",
-        "How do I prepare the batter?",
-        "What are the cleaning protocols?",
+        "What is the standard pre-flight safety check procedure?",
+        "Explain the cabin opening checklist",
+        "How do I prepare the galley for meal service?",
+        "What are the emergency protocols?",
     ]
     
     try:
@@ -1066,14 +1066,14 @@ async def ai_chatbot_alias(
 YOUR KNOWLEDGE BASE INCLUDES:
 1. Training courses and learning paths
 2. Standard Operating Procedures (SOPs)
-3. Recipes and food preparation guides
+3. Flight safety and emergency procedures
 4. Equipment handling and safety protocols
-5. Customer service standards
-6. Store operations (opening, closing, cleaning)
+5. Passenger service standards
+6. Cabin operations (pre-flight, in-flight, post-flight)
 
 RESPONSE GUIDELINES:
 - Be helpful, friendly, and professional
-- Use emojis sparingly to keep it engaging (🧇, ✅, 📚)
+- Use emojis sparingly to keep it engaging (✈️, ✅, 📚)
 - Format responses with **bold** for important terms
 - Use bullet points for lists
 - Keep responses concise but informative
@@ -1082,10 +1082,10 @@ RESPONSE GUIDELINES:
   "ℹ️ Note: This information is general knowledge and not part of Emirates LMS training materials."
 
 Emirates Airlines SPECIFIC INFO:
-- Standard baking temp: 180-190°C
-- Batter: 5kg Premix + 4L Water + 500g Oil
-- Cooking time: 3:30 - 4:00 minutes
-- Uniform: BWC Cap, Black T-Shirt, Apron, Non-slip shoes"""
+- Premium cabin service standards apply at all times
+- Safety demonstrations must be performed before every departure
+- Cabin crew uniform: Emirates branded attire per policy
+- Service excellence is the Emirates brand promise"""
 
         # Build context section
         context_section = ""
@@ -1119,8 +1119,8 @@ Emirates Airlines SPECIFIC INFO:
         ai_response = response.choices[0].message.content.strip()
         
         # Determine if answer is from internal sources
-        internal_keywords = ["sop", "recipe", "batter", "waffle", "temperature", "iron", 
-                           "cleaning", "opening", "closing", "uniform", "training", "course"]
+        internal_keywords = ["sop", "safety", "cabin", "flight", "procedure", "aircraft", 
+                           "cleaning", "boarding", "service", "uniform", "training", "course"]
         message_lower = message.lower()
         is_internal_question = any(kw in message_lower for kw in internal_keywords)
         
@@ -1208,22 +1208,22 @@ async def ai_voice_query_alias(
 YOUR KNOWLEDGE BASE INCLUDES:
 1. Training courses and learning paths
 2. Standard Operating Procedures (SOPs)
-3. Recipes and food preparation guides
+3. Flight safety and emergency procedures
 4. Equipment handling and safety protocols
-5. Customer service standards
-6. Store operations (opening, closing, cleaning)
+5. Passenger service standards
+6. Cabin operations (pre-flight, in-flight, post-flight)
 
 RESPONSE GUIDELINES:
 - Be helpful, friendly, and professional
-- Use emojis sparingly to keep it engaging (🧇, ✅, 📚)
+- Use emojis sparingly to keep it engaging (✈️, ✅, 📚)
 - Keep responses concise for voice output
 - If answering general questions OUTSIDE the Emirates LMS scope, mention it briefly
 
 Emirates Airlines SPECIFIC INFO:
-- Standard baking temp: 180-190°C
-- Batter: 5kg Premix + 4L Water + 500g Oil
-- Cooking time: 3:30 - 4:00 minutes
-- Uniform: BWC Cap, Black T-Shirt, Apron, Non-slip shoes"""
+- Premium cabin service standards apply at all times
+- Safety demonstrations must be performed before every departure
+- Cabin crew uniform: Emirates branded attire per policy
+- Service excellence is the Emirates brand promise"""
 
         context_section = ""
         if course_summaries:

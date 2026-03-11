@@ -21,7 +21,7 @@ const FALLBACK_HIERARCHY = [
     { role: "Ops Manager", name: "Operations Manager", icon: "account-cog", color: "#9333EA", bg: "#F3E8FF" },
     { role: "City Manager", name: "City Manager", icon: "city", color: "#2563EB", bg: "#DBEAFE" },
     { role: "Area Manager", name: "Area Manager", icon: "map-marker-radius", color: "#059669", bg: "#D1FAE5" },
-    { role: "Store Manager", name: "Store Manager", icon: "store", color: "#B91C1C", bg: "#FEF3C7" },
+    { role: "Airport Manager", name: "Airport Manager", icon: "airplane", color: "#B91C1C", bg: "#FEF3C7" },
     { role: "Gold Crew", name: "Gold Crew", icon: "medal", color: "#D71A21", bg: "#FEF3C7" },
     { role: "Silver Crew", name: "Silver Crew", icon: "medal-outline", color: "#9CA3AF", bg: "#F3F4F6" },
     { role: "Crew Member", name: "Crew Member", icon: "account", color: "#6B7280", bg: "#F9FAFB" },

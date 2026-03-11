@@ -11,7 +11,7 @@ import sys
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding='utf-8')
 
-BASE_URL = "http://192.168.29.119:8000"
+BASE_URL = "http://192.168.1.23:8000"
 
 def test_translation():
     print("=" * 60)

@@ -421,7 +421,7 @@ const NodeEditor = React.memo(({ node, index, nodes, onUpdate, onDelete, onUploa
 export default function SimulationFlowBuilder({ existingSimulation, onSave, onClose }) {
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
-    const [category, setCategory] = useState('waffle');
+    const [category, setCategory] = useState('flight');
     const [difficulty, setDifficulty] = useState('Medium');
     const [nodes, setNodes] = useState([]);
     const [thumbnailUrl, setThumbnailUrl] = useState(null);
@@ -434,7 +434,7 @@ export default function SimulationFlowBuilder({ existingSimulation, onSave, onCl
             setSimulationId(existingSimulation.id);
             setTitle(existingSimulation.title || '');
             setDescription(existingSimulation.description || '');
-            setCategory(existingSimulation.category || 'waffle');
+            setCategory(existingSimulation.category || 'flight');
             setDifficulty(existingSimulation.difficulty || 'Medium');
             setThumbnailUrl(existingSimulation.thumbnailUrl || null);
             // Deep copy nodes to avoid mutation issues
@@ -444,14 +444,14 @@ export default function SimulationFlowBuilder({ existingSimulation, onSave, onCl
             setSimulationId(`sim-${Date.now()}`);
             setTitle('');
             setDescription('');
-            setCategory('waffle');
+            setCategory('flight');
             setDifficulty('Medium');
             setThumbnailUrl(null);
             setNodes([]);
         }
     }, [existingSimulation]);
 
-    const categories = ['waffle', 'hygiene', 'service', 'safety'];
+    const categories = ['flight', 'cabin', 'service', 'safety'];
     const difficulties = ['Easy', 'Medium', 'Hard'];
 
     // Add new step with auto-linking to previous step

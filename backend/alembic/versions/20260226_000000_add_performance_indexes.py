@@ -30,79 +30,78 @@ depends_on = None
 
 
 def upgrade():
-    # Use raw SQL so we can use CREATE INDEX CONCURRENTLY (not supported by op.create_index)
-    # CONCURRENTLY builds the index without locking reads/writes on the table.
+    # Create indexes without CONCURRENTLY to avoid transaction issues
     # IF NOT EXISTS prevents errors on re-runs.
 
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_profile_data_gin
+        CREATE INDEX IF NOT EXISTS idx_users_profile_data_gin
         ON users USING gin(profile_data)
     """)
 
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_role_store_category
+        CREATE INDEX IF NOT EXISTS idx_users_role_store_category
         ON users(role, store, category)
     """)
 
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_is_external_category
+        CREATE INDEX IF NOT EXISTS idx_users_is_external_category
         ON users(is_external, category)
     """)
 
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_completions_user_course
+        CREATE INDEX IF NOT EXISTS idx_completions_user_course
         ON course_completions(user_email, course_id)
     """)
 
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_completions_completed_at
+        CREATE INDEX IF NOT EXISTS idx_completions_completed_at
         ON course_completions(completed_at DESC)
     """)
 
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_completions_user_completed_at
+        CREATE INDEX IF NOT EXISTS idx_completions_user_completed_at
         ON course_completions(user_email, completed_at DESC)
     """)
 
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_audit_logs_created_at
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at
         ON audit_logs(created_at DESC)
     """)
 
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_video_progress_user_updated
+        CREATE INDEX IF NOT EXISTS idx_video_progress_user_updated
         ON video_progress(user_email, updated_at DESC)
     """)
 
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_video_progress_user_completed
+        CREATE INDEX IF NOT EXISTS idx_video_progress_user_completed
         ON video_progress(user_email, completed_at DESC)
         WHERE completed = TRUE AND completed_at IS NOT NULL
     """)
 
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_quiz_submissions_user_submitted
+        CREATE INDEX IF NOT EXISTS idx_quiz_submissions_user_submitted
         ON quiz_submissions(user_email, submitted_at DESC)
     """)
 
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_assessment_submissions_user_submitted
+        CREATE INDEX IF NOT EXISTS idx_assessment_submissions_user_submitted
         ON assessment_submissions(user_email, submitted_at DESC)
     """)
 
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_simulation_progress_user_started
+        CREATE INDEX IF NOT EXISTS idx_simulation_progress_user_started
         ON simulation_progress(user_email, started_at DESC)
     """)
 
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_simulation_progress_user_completed
+        CREATE INDEX IF NOT EXISTS idx_simulation_progress_user_completed
         ON simulation_progress(user_email, completed_at DESC)
         WHERE completed = TRUE AND completed_at IS NOT NULL
     """)
 
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_node_progress_user_email
+        CREATE INDEX IF NOT EXISTS idx_user_node_progress_user_email
         ON user_node_progress(user_email)
     """)
 

@@ -68,7 +68,7 @@ export default function ProctoredAssessment({ route, navigation }) {
     };
 
     // Legacy role-based admin check (for backward compatibility)
-    const isRoleBasedAdmin = role === 'Super Admin' || role === 'Ops Manager' || role === 'City Manager' || role === 'Store Manager';
+    const isRoleBasedAdmin = role === 'Super Admin' || role === 'Ops Manager' || role === 'City Manager' || role === 'Airport Manager';
 
     // New privilege-based checks
     const canCreateManage = hasPrivilege('proctored_create_manage') || isRoleBasedAdmin;
@@ -961,208 +961,208 @@ export default function ProctoredAssessment({ route, navigation }) {
             ? Math.round(viewSubmissions.reduce((sum, s) => sum + (s.score_percent || 0), 0) / viewSubmissions.length)
             : 0;
         return (
-        <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
-            <View style={styles.sectionHeaderBox}>
-                <Text style={styles.sectionHeader}>{selectedAssessment?.title} - Results</Text>
-            </View>
-
-            {/* Summary Stats */}
-            {!loadingSubmissions && viewSubmissions.length > 0 && (
-                <View style={styles.resultsSummaryRow}>
-                    <View style={styles.resultsSummaryStat}>
-                        <Text style={styles.resultsSummaryNum}>{viewSubmissions.length}</Text>
-                        <Text style={styles.resultsSummaryLabel}>Total</Text>
-                    </View>
-                    <View style={styles.resultsSummaryStat}>
-                        <Text style={[styles.resultsSummaryNum, { color: '#10B981' }]}>{passedCount}</Text>
-                        <Text style={styles.resultsSummaryLabel}>Passed</Text>
-                    </View>
-                    <View style={styles.resultsSummaryStat}>
-                        <Text style={[styles.resultsSummaryNum, { color: '#EF4444' }]}>{viewSubmissions.length - passedCount}</Text>
-                        <Text style={styles.resultsSummaryLabel}>Failed</Text>
-                    </View>
-                    <View style={styles.resultsSummaryStat}>
-                        <Text style={[styles.resultsSummaryNum, { color: '#D71A21' }]}>{avgScore}%</Text>
-                        <Text style={styles.resultsSummaryLabel}>Avg Score</Text>
-                    </View>
+            <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+                <View style={styles.sectionHeaderBox}>
+                    <Text style={styles.sectionHeader}>{selectedAssessment?.title} - Results</Text>
                 </View>
-            )}
 
-            {/* Sort Controls */}
-            {!loadingSubmissions && viewSubmissions.length > 0 && (
-                <View style={styles.resultsControlsBox}>
-                    <View style={styles.resultsSortRow}>
-                        <Text style={styles.resultsControlLabel}>Sort by:</Text>
-                        {['date', 'score', 'name'].map(opt => (
-                            <TouchableOpacity
-                                key={opt}
-                                style={[styles.resultsSortBtn, resultsSortBy === opt && styles.resultsSortBtnActive]}
-                                onPress={() => {
-                                    if (resultsSortBy === opt) setResultsSortOrder(o => o === 'asc' ? 'desc' : 'asc');
-                                    else { setResultsSortBy(opt); setResultsSortOrder('desc'); }
-                                }}
-                            >
-                                <Text style={[styles.resultsSortBtnText, resultsSortBy === opt && styles.resultsSortBtnTextActive]}>
-                                    {opt.charAt(0).toUpperCase() + opt.slice(1)}
-                                    {resultsSortBy === opt ? (resultsSortOrder === 'asc' ? ' ↑' : ' ↓') : ''}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
+                {/* Summary Stats */}
+                {!loadingSubmissions && viewSubmissions.length > 0 && (
+                    <View style={styles.resultsSummaryRow}>
+                        <View style={styles.resultsSummaryStat}>
+                            <Text style={styles.resultsSummaryNum}>{viewSubmissions.length}</Text>
+                            <Text style={styles.resultsSummaryLabel}>Total</Text>
+                        </View>
+                        <View style={styles.resultsSummaryStat}>
+                            <Text style={[styles.resultsSummaryNum, { color: '#10B981' }]}>{passedCount}</Text>
+                            <Text style={styles.resultsSummaryLabel}>Passed</Text>
+                        </View>
+                        <View style={styles.resultsSummaryStat}>
+                            <Text style={[styles.resultsSummaryNum, { color: '#EF4444' }]}>{viewSubmissions.length - passedCount}</Text>
+                            <Text style={styles.resultsSummaryLabel}>Failed</Text>
+                        </View>
+                        <View style={styles.resultsSummaryStat}>
+                            <Text style={[styles.resultsSummaryNum, { color: '#D71A21' }]}>{avgScore}%</Text>
+                            <Text style={styles.resultsSummaryLabel}>Avg Score</Text>
+                        </View>
                     </View>
+                )}
 
-                    {/* Filter Controls */}
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
-                        <View style={styles.resultsFilterRow}>
-                            {[
-                                { key: 'all', label: 'All', color: '#6B7280' },
-                                { key: 'passed', label: 'Passed', color: '#10B981' },
-                                { key: 'failed', label: 'Failed', color: '#EF4444' },
-                                { key: 'flagged', label: 'Flagged', color: '#DC2626' },
-                                { key: 'warning', label: 'Warning', color: '#B91C1C' },
-                                { key: 'clean', label: 'Clean', color: '#059669' },
-                            ].map(f => (
+                {/* Sort Controls */}
+                {!loadingSubmissions && viewSubmissions.length > 0 && (
+                    <View style={styles.resultsControlsBox}>
+                        <View style={styles.resultsSortRow}>
+                            <Text style={styles.resultsControlLabel}>Sort by:</Text>
+                            {['date', 'score', 'name'].map(opt => (
                                 <TouchableOpacity
-                                    key={f.key}
-                                    style={[
-                                        styles.resultsFilterBtn,
-                                        resultsFilter === f.key && { backgroundColor: f.color, borderColor: f.color }
-                                    ]}
-                                    onPress={() => setResultsFilter(f.key)}
+                                    key={opt}
+                                    style={[styles.resultsSortBtn, resultsSortBy === opt && styles.resultsSortBtnActive]}
+                                    onPress={() => {
+                                        if (resultsSortBy === opt) setResultsSortOrder(o => o === 'asc' ? 'desc' : 'asc');
+                                        else { setResultsSortBy(opt); setResultsSortOrder('desc'); }
+                                    }}
                                 >
-                                    <Text style={[
-                                        styles.resultsFilterBtnText,
-                                        resultsFilter === f.key && { color: '#fff' }
-                                    ]}>{f.label}</Text>
+                                    <Text style={[styles.resultsSortBtnText, resultsSortBy === opt && styles.resultsSortBtnTextActive]}>
+                                        {opt.charAt(0).toUpperCase() + opt.slice(1)}
+                                        {resultsSortBy === opt ? (resultsSortOrder === 'asc' ? ' ↑' : ' ↓') : ''}
+                                    </Text>
                                 </TouchableOpacity>
                             ))}
                         </View>
-                    </ScrollView>
 
-                    <Text style={styles.resultsCountText}>
-                        Showing {displayedSubs.length} of {viewSubmissions.length} submissions
-                    </Text>
-                </View>
-            )}
-
-            {loadingSubmissions ? (
-                <ActivityIndicator size="large" color="#D71A21" />
-            ) : viewSubmissions.length === 0 ? (
-                <Text style={styles.emptyText}>No submissions yet.</Text>
-            ) : displayedSubs.length === 0 ? (
-                <Text style={styles.emptyText}>No submissions match the selected filter.</Text>
-            ) : (
-                displayedSubs.map((sub, i) => (
-                    <TouchableOpacity
-                        key={i}
-                        style={styles.resultCardEnhanced}
-                        onPress={() => setSelectedSubmissionDetail(
-                            selectedSubmissionDetail?.id === sub.id ? null : sub
-                        )}
-                        activeOpacity={0.8}
-                    >
-                        {/* Main Info Row */}
-                        <View style={styles.resultMainRow}>
-                            <View style={{ flex: 1 }}>
-                                <Text style={styles.resultName}>{sub.user_name}</Text>
-                                <Text style={styles.resultDate}>{new Date(sub.submitted_at).toLocaleString()}</Text>
-                                <Text style={styles.resultTimeTaken}>
-                                    Duration: {formatTime(sub.time_taken_seconds || 0)}
-                                </Text>
-                            </View>
-                            <View style={{ alignItems: 'flex-end' }}>
-                                <Text style={[styles.resultScore, { color: sub.passed ? '#10B981' : '#EF4444' }]}>
-                                    {sub.score_percent || sub.score}%
-                                </Text>
-                                <Text style={[styles.resultPassLabel, { color: sub.passed ? '#10B981' : '#EF4444' }]}>
-                                    {sub.passed ? '✓ PASSED' : '✗ FAILED'}
-                                </Text>
-                            </View>
-                        </View>
-
-                        {/* Breach Summary Bar */}
-                        {(sub.violations > 0 || sub.breach_log?.length > 0) && (
-                            <View style={styles.breachSummaryBar}>
-                                <View style={styles.breachCountBox}>
-                                    <Feather name="alert-triangle" size={14} color="#EF4444" />
-                                    <Text style={styles.breachCountText}>
-                                        {sub.violations || sub.breach_log?.length || 0} Breaches
-                                    </Text>
-                                </View>
-                                {sub.critical_breaches > 0 && (
-                                    <View style={[styles.breachBadge, { backgroundColor: '#FEE2E2' }]}>
-                                        <Text style={[styles.breachBadgeText, { color: '#DC2626' }]}>
-                                            {sub.critical_breaches} Critical
-                                        </Text>
-                                    </View>
-                                )}
-                                {sub.warning_breaches > 0 && (
-                                    <View style={[styles.breachBadge, { backgroundColor: '#FEF3C7' }]}>
-                                        <Text style={[styles.breachBadgeText, { color: '#B91C1C' }]}>
-                                            {sub.warning_breaches} Warning
-                                        </Text>
-                                    </View>
-                                )}
-                                <Feather
-                                    name={selectedSubmissionDetail?.id === sub.id ? "chevron-up" : "chevron-down"}
-                                    size={18}
-                                    color="#6B7280"
-                                />
-                            </View>
-                        )}
-
-                        {/* Expanded Breach Details */}
-                        {selectedSubmissionDetail?.id === sub.id && sub.breach_log && sub.breach_log.length > 0 && (
-                            <View style={styles.breachDetailsContainer}>
-                                <Text style={styles.breachDetailsTitle}>Breach Log</Text>
-                                {sub.breach_log.map((breach, idx) => (
-                                    <View key={idx} style={[
-                                        styles.breachLogItem,
-                                        breach.severity === 'critical' && styles.breachLogItemCritical,
-                                        breach.severity === 'warning' && styles.breachLogItemWarning
-                                    ]}>
-                                        <View style={styles.breachLogIcon}>
-                                            <Feather
-                                                name={breach.icon || 'alert-circle'}
-                                                size={16}
-                                                color={breach.severity === 'critical' ? '#DC2626' : '#B91C1C'}
-                                            />
-                                        </View>
-                                        <View style={styles.breachLogContent}>
-                                            <Text style={styles.breachLogLabel}>{breach.label}</Text>
-                                            <Text style={styles.breachLogMeta}>
-                                                Q{breach.questionNumber} • {formatBreachTime(breach.timestamp)} • {formatTime(breach.timeElapsed || 0)} elapsed
-                                            </Text>
-                                            {breach.description !== breach.label && (
-                                                <Text style={styles.breachLogDesc}>{breach.description}</Text>
-                                            )}
-                                        </View>
-                                        <View style={[
-                                            styles.breachSeverityDot,
-                                            { backgroundColor: breach.severity === 'critical' ? '#DC2626' : breach.severity === 'warning' ? '#B91C1C' : '#6B7280' }
-                                        ]} />
-                                    </View>
+                        {/* Filter Controls */}
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
+                            <View style={styles.resultsFilterRow}>
+                                {[
+                                    { key: 'all', label: 'All', color: '#6B7280' },
+                                    { key: 'passed', label: 'Passed', color: '#10B981' },
+                                    { key: 'failed', label: 'Failed', color: '#EF4444' },
+                                    { key: 'flagged', label: 'Flagged', color: '#DC2626' },
+                                    { key: 'warning', label: 'Warning', color: '#B91C1C' },
+                                    { key: 'clean', label: 'Clean', color: '#059669' },
+                                ].map(f => (
+                                    <TouchableOpacity
+                                        key={f.key}
+                                        style={[
+                                            styles.resultsFilterBtn,
+                                            resultsFilter === f.key && { backgroundColor: f.color, borderColor: f.color }
+                                        ]}
+                                        onPress={() => setResultsFilter(f.key)}
+                                    >
+                                        <Text style={[
+                                            styles.resultsFilterBtnText,
+                                            resultsFilter === f.key && { color: '#fff' }
+                                        ]}>{f.label}</Text>
+                                    </TouchableOpacity>
                                 ))}
                             </View>
-                        )}
+                        </ScrollView>
 
-                        {/* Show empty breach state */}
-                        {selectedSubmissionDetail?.id === sub.id && (!sub.breach_log || sub.breach_log.length === 0) && sub.violations > 0 && (
-                            <View style={styles.breachDetailsContainer}>
-                                <Text style={styles.breachDetailsTitle}>Breach Summary</Text>
-                                <View style={styles.legacyBreachInfo}>
-                                    <Feather name="alert-triangle" size={20} color="#B91C1C" />
-                                    <Text style={styles.legacyBreachText}>
-                                        {sub.violations} integrity violation(s) detected during this assessment.
-                                        Detailed logs not available for legacy submissions.
+                        <Text style={styles.resultsCountText}>
+                            Showing {displayedSubs.length} of {viewSubmissions.length} submissions
+                        </Text>
+                    </View>
+                )}
+
+                {loadingSubmissions ? (
+                    <ActivityIndicator size="large" color="#D71A21" />
+                ) : viewSubmissions.length === 0 ? (
+                    <Text style={styles.emptyText}>No submissions yet.</Text>
+                ) : displayedSubs.length === 0 ? (
+                    <Text style={styles.emptyText}>No submissions match the selected filter.</Text>
+                ) : (
+                    displayedSubs.map((sub, i) => (
+                        <TouchableOpacity
+                            key={i}
+                            style={styles.resultCardEnhanced}
+                            onPress={() => setSelectedSubmissionDetail(
+                                selectedSubmissionDetail?.id === sub.id ? null : sub
+                            )}
+                            activeOpacity={0.8}
+                        >
+                            {/* Main Info Row */}
+                            <View style={styles.resultMainRow}>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.resultName}>{sub.user_name}</Text>
+                                    <Text style={styles.resultDate}>{new Date(sub.submitted_at).toLocaleString()}</Text>
+                                    <Text style={styles.resultTimeTaken}>
+                                        Duration: {formatTime(sub.time_taken_seconds || 0)}
+                                    </Text>
+                                </View>
+                                <View style={{ alignItems: 'flex-end' }}>
+                                    <Text style={[styles.resultScore, { color: sub.passed ? '#10B981' : '#EF4444' }]}>
+                                        {sub.score_percent || sub.score}%
+                                    </Text>
+                                    <Text style={[styles.resultPassLabel, { color: sub.passed ? '#10B981' : '#EF4444' }]}>
+                                        {sub.passed ? '✓ PASSED' : '✗ FAILED'}
                                     </Text>
                                 </View>
                             </View>
-                        )}
-                    </TouchableOpacity>
-                ))
-            )}
-            <View style={{ height: 100 }} />
-        </ScrollView>
+
+                            {/* Breach Summary Bar */}
+                            {(sub.violations > 0 || sub.breach_log?.length > 0) && (
+                                <View style={styles.breachSummaryBar}>
+                                    <View style={styles.breachCountBox}>
+                                        <Feather name="alert-triangle" size={14} color="#EF4444" />
+                                        <Text style={styles.breachCountText}>
+                                            {sub.violations || sub.breach_log?.length || 0} Breaches
+                                        </Text>
+                                    </View>
+                                    {sub.critical_breaches > 0 && (
+                                        <View style={[styles.breachBadge, { backgroundColor: '#FEE2E2' }]}>
+                                            <Text style={[styles.breachBadgeText, { color: '#DC2626' }]}>
+                                                {sub.critical_breaches} Critical
+                                            </Text>
+                                        </View>
+                                    )}
+                                    {sub.warning_breaches > 0 && (
+                                        <View style={[styles.breachBadge, { backgroundColor: '#FEF3C7' }]}>
+                                            <Text style={[styles.breachBadgeText, { color: '#B91C1C' }]}>
+                                                {sub.warning_breaches} Warning
+                                            </Text>
+                                        </View>
+                                    )}
+                                    <Feather
+                                        name={selectedSubmissionDetail?.id === sub.id ? "chevron-up" : "chevron-down"}
+                                        size={18}
+                                        color="#6B7280"
+                                    />
+                                </View>
+                            )}
+
+                            {/* Expanded Breach Details */}
+                            {selectedSubmissionDetail?.id === sub.id && sub.breach_log && sub.breach_log.length > 0 && (
+                                <View style={styles.breachDetailsContainer}>
+                                    <Text style={styles.breachDetailsTitle}>Breach Log</Text>
+                                    {sub.breach_log.map((breach, idx) => (
+                                        <View key={idx} style={[
+                                            styles.breachLogItem,
+                                            breach.severity === 'critical' && styles.breachLogItemCritical,
+                                            breach.severity === 'warning' && styles.breachLogItemWarning
+                                        ]}>
+                                            <View style={styles.breachLogIcon}>
+                                                <Feather
+                                                    name={breach.icon || 'alert-circle'}
+                                                    size={16}
+                                                    color={breach.severity === 'critical' ? '#DC2626' : '#B91C1C'}
+                                                />
+                                            </View>
+                                            <View style={styles.breachLogContent}>
+                                                <Text style={styles.breachLogLabel}>{breach.label}</Text>
+                                                <Text style={styles.breachLogMeta}>
+                                                    Q{breach.questionNumber} • {formatBreachTime(breach.timestamp)} • {formatTime(breach.timeElapsed || 0)} elapsed
+                                                </Text>
+                                                {breach.description !== breach.label && (
+                                                    <Text style={styles.breachLogDesc}>{breach.description}</Text>
+                                                )}
+                                            </View>
+                                            <View style={[
+                                                styles.breachSeverityDot,
+                                                { backgroundColor: breach.severity === 'critical' ? '#DC2626' : breach.severity === 'warning' ? '#B91C1C' : '#6B7280' }
+                                            ]} />
+                                        </View>
+                                    ))}
+                                </View>
+                            )}
+
+                            {/* Show empty breach state */}
+                            {selectedSubmissionDetail?.id === sub.id && (!sub.breach_log || sub.breach_log.length === 0) && sub.violations > 0 && (
+                                <View style={styles.breachDetailsContainer}>
+                                    <Text style={styles.breachDetailsTitle}>Breach Summary</Text>
+                                    <View style={styles.legacyBreachInfo}>
+                                        <Feather name="alert-triangle" size={20} color="#B91C1C" />
+                                        <Text style={styles.legacyBreachText}>
+                                            {sub.violations} integrity violation(s) detected during this assessment.
+                                            Detailed logs not available for legacy submissions.
+                                        </Text>
+                                    </View>
+                                </View>
+                            )}
+                        </TouchableOpacity>
+                    ))
+                )}
+                <View style={{ height: 100 }} />
+            </ScrollView>
         );
     };
 

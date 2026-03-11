@@ -26,12 +26,12 @@ _LEVELS_CACHE_TTL = 300.0  # 5 minutes
 
 # Default hierarchy configuration
 DEFAULT_HIERARCHY = [
-    {"id": "1", "role": "waffler", "name": "Waffler", "icon": "account", "color": "#F59E0B", "order": 1},
-    {"id": "2", "role": "silver_waffler", "name": "Silver Waffler", "icon": "star", "color": "#9CA3AF", "order": 2},
-    {"id": "3", "role": "gold_waffler", "name": "Gold Waffler", "icon": "star-circle", "color": "#FCD34D", "order": 3},
+    {"id": "1", "role": "crew_member", "name": "Crew Member", "icon": "account", "color": "#D71A21", "order": 1},
+    {"id": "2", "role": "senior_crew", "name": "Senior Crew", "icon": "star", "color": "#9CA3AF", "order": 2},
+    {"id": "3", "role": "flight_purser", "name": "Flight Purser", "icon": "star-circle", "color": "#FCD34D", "order": 3},
     {"id": "4", "role": "shift_manager", "name": "Shift Manager", "icon": "account-clock", "color": "#60A5FA", "order": 4},
-    {"id": "5", "role": "assistant_sm", "name": "Assistant Store Manager", "icon": "account-tie", "color": "#A78BFA", "order": 5},
-    {"id": "6", "role": "store_manager", "name": "Store Manager", "icon": "crown", "color": "#C084FC", "order": 6},
+    {"id": "5", "role": "assistant_sm", "name": "Assistant Manager", "icon": "account-tie", "color": "#A78BFA", "order": 5},
+    {"id": "6", "role": "cabin_manager", "name": "Cabin Manager", "icon": "crown", "color": "#C084FC", "order": 6},
 ]
 
 
@@ -523,7 +523,7 @@ async def get_user_level_progress(user_email: str, db: Session = Depends(get_db)
     except Exception as e:
         logger.error(f"User level progress fetch failed: {e}")
         return {
-            "current_level": "Waffler",
+            "current_level": "Crew Member",
             "progress_percent": 0,
         }
 
@@ -819,7 +819,7 @@ async def get_role_exam(
 
     service = UserService(db)
     user = service.get_user_by_email(user_email)
-    current_role = current_role or user.role or "Waffler"
+    current_role = current_role or user.role or "Crew Member"
     
     # Dynamic Target Role
     from app.repositories.content_repository import ProgressionLevelRepository
@@ -971,7 +971,7 @@ async def submit_role_exam(
 
         # Determine passing criteria dynamically
         user = service.get_user_by_email(user_email)
-        current_role = current_role or user.role or "Waffler"
+        current_role = current_role or user.role or "Crew Member"
         
         from app.repositories.content_repository import ProgressionLevelRepository
         level_repo = ProgressionLevelRepository(db)

@@ -82,11 +82,11 @@ const getDashboardData = (role) => {
                 title: "City Command",
                 stats: [
                     { label: "City Revenue", value: "$850k", icon: "chart-line", trend: "+5%" },
-                    { label: "Store uptime", value: "99.8%", icon: "clock-check", trend: "0%" },
+                    { label: "Airport uptime", value: "99.8%", icon: "clock-check", trend: "0%" },
                     { label: "Staff Turnover", value: "4%", icon: "account-group", trend: "-1%" },
                 ],
                 feed: [
-                    { title: "Store #104 Inspection Due", time: "30m ago", type: "warning" },
+                    { title: "Airport #104 Inspection Due", time: "30m ago", type: "warning" },
                     { title: "Monthly Review Meeting", time: "1d ago", type: "calendar" },
                 ]
             };
@@ -105,18 +105,18 @@ const getDashboardData = (role) => {
                     { title: "Staff Shortage at Mall Branch", time: "1h ago", type: "alert" },
                 ]
             };
-        case 'Store Manager':
+        case 'Airport Manager':
             return {
                 theme: ['#B91C1C', '#B45309'],
-                title: "Store Leadership",
+                title: "Airport Leadership",
                 stats: [
-                    { label: "Daily Sales", value: "$3.2k", icon: "cash-register", trend: "+15%" },
+                    { label: "Daily Passengers", value: "3.2k", icon: "airplane-takeoff", trend: "+15%" },
                     { label: "Shift Fulfilled", value: "100%", icon: "account-check", trend: "0%" },
-                    { label: "Cust. Satisfaction", value: "4.8", icon: "star", trend: "+0.1" },
+                    { label: "Pax. Satisfaction", value: "4.8", icon: "star", trend: "+0.1" },
                 ],
                 feed: [
-                    { title: "Morning Checklist Complete", time: "8:00 AM", type: "success" },
-                    { title: "Inventory Delivery Arriving", time: "2:00 PM", type: "info" },
+                    { title: "Morning Briefing Complete", time: "8:00 AM", type: "success" },
+                    { title: "Crew Rotation Scheduled", time: "2:00 PM", type: "info" },
                 ]
             };
         default:
@@ -332,7 +332,7 @@ export default function ManagerDashboard({ route, navigation }) {
 
     // [NEW] Admin AI Analyst State
     const [adminChatVisible, setAdminChatVisible] = useState(false);
-    const [chatMessages, setChatMessages] = useState([{ role: 'ai', content: "Hello! I'm your AI Analyst. I can help answer questions based on your specific user access.\n\nTry asking:\n- How many users have completed the Store Manager path?\n- What are the quiz scores for my team?\n- Which users are active today?" }]);
+    const [chatMessages, setChatMessages] = useState([{ role: 'ai', content: "Hello! I'm your AI Analyst. I can help answer questions based on your specific user access.\n\nTry asking:\n- How many users have completed the Airport Manager path?\n- What are the quiz scores for my team?\n- Which users are active today?" }]);
     const [chatInput, setChatInput] = useState('');
     const [isChatLoading, setIsChatLoading] = useState(false);
 
@@ -917,7 +917,7 @@ export default function ManagerDashboard({ route, navigation }) {
         try {
             const formData = new FormData();
             formData.append('title', 'New Quiz Assigned!');
-            formData.append('message', `Manager ${name} assigned '${role === 'Store Manager' ? 'Espresso Calibration' : 'Safety Drill'}' quiz.`);
+            formData.append('message', `Manager ${name} assigned '${role === 'Airport Manager' ? 'Service Excellence' : 'Safety Drill'}' quiz.`);
             formData.append('type', 'quiz');
 
             await fetch(`${API_URL}/api/v1/notifications/send`, {
@@ -1186,7 +1186,8 @@ export default function ManagerDashboard({ route, navigation }) {
             <View style={styles.bodyContainer}>
                 <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
 
-                    {/* AI INSIGHT - Moved to top to overlap header */}
+                    {/* AI INSIGHT - Moved to top to overlap header - HIDDEN */}
+                    {/*
                     <Animated.View entering={FadeInDown.delay(300)} style={styles.aiCard}>
                         <LinearGradient colors={['#4C1D95', '#6D28D9']} style={styles.aiGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
                             <View style={styles.aiHeader}>
@@ -1201,6 +1202,7 @@ export default function ManagerDashboard({ route, navigation }) {
                             </TouchableOpacity>
                         </LinearGradient>
                     </Animated.View>
+                    */}
 
                     {/* MODE INDICATOR & SWITCHER */}
                     <Animated.View entering={FadeInDown.delay(400)} style={styles.modeSection}>

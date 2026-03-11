@@ -23,7 +23,7 @@ class StartRequest(BaseModel):
 class RoleplayRequest(BaseModel):
     user_text: str
     history: List[dict] = []
-    context: Optional[str] = "cold_waffle"
+    context: Optional[str] = "delayed_flight"
 
 # --- IN-MEMORY STORAGE (Matches legacy implementation) ---
 simulation_history = []
@@ -123,10 +123,10 @@ async def process_roleplay_logic(user_text: str, history: List[dict]):
 
 
 # --- HELPER: Process Roleplay Logic with Context ---
-async def process_roleplay_logic_with_context(user_text: str, history: List[dict], context: str = "cold_waffle"):
+async def process_roleplay_logic_with_context(user_text: str, history: List[dict], context: str = "delayed_flight"):
     """
     Process roleplay with scenario-specific context.
-    Context options: 'cold_waffle', 'payment_trouble', 'positive_feedback'
+    Context options: 'delayed_flight', 'payment_trouble', 'positive_feedback'
     """
     try:
         api_key = settings.GROQ_API_KEY
@@ -143,48 +143,48 @@ async def process_roleplay_logic_with_context(user_text: str, history: List[dict
         
         # Context-specific system prompts
         system_prompts = {
-            "cold_waffle": """
-You are an ANGRY Indian customer at 'The Emirates Airlines'.
-The user is the store manager or support agent trying to resolve your complaint.
+            "delayed_flight": """
+You are an ANGRY passenger at Emirates Airlines.
+The user is the cabin crew member, ground staff or customer service agent trying to resolve your complaint.
 
 CONTEXT:
-- You ordered a 'Triple Chocolate Waffle' 45 minutes ago via Swiggy/Zomato.
-- The delivery arrived VERY LATE, and the waffle was COLD and SOGGY.
-- You are extremely frustrated, hungry, and considering leaving a bad review.
-- You speak naturally in Hinglish (Hindi + English mix), using colloquial terms like "Arre yaar", "Bhai", "Matlab", etc.
+- Your flight EK507 from Mumbai to Dubai was delayed by 4 hours with no clear communication.
+- You missed your connecting flight to London and now you're stranded at Dubai airport.
+- You are extremely frustrated, tired after a long journey, and considering filing a formal complaint.
+- You speak naturally, expressing frustration professionally but firmly.
 
 TASK:
-1. Act like a real angry person in a chat. Keep responses CONCISE (1-3 sentences).
+1. Act like a real frustrated premium passenger in a chat. Keep responses CONCISE (1-3 sentences).
 2. Analyze the User's response for: EMPATHY, POLITENESS, PROBLEM-SOLVING, and PROFESSIONALISM.
 3. Generate a Score (0-100) based on their overall performance.
 4. RESOLUTION PROGRESS (0-100):
    - 0-20: No resolution
    - 21-50: Acknowledged but no fix
-   - 51-80: Partial fix
-   - 81-100: Full resolution (refund/replace)
+   - 51-80: Partial fix (rebooking offered)
+   - 81-100: Full resolution (rebooking + lounge access + compensation)
 5. Provide a short TIP (max 10 words).
 6. Continue the roleplay naturally. If they fix it, calm down. If bureaucratic, get angrier!
 
 OUTPUT FORMAT (JSON ONLY):
 {
-    "customer_response": "Arre yaar, meri waffle thandi thi! I want refund!",
+    "customer_response": "This is unacceptable! I've been waiting 4 hours with no updates!",
     "mood_score": 20,
     "user_score": 75,
     "empathy_score": 60,
     "resolution_progress": 30,
-    "improvement_tip": "Offer immediate refund."
+    "improvement_tip": "Offer immediate rebooking."
 }
 """,
             "payment_trouble": """
-You are a CONFUSED Indian customer at 'The Emirates Airlines' having PAYMENT issues.
-The user is the store manager or support agent trying to help you.
+You are a CONFUSED passenger at Emirates Airlines having BOOKING/PAYMENT issues.
+The user is the customer service agent trying to help you.
 
 CONTEXT:
-- You placed an order worth Rs. 450 on the app.
+- You booked a Business Class ticket worth AED 8,500 on the Emirates app.
 - The payment screen showed "failed" but money was deducted from your account!
-- OR you were charged TWICE for the same order.
+- OR you were charged TWICE for the same booking.
 - You're not angry, just confused and worried about your money.
-- You speak naturally in Hinglish, politely asking for clarification.
+- You speak naturally, politely asking for clarification.
 
 TASK:
 1. Act like a real confused person who needs help understanding. Keep responses CONCISE (1-3 sentences).
@@ -200,7 +200,7 @@ TASK:
 
 OUTPUT FORMAT (JSON ONLY):
 {
-    "customer_response": "Mujhe samajh nahi aa raha... mere paise double kat gaye?",
+    "customer_response": "I don't understand... my payment was deducted twice for the same flight?",
     "mood_score": 50,
     "user_score": 75,
     "empathy_score": 60,
@@ -209,18 +209,18 @@ OUTPUT FORMAT (JSON ONLY):
 }
 """,
             "positive_feedback": """
-You are a HAPPY loyal customer at 'The Emirates Airlines' giving POSITIVE FEEDBACK.
-The user is the store manager or support agent receiving your appreciation.
+You are a HAPPY loyal passenger at Emirates Airlines giving POSITIVE FEEDBACK.
+The user is the cabin crew or customer service agent receiving your appreciation.
 
 CONTEXT:
-- You are a regular customer who loves Emirates Airlines
-- Your order today was AMAZING - fresh, hot, and delicious!
-- The delivery was quick and the staff was friendly.
+- You are a frequent flyer who loves Emirates.
+- Your flight today was AMAZING - smooth, comfortable, and the service was exceptional!
+- The cabin crew was attentive and the in-flight entertainment was superb.
 - You want to share your positive experience and maybe get recognized for loyalty.
-- You speak naturally in Hinglish, expressing genuine happiness.
+- You speak naturally, expressing genuine happiness.
 
 TASK:
-1. Act like a genuinely happy customer. Keep responses CONCISE (1-3 sentences).
+1. Act like a genuinely happy passenger. Keep responses CONCISE (1-3 sentences).
 2. Analyze the User's response for: GRATITUDE, ENGAGEMENT, PROFESSIONALISM, and BRAND BUILDING.
 3. Generate a Score (0-100) based on their overall performance.
 4. HAPPINESS LEVEL (0-100): How happy are you with their response?
@@ -229,17 +229,17 @@ TASK:
 
 OUTPUT FORMAT (JSON ONLY):
 {
-    "customer_response": "Arre wah! Aapke waffles toh ekdum mast the! Thank you so much!",
+    "customer_response": "The service on EK507 was absolutely phenomenal! Best flight ever!",
     "mood_score": 85,
     "user_score": 80,
     "empathy_score": 70,
     "resolution_progress": 80,
-    "improvement_tip": "Offer loyalty discount."
+    "improvement_tip": "Offer loyalty upgrade."
 }
 """
         }
         
-        system_prompt = system_prompts.get(context, system_prompts["cold_waffle"])
+        system_prompt = system_prompts.get(context, system_prompts["delayed_flight"])
         
         messages = [{"role": "system", "content": system_prompt}]
         for msg in history[-5:]:
@@ -325,51 +325,51 @@ async def start_roleplay(request: StartRequest):
     logger.info(f"--- START SIMULATION ({request.scenario_id}) ---")
     
     # Scenarios mapped to frontend IDs from SimulationHub.js:
-    # { id: 'angry', title: 'The Cold Waffle', subtitle: 'Angry Customer' }
-    # { id: 'confused', title: 'Payment Trouble', subtitle: 'Confused Customer' }
-    # { id: 'happy', title: 'Positive Feedback', subtitle: 'Loyal Customer' }
+    # { id: 'angry', title: 'Delayed Flight', subtitle: 'Frustrated Passenger' }
+    # { id: 'confused', title: 'Booking Issue', subtitle: 'Confused Passenger' }
+    # { id: 'happy', title: 'Positive Feedback', subtitle: 'Loyal Passenger' }
     
     scenarios = {
-        # The Cold Waffle - Angry Customer
+        # Delayed Flight - Frustrated Passenger
         "angry": {
-            "prompt": "You are an ANGRY customer. Start by complaining loudly in Hinglish about your Triple Chocolate Waffle that arrived 45 minutes late and was COLD and SOGGY. Be very frustrated. Say something like 'Arre bhai, meri waffle thandi hai! I want a refund now!'",
+            "prompt": "You are a FRUSTRATED premium passenger. Start by complaining firmly about your Emirates flight EK507 that was delayed 4 hours, causing you to miss your connecting flight to London. You are stranded at Dubai airport. Be very frustrated. Say something like 'This is unacceptable! 4 hours delayed and I missed my connection to London!'",
             "mood": 20,
-            "context": "cold_waffle"
+            "context": "delayed_flight"
         },
-        # Payment Trouble - Confused Customer  
+        # Booking Issue - Confused Passenger  
         "confused": {
-            "prompt": "You are a CONFUSED customer having payment issues. Start by explaining your problem - you've been charged twice for your order, or the payment failed but money was deducted. You're not angry, just confused and need help understanding what happened. Say something like 'Main samajh nahi pa raha... mera payment double ho gaya lagta hai?'",
+            "prompt": "You are a CONFUSED passenger having booking/payment issues with Emirates. Start by explaining your problem - you've been charged twice for your Business Class ticket, or the payment failed but money was deducted. You're not angry, just confused and need help understanding what happened. Say something like 'I don't understand... my payment was deducted twice for the same booking?'",
             "mood": 50,
             "context": "payment_trouble"
         },
-        # Positive Feedback - Loyal Customer
+        # Positive Feedback - Loyal Passenger
         "happy": {
-            "prompt": "You are a HAPPY loyal customer who wants to give positive feedback! Start by expressing your appreciation in Hinglish. You love Emirates Co, the waffles are always delicious, and you wanted to share your good experience. Say something like 'Arre wah! Bahut tasty waffles the! Main bata na chahta tha ki kitna achha experience tha!'",
+            "prompt": "You are a HAPPY loyal Emirates frequent flyer who wants to give positive feedback! Start by expressing your appreciation. You love Emirates, the flights are always comfortable, and you wanted to share your good experience. Say something like 'I just had the most amazing flight! The crew on EK507 were absolutely phenomenal!'",
             "mood": 85,
             "context": "positive_feedback"
         },
         # Legacy IDs (keep for backward compatibility)
         "late_order": {
-            "prompt": "Start by complaining loudly in Hinglish about your late waffle order.", 
+            "prompt": "Start by complaining about your delayed Emirates flight.", 
             "mood": 20,
-            "context": "cold_waffle"
+            "context": "delayed_flight"
         },
         "wrong_item": {
-            "prompt": "Start by saying you received a plain waffle instead of chocolate. Be annoyed.", 
+            "prompt": "Start by saying you received wrong seat assignment despite booking First Class. Be annoyed.", 
             "mood": 30,
-            "context": "cold_waffle"
+            "context": "delayed_flight"
         },
         "default": {
-            "prompt": "Start by complaining about cold waffles delivered late.", 
+            "prompt": "Start by complaining about a delayed Emirates flight and missed connection.", 
             "mood": 20,
-            "context": "cold_waffle"
+            "context": "delayed_flight"
         }
     }
     
     scenario = scenarios.get(request.scenario_id, scenarios["default"])
     
     # Generate Opening Line with scenario-specific context
-    result = await process_roleplay_logic_with_context(scenario["prompt"], [], scenario.get("context", "cold_waffle"))
+    result = await process_roleplay_logic_with_context(scenario["prompt"], [], scenario.get("context", "delayed_flight"))
     result["mood"] = scenario["mood"]  # Force initial mood
     return result
 
@@ -382,7 +382,7 @@ async def roleplay_text(request: RoleplayRequest):
 async def roleplay_voice(
     file: UploadFile = File(...), 
     history: str = Form("[]"),
-    context: str = Form("cold_waffle")
+    context: str = Form("delayed_flight")
 ):
     logger.info(f"--- VOICE RQ (Context: {context}) ---")
     
@@ -411,7 +411,7 @@ async def roleplay_voice(
                     file=audio_file,
                     model="whisper-large-v3",
                     language="en", 
-                    prompt="Hindi code-switching, restaurant operations context.",
+                    prompt="Hindi code-switching, airline operations context.",
                     response_format="verbose_json"
                 )
             user_text = transcription.text.strip()

@@ -7,11 +7,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 const { width, height } = Dimensions.get('window');
 
-// Waffle Pattern SVG Component
-const WafflePattern = () => (
+// Grid Pattern SVG Component
+const GridPattern = () => (
     <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
         <Defs>
-            <Pattern id="waffle" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
+            <Pattern id="grid" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
                 <Rect x="2" y="2" width="36" height="36" fill="none" stroke="#FCD34D" strokeWidth="1" strokeOpacity="0.2" rx="4" />
             </Pattern>
             <SvgLinearGradient id="chocoGradient" x1="0" y1="0" x2="1" y2="1">
@@ -19,7 +19,7 @@ const WafflePattern = () => (
                 <Stop offset="1" stopColor="#3E2723" stopOpacity="0.95" />
             </SvgLinearGradient>
         </Defs>
-        <Rect width="100%" height="100%" fill="url(#waffle)" />
+        <Rect width="100%" height="100%" fill="url(#grid)" />
     </Svg>
 );
 
@@ -49,8 +49,8 @@ const LanguageDisclaimerModal = ({ onDismiss }) => {
                 {/* <View style={[styles.decoCircle, { bottom: 100, right: -20, backgroundColor: '#5D4037', opacity: 0.1 }]} /> */}
 
                 <View style={styles.modalView}>
-                    <View style={styles.waffleBg}>
-                        <WafflePattern />
+                    <View style={styles.gridBg}>
+                        <GridPattern />
                     </View>
 
                     <View style={styles.iconContainer}>
@@ -106,7 +106,7 @@ const styles = StyleSheet.create({
     },
     modalView: {
         margin: 20,
-        backgroundColor: '#FFF8F0', // Creamy background (Milk/Waffle batter)
+        backgroundColor: '#FFF8F0', // Creamy background
         borderRadius: 24,
         padding: 30,
         alignItems: 'center',
@@ -119,9 +119,9 @@ const styles = StyleSheet.create({
         maxWidth: 400,
         overflow: 'hidden',
         borderWidth: 1,
-        borderColor: '#FCD34D', // Gold/Waffle hint
+        borderColor: '#FCD34D', // Gold hint
     },
-    waffleBg: {
+    gridBg: {
         ...StyleSheet.absoluteFillObject,
         opacity: 0.5,
     },
