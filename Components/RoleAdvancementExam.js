@@ -33,8 +33,8 @@ const LEVEL_COLORS = {
     'Silver Crew': '#60A5FA',
     'Gold Crew': '#D71A21',
     'Shift Manager': '#8B5CF6',
-    'Assistant Store Manager': '#EF4444',
-    'Store Manager': '#C084FC',
+    'Assistant Airport Manager': '#EF4444',
+    'Airport Manager': '#C084FC',
     // Default fallback
     'default': '#6B7280'
 };
@@ -44,8 +44,8 @@ const LEVEL_ICONS = {
     'Silver Crew': 'medal-outline',
     'Gold Crew': 'medal',
     'Shift Manager': 'account-tie',
-    'Assistant Store Manager': 'store',
-    'Store Manager': 'crown',
+    'Assistant Airport Manager': 'airplane',
+    'Airport Manager': 'crown',
     // Default fallback
     'default': 'star'
 };

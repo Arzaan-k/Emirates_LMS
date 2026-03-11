@@ -13,7 +13,8 @@
       "Bash(curl:*)",
       "Bash(wc:*)",
       "Bash(find:*)",
-      "Bash(du:*)"
+      "Bash(du:*)",
+      "Bash(alembic revision -m \"add_course_completions_table\")"
     ]
   }
 }

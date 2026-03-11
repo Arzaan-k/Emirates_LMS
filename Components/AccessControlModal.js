@@ -25,7 +25,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 const { width } = Dimensions.get('window');
 
 // Fallback levels in case API fails
-const DEFAULT_LEVELS = ['Crew Member', 'Silver Crew', 'Gold Crew', 'Shift Manager', 'Assistant Store Manager'];
+const DEFAULT_LEVELS = ['Crew Member', 'Silver Crew', 'Gold Crew', 'Shift Manager', 'Assistant Airport Manager'];
 
 export default function AccessControlModal({ visible, onClose }) {
     const [loading, setLoading] = useState(false);

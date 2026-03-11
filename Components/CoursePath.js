@@ -444,20 +444,20 @@ export default function CoursePath(props) {
     ];
 
     // Level stages configuration
-    const HIERARCHY = ['Crew Member', 'Silver Crew', 'Gold Crew', 'Shift Manager', 'Assistant Store Manager'];
+    const HIERARCHY = ['Crew Member', 'Silver Crew', 'Gold Crew', 'Shift Manager', 'Assistant Airport Manager'];
     const LEVEL_COLORS = {
         'Crew Member': '#9CA3AF',
         'Silver Crew': '#60A5FA',
         'Gold Crew': '#D71A21',
         'Shift Manager': '#8B5CF6',
-        'Assistant Store Manager': '#EF4444'
+        'Assistant Airport Manager': '#EF4444'
     };
     const LEVEL_ICONS = {
         'Crew Member': 'account',
         'Silver Crew': 'medal-outline',
         'Gold Crew': 'medal',
         'Shift Manager': 'account-tie',
-        'Assistant Store Manager': 'store'
+        'Assistant Airport Manager': 'airplane'
     };
 
     const [hierarchy, setHierarchy] = useState(HIERARCHY);

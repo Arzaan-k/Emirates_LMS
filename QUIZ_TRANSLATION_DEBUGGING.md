@@ -6,7 +6,7 @@
 
 Tested the backend translation endpoint:
 ```bash
-curl "http://192.168.29.119:8000/api/v1/quizzes/live_fe3874d5?language=Hindi"
+curl "http://192.168.1.23:8000/api/v1/quizzes/live_fe3874d5?language=Hindi"
 ```
 
 **Result**: Quiz successfully translated to Hindi!

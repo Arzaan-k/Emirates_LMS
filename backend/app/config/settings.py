@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     # ===========================================
     # SECURITY
     # ===========================================
-    ALLOWED_ORIGINS: str = Field(default="https://bwc-lms-demo.netlify.app,https://bwc-lms.onrender.com,http://192.168.1.143:8000,http://192.168.29.119:8000,http://10.233.54.1:8000,http://10.107.174.1:8000,http://localhost:8081,http://localhost:8080,http://localhost:19006,*", env="ALLOWED_ORIGINS")
+    ALLOWED_ORIGINS: str = Field(default="https://bwc-lms-demo.netlify.app,https://bwc-lms.onrender.com,http://192.168.29.119:8000,http://10.233.54.1:8000,http://10.107.174.1:8000,http://localhost:8081,http://localhost:8080,http://localhost:19006,*", env="ALLOWED_ORIGINS")
     RATE_LIMIT_DEFAULT: str = Field(default="100/minute", env="RATE_LIMIT_DEFAULT")
     RATE_LIMIT_LOGIN: str = Field(default="5/minute", env="RATE_LIMIT_LOGIN")
     RATE_LIMIT_REGISTER: str = Field(default="10/hour", env="RATE_LIMIT_REGISTER")
