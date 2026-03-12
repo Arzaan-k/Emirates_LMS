@@ -1,0 +1,7 @@
+﻿diff --git a/app.json b/app.json
+index 3902f3c..e55d60d 100644
+--- a/app.json
++++ b/app.json
+@@ -47 +47 @@
+-        "projectId": "e87d8ccd-0381-4aee-a360-287354994f3c"
++        "projectId": "060179a3-bf71-40c4-a8c7-1b4a5e2696b5"

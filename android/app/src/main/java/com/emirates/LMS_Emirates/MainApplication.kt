@@ -1,4 +1,4 @@
-package com.gajjoshi.LMS_BW
+package com.emirates.LMS_Emirates
 
 import android.app.Application
 import android.content.res.Configuration

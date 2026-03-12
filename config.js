@@ -6,12 +6,12 @@ import { Platform } from 'react-native';
 const ENV = {
     // Local Development URLs
     dev: {
-        web: "http://192.168.29.119:8000",
-        ios: "http://192.168.29.119:8000",
-        android: "http://192.168.29.119:8000", // Special alias for Android Emulator to access host localhost
+        web: "http://192.168.1.23:8000",
+        ios: "http://192.168.1.23:8000",
+        android: "http://192.168.1.23:8000", // Special alias for Android Emulator to access host localhost
     },
     // Production URL (Render.com)
-    prod: "https://newlms-backend.onrender.com"
+    prod: "https://newlms-backend-ocjt.onrender.com"
 };
 
 const getApiUrl = () => {

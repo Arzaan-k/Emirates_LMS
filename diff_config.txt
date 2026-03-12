@@ -1,0 +1,14 @@
+﻿diff --git a/config.js b/config.js
+index 8b99fdb..faaa7cf 100644
+--- a/config.js
++++ b/config.js
+@@ -9,3 +9,3 @@ const ENV = {
+-        web: "http://192.168.29.119:8000",
+-        ios: "http://192.168.29.119:8000",
+-        android: "http://192.168.29.119:8000", // Special alias for Android Emulator to access host localhost
++        web: "http://192.168.1.23:8000",
++        ios: "http://192.168.1.23:8000",
++        android: "http://192.168.1.23:8000", // Special alias for Android Emulator to access host localhost
+@@ -14 +14 @@ const ENV = {
+-    prod: "https://newlms-backend.onrender.com"
++    prod: "https://newlms-backend-ocjt.onrender.com"

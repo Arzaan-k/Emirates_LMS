@@ -1,4 +1,4 @@
-package com.gajjoshi.LMS_BW
+package com.emirates.LMS_Emirates
 
 import android.os.Build
 import android.os.Bundle
