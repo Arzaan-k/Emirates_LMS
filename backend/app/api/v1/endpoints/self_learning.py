@@ -88,27 +88,40 @@ def get_self_learning_buckets(
     Get all self-learning buckets (folders) visible to a user.
     Returns buckets with course counts and user progress.
     """
-    # Get all active self-learning buckets + career_progression buckets with show_in_both_paths
+    from sqlalchemy import or_
+    # Get all active self-learning buckets: either explicitly typed as self_learning,
+    # or career_progression buckets with show_in_both_paths=True,
+    # OR career_progression buckets that actually hold self_learning content
+    sl_content_bucket_ids = [
+        row[0] for row in db.query(Content.bucket_id).filter(
+            Content.learning_path_type == "self_learning",
+            Content.bucket_id != None,
+            Content.is_published == True
+        ).distinct().all()
+    ]
     buckets = db.query(CourseBucket).filter(
         CourseBucket.is_active == True,
-        (
-            (CourseBucket.learning_path_type == "self_learning") |
-            (
-                (CourseBucket.learning_path_type == "career_progression") &
-                (CourseBucket.show_in_both_paths == True)
-            )
+        or_(
+            CourseBucket.learning_path_type == "self_learning",
+            and_(
+                CourseBucket.learning_path_type == "career_progression",
+                CourseBucket.show_in_both_paths == True
+            ),
+            # Include career_progression buckets that hold self_learning content
+            CourseBucket.id.in_(sl_content_bucket_ids)
         )
     ).order_by(CourseBucket.order_index).all()
 
     # Get user info for access filtering
     user = db.query(User).filter(User.email == user_email).first()
 
-    # Get all self-learning courses + career courses from cross-displayed buckets
+    # Get all self-learning courses (all content tagged self_learning)
+    # PLUS content in any of the hybrid/cross-displayed buckets
     cross_bucket_ids = [b.id for b in buckets if b.learning_path_type == 'career_progression']
-    course_filter = Content.learning_path_type == "self_learning"
     if cross_bucket_ids:
-        from sqlalchemy import or_
         course_filter = or_(Content.learning_path_type == "self_learning", Content.bucket_id.in_(cross_bucket_ids))
+    else:
+        course_filter = Content.learning_path_type == "self_learning"
     all_courses = db.query(Content).filter(
         Content.is_published == True,
         course_filter
@@ -279,14 +292,24 @@ def _get_cached_buckets_and_courses(db: Session):
 
     # Check if buckets cache is valid
     if _buckets_cache["data"] is None or now > _buckets_cache["expires"]:
+        # Find all bucket IDs that hold self_learning content (regardless of bucket type)
+        sl_content_bucket_ids = [
+            row[0] for row in db.query(Content.bucket_id).filter(
+                Content.learning_path_type == "self_learning",
+                Content.bucket_id != None,
+                Content.is_published == True
+            ).distinct().all()
+        ]
         all_buckets = db.query(CourseBucket).filter(
             CourseBucket.is_active == True,
-            (
-                (CourseBucket.learning_path_type == "self_learning") |
-                (
-                    (CourseBucket.learning_path_type == "career_progression") &
-                    (CourseBucket.show_in_both_paths == True)
-                )
+            or_(
+                CourseBucket.learning_path_type == "self_learning",
+                and_(
+                    CourseBucket.learning_path_type == "career_progression",
+                    CourseBucket.show_in_both_paths == True
+                ),
+                # Include career_progression buckets that actually hold self_learning content
+                CourseBucket.id.in_(sl_content_bucket_ids)
             )
         ).order_by(CourseBucket.order_index).all()
         _buckets_cache["data"] = all_buckets
@@ -297,9 +320,15 @@ def _get_cached_buckets_and_courses(db: Session):
     # Check if courses cache is valid
     if _courses_cache["data"] is None or now > _courses_cache["expires"]:
         cross_bucket_ids = [b.id for b in all_buckets if b.learning_path_type == 'career_progression']
-        course_filter = Content.learning_path_type == "self_learning"
+        # Base filter: all content tagged as self_learning
+        # PLUS: any content in cross-displayed or hybrid buckets
         if cross_bucket_ids:
-            course_filter = or_(Content.learning_path_type == "self_learning", Content.bucket_id.in_(cross_bucket_ids))
+            course_filter = or_(
+                Content.learning_path_type == "self_learning",
+                Content.bucket_id.in_(cross_bucket_ids)
+            )
+        else:
+            course_filter = Content.learning_path_type == "self_learning"
 
         all_courses = db.query(Content).filter(
             Content.is_published == True,
@@ -1598,7 +1627,7 @@ async def get_affected_users_preview(
 
     if total_courses == 0:
         # No courses yet - all users are "not started"
-        all_users = db.query(User.email, User.name, User.role, User.store).filter(User.is_active == True).all()
+        all_users = db.query(User.email, User.name, User.role, User.store).limit(100).all()
         return {
             "bucket_id": bucket_id,
             "bucket_name": bucket.name,
@@ -1639,7 +1668,7 @@ async def get_affected_users_preview(
         user_progress[p.user_email][p.node_id] = p.video_watched_percent or 0
 
     # Get all active users
-    all_users = db.query(User.email, User.name, User.role, User.store).filter(User.is_active == True).all()
+    all_users = db.query(User.email, User.name, User.role, User.store).all()
     user_map = {u.email: {"email": u.email, "name": u.name, "role": u.role, "store": u.store} for u in all_users}
 
     # Categorize users
@@ -1735,7 +1764,7 @@ async def get_learning_path_affected_users(
     total_courses = len(courses)
 
     if total_courses == 0:
-        all_users = db.query(User.email, User.name, User.role, User.store).filter(User.is_active == True).limit(100).all()
+        all_users = db.query(User.email, User.name, User.role, User.store).limit(100).all()
         return {
             "learning_path_type": learning_path_type,
             "total_courses": 0,

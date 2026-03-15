@@ -2082,15 +2082,22 @@ async def get_content_library(db: Session = Depends(get_db)):
                 
                 # Determine effective path type for the item
                 item_path_type = get_attr(content, 'learning_path_type')
-                if not item_path_type:
-                    # Inherit from bucket if not set on item
-                    item_path_type = bucket_path_type
-                
-                # Check if item matches the filter path type
-                if item_path_type == filter_path_type:
+
+                # Trust the bucket assignment: if an item is in this bucket, treat it as
+                # belonging to the bucket's learning path type. This is necessary because
+                # content defaults to "career_progression" on creation even when uploaded
+                # into a self-learning bucket, causing self-learning content to be invisible.
+                # Only exclude the item if it explicitly declares a DIFFERENT path type AND
+                # the bucket itself belongs to a different path type.
+                effective_path_type = item_path_type if item_path_type else bucket_path_type
+                should_include = (
+                    effective_path_type == filter_path_type  # normal case: types match
+                    or bucket_path_type == filter_path_type  # trust bucket: item is IN this bucket
+                )
+                if should_include:
                     item_dict = content.to_dict() if hasattr(content, 'to_dict') else dict(content)
-                    # Ensure the item has the correct path type set in response
-                    item_dict['learning_path_type'] = item_path_type
+                    # Stamp the correct path type on the response so frontend displays correctly
+                    item_dict['learning_path_type'] = filter_path_type
                     bucket_items.append(item_dict)
 
             # Find child buckets
@@ -2200,6 +2207,72 @@ async def get_content_library(db: Session = Depends(get_db)):
             for content in content_list
             if not content.bucket_id or content.bucket_id not in bucket_map
         ]
+
+        # ─── CRITICAL FIX ─────────────────────────────────────────────────────────
+        # After building normal trees, find all self_learning content items that
+        # were NOT included yet (because their assigned bucket has
+        # learning_path_type='career_progression' — a common scenario when the user
+        # uploads with the self-learning toggle ON but selects a career bucket).
+        # We collect these items and group them under their original bucket name
+        # so they still appear in the self-learning section.
+        # ──────────────────────────────────────────────────────────────────────────
+
+        # Collect all content IDs already included in self_learning_buckets
+        def collect_item_ids_from_buckets(buckets):
+            ids = set()
+            for b in buckets:
+                for item in b.get('items', []):
+                    ids.add(item.get('id'))
+                for child in b.get('children', []):
+                    ids.update(collect_item_ids_from_buckets([child]))
+            return ids
+
+        already_included_ids = collect_item_ids_from_buckets(self_learning_buckets)
+
+        # Find self_learning content not yet in self_learning_buckets
+        missed_self_learning = [
+            content for content in content_list
+            if get_attr(content, 'learning_path_type') == 'self_learning'
+            and get_attr(content, 'id') not in already_included_ids
+        ]
+
+        if missed_self_learning:
+            logger.info(f"Found {len(missed_self_learning)} self-learning items in career-typed buckets — adding to self-learning view")
+            # Group by bucket name so they appear under their original folder
+            from collections import defaultdict
+            missed_by_bucket = defaultdict(list)
+            for content in missed_self_learning:
+                bucket_name_key = get_attr(content, 'bucket') or 'Uncategorized'
+                item_dict = content.to_dict() if hasattr(content, 'to_dict') else dict(content)
+                item_dict['learning_path_type'] = 'self_learning'
+                missed_by_bucket[bucket_name_key].append(item_dict)
+
+            for bname, items in missed_by_bucket.items():
+                # Check if this bucket exists in the bucket_map by name
+                matching_bucket = next(
+                    (b for b in all_buckets if get_attr(b, 'name') == bname),
+                    None
+                )
+                self_learning_buckets.append({
+                    "id": f"sl_overflow_{bname.lower().replace(' ', '_')}",
+                    "name": bname,
+                    "description": get_attr(matching_bucket, 'description') if matching_bucket else "Content uploaded to self-learning",
+                    "parent_bucket_id": None,
+                    "folder_path": bname,
+                    "learning_path_type": "self_learning",
+                    "color": get_attr(matching_bucket, 'color') if matching_bucket else "#10B981",
+                    "icon": get_attr(matching_bucket, 'icon') if matching_bucket else "book-outline",
+                    "order_index": get_attr(matching_bucket, 'order_index', 0) if matching_bucket else 0,
+                    "is_linear": get_attr(matching_bucket, 'is_linear', False) if matching_bucket else False,
+                    "assigned_users": get_attr(matching_bucket, 'assigned_users', []) if matching_bucket else [],
+                    "show_in_both_paths": False,
+                    "thumbnail": get_attr(matching_bucket, 'thumbnail') if matching_bucket else None,
+                    "items": sorted(items, key=lambda x: x.get('order_index', 0) or 0),
+                    "children": [],
+                    "has_children": False,
+                    "item_count": len(items),
+                    "total_count": len(items)
+                })
 
         # Split uncategorized by their learning_path_type
         uncategorized_career = [

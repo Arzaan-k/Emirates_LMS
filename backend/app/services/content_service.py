@@ -168,7 +168,8 @@ class ContentService:
             return self.content_repo.get_by_filter(
                 filters, skip=skip, limit=limit, order_by="timestamp"
             )
-        return self.content_repo.get_all(skip=skip, limit=limit, order_by="timestamp")
+        return self.content_repo.get_all(skip=skip, limit=10000, order_by="timestamp")
+
 
     def duplicate_content(self, content_id: str) -> Content:
         """Duplicate content with new ID."""
@@ -290,7 +291,7 @@ class ContentService:
                 "file_url": course.file_url,
                 "thumbnail": course.thumbnail,
                 "thumbnail_url": course.thumbnail,
-                "learning_path_type": course.learning_path_type,
+                "learning_path_type": path_type,  # Stamp the requested path_type (not raw DB value which may be wrong due to upload default)
                 "is_path_node": course.is_path_node,
                 "resource_type": course.resource_type,
                 "transcript": course.transcript,
@@ -302,7 +303,7 @@ class ContentService:
                 "audioUrl": getattr(course, 'audio_url', None),
                 "fileUrl": course.file_url,
                 "thumbnailUrl": course.thumbnail,
-                "learningPathType": course.learning_path_type,
+                "learningPathType": path_type,  # CamelCase, also stamped
                 "isPathNode": course.is_path_node,
                 "resourceType": course.resource_type,
                 

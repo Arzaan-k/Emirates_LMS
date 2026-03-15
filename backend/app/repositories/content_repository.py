@@ -49,19 +49,48 @@ class ContentRepository(BaseRepository[Content]):
         return query.order_by(Content.timestamp).all()
 
     def get_self_learning_content(self) -> List[Content]:
-        """Get all self-learning content. Cached for 3 minutes."""
+        """Get all self-learning content. Cached for 30 seconds.
+        
+        Includes content where:
+        1. learning_path_type == 'self_learning' (explicit)
+        2. Content belongs to a self-learning bucket (bucket-based assignment)
+        """
         slot = _CONTENT_CACHE["self_learning"]
         now = _time.monotonic()
         if slot["data"] is not None and now < slot["expires"]:
             return slot["data"]
-        result = self.db.query(Content).filter(
+
+        # Primary query: content explicitly tagged as self_learning
+        explicit_self_learning = self.db.query(Content).filter(
             Content.is_path_node == True,
             Content.is_published == True,
             Content.learning_path_type == "self_learning"
         ).order_by(Content.timestamp).all()
+
+        # Secondary query: content in buckets that are self_learning type
+        # This handles content uploaded with wrong default learning_path_type
+        from app.models.content import CourseBucket
+        self_learning_bucket_ids = [
+            b.id for b in self.db.query(CourseBucket).filter(
+                CourseBucket.learning_path_type == "self_learning"
+            ).all()
+        ]
+
+        already_ids = {c.id for c in explicit_self_learning}
+        bucket_based = []
+        if self_learning_bucket_ids:
+            bucket_based = self.db.query(Content).filter(
+                Content.is_path_node == True,
+                Content.is_published == True,
+                Content.bucket_id.in_(self_learning_bucket_ids),
+                Content.id.notin_(already_ids)
+            ).order_by(Content.timestamp).all()
+
+        result = explicit_self_learning + bucket_based
         slot["data"] = result
         slot["expires"] = now + _CONTENT_CACHE_TTL
         return result
+
 
     def get_career_progression_content(self) -> List[Content]:
         """Get all career progression content that are path nodes. Cached for 3 minutes."""

@@ -156,8 +156,8 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
 
             // Bump version to v4 to clear all stale caches (new estimated time fields + published fix)
             const cacheVersion = await AsyncStorage.getItem('sl_cache_version');
-            if (cacheVersion !== 'v4') {
-                console.log('[SelfLearningView] Clearing ALL old caches (upgrading to v4)');
+            if (cacheVersion !== 'v5') {
+                console.log('[SelfLearningView] Clearing ALL old caches (upgrading to v5)');
                 // Clear hierarchy cache
                 await AsyncStorage.removeItem(CACHE_KEY_HIERARCHY);
                 // Clear all course caches (they start with sl_courses_)
@@ -167,7 +167,7 @@ export default function SelfLearningView({ userEmail = 'user', onOpenCourse, ref
                     await AsyncStorage.multiRemove(courseCacheKeys);
                     console.log('[SelfLearningView] Cleared', courseCacheKeys.length, 'course caches');
                 }
-                await AsyncStorage.setItem('sl_cache_version', 'v4');
+                await AsyncStorage.setItem('sl_cache_version', 'v5');
             }
 
             // Step 1: Try to load cached data for instant display

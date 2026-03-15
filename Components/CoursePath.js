@@ -524,11 +524,11 @@ export default function CoursePath(props) {
 
                 const pathCourses = learningPathData.courses || [];
 
-                // Filter & Sort
-                const relevantCourses = pathCourses.filter(c =>
-                    c.learning_path_type === 'self_learning' ||
-                    (!c.learning_path_type && c.bucket === 'Self Learning')
-                );
+                // Accept all courses returned by the self_learning endpoint.
+                // The backend now stamps learning_path_type='self_learning' on every
+                // item it returns, even if the DB row had 'career_progression' due to
+                // a historical upload default. No need to re-filter here.
+                const relevantCourses = pathCourses;
                 const sortedCourses = [...relevantCourses].sort((a, b) =>
                     new Date(a.timestamp || 0) - new Date(b.timestamp || 0)
                 );
